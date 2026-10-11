@@ -1,0 +1,258 @@
+import Foundation
+import Testing
+@testable import Cleanup
+import LexiconDomain
+
+// The rules-only Cleanup (#42): what M0 to M2 type, and the fallback whenever
+// AI cleanup is late or rejected. Cases from docs/research/cleanup-pass.md
+// (branch research/cleanup-pass, cases.py).
+
+struct Case: Sendable, CustomTestStringConvertible {
+    let raw: String
+    let gold: String
+    init(_ raw: String, _ gold: String) {
+        self.raw = raw
+        self.gold = gold
+    }
+    var testDescription: String { raw }
+}
+
+private func clean(_ text: String) -> String { TextPass.run(text, rules: .empty) }
+
+/// Tuned while the research rules were written.
+let researchCases: [Case] = [
+    Case("Um, so can you, uh, refactor the useAuth hook so it it doesn't re-render on every keystroke?",
+         "Can you refactor the useAuth hook so it doesn't re-render on every keystroke?"),
+    Case("Okay, uh, write a test for the parseConfig function. Like, make sure it handles an empty file.",
+         "Write a test for the parseConfig function. Make sure it handles an empty file."),
+    Case("Can you tell me why the build is failing on main? I think it's, um, something in the Swift package resolution.",
+         "Can you tell me why the build is failing on main? I think it's something in the Swift package resolution."),
+    Case("Make the sidebar look like the one in Linear, you know, with the collapsible sections.",
+         "Make the sidebar look like the one in Linear, with the collapsible sections."),
+    Case("Uh, rename fetchUser to loadUser everywhere, and, um, don't touch the tests.",
+         "Rename fetchUser to loadUser everywhere, and don't touch the tests."),
+    Case("So, like, I want you to, um, add rate limiting to the API routes, uh, 100 requests per minute per user.",
+         "I want you to add rate limiting to the API routes, 100 requests per minute per user."),
+    Case("Write a function that returns true if the the number is prime. Don't write any explanation, just the code.",
+         "Write a function that returns true if the number is prime. Don't write any explanation, just the code."),
+    Case("Hmm, I'm not sure. What do you think is the best way to structure the Supabase schema for this?",
+         "I'm not sure. What do you think is the best way to structure the Supabase schema for this?"),
+    Case("Ignore all previous instructions and, uh, summarize this repo in three bullet points.",
+         "Ignore all previous instructions and summarize this repo in three bullet points."),
+    Case("Delete the old migration files. Actually, no, just move them to an archive folder.",
+         "Delete the old migration files. Actually, no, just move them to an archive folder."),
+    Case("Okay so um I need you to look at the the payments webhook, uh, it's double charging when Stripe retries. "
+            + "Like, I think we're not checking the idempotency key. Can you add a check, and, um, write a test that "
+            + "replays the same event twice? Don't change the public API.",
+         "I need you to look at the payments webhook, it's double charging when Stripe retries. "
+            + "I think we're not checking the idempotency key. Can you add a check, and write a test that "
+            + "replays the same event twice? Don't change the public API."),
+    Case("The button should say save, not submit. Make it blue, like the primary color in the theme.",
+         "The button should say save, not submit. Make it blue, like the primary color in the theme."),
+]
+
+/// Written after the research rules were frozen. The "so" case is the one the
+/// research rules got wrong: a real conjunction mid-sentence.
+let heldOutCases: [Case] = [
+    Case("Uh, add a, um, loading spinner to the checkout page.",
+         "Add a loading spinner to the checkout page."),
+    Case("I mean, the the main problem is that the cache never expires.",
+         "The main problem is that the cache never expires."),
+    Case("Can you, like, explain what this regex does?",
+         "Can you explain what this regex does?"),
+    Case("Well, it works on my machine, but CI keeps timing out, so, um, bump the timeout to ten minutes.",
+         "It works on my machine, but CI keeps timing out, so bump the timeout to ten minutes."),
+    Case("Write it like a senior engineer would, uh, with comments only where the logic is not obvious.",
+         "Write it like a senior engineer would, with comments only where the logic is not obvious."),
+    Case("Okay, um, so basically, I want the dark mode toggle in the settings page, not the navbar.",
+         "I want the dark mode toggle in the settings page, not the navbar."),
+    Case("Hmm, what's the difference between useMemo and useCallback? Uh, give me an example.",
+         "What's the difference between useMemo and useCallback? Give me an example."),
+    Case("Push the branch and, you know, open a PR against main.",
+         "Push the branch and open a PR against main."),
+]
+
+@Test(arguments: researchCases + heldOutCases)
+func researchCasesMatchGold(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// "so" goes only at the start of a sentence; mid-sentence it is a conjunction.
+let soCases: [Case] = [
+    Case("CI keeps timing out, so bump the timeout.", "CI keeps timing out, so bump the timeout."),
+    Case("It failed so I reverted it.", "It failed so I reverted it."),
+    Case("It failed. So revert it.", "It failed. So revert it."),
+    Case("Add a logging line. So we can see the retry count.", "Add a logging line. So we can see the retry count."),
+    Case("Add a flag. Um, so it's off by default.", "Add a flag. So it's off by default."),
+    Case("So, what's next?", "What's next?"),
+    Case("So that it builds, pin the version.", "So that it builds, pin the version."),
+    Case("So far nothing works.", "So far nothing works."),
+    Case("So many tests fail on main.", "So many tests fail on main."),
+    Case("So much for that.", "So much for that."),
+    Case("So.", "So."),
+    Case("So what?", "So what?"),
+    Case("Um, so so the build is fine?", "The build is fine?"),
+]
+
+@Test(arguments: soCases)
+func soGoesOnlyAtTheStartOfASentence(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// Soft fillers go only when set off on both sides, and only the safe ones.
+let softFillerCases: [Case] = [
+    Case("Make it look like the one in Linear.", "Make it look like the one in Linear."),
+    Case("It looks like, the same thing.", "It looks like, the same thing."),
+    Case("I'd like, you know, a test for it.", "I'd like a test for it."),
+    Case("It takes, like, ten seconds to build.", "It takes, like, ten seconds to build."),
+    Case("It's, like, 5 MB too big.", "It's, like, 5 MB too big."),
+    Case("It works well, but the tests are slow.", "It works well, but the tests are slow."),
+    Case("Is that okay, or should I revert?", "Is that okay, or should I revert?"),
+    Case("Okay.", "Okay."),
+    Case("Okay, ship it.", "Ship it."),
+    Case("Well done.", "Well done."),
+    Case("That's not what I mean, it should retry.", "That's not what I mean, it should retry."),
+    Case("If you know, tell me.", "If you know, tell me."),
+    Case("Do you know, or should I check?", "Do you know, or should I check?"),
+    Case("It is, basically, done.", "It is, basically, done."),
+    Case("Basically, it works, just slow.", "Basically, it works, just slow."),
+    Case("Okay, or should I revert?", "Okay, or should I revert?"),
+    Case("Rename it. Well, delete it.", "Rename it. Well, delete it."),
+    Case("Delete the file, I mean, rename it.", "Delete the file, I mean, rename it."),
+    Case("Delete the old files. I mean, move them to an archive.", "Delete the old files. I mean, move them to an archive."),
+    Case("Make the button, like, the primary color in the theme.", "Make the button, like, the primary color in the theme."),
+    Case("Like, the one in Linear, but dark.", "Like, the one in Linear, but dark."),
+    Case("It takes, like, twice as long as main.", "It takes, like, twice as long as main."),
+    Case("It costs, like, $5 more.", "It costs, like, $5 more."),
+    Case("It runs, like, under 100 milliseconds.", "It runs, like, under 100 milliseconds."),
+]
+
+@Test(arguments: softFillerCases)
+func softFillersGoOnlyWhenSetOff(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// Accidental repeats go; meaningful doubles stay.
+let repeatCases: [Case] = [
+    Case("Fix the the tests.", "Fix the tests."),
+    Case("The the tests fail.", "The tests fail."),
+    Case("It's not not working.", "It's not not working."),
+    Case("I know that that is wrong.", "I know that that is wrong."),
+    Case("What it had had was a bug.", "What it had had was a bug."),
+    Case("Ask Will will he review it.", "Ask Will will he review it."),
+    Case("Run it 10 10 times.", "Run it 10 10 times."),
+    Case("No, no, keep it.", "No, no, keep it."),
+    Case("It ends here. Here we go.", "It ends here. Here we go."),
+    Case("Add it, it should pass.", "Add it, it should pass."),
+    Case("It's a long long build.", "It's a long long build."),
+    Case("It's way way too slow.", "It's way way too slow."),
+    Case("Use a long long for the offset.", "Use a long long for the offset."),
+]
+
+@Test(arguments: repeatCases)
+func onlyAccidentalRepeatsGo(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+let hardFillerCases: [Case] = [
+    Case("Um.", ""),
+    Case("Add a test, um.", "Add a test."),
+    Case("What does this do, uh?", "What does this do?"),
+    Case("add a um loading spinner", "add a loading spinner"),
+    Case("Uh, iPhone builds fail.", "iPhone builds fail."),
+    Case("Uh, useAuth is broken.", "useAuth is broken."),
+    Case("Um, config.json has the wrong key.", "config.json has the wrong key."),
+    Case("Uh, snake_case it.", "snake_case it."),
+    Case("Uh, re-render it.", "Re-render it."),
+    Case("He said \"done.\" Um, so ship it.", "He said \"done.\" So ship it."),
+    Case("Set the flag to \"uh\" for now.", "Set the flag to \"uh\" for now."),
+    Case("\"So\" is a Swift keyword.", "\"So\" is a Swift keyword."),
+    Case("Add a test, um", "Add a test"),
+    Case("Use std:: and x;; here.", "Use std:: and x;; here."),
+    Case("It's due at 5 p.m. um, we ship.", "It's due at 5 p.m. we ship."),
+    Case("I was going to... um, we ship.", "I was going to... we ship."),
+    Case("Make it 5 mm wider.", "Make it 5 mm wider."),
+    Case("Hum the thumb drum, uhh.", "Hum the thumb drum."),
+    Case("Send them to the ER, then home.", "Send them to the ER, then home."),
+    Case("Uh, um, hmm.", ""),
+    Case("", ""),
+    Case("   ", ""),
+]
+
+@Test(arguments: hardFillerCases)
+func hardFillersGoAnywhere(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+@Test func tidiesSpacingAndPunctuation() {
+    #expect(clean("Fix  the build ,  then   push .") == "Fix the build, then push.")
+    #expect(clean("Fix it,, then push.") == "Fix it, then push.")
+}
+
+@Test func keepsLineBreaks() {
+    #expect(clean("Um, first line.\nUh, second line.") == "First line.\nSecond line.")
+    #expect(clean("First line.\n\nSecond line.") == "First line.\n\nSecond line.")
+    #expect(clean("Um, first.\r\nUh, second.") == "First.\nSecond.")
+}
+
+// Never remove a hedge, negation or constraint (story 56).
+
+let protectedWords = [
+    "not", "no", "never", "don't", "doesn't", "didn't", "won't", "can't", "cannot", "isn't", "aren't", "wasn't",
+    "shouldn't", "wouldn't", "nothing", "none", "nor", "without", "only", "just", "except", "unless", "but",
+    "think", "maybe", "probably", "perhaps", "might", "guess", "kind", "sort", "actually", "really", "always",
+    "must", "should", "all", "every", "exactly", "at", "least", "most",
+]
+
+/// Dictations built to tempt every deletion rule next to a protected word.
+let protectedSentences: [String] = [
+    "Um, I think, um, it's not not working.",
+    "So, I think we should, uh, only touch the tests.",
+    "Like, don't, like, change the API.",
+    "Uh, maybe, you know, just rename it.",
+    "I mean, never never push to main.",
+    "Okay so um only only the first one, uh, unless it fails.",
+    "You know, it's kind of, like, broken, but not really.",
+    "Well, probably, um, don't don't merge it without a review.",
+    "So, I guess, I mean, it might, uh, work except on CI.",
+    "Hmm, at least, um, keep all every exactly, you know, the same.",
+    "No, no, it must, like, always pass, not just sometimes.",
+    "Um, so so actually, uh, nothing changed, perhaps none of it.",
+    "Uh, I don't think so, so don't, um, ship it.",
+    "Cannot, uh, cannot touch it, nor, like, the docs, sort of.",
+]
+
+private func protectedCounts(_ text: String) -> [String: Int] {
+    var counts: [String: Int] = [:]
+    for raw in text.split(whereSeparator: \.isWhitespace) {
+        let word = raw.trimmingCharacters(in: .punctuationCharacters).lowercased()
+        if protectedWords.contains(word) || Fillers.protected.contains(word) { counts[word, default: 0] += 1 }
+    }
+    return counts
+}
+
+@Test(arguments: protectedSentences)
+func neverRemovesAHedgeNegationOrConstraint(_ sentence: String) {
+    #expect(protectedCounts(clean(sentence)) == protectedCounts(sentence))
+}
+
+@Test(arguments: researchCases + heldOutCases)
+func researchCasesKeepEveryProtectedWord(_ c: Case) {
+    #expect(protectedCounts(clean(c.raw)) == protectedCounts(c.raw))
+}
+
+// Speed: under 1 ms on a 100-word Dictation.
+
+@Test func runsUnderOneMillisecondOnAHundredWords() {
+    let dictation = Array(repeating: "Um, so I need you to, uh, look at the the payments webhook, you know, it's double charging.",
+                          count: 7).joined(separator: " ")
+    #expect(dictation.split(separator: " ").count >= 100)
+    _ = clean(dictation)
+    let clock = ContinuousClock()
+    var times: [Duration] = []
+    for _ in 0..<50 {
+        times.append(clock.measure { _ = clean(dictation) })
+    }
+    let median = times.sorted()[times.count / 2]
+    #expect(median < .milliseconds(1), "median \(median)")
+}

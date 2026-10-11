@@ -8,8 +8,8 @@ public import LexiconDomain
 ///   2. LLM cleanup of the ruled text, with this Dictation's Lexicon terms in its
 ///      context (OpenRouter, or Apple Foundation Models on the Mac).
 ///   3. `StructuralCheck` of the LLM's text against the step-1 text.
-///   4. Accept it; otherwise type the rules-only cleanup (`TextPass.run`: fillers,
-///      repeats, Rules, app formatting), which runs alongside as the fallback.
+///   4. Accept it; otherwise type the rules-only cleanup (`TextPass.run`: Rules,
+///      then fillers and repeats), which runs alongside as the fallback.
 ///
 /// Finished sentences are cleaned while Jake is still talking, from the
 /// provider's finalized segments, so after fn-up only the tail waits on the LLM.
@@ -111,7 +111,7 @@ public actor CleanupSession {
     ///   - check failed -> rules-only, `.rejected(failure)`
     ///   - otherwise -> the LLM text, `.aiAccepted(engine)`
     public func finish(modelText: String, deadline: Duration) async -> Cleaned {
-        // TODO: let rulesOnly = TextPass.run(modelText, rules: plan.rules, app: plan.app)
+        // TODO: let rulesOnly = TextPass.run(modelText, rules: plan.rules)
         // guard let model else { return Cleaned(model: modelText, cleaned: rulesOnly, .rulesOnly(.off)) }
         // let ruled = plan.rules.apply(to: modelText); let parts = Sentences.split(ruled)
         // reuse cache hits; request the misses + the sentence before the last; race against `deadline`;

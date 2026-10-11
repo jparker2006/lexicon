@@ -34,10 +34,9 @@ import LexiconCore
     #expect(second == [.transcribe(id, wasWaiting: false)])
 }
 
-@Test(.disabled("lands with #42")) func cleanupNeverChangesMeaning() {
-    let out = TextPass.run("um so wire the auth callback into super base", rules: RuleSet([Rule(heard: "super base", written: "Supabase")]),
-                           app: .unknown)
-    #expect(out == "So wire the auth callback into Supabase")
+@Test(.disabled("lands with #70")) func cleanupAppliesRulesAndDropsFillers() {
+    let out = TextPass.run("um so wire the auth callback into super base", rules: RuleSet([Rule(heard: "super base", written: "Supabase")]))
+    #expect(out == "Wire the auth callback into Supabase")
 }
 
 @Test(.disabled("lands with #60")) func lateTextIsHeldWhenJakeTypedSinceFnUp() {
