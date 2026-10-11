@@ -16,11 +16,19 @@ public import LexiconDomain
 public actor SpeechEngine {
     let local: (any LocalTranscriber)?
     let residency: LocalResidency?
+    let clock: any Clock<Duration>
 
-    /// `clock` times the local model's idle unload; tests pass a fake one.
+    /// How often a waiting Dictation tries again. Nothing announces a local model
+    /// installed by another process (`scripts/install-model.sh`), and a missing
+    /// model costs one file check to find, so trying is how it is noticed.
+    public static let retryInterval: Duration = .seconds(30)
+
+    /// `clock` times the local model's idle unload and a waiting Dictation's
+    /// retries; tests pass a fake one.
     public init(local: (any LocalTranscriber)?, session: URLSession = .shared,
                 clock: any Clock<Duration> = ContinuousClock()) {
         self.local = local
+        self.clock = clock
         residency = local.map { LocalResidency(transcriber: $0, clock: clock) }
     }
 
@@ -37,8 +45,16 @@ public actor SpeechEngine {
     /// `priority`: `.background` for recovery and Retry, so they queue behind any
     /// live Dictation on the Neural Engine; `.live` when the text may still be typed.
     public func transcribe(_ clip: AudioClip, plan: SpeechPlan, priority: LocalPriority = .background) async -> SpeechOutcome {
-        // TODO: same body as begin(feed: clip.replay(), plan: plan) with local work at `priority`; then finish(clip)
-        fatalError("not implemented")
+        let attempt = SpeechAttempt(core: AttemptCore(feed: clip.replay(), plan: plan, local: local,
+                                                      residency: residency, priority: priority))
+        return await attempt.finish(clip)
+    }
+
+    /// Returns when a Dictation that got no text for `reason` should try again:
+    /// after `retryInterval`. The cloud race (#66) adds waking early once the
+    /// network returns; until then no plan has a cloud engine to wait for.
+    public func untilRetry(after reason: SpeechUnavailable) async {
+        try? await clock.sleep(for: Self.retryInterval)
     }
 
     /// Launch: load the local model now, in the background, then apply the

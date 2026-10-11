@@ -44,12 +44,14 @@ public actor Conductor<Destination: TextDestination> {
     /// Stop signal of the Dictation that is recording. Single slot: one mic.
     var captureEnd: AsyncStream<RunEnd>.Continuation?
     var capturingID: DictationID?
-    /// Dictations past stop that still need text (transcribing, waiting).
+    /// Dictations past stop that still need text (transcribing), and recovered ones being transcribed.
     var inFlight: [DictationID: Task<DictationResult, Never>] = [:]
+    /// Waiting Dictations, each trying again until it has text (`retryWhenReady`).
+    var waiting: [DictationID: Task<Void, Never>] = [:]
     /// Live Dictations in fn-down order. A Dictation inserts only when every
     /// earlier one has inserted, been held, or gone waiting (#18: they insert in
     /// the order they were spoken). A waiting Dictation gives up its turn, so a
-    /// network outage never blocks later text; its late insert passes InsertGuard.
+    /// network outage never blocks later text; its late text waits for paste-last.
     var insertOrder: [DictationID] = []
     /// A Dictation whose text is ready while an earlier one still holds the turn.
     var turnWaiters: [DictationID: CheckedContinuation<Void, Never>] = [:]
@@ -138,12 +140,6 @@ public actor Conductor<Destination: TextDestination> {
         fatalError("not implemented")
     }
 
-    /// Launch: transcribe what the last run left unfinished. Never typed.
-    /// Safe to call twice (History.recover is idempotent; ids already in flight are skipped).
-    public func recover() async {
-        fatalError("not implemented")
-    }
-
     /// The dev app's "dictate this WAV" test hook and `lexicon-eval`:
     /// the same run as a live Dictation, audio from a file, stop at end of file.
     /// In the dev app the text is typed into the focused field; headless it is recorded.
@@ -216,18 +212,17 @@ public actor Conductor<Destination: TextDestination> {
 
 extension Conductor {
     /// Everything `land` needs about one Dictation past fn-up, as one value, so
-    /// live, waiting, retry and recovery hand over the same thing (retry and
-    /// recovery build it with `target: nil`, `releasedAt: nil` and their own
-    /// `cleaning` from `cleanup.begin(plan:)`).
+    /// live, waiting, retry and recovery hand over the same thing (retry,
+    /// recovery and a waiting Dictation's later try land it with `target: nil`
+    /// and their own `cleaning` from `cleanup.begin(plan:)`).
     struct DictationRun: Sendable {
         let id: DictationID
         let origin: DictationOrigin
         let purpose: DictationPurpose
         let context: AppContext
-        /// RAM copy of the audio, for the waiting branch's second transcription.
-        let clip: AudioClip
-        let speechPlan: SpeechPlan
-        let cleanupPlan: CleanupPlan
+        /// RAM copy of the audio, for the waiting branch's next transcription. nil
+        /// once a waiting Dictation's whole audio is on disk: it is read back per try.
+        var clip: AudioClip?
         var cleaning: CleanupSession
         /// Live: `Preferences.cleanupDeadline` (about 450 ms). Retry and recovery: seconds (nobody waits).
         let cleanupDeadline: Duration
@@ -237,7 +232,8 @@ extension Conductor {
         var releasedAt: HostTime?
         /// The status before this landing, for `DictationStatus.landed`.
         var previous: DictationStatus?
-        let hold: LatencyHold
+        /// nil when nobody waits for the text (recovery).
+        let hold: LatencyHold?
 
         /// Jake waits at the cursor only when the text may still be typed.
         var localPriority: LocalPriority { target == nil ? .background : .live }
@@ -326,6 +322,8 @@ public enum Notice: Sendable, Hashable {
     /// Text ready but not typed: "Dictation ready, paste-last to insert" (#4).
     case readyToPaste(DictationID)
     case waitingForNetwork(DictationID)
+    /// A Dictation the last run left unfinished has its text, at the top of History, never typed (#4).
+    case recovered(DictationID)
     case microphoneUnavailable(String)
     case microphoneSilent
     case microphoneMuted
