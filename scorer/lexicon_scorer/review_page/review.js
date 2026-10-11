@@ -359,7 +359,14 @@ function markKeys(event) {
     case "x": case "Enter": if (size > 0) toggleMark(cursor.model, cursor.word); return true;
     case " ": togglePlay(); return true;
     case "Escape": case "m": mode = "normal"; break;
-    default: return false;
+    default: {
+      // Any other key leaves mark mode and does what it does outside it.
+      const name = command(event.key);
+      if (name === null) return false;
+      mode = "normal";
+      run(name);
+      return true;
+    }
   }
   render();
   return true;
@@ -378,11 +385,15 @@ function editKeys(event) {
   return false;
 }
 
+// A page key (A, B, N...) closes the tour and plays the clip, so a key the tour
+// names is never ignored, yet no clip is answered unheard.
 function tourKeys(event) {
-  if (event.key === "Escape") tour(TOUR.length);
+  if (event.key === "Tab") return false;
+  if (event.key === "Escape" || command(event.key) !== null && event.key !== " " && !event.key.startsWith("Arrow"))
+    tour(TOUR.length);
   else if (event.key === "Enter" || event.key === " " || event.key === "ArrowRight") tour(tourStep + 1);
   else if (event.key === "ArrowLeft") tour(Math.max(0, tourStep - 1));
-  return true; // nothing else happens under the tour
+  return true;
 }
 
 function run(name) {
@@ -419,10 +430,14 @@ function run(name) {
 document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey || clips.length === 0) return;
   if (busy) return event.preventDefault();
-  // A held key would answer clip after clip unheard; only seeking repeats.
-  if (event.repeat && mode !== "edit" && !event.key.startsWith("Arrow")) return event.preventDefault();
-  // A clicked button or toggle keeps focus, and Space or Enter would press it again.
-  if (mode !== "edit" && document.activeElement !== document.body) document.activeElement.blur();
+  // A held key would answer or skip clip after clip unheard; only seeking and
+  // the mark cursor repeat.
+  const repeats = mode === "mark" ? event.key.startsWith("Arrow") : event.key === "ArrowLeft" || event.key === "ArrowRight";
+  if (event.repeat && mode !== "edit" && !repeats) return event.preventDefault();
+  // A clicked button or toggle keeps focus, and Space would press it again. Keys
+  // the page doesn't use (Tab, Enter) still reach it.
+  if (mode === "normal" && command(event.key) !== null && document.activeElement !== document.body)
+    document.activeElement.blur();
   const wasClearing = clearing;
   let handled;
   if (mode === "tour") handled = tourKeys(event);

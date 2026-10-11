@@ -3,14 +3,25 @@
 // them under osascript's JavaScript; review.js draws the page with them.
 "use strict";
 
-const key = (word) => word.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
+const key = (word) => word.toLowerCase().replace(/’/g, "'").replace(/[^\p{L}\p{N}']/gu, "");
 
 // Which words of a and b are not in their longest common subsequence: where
-// the two texts differ. `first` is the index in b where they first part, -1
-// when they never do.
+// the two texts differ. A token with no letters or digits (a lone dash) is
+// punctuation, which never counts. `first` is the index in b where they first
+// part, -1 when they never do.
 function differing(a, b) {
-  const ka = a.map(key), kb = b.map(key);
-  const n = a.length, m = b.length;
+  const wa = a.map((w, i) => i).filter((i) => key(a[i]) !== "");
+  const wb = b.map((w, i) => i).filter((i) => key(b[i]) !== "");
+  const found = differingWords(wa.map((i) => key(a[i])), wb.map((i) => key(b[i])));
+  return {
+    parakeet: new Set([...found.a].map((i) => wa[i])),
+    wispr: new Set([...found.b].map((i) => wb[i])),
+    first: found.first < 0 ? -1 : found.first < wb.length ? wb[found.first] : b.length,
+  };
+}
+
+function differingWords(ka, kb) {
+  const n = ka.length, m = kb.length;
   const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
   for (let i = n - 1; i >= 0; i--)
     for (let j = m - 1; j >= 0; j--)
@@ -26,7 +37,7 @@ function differing(a, b) {
   if (i < n || j < m) part();
   while (i < n) da.add(i++);
   while (j < m) db.add(j++);
-  return { parakeet: da, wispr: db, first };
+  return { a: da, b: db, first };
 }
 
 // What "Neither" opens: B's text, which has the punctuation and capitals, with
@@ -41,14 +52,17 @@ function prefill(clip) {
   return { text, start, end: diff.wispr.has(diff.first) ? end : start };
 }
 
-// Where D plays from, in seconds: just before each place A and B differ. There
-// are no word timings, so a place is estimated from its word's share of the text.
+// Where D plays from, in seconds: just before each place A and B differ, in
+// either text. There are no word timings, so a place is estimated from its
+// word's share of the text, and two places under a second apart are one.
 function differenceTimes(clip, duration) {
   const diff = differing(clip.words.parakeet, clip.words.wispr);
-  const model = diff.parakeet.size ? "parakeet" : "wispr";
-  const list = [...diff[model]].sort((x, y) => x - y);
-  return list.filter((i, k) => k === 0 || list[k - 1] !== i - 1)
-    .map((i) => ({ model, word: i, time: Math.max(0, (i / clip.words[model].length) * duration - 1.5) }));
+  const places = ["parakeet", "wispr"].flatMap((model) => {
+    const list = [...diff[model]].sort((x, y) => x - y);
+    return list.filter((i, k) => k === 0 || list[k - 1] !== i - 1)
+      .map((i) => ({ model, word: i, time: Math.max(0, (i / clip.words[model].length) * duration - 1.5) }));
+  }).sort((x, y) => x.time - y.time);
+  return places.filter((p, k) => k === 0 || p.time - places[k - 1].time >= 1);
 }
 
 // Keys when no box is open. Letters work with Caps Lock or Shift on too.

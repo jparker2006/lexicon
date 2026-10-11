@@ -334,6 +334,15 @@ class PageTest(unittest.TestCase):
                                      "wispr": "one two three four five six seven ate nine ten".split()}})
         self.assertEqual(self.run_page(f"differenceTimes({clip}, 10)"), [{"model": "parakeet", "word": 7, "time": 5.5}])
 
+    def test_punctuation_is_never_a_difference(self):
+        a, b = "i don't know so yes".split(), "I don’t know - so, yes.".split()
+        self.assertEqual(self.run_page(f"((d) => [[...d.parakeet], [...d.wispr], d.first])(differing({json.dumps(a)}, {json.dumps(b)}))"),
+                         [[], [], -1])
+
+    def test_d_reaches_a_word_only_b_has(self):
+        clip = json.dumps({"words": {"parakeet": "i went home".split(), "wispr": "I want home today".split()}})
+        self.assertEqual([p["word"] for p in self.run_page(f"differenceTimes({clip}, 10)")], [1, 3])
+
     def test_time_left_is_rough(self):
         cases = "[[0, []], [1, [10]], [3, [20, 20, 600]], [250, []], [180, [20]]]"
         self.assertEqual(self.run_page(f"{cases}.map(([n, s]) => timeLeft(n, s))"),
