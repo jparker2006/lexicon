@@ -44,10 +44,15 @@ public struct AudioLevel: Sendable { public let rms: Float }
 /// Threads: the Core Audio IO thread (sink node) and one serial writer queue.
 /// All engine and file state is confined to the writer queue.
 public final class Recorder: @unchecked Sendable {
-    public init() { fatalError("not implemented") }
+    /// The one serial writer queue: drains, converts, writes, syncs, closes.
+    private let writerQueue = DispatchQueue(label: "lexicon.audio.writer", qos: .userInitiated)
+
+    public init() {}
 
     /// At launch and after every stop, so `start` only has to start hardware.
-    public func prepare(_ input: AudioInput) { fatalError("not implemented") }
+    public func prepare(_ input: AudioInput) {
+        // A file has nothing to warm up. TODO(#52): prepare the engine for the microphone.
+    }
 
     /// fn-down. Starts the engine, then (on the writer queue, not in front of the
     /// hardware start) creates `file`. Returns as soon as capture is running.
@@ -57,7 +62,25 @@ public final class Recorder: @unchecked Sendable {
     /// fn never waits (#18): if the previous LiveCapture is still in its tail, its
     /// tail ends now and the new capture starts at once.
     public func start(_ input: AudioInput, writingTo file: URL) async throws(RecorderError) -> LiveCapture {
-        fatalError("not implemented")
+        switch input {
+        case .microphone:
+            fatalError("not implemented: lands with #52")
+        case .file(let url, let pace):
+            let source = try FileSource(url: url, pace: pace)
+            var policy = FlushPolicy()
+            if pace == .asFastAsPossible { policy.drainEvery = .milliseconds(5) }
+            guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue) else {
+                throw .engineFailed("no converter from \(source.sampleRate) Hz to 16 kHz")
+            }
+            core.begin()
+            return LiveCapture(core: core)
+        }
+    }
+
+    /// Returns once every stopped or dropped capture's file is synced and closed.
+    /// For quit, and for tests that read a file right after `stop`.
+    public func settle() async {
+        await withCheckedContinuation { continuation in writerQueue.async { continuation.resume() } }
     }
 
     /// Levels of whatever is recording, for the indicator. Any number of observers.
@@ -93,20 +116,27 @@ public enum CaptureProblem: Sendable, Hashable {
 /// Signals a caller can watch without owning the LiveCapture. Copyable on purpose,
 /// so it can be handed to a task while the LiveCapture itself stays with its owner.
 public struct CaptureSignals: Sendable {
+    let first: OneShot<HostTime>
+    let end: OneShot<HostTime>
+    public let problems: AsyncStream<CaptureProblem>
+
     /// Host time of the first real buffer: show "listening" now, not on key-down (#4).
-    public func firstAudio() async -> HostTime? { fatalError("not implemented") }
-    public var problems: AsyncStream<CaptureProblem> { fatalError("not implemented") }
+    /// nil if the capture stopped before any audio arrived.
+    public func firstAudio() async -> HostTime? { await first.value() }
     /// File inputs only: host time the last sample was read (the "release" of a
-    /// file Dictation). Never returns for the microphone.
-    public func inputEnded() async -> HostTime? { fatalError("not implemented") }
+    /// file Dictation). nil for the microphone, and for a file stopped before its
+    /// end; either way it returns only once the capture stops. Cancelling the
+    /// waiting task returns nil at once.
+    public func inputEnded() async -> HostTime? { await end.value() }
 }
 
 /// One open capture. Non-copyable: it can be stopped exactly once (`stop` is
 /// consuming), and only by whoever holds it, so "who ends this Dictation's
 /// audio" has a single answer enforced by the compiler.
 ///
-/// If a LiveCapture is dropped without `stop`, the Recorder finalizes it on the
-/// next `start` or at quit, keeping the audio. Dropping never loses audio.
+/// If a LiveCapture is dropped without `stop`, it stops itself in the
+/// background: the ring is drained, the file synced and closed. Dropping never
+/// loses audio.
 public struct LiveCapture: ~Copyable, Sendable {
     let core: CaptureCore
 
@@ -114,16 +144,14 @@ public struct LiveCapture: ~Copyable, Sendable {
     public var feed: AudioFeed { core.feed }
     public var signals: CaptureSignals { core.signals }
 
+    /// Returns once the last packet is written and `feed` has finished. The
+    /// F_FULLFSYNC and close (which writes the real size) run after, on the
+    /// writer queue, in parallel with transcription (`Recorder.settle` waits).
     public consuming func stop(_ ending: Ending) async -> Take {
-        // TODO: if .released: keep capturing until TailPolicy says stop (cap 200 ms);
-        // drain the ring, write the last packets, finish `feed`, return the RAM clip.
-        // Then, on the writer queue: F_FULLFSYNC, AudioFileClose (writes the real size).
-        fatalError("not implemented")
+        // TODO(#52): for .released on the microphone, keep capturing until TailPolicy says stop (cap 200 ms).
+        // A file has no tail: its release is the end of the file.
+        await core.stop()
     }
-}
 
-/// Internal shared state of one LiveCapture, confined to the writer queue.
-final class CaptureCore: @unchecked Sendable {
-    var feed: AudioFeed { fatalError("not implemented") }
-    var signals: CaptureSignals { fatalError("not implemented") }
+    deinit { core.dropped() }
 }
