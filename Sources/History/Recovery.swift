@@ -9,8 +9,8 @@ public struct UnfinishedDictation: Sendable {
     public let id: DictationID
     public let audio: URL
     public let purpose: DictationPurpose
-    /// The app it was dictated into, so an always-private app stays private (#5).
-    /// `.unknown` for an audio file the last run never got to record a row for.
+    /// The app it was dictated into, for its words and Cleanup. `.unknown` for an
+    /// audio file the last run never got to record a row for.
     public let app: AppContext
     /// It was waiting for an engine before the restart.
     public let wasWaiting: Bool
