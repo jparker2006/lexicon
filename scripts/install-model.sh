@@ -1,7 +1,7 @@
 #!/bin/sh
 # install-model: download the local speech model (Parakeet Unified, offline
-# int8 tier only, about 586 MB) and run its one-time CoreML compile. Until
-# onboarding exists this is how a Mac gets the model.
+# int8 tier only, about 614 MB) and run its one-time CoreML compile. First-run
+# setup downloads it in the app; this is the same install from a shell.
 #
 #   scripts/install-model.sh [dev|daily]     (default dev)
 #
@@ -22,13 +22,15 @@ SUPPORT="$HOME/Library/Application Support"
 DAILY="$SUPPORT/Lexicon/models"
 DEV="$SUPPORT/Lexicon Dev/models"
 # FluidAudio's folder for Parakeet Unified, and the files ParakeetTranscriber
-# needs in it (`requiredFiles` in Sources/LocalParakeet/ParakeetTranscriber.swift).
+# needs in it, whole (`isComplete` in Sources/LocalParakeet/ParakeetTranscriber.swift):
+# an interrupted download leaves `.partial` files inside folders that exist.
 MODEL=parakeet-unified-en-0.6b
 complete() {
     for file in parakeet_unified_encoder_int8.mlmodelc parakeet_unified_decoder.mlmodelc \
-        parakeet_unified_joint_decision_single_step.mlmodelc vocab.json; do
-        [ -e "$1/$MODEL/$file" ] || return 1
+        parakeet_unified_joint_decision_single_step.mlmodelc; do
+        [ -e "$1/$MODEL/$file/coremldata.bin" ] || return 1
     done
+    [ -e "$1/$MODEL/vocab.json" ] && [ -z "$(find "$1/$MODEL/" -name '*.partial' -print -quit)" ]
 }
 mkdir -p "$SUPPORT/Lexicon Dev"
 
