@@ -47,7 +47,7 @@ import LexiconCore
                                inputSinceMark: false) == .hold(.focusMoved))
 }
 
-@Test(.disabled("lands with #74")) func structuralCheckRejectsChangedNumbers() {
+@Test func structuralCheckRejectsChangedNumbers() {
     let failure = StructuralCheck.check("Ship it on the 5th", ruled: "ship it on the fourth", terms: [])
     #expect(failure == .numberMismatch)
 }

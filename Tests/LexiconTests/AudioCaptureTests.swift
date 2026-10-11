@@ -37,7 +37,7 @@ import LexiconDomain
     // running: no stop, no close. (Not timed to land inside a write() call.)
     let result = try #require(await #expect(processExitsWith: .signal(SIGKILL), observing: [\.standardOutputContent]) {
         let dir = try scratchDirectory()
-        let wav = try writeWAV(syntheticSamples(count: 48_000), rate: 16_000, in: dir)  // 3 s
+        let wav = try writeWAV(longSamples(), rate: 16_000, in: dir)
         let caf = dir.appending(path: "audio/killed.caf")
         report("caf \(caf.path)")
         let recorder = Recorder()
@@ -56,7 +56,7 @@ import LexiconDomain
     let lines = String(decoding: result.standardOutputContent, as: UTF8.self).split(separator: "\n")
     let caf = URL(filePath: String(try #require(lines.first { $0.hasPrefix("caf ") }).dropFirst(4)))
     let lastWritten = try #require(lines.last { $0.hasPrefix("written ") }.flatMap { Int($0.dropFirst(8)) })
-    let source = syntheticSamples(count: 48_000)
+    let source = longSamples()
 
     #expect(CAFFile.state(of: caf) == .open)  // data size left at -1
     let survived = try CAFFile.read(caf).samples
@@ -104,19 +104,25 @@ import LexiconDomain
 
 @Test func stoppingBeforeTheEndKeepsEverythingRead() async throws {
     let dir = try scratchDirectory()
-    let source = syntheticSamples(count: 48_000)
+    let source = longSamples()
     let wav = try writeWAV(source, rate: 16_000, in: dir)
     let caf = dir.appending(path: "early.caf")
 
     let recorder = Recorder()
     let capture = try await recorder.start(.file(wav, pace: .realtime), writingTo: caf)
     let signals = capture.signals
-    _ = await signals.firstAudio()
-    try await Task.sleep(for: .milliseconds(300))
+    var feed = capture.feed.makeAsyncIterator()
+    var heard: [Int16] = []
+    for _ in 0..<3 {
+        let chunk = await feed.next()
+        heard += try #require(chunk).samples
+    }
     let take = await capture.stop(.immediately)
+    while let chunk = await feed.next() { heard += chunk.samples }
     await recorder.settle()
 
-    #expect(!take.clip.samples.isEmpty && take.clip.samples.count < source.count)
+    #expect(take.clip.samples == heard)  // every chunk the feed gave, before and after the stop
+    #expect(take.clip.samples.count < source.count)
     #expect(take.clip.samples == Array(source.prefix(take.clip.samples.count)))
     #expect(await signals.inputEnded() == nil)  // stopped, not ended
     #expect(take.summary.startGap != nil)
@@ -125,20 +131,25 @@ import LexiconDomain
 
 @Test func aDroppedCaptureStillClosesItsFile() async throws {
     let dir = try scratchDirectory()
-    let source = syntheticSamples(count: 48_000)
+    let source = longSamples()
     let wav = try writeWAV(source, rate: 16_000, in: dir)
     let caf = dir.appending(path: "dropped.caf")
 
     let recorder = Recorder()
+    var heard = 0
     do {
         let capture = try await recorder.start(.file(wav, pace: .realtime), writingTo: caf)
-        _ = await capture.signals.firstAudio()
+        var feed = capture.feed.makeAsyncIterator()
+        for _ in 0..<3 {
+            let chunk = await feed.next()
+            heard += try #require(chunk).samples.count
+        }
     }  // dropped here, mid-file, without stop
     await recorder.settle()
 
     #expect(CAFFile.state(of: caf) == .closed)
     let kept = try CAFFile.read(caf).samples
-    #expect(!kept.isEmpty && kept.count < source.count)
+    #expect(kept.count >= heard && kept.count < source.count)
     #expect(kept == Array(source.prefix(kept.count)))
 }
 
@@ -185,13 +196,13 @@ import LexiconDomain
     #expect(out.withUnsafeMutableBufferPointer { ring.read(into: $0) } == 0)
 }
 
-@Test func stoppingACaptureTwiceIsACompileError() throws {
-    let once = try compile("""
+@Test func stoppingACaptureTwiceIsACompileError() async throws {
+    let once = try await compile("""
         func run(_ capture: consuming LiveCapture) async { _ = await capture.stop(.immediately) }
         """)
     #expect(once.status == 0, "control snippet must compile: \(once.output)")
 
-    let twice = try compile("""
+    let twice = try await compile("""
         func run(_ capture: consuming LiveCapture) async {
             _ = await capture.stop(.immediately)
             _ = await capture.stop(.immediately)
@@ -220,6 +231,12 @@ func syntheticSamples(count: Int) -> [Int16] {
         }
     }
 }
+
+/// 30 s at 16 kHz, for realtime tests that stop, drop or kill a capture partway.
+/// A realtime file is read against the wall clock, so the test acts on an
+/// explicit signal (a chunk, first audio) and the file's length is the margin:
+/// 30 s keeps the end out of reach however loaded the machine.
+func longSamples() -> [Int16] { syntheticSamples(count: 30 * 16_000) }
 
 /// A 16-bit mono PCM WAV, header written by hand so the fixture does not depend
 /// on the Apple file APIs it tests.
@@ -256,7 +273,9 @@ func report(_ line: String) {
 
 /// Compiles `source` against the AudioCapture module this test run built, as
 /// far as SIL: ownership ("consumed more than once") is checked there, after type checking.
-func compile(_ source: String) throws -> (status: Int32, output: String) {
+/// Waits for swiftc on a GCD thread, never the cooperative pool: blocking a pool
+/// thread for its 6 to 10 s starves the realtime audio tests on a 3-core runner.
+func compile(_ source: String) async throws -> (status: Int32, output: String) {
     var image = Dl_info()
     try #require(dladdr(#dsohandle, &image) != 0)
     var bundle = URL(filePath: String(cString: image.dli_fname))
@@ -280,7 +299,11 @@ func compile(_ source: String) throws -> (status: Int32, output: String) {
     process.standardOutput = pipe
     process.standardError = pipe
     try process.run()
-    let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-    process.waitUntilExit()
-    return (process.terminationStatus, output)
+    return await withCheckedContinuation { continuation in
+        DispatchQueue.global().async {
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            continuation.resume(returning: (process.terminationStatus, output))
+        }
+    }
 }
