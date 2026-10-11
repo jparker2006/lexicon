@@ -60,11 +60,11 @@ final class Microphone: @unchecked Sendable {
     #endif
 
     private func begin(deviceUID: String?, keyDown: HostTime) throws(RecorderError) -> MicSource {
-        // fn never waits (#18): a capture still in its tail ends now.
-        active?.cutOff()
         guard let device = findDevice(deviceUID) else { throw .noInputDevice }
         // Without permission the mic gives silence, not an error (#4).
         guard AVAudioApplication.shared.recordPermission != .denied else { throw .micPermissionDenied }
+        // fn never waits (#18): a capture still in its tail ends now.
+        active?.cutOff()
 
         let ready = prepared.flatMap { $0.device == device && $0.isCurrent ? $0 : nil }
         prepared = nil
@@ -285,8 +285,7 @@ final class MicEngine: @unchecked Sendable {
             let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
             guard let data = buffers.first?.mData else { return noErr }
             stamp.mark(timestamp.pointee)
-            // Frames that do not fit are dropped: the writer is 2 s behind.
-            _ = ring.write(UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self), count: Int(frameCount)))
+            ring.writeOrDrop(UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self), count: Int(frameCount)))
             return noErr
         }
         engine.attach(sink)

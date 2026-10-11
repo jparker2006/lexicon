@@ -18,6 +18,7 @@ final class SPSCRing: @unchecked Sendable {
     private let storage: UnsafeMutableBufferPointer<Float>
     private let head = Atomic<Int>(0)
     private let tail = Atomic<Int>(0)
+    private let refused = Atomic<Int>(0)
 
     init(capacityFrames: Int) {
         precondition(capacityFrames > 0)
@@ -28,7 +29,7 @@ final class SPSCRing: @unchecked Sendable {
     deinit { storage.deallocate() }
 
     /// Producer only. Real-time safe. Returns frames accepted; the rest did not
-    /// fit because the writer fell 2 s behind (the mic logs them as dropped).
+    /// fit because the writer fell 2 s behind.
     func write(_ frames: UnsafeBufferPointer<Float>) -> Int {
         let written = head.load(ordering: .relaxed)
         let read = tail.load(ordering: .acquiring)
@@ -41,6 +42,16 @@ final class SPSCRing: @unchecked Sendable {
         head.store(written + count, ordering: .releasing)
         return count
     }
+
+    /// The mic's write: it can't wait for room (a file can), so what does not
+    /// fit is dropped and counted. Real-time safe.
+    func writeOrDrop(_ frames: UnsafeBufferPointer<Float>) {
+        let accepted = write(frames)
+        if accepted < frames.count { refused.add(frames.count - accepted, ordering: .relaxed) }
+    }
+
+    /// Frames `writeOrDrop` dropped so far.
+    var dropped: Int { refused.load(ordering: .relaxed) }
 
     /// Consumer only. Returns frames copied into `buffer`, at most `buffer.count`.
     func read(into buffer: UnsafeMutableBufferPointer<Float>) -> Int {

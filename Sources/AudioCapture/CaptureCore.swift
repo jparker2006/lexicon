@@ -40,6 +40,8 @@ final class CaptureCore: @unchecked Sendable {
     /// Samples captured before fn-up, once it came.
     private var heardBeforeRelease: Int?
     private var take: Take?
+    /// Audio refused by rings already left behind by a device change.
+    private var droppedEarlier: Duration = .zero
     /// Audio kept after fn-up. Set by `finish` on the writer queue; read only
     /// after `stop` returned, which orders it after the write.
     private(set) var tailLength: Duration?
@@ -60,12 +62,15 @@ final class CaptureCore: @unchecked Sendable {
         samples.reserveCapacity(PCM16k.sampleRate * 30)
     }
 
-    /// Starts the producer first, then creates the file and the drain timer on
-    /// the writer queue, so the file never stands in front of the first audio.
+    /// Creates the file and the drain timer on the writer queue, and starts the
+    /// producer meanwhile: the file never stands in front of the first audio
+    /// (the ring holds it), and is queued before anything the producer reports.
     func begin() {
-        let (first, end) = (signals.first, signals.end)
-        source.start(SourceEvents(firstAudio: { first.settle($0) }, ended: { end.settle($0) },
-                                  switched: { [weak self] in self?.switchSegment(to: $0) }))
+        defer {
+            let (first, end) = (signals.first, signals.end)
+            source.start(SourceEvents(firstAudio: { first.settle($0) }, ended: { end.settle($0) },
+                                      switched: { [weak self] in self?.switchSegment(to: $0) }))
+        }
         queue.async { [self] in
             if hasRoom() {
                 do {
@@ -177,7 +182,7 @@ final class CaptureCore: @unchecked Sendable {
         Self.log.notice("""
             captured \(summary.duration.ms, privacy: .public) ms, start gap \(summary.startGap?.ms ?? -1, privacy: .public) ms, \
             tail \(self.tailLength?.ms ?? -1, privacy: .public) ms, \(summary.gaps.count, privacy: .public) device changes, \
-            \(summary.storage.rawValue, privacy: .public)
+            \(summary.storage.rawValue, privacy: .public), \((self.droppedEarlier + self.segment.droppedAudio).ms, privacy: .public) ms dropped
             """)
     }
 
@@ -190,6 +195,7 @@ final class CaptureCore: @unchecked Sendable {
             guard take == nil, let converter = Self.resampler(for: next.rate, policy: policy) else { return }
             drain()
             resampler.flush(emit: emit)
+            droppedEarlier += segment.droppedAudio
             resampler = converter
             segment = next
             problems.yield(.deviceChanged)

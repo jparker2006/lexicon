@@ -29,6 +29,8 @@ struct Segment: Sendable {
         self.rate = rate
         ring = SPSCRing(capacityFrames: Int(rate * 2))
     }
+
+    var droppedAudio: Duration { .seconds(Double(ring.dropped) / rate) }
 }
 
 /// What a source reports to its capture. Each runs off the real-time thread.
