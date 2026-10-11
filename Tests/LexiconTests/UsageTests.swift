@@ -12,7 +12,7 @@ import LexiconCore
 // A test whose body calls a sketch stub stays disabled until its ticket lands;
 // `scripts/check.sh` still compiles every one.
 
-@Test(.disabled("lands with #59")) func recoveryPlanIsIdempotent() {
+@Test func recoveryPlanIsIdempotent() {
     let id = DictationID()
     let rows = [RecoveryPlan.RowState(id: id, status: .recording, audio: .onDisk)]
     let first = RecoveryPlan.plan(rows: rows, files: [id: .open])

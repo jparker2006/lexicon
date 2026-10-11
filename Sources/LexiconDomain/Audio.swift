@@ -44,7 +44,12 @@ public struct AudioClip: Sendable {
     /// Replays the clip as a feed, so retry, recovery and eval go through the
     /// same streaming path as a live Dictation. One engine path, not two.
     public func replay(chunkMilliseconds: Int = 100) -> AudioFeed {
-        // TODO: split `samples` into chunkMilliseconds slices and yield them in order, then finish.
-        fatalError("not implemented")
+        let size = max(1, PCM16k.sampleRate * chunkMilliseconds / 1_000)
+        let (feed, input) = AudioFeed.makeStream()
+        for (index, start) in stride(from: 0, to: samples.count, by: size).enumerated() {
+            input.yield(PCMChunk(index: index, samples: Array(samples[start..<min(start + size, samples.count)])))
+        }
+        input.finish()
+        return feed
     }
 }

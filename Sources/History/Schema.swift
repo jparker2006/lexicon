@@ -107,37 +107,6 @@ enum HistorySchema {
     }
 }
 
-/// Pure crash recovery: rows and files in, actions out. Tested without disk.
-/// Converges: applying the actions and planning again yields only `.transcribe`
-/// for the same ids (which the Conductor runs; their `.textReady` ends them).
-enum RecoveryPlan {
-    struct RowState: Sendable, Hashable {
-        let id: DictationID
-        let status: DictationStatus
-        let audio: AudioStorage
-    }
-    enum FileState: Sendable, Hashable { case open, closed, unreadable }
-
-    enum Action: Sendable, Hashable {
-        case finalize(DictationID)                 // CAF still open: write its real size
-        case adoptOrphan(DictationID)              // file with no row: insert row, origin recovered
-        case deleteGarbage(DictationID)            // row says deleted (crash between mark and unlink)
-        case markFailed(DictationID, String)       // in-flight row, no readable audio
-        case transcribe(DictationID, wasWaiting: Bool)
-    }
-
-    static func plan(rows: [RowState], files: [DictationID: FileState]) -> [Action] {
-        // TODO:
-        // - for each file: no row -> [finalize if open, adoptOrphan, transcribe]
-        // - row.audio == .deleted && file exists -> deleteGarbage
-        // - row.audio == .expired (retention; the row keeps its text): file exists -> unlink the file only;
-        //   its missing audio is never a reason to markFailed (a .ready row still becomes notInserted)
-        // - row whose status is not terminal (!status.isTerminal):
-        //     file open -> finalize + transcribe; closed -> transcribe; missing/unreadable -> markFailed
-        fatalError("not implemented")
-    }
-}
-
 /// Audio retention (#4): audio older than 14 days goes, then the oldest until
 /// what is left fits in 1 GB. Text is kept forever. Never touched, and not
 /// counted against the 1 GB: a Dictation whose status `needsAudio` (it still
