@@ -25,11 +25,15 @@ A Fix made by editing the inserted text yourself.
 _Avoid_: Manual edit
 
 **Rule**:
-A learned "when you hear X, write Y", created from a Fix the user confirmed.
+A learned "when you hear X, write Y", added by the user or learned from a Fix the user confirmed.
 _Avoid_: Replacement, correction, mapping
 
+**Term**:
+A word or name in the Lexicon that is always written one exact way, such as a product name, a person's name or a code term.
+_Avoid_: Keyword, keyterm, vocabulary word, custom word
+
 **Lexicon**:
-The user's personal word store: their Rules, names and code terms.
+The user's personal word store: their Terms and Rules.
 _Avoid_: Dictionary, vocabulary, word list
 
 **Test set**:
