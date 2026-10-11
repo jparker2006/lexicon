@@ -15,9 +15,9 @@ import TestHooks
 ///    `LexiconSystem.live` (the fn tap first, then History, the Lexicon, AppText),
 ///    then `system.run()`: the key loop, crash recovery, mic prepare and the local model's load.
 /// 2. `applicationDidFinishLaunching`: the status item and the indicator, which
-///    follows the Conductor's events and the mic's levels.
+///    follows the Conductor's events and the mic's levels; then `Setup`: start at
+///    login, the warning dot, and the setup window on first run.
 /// 3. NSWorkspace will-sleep -> `conductor.systemWillSleep()`; Quit waits for `conductor.idle()`.
-/// Not yet: start at login (#57).
 ///
 /// Test hooks (debug builds only) answer when the dev bundle id is launched with `--test-hooks`.
 @MainActor
@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var systemError: String?
     var statusItem: StatusItemController?
     var indicator: DictationIndicator?
+    var setup: Setup?
     var history: HistoryWindowPresenter?
     /// Nil until the Lexicon has opened, just after launch; its menu line appears then.
     var lexiconPage: LexiconWindowPresenter?
@@ -52,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let fnOff = system.fnOff {
                 log.error("""
                     fn is off: \(String(describing: fnOff), privacy: .public), \
-                    accessibility=\(Permissions.accessibility, privacy: .public)
+                    accessibility=\(AXIsProcessTrusted(), privacy: .public)
                     """)
             } else {
                 log.notice("fn working \(ms, privacy: .public) ms after process start")
@@ -74,11 +75,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.history = history
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
             [history.menuItem()] + (self?.lexiconPage.map { [$0.menuItem()] } ?? [])
-                + (self?.systemError.map { [Permissions.status($0)] } ?? [])
-                + Permissions.fnOffItems(self?.system?.fnOff) + Permissions.menuItems()
+                + (self?.systemError.map { [Self.line($0)] } ?? [])
+                + (self?.setup?.menuItems() ?? [])
                 + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
         }
-        let indicator = DictationIndicator(statusItem: statusItem, preferences: system?.preferences ?? PreferencesStore())
+        let preferences = system?.preferences ?? PreferencesStore()
+        let indicator = DictationIndicator(statusItem: statusItem, preferences: preferences)
         // The system's Lexicon, the one every Dictation reads, so the page's edits reach the next fn-down.
         lexiconPage = system.map { LexiconWindowPresenter(lexicon: $0.lexicon) }
         self.statusItem = statusItem
@@ -94,11 +96,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
+        let setup = Setup(statusItem: statusItem, preferences: preferences,
+                          services: Self.setupServices(paths: paths, system: system),
+                          relaunched: CommandLine.arguments.contains(Setup.relaunchArgument),
+                          registersAtLogin: bundleID == AppPaths.dailyBundleID)
+        self.setup = setup
+        setup.start()
         #if DEBUG
         testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator, system: system)
         #endif
 
-        let permissions = Permissions.summary
+        let permissions = Setup.permissionsSummary
         DispatchQueue.main.async {
             // One run loop turn after the status item exists: the closest in-process mark
             // for the icon being on screen (the window server composites it just after).
@@ -152,6 +160,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         source.resume()
         return source
+    }
+
+    /// What setup needs from modules only the shell imports: the fn tap and the
+    /// globe key (KeyInput), the model (LocalParakeet), the mic (the system's recorder).
+    static func setupServices(paths: AppPaths, system: LexiconSystem?) -> Setup.Services {
+        Setup.Services(
+            fnOn: system != nil && system?.fnOff == nil,
+            globeKeyOK: { !GlobeKey.hasSystemAction },
+            modelInstalled: { ParakeetTranscriber.isInstalled(paths: paths) },
+            installModel: { access, progress in
+                try await ParakeetTranscriber.install(paths: paths, access: access, progress: progress)
+            },
+            modelInstalledNow: { await system?.loadModel() },
+            microphoneGranted: {
+                guard let system else { return }
+                system.recorder.prepare(.microphone(deviceUID: system.preferences.snapshot().microphoneUID))
+            })
+    }
+
+    /// A menu line that only informs.
+    static func line(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 
     /// "0.1 (412, 4dfdca8)": marketing version, build number, commit (set by scripts/bundle.sh).

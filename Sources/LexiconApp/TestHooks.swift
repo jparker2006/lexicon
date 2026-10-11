@@ -35,8 +35,8 @@ enum AppTestHooks {
         case .status:
             .status(TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
                                    version: AppDelegate.version(of: .main), pid: getpid(),
-                                   accessibility: Permissions.accessibility,
-                                   microphone: Permissions.microphoneName))
+                                   accessibility: AXIsProcessTrusted(),
+                                   microphone: Setup.microphoneName))
         case .dictate(let wav):
             if let system { await dictate(URL(filePath: wav), on: system) } else { closed }
         case .indicator(let state):
