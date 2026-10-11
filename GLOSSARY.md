@@ -8,6 +8,10 @@ Lexicon is a Mac dictation app: you speak, it types at your cursor, and it learn
 One spoken session, held or hands-free, from the audio through to the text inserted at the cursor.
 _Avoid_: Recording, transcript, utterance
 
+**Cleanup**:
+Tidying a Dictation's text after the speech model and before it's typed: fillers, stutters, self-corrections, punctuation, numbers, lists and paragraphs. It never changes what you asked for.
+_Avoid_: Formatting, polish, rewrite
+
 **Fix**:
 A correction to a Dictation's text. Either a Re-speak fix or a Hand fix.
 _Avoid_: Edit, correction
@@ -39,3 +43,7 @@ _Avoid_: Offline mode, local mode
 **History**:
 The saved record of every Dictation, its text versions and audio, shown in the History window.
 _Avoid_: Log, archive, transcripts
+
+**Secret guard**:
+A check on the Mac that keeps any Dictation containing a key, token or password from leaving the Mac.
+_Avoid_: Redaction, filter
