@@ -11,7 +11,7 @@
 //   - starting Docker, which can take the Mac down mid-build;
 //   - killing processes by name, which can kill other sessions' processes;
 //   - GitHub writes carrying Codex's handle, which start paid Codex cloud tasks;
-//   - recursively deleting .claude, which holds tracked agents, skills and settings;
+//   - recursively deleting .claude, which holds tracked agents, skills, hooks and settings;
 //   - recursively deleting the repo root or everything directly in it.
 // It refuses on every platform: each form is forbidden in cloud sessions too.
 //
@@ -44,7 +44,11 @@
 //   - a directory the same command creates or removes is judged as it was before it runs;
 //   - a body file over 1 MB, which is not read for Codex's handle;
 //   - a push with no refspec from a directory it can't read, and a refspec from a substitution;
-//   - push.default set to matching, which pushes main by a bare `git push` from another branch.
+//   - push.default set to matching, which pushes main by a bare `git push` from another branch;
+//   - a push or merge through GIT_DIR, --git-dir, or a wrapper it doesn't know (`caffeinate`, `arch`);
+//   - any clone whose .git is a folder counts as the main checkout, so the Reviewer's rule rests on
+//     builders and the orchestrator running in worktrees;
+//   - merges through tools other than Bash, such as an auto-merge button in the app, never reach it.
 // An unreadable heredoc, any other parse failure and nesting about 1,500 levels
 // deep allow the command. A non-string cwd allows any command that needs a path.
 // This is a backstop, not the permission system.
@@ -60,7 +64,7 @@ const REASONS = {
   docker: 'Refused: never start Docker from an agent session; it can crash the Mac.',
   kill: 'Refused: stop processes only by the PIDs you started, never by name.',
   handle: "Refused: this GitHub write contains Codex's handle, which starts a paid Codex cloud task; write \"Codex's handle\" instead.",
-  claude: 'Refused: never recursively delete .claude; it holds tracked agents, skills and settings.',
+  claude: 'Refused: never recursively delete .claude; it holds tracked agents, skills, hooks and settings.',
   root: 'Refused: never recursively delete the repo root or everything directly in it.',
   main: 'Refused: nobody pushes to main; land the change by PR, and the Reviewer merges it.',
   merge: 'Refused: only the Reviewer merges, from its session in the main checkout; builders and the orchestrator never do.',
@@ -76,8 +80,11 @@ const PUSH_VALUE_OPTIONS = new Set(['-o', '--push-option', '--repo', '--receive-
 // gh pr merge flags that merge some other way than the pinned squash.
 const MERGE_OTHER_WAYS = new Set(['--admin', '--auto', '--merge', '-m', '--rebase', '-r']);
 // gh api endpoints that merge or move main.
-const MERGE_ENDPOINT = /^\/?repos\/[^/]+\/[^/]+\/(?:pulls\/\d+\/merge|merges)$/;
-const MAIN_REF_ENDPOINT = /^\/?repos\/[^/]+\/[^/]+\/git\/refs\/heads\/main$/;
+const API = '^(?:https://api\\.github\\.com)?/?repos/[^/]+/[^/]+/';
+const MERGE_ENDPOINT = new RegExp(`${API}(?:pulls/\\d+/merge|merges)$`);
+const MAIN_REF_ENDPOINT = new RegExp(`${API}git/refs/heads/main$`);
+// A contents write with no branch field commits to the default branch, main.
+const CONTENTS_ENDPOINT = new RegExp(`${API}contents/`);
 const GRAPHQL_MERGE = /\b(?:mergePullRequest|enablePullRequestAutoMerge|mergeBranch)\b/;
 
 // Shell keywords that can precede a command.
@@ -98,9 +105,9 @@ const WRAPPERS = new Map([
 // gh's own flags that come before the subcommand, with a value.
 const GH_GLOBAL_VALUE_OPTIONS = new Set(['-R', '--repo', '--hostname']);
 // .claude's tracked entries; deleting one of these, .claude or .claude/worktrees is refused.
-const CLAUDE_TRACKED = /^(agents|skills|commands|settings.*\.json)$/;
+const CLAUDE_TRACKED = /^(agents|skills|commands|hooks|settings.*\.json)$/;
 // Names a find's name filters must not reach: .claude, the worktrees and the tracked entries. A settings file stands for settings*.json.
-const FIND_PROTECTED = ['.claude', 'worktrees', 'agents', 'skills', 'commands', 'settings.json', 'settings.local.json'];
+const FIND_PROTECTED = ['.claude', 'worktrees', 'agents', 'skills', 'commands', 'hooks', 'settings.json', 'settings.local.json'];
 // find tests that the name filters don't bound: a negation or alternation reaches other entries, and -regex isn't read.
 const FIND_UNJUDGED = new Set(['!', '-not', '-o', '-or', '-regex', '-iregex']);
 const REDIRECTION = /^(?:\d+|&)?(?:>>|>&|<&|&>>|&>|>\||<>|>|<)(.*)$/;
@@ -694,6 +701,8 @@ function pushRefusal(args, dir) {
     // `src:dst` updates dst, `:dst` deletes it, and a lone name updates the branch of that name.
     let destination = spec.includes(':') ? spec.slice(spec.indexOf(':') + 1) : spec;
     if (destination === 'HEAD' || destination === '@') destination = currentBranch(dir);
+    // A pattern such as refs/heads/* reaches main too.
+    if (destination?.includes('*')) return REASONS.main;
     if (destination?.replace(/^refs\/heads\//, '') === MAIN) return REASONS.main;
   }
   return null;
@@ -726,6 +735,8 @@ function ghMergeRefusal(gh, command) {
   }
   if (gh[0] !== 'api' || !isGitHubWrite(gh)) return null;
   if (gh.some((arg) => MAIN_REF_ENDPOINT.test(arg))) return REASONS.main;
+  const branchField = gh.map((arg) => /^branch=(.+)$/.exec(arg)?.[1]).find(Boolean);
+  if (gh.some((arg) => CONTENTS_ENDPOINT.test(arg)) && (branchField ?? MAIN) === MAIN) return REASONS.main;
   const merges = gh.some((arg) => MERGE_ENDPOINT.test(arg)) || (gh[1] === 'graphql' && GRAPHQL_MERGE.test(text(command)));
   if (merges) return reviewerSession() ? REASONS.mergeForm : REASONS.merge;
   return null;
@@ -735,7 +746,7 @@ function ghMergeRefusal(gh, command) {
 function tccRefusal(args) {
   if (args[0] !== 'reset') return null;
   // `tccutil reset <service> [bundle id]`; with no bundle ID it resets every app.
-  return /dev/i.test(args[2] ?? '') ? null : REASONS.tcc;
+  return /lexicon.*dev/i.test(args[2] ?? '') ? null : REASONS.tcc;
 }
 
 function check(command, cwd) {

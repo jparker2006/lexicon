@@ -442,6 +442,8 @@ test('refuses pushing to main from any session', () => {
       'cd docs && git push origin main',
       "bash -c 'git push origin main'",
       'gh api -X PATCH repos/jparker2006/lexicon/git/refs/heads/main -f sha=abc',
+      'gh api -X PUT repos/jparker2006/lexicon/contents/README.md -f message=m -f content=YQ==',
+      "git push origin 'refs/heads/*'",
     ]) {
       assertRefused(command, /pushes to main/);
       assertRefused(command, /pushes to main/, { projectDir: reviewer, cwd: reviewer });
@@ -463,6 +465,7 @@ test('allows pushing a ticket branch', () => {
       'git push origin HEAD:claude/issue-37',
       'git push origin --delete claude/issue-37',
       'git push origin main-notes',
+      'gh api -X PUT repos/jparker2006/lexicon/contents/docs/x.md -f message=m -f content=YQ== -f branch=claude/issue-37',
       'git commit -m "never git push origin main"',
       'grep -n "git push origin main" docs/agents/workflow.md',
     ]) assertAllowed(command);
@@ -472,15 +475,31 @@ test('allows pushing a ticket branch', () => {
   }
 });
 
+/** A builder's worktree of a throwaway main checkout: its .git is a file. */
+function builderWorktree() {
+  const main = mainCheckout();
+  const dir = `${main}-worktree`;
+  spawnSync('git', ['-C', main, 'worktree', 'add', '-q', '-b', 'claude/issue-41', dir], { encoding: 'utf8' });
+  mkdirSync(path.join(dir, '.claude/hooks'), { recursive: true });
+  writeFileSync(path.join(dir, '.claude/hooks/guard.mjs'), readFileSync(path.join(REPO, '.claude/hooks/guard.mjs')));
+  return { dir, cleanup: () => [main, dir].forEach((d) => rmSync(d, { recursive: true, force: true })) };
+}
+
 test("refuses a merge from a builder's worktree", () => {
-  for (const command of [
-    `gh pr merge 41 --squash --match-head-commit ${SHA}`,
-    'gh pr merge 41',
-    'gh -R jparker2006/lexicon pr merge 41 --squash',
-    'gh api -X PUT repos/jparker2006/lexicon/pulls/41/merge -f merge_method=squash',
-    'gh api repos/jparker2006/lexicon/merges -f base=main -f head=claude/issue-41',
-    "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
-  ]) assertRefused(command, /only the Reviewer merges/);
+  const builder = builderWorktree();
+  try {
+    for (const command of [
+      `gh pr merge 41 --squash --match-head-commit ${SHA}`,
+      'gh pr merge 41',
+      'gh -R jparker2006/lexicon pr merge 41 --squash',
+      'gh api -X PUT repos/jparker2006/lexicon/pulls/41/merge -f merge_method=squash',
+      'gh api repos/jparker2006/lexicon/merges -f base=main -f head=claude/issue-41',
+      'gh api -X PUT https://api.github.com/repos/jparker2006/lexicon/pulls/41/merge -f merge_method=squash',
+      "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
+    ]) assertRefused(command, /only the Reviewer merges/, { projectDir: builder.dir, cwd: builder.dir });
+  } finally {
+    builder.cleanup();
+  }
 });
 
 test('lets the Reviewer merge only a squash pinned to the head sha', () => {
@@ -514,8 +533,19 @@ test('allows reading PRs and checks from any session', () => {
 });
 
 test("refuses tccutil reset except on the Lexicon Dev bundle ID", () => {
-  for (const command of ['tccutil reset Accessibility', 'tccutil reset All', 'tccutil reset Microphone com.example.lexicon']) {
+  for (const command of [
+    'tccutil reset Accessibility',
+    'tccutil reset All',
+    'tccutil reset Microphone com.example.lexicon',
+    'tccutil reset Accessibility com.apple.developer-tools',
+  ]) {
     assertRefused(command, /tccutil reset/);
   }
   assertAllowed('tccutil reset Accessibility com.example.lexicon.dev');
+});
+
+test('refuses recursively deleting the guard hook itself', () => {
+  for (const command of ['rm -rf .claude/hooks', 'rm -r .claude/hooks/', 'find .claude -name hooks -exec rm -rf {} +']) {
+    assertRefused(command, /\.claude/);
+  }
 });
