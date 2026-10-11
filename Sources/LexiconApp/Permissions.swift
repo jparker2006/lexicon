@@ -23,11 +23,7 @@ enum Permissions {
     }
 
     /// For the launch log line, read by the grant check in the PR evidence.
-    /// Input Monitoring is never requested: the active fn tap needs Accessibility only.
-    /// Logged so a working tap with `inputMonitoring=false` proves it (#53).
-    static var summary: String {
-        "accessibility=\(accessibility) microphone=\(microphoneName) inputMonitoring=\(CGPreflightListenEventAccess())"
-    }
+    static var summary: String { "accessibility=\(accessibility) microphone=\(microphoneName)" }
 
     static func menuItems() -> [NSMenuItem] {
         [

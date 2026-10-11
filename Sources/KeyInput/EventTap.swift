@@ -83,8 +83,8 @@ final class EventTapThread: @unchecked Sendable {
         guard let key = KeyInput(event, secureInput: { IsSecureEventInputEnabled() }, now: .now()) else { return pass }
         feed(key)
         switch key {
-        case .fnDown(let at, _): logDelivery("down", at: at, stamp: event.timestamp)
-        case .fnUp(let at): logDelivery("up", at: at, stamp: event.timestamp)
+        case .fnDown(let at, _): logDelivery("down", at: at)
+        case .fnUp(let at): logDelivery("up", at: at)
         default: break
         }
         return pass
@@ -117,14 +117,9 @@ final class EventTapThread: @unchecked Sendable {
     }
 
     /// fn delivery latency through the tap: the key event's own time to now.
-    private func logDelivery(_ edge: StaticString, at: HostTime, stamp: CGEventTimestamp) {
-        let now = HostTime.now()
-        let micros = Int(now.duration(since: at) / .microseconds(1))
-        // TODO(#53 live check): the raw stamp and now settle which timestamp reading is right; then drop them.
-        log.notice("""
-            fn \(String(describing: edge), privacy: .public) delivered \(micros, privacy: .public) µs after the key \
-            (stamp \(stamp, privacy: .public), now \(now.nanoseconds, privacy: .public) ns)
-            """)
+    private func logDelivery(_ edge: StaticString, at: HostTime) {
+        let micros = Int(HostTime.now().duration(since: at) / .microseconds(1))
+        log.notice("fn \(String(describing: edge), privacy: .public) delivered \(micros, privacy: .public) µs after the key")
     }
 }
 
@@ -156,19 +151,11 @@ extension KeyInput {
 }
 
 extension HostTime {
-    /// A CGEvent's timestamp on the HostTime clock. An event posted without a
-    /// time (stamp 0), or one that reads as not yet happened or over a second
-    /// old, is taken as `now`.
+    /// A CGEvent's timestamp is nanoseconds on the HostTime clock. An event posted
+    /// without a time (stamp 0), or one that reads as not yet happened or over a
+    /// second old, is taken as `now`, so a bad stamp can't turn a tap into a hold.
     init(eventTimestamp stamp: CGEventTimestamp, now: HostTime) {
-        // TODO(#53 live check): the header says "roughly nanoseconds"; keep whichever reading the live log proves.
-        let (scaled, overflow) = stamp.multipliedReportingOverflow(by: machTimebase.numer)
-        let readings = [HostTime(nanoseconds: stamp)] + (overflow ? [] : [HostTime(nanoseconds: scaled / machTimebase.denom)])
-        self = readings.first { $0 <= now && now.duration(since: $0) < .seconds(1) } ?? now
+        let at = HostTime(nanoseconds: stamp)
+        self = at <= now && now.duration(since: at) < .seconds(1) ? at : now
     }
 }
-
-private let machTimebase: (numer: UInt64, denom: UInt64) = {
-    var info = mach_timebase_info_data_t()
-    mach_timebase_info(&info)
-    return (UInt64(info.numer), UInt64(info.denom))
-}()

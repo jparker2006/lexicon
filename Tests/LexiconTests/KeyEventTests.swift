@@ -1,5 +1,4 @@
 import CoreGraphics
-import Darwin
 import Testing
 import LexiconDomain
 @testable import KeyInput
@@ -8,7 +7,7 @@ import LexiconDomain
 // in-process and never posted, so no Accessibility permission is needed.
 // Keycodes: fn 63, Shift 56 (left) and 60 (right), Command 55, Option 58, Control 59.
 
-/// Far from zero, so a mach-tick reading and a nanosecond reading of one moment differ wildly.
+/// A fixed clock reading, about 10 days of uptime.
 private let fixedNow = HostTime(nanoseconds: 900_000_000_000_000)
 
 /// Milliseconds after `fixedNow`.
@@ -147,17 +146,6 @@ private func feed(_ event: CGEvent, at now: HostTime, into gesture: inout FnGest
     let twoMillisecondsAgo = fixedNow.nanoseconds - 2_000_000
     #expect(HostTime(eventTimestamp: twoMillisecondsAgo, now: fixedNow)
         == HostTime(nanoseconds: twoMillisecondsAgo))
-}
-
-@Test func machTickStampTwoMillisecondsAgoIsThatTimeWithinAMicrosecond() {
-    var timebase = mach_timebase_info_data_t()
-    mach_timebase_info(&timebase)
-    let twoMillisecondsAgo = fixedNow.nanoseconds - 2_000_000
-    // Mach ticks: nanoseconds * denom / numer. Apple silicon is 125/3, Intel 1/1.
-    let ticks = twoMillisecondsAgo * UInt64(timebase.denom) / UInt64(timebase.numer)
-    let read = HostTime(eventTimestamp: ticks, now: fixedNow)
-    let drift = Int64(read.nanoseconds) - Int64(twoMillisecondsAgo)
-    #expect(abs(drift) <= 1_000)
 }
 
 @Test func futureStampIsTakenAsNow() {
