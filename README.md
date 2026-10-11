@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/brand/logo.webp" alt="Lexicon logo" width="160"></p>
+
 # Lexicon
 
 A fast, native Mac dictation app that learns your words.
