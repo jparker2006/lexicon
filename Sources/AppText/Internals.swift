@@ -3,21 +3,43 @@ import Foundation
 /// A serial executor backed by one dedicated thread running a CFRunLoop. Makes
 /// `TargetApp` run there: AX calls (synchronous IPC that can block up to the
 /// messaging timeout) and AXObserver run loop sources live on this thread.
+///
+/// `@unchecked Sendable`: its only state is the run loop, set before `init`
+/// returns and never changed; CFRunLoopPerformBlock and CFRunLoopWakeUp may be
+/// called from any thread.
 final class RunLoopExecutor: SerialExecutor, @unchecked Sendable {
-    init(name: String) { fatalError("not implemented") }
+    private let runLoop: CFRunLoop
+
+    init(name: String) {
+        let started = Started()
+        let thread = Thread {
+            // A source with nothing to do keeps the run loop running when idle.
+            var context = CFRunLoopSourceContext()
+            let source = CFRunLoopSourceCreate(nil, 0, &context)
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            started.loop = CFRunLoopGetCurrent()
+            started.ready.signal()
+            CFRunLoopRun()
+        }
+        thread.name = name
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        started.ready.wait()
+        runLoop = started.loop!  // set before `ready` is signalled
+    }
 
     func enqueue(_ job: consuming ExecutorJob) {
-        // TODO: let unowned = UnownedJob(job); CFRunLoopPerformBlock(runLoop, commonModes) {
-        //   unowned.runSynchronously(on: self.asUnownedSerialExecutor()) }; CFRunLoopWakeUp(runLoop)
-        fatalError("not implemented")
+        let job = UnownedJob(job)
+        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) {
+            job.runSynchronously(on: self.asUnownedSerialExecutor())
+        }
+        CFRunLoopWakeUp(runLoop)
     }
-}
 
-/// Handy-style clipboard restore (#7). Lives with the paste because it is the
-/// same decision: we own the pasteboard from write until restore. Pasteboard
-/// writes and the promise provider run on the main actor (AppKit pasteboard
-/// owner callbacks arrive on the main run loop; verify in M0).
-final class PasteboardRestorer: @unchecked Sendable {
-    let quietPeriod: Duration = .milliseconds(200)
-    let cap: Duration = .seconds(8)
+    /// Hands the new thread's run loop back to `init`. `@unchecked`: written
+    /// once on the new thread before `ready` is signalled, read after the wait.
+    private final class Started: @unchecked Sendable {
+        var loop: CFRunLoop?
+        let ready = DispatchSemaphore(value: 0)
+    }
 }

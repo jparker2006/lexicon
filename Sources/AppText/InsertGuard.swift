@@ -4,7 +4,8 @@ public import LexiconDomain
 /// from Accessibility; the guard only compares them.
 public struct FocusSnapshot: Sendable, Hashable {
     public let pid: Int32
-    /// Opaque field identity (same scheme as `InsertionReceipt.fieldFingerprint`).
+    /// Opaque field identity: the receipt's durable fingerprint plus this
+    /// element's live identity, so two alike fields in one window differ.
     /// nil when the app exposes no focused element.
     public let fieldFingerprint: String?
     public init(pid: Int32, fieldFingerprint: String?) {

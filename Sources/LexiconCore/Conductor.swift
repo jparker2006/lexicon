@@ -118,7 +118,7 @@ public actor Conductor<Destination: TextDestination> {
     public func pasteLast() async {
         guard let (id, text) = await history.newestText() else { return emit(.notice(.nothingToPaste)) }
         guard let target = await destination.target() else { return emit(.notice(.noFieldToPaste)) }
-        switch await destination.insert(text, for: id, at: target) {
+        switch await destination.pasteLast(text, for: id, at: target) {
         case .inserted(let receipt): history.record(.delivered(id, receipt, lag: nil))
         case .notInserted, .historyOnly: break  // the row keeps its status; Jake can press it again
         }

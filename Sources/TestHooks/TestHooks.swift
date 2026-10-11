@@ -30,6 +30,10 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     /// builds it on fn-down (cold). `deviceChange`: rebuild the engine halfway,
     /// as when hardware changes. `deviceUID` nil: built-in mic.
     case capture(seconds: Double, preparedIdle: Double?, deviceChange: Bool, deviceUID: String?)
+    /// Paste `text` at the cursor through the real AppText path, as a Dictation
+    /// would at fn-up: capture the focused field after `delay` seconds (time to
+    /// click into the field), then insert.
+    case insert(text: String, delay: Double)
 }
 
 public enum TestHookReply: Codable, Sendable, Equatable {
@@ -38,6 +42,7 @@ public enum TestHookReply: Codable, Sendable, Equatable {
     /// From the call to play until its first sample reaches the output device.
     case soundPlayed(latency: Duration)
     case capture(MicMeasurement)
+    case inserted(TestHookInsertion)
     /// The app understood the command but could not do it; the text says why.
     case failed(String)
 }
@@ -57,6 +62,41 @@ public struct TestHookStatus: Codable, Sendable, Equatable {
         self.pid = pid
         self.accessibility = accessibility
         self.microphone = microphone
+    }
+}
+
+/// What one `insert` did. Counts and timings only: the field's text never
+/// leaves the app through a hook, since the field can be one of Jake's.
+public struct TestHookInsertion: Codable, Sendable, Equatable {
+    /// The focused app at capture.
+    public let bundleID: String?
+    /// "inserted", or the `NotInsertedReason`.
+    public let outcome: String
+    /// Capturing the field at "fn-up", and the insert's own work up to Cmd-V, in microseconds.
+    public let targetMicros: Int
+    public let pasteWorkMicros: Int?
+    public let hasFingerprint: Bool
+    public let caretAfter: Int?
+    public let contextBeforeCount: Int
+    public let contextAfterCount: Int
+    /// `NSPasteboard.general.accessBehavior` before and after: how macOS treats
+    /// Lexicon reading the clipboard ("default", "ask", "alwaysAllow", "alwaysDeny").
+    public let clipboardAccessBefore: String
+    public let clipboardAccessAfter: String
+
+    public init(bundleID: String?, outcome: String, targetMicros: Int, pasteWorkMicros: Int?, hasFingerprint: Bool,
+                caretAfter: Int?, contextBeforeCount: Int, contextAfterCount: Int,
+                clipboardAccessBefore: String, clipboardAccessAfter: String) {
+        self.bundleID = bundleID
+        self.outcome = outcome
+        self.targetMicros = targetMicros
+        self.pasteWorkMicros = pasteWorkMicros
+        self.hasFingerprint = hasFingerprint
+        self.caretAfter = caretAfter
+        self.contextBeforeCount = contextBeforeCount
+        self.contextAfterCount = contextAfterCount
+        self.clipboardAccessBefore = clipboardAccessBefore
+        self.clipboardAccessAfter = clipboardAccessAfter
     }
 }
 
