@@ -46,7 +46,7 @@ final class CloudSession: Sendable {
             do {
                 socket = try await link.connect(provider.connectRequest(key: key))
             } catch {
-                return .failed("connect: \(error)")
+                return .failed("connect: " + describe(error))
             }
             return await Self.stream(audio, over: socket, provider: provider, access: access, terms: terms,
                                      segments: segmentsIn)
@@ -85,6 +85,8 @@ final class CloudSession: Sendable {
             await withTaskGroup(of: Step.self) { group in
                 group.addTask {
                     do {
+                        // Terms are text leaving the Mac: one that looks like a key stays home.
+                        let terms = terms.filter { !SecretGuard.matches($0.text) }
                         if let start = provider.sessionStart(terms: terms) { try await socket.send(start) }
                         for await chunk in audio { try await socket.send(provider.audio(chunk)) }
                         // A cancelled iteration also ends the loop; that is not the end of the recording.
@@ -93,7 +95,7 @@ final class CloudSession: Sendable {
                         try await socket.send(provider.finalize())
                         return .sent
                     } catch {
-                        return .ended(.failed("send: \(error)"))
+                        return .ended(.failed("send: " + describe(error)))
                     }
                 }
                 group.addTask {
@@ -121,7 +123,7 @@ final class CloudSession: Sendable {
                         }
                         return .serverEnded(finals)
                     } catch {
-                        return .ended(.failed("receive: \(error)"))
+                        return .ended(.failed("receive: " + describe(error)))
                     }
                 }
                 group.addTask { .revoked(await access.whenRevoked()) }
@@ -151,4 +153,11 @@ final class CloudSession: Sendable {
             socket.close()
         }
     }
+}
+
+/// Kept in History's attempts table, so never the error's own text: a URL in it
+/// could carry a key some provider puts in the query.
+private func describe(_ error: any Error) -> String {
+    if let error = error as? URLError { return "URLError \(error.code.rawValue)" }
+    return String(describing: type(of: error))
 }

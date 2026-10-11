@@ -25,8 +25,9 @@ struct RacePolicy: Sendable, Hashable {
 
     /// The cloud wins whenever its final is back before the deadline, even if
     /// local finished first. A failed cloud, or the deadline passing, hands the
-    /// Dictation to local the moment local has text. After the deadline the first
-    /// engine to finish wins, so a slow local load can still be beaten by the cloud.
+    /// Dictation to local the moment local has text. The caller decides again on
+    /// every engine result, so after the deadline whichever engine answers next
+    /// wins, and a slow local load can still be beaten by the cloud.
     func decide(cloud: State?, local: State?, deadlinePassed: Bool) -> Decision {
         if case .done? = cloud { return .useCloud }
         if case .done? = local, cloud != .pending || deadlinePassed { return .useLocal }

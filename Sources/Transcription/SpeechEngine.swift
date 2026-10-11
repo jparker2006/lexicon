@@ -5,7 +5,7 @@ public import LexiconDomain
 ///
 /// Hides: one WebSocket per Dictation opened at fn-down (cold TLS 95-635 ms runs
 /// while Jake talks), the provider's session-start message with keywords, PCM
-/// framing, manual finalize, parsing finals, retry-once, racing the local model
+/// framing, manual finalize, parsing finals, racing the local model
 /// on the same audio against a deadline, NWPathMonitor and "wait for the
 /// network", and loading/unloading the local model. Callers never see a socket,
 /// a provider message or a model file.
@@ -17,6 +17,8 @@ public actor SpeechEngine {
     let residency: LocalResidency?
     let cloud: CloudLink
     let clock: any Clock<Duration>
+    /// Feeds the network path to residency for as long as this engine lives.
+    private let networkWatch: Task<Void, Never>?
 
     /// `cloud`: `.network` in the app and eval; tests pass a scripted link.
     /// `clock` times the race deadline and the local model's idle unload; tests pass a fake one.
@@ -28,11 +30,13 @@ public actor SpeechEngine {
         let residency = local.map { LocalResidency(transcriber: $0, clock: clock) }
         self.residency = residency
         // While the network is down local is the only engine, so it stays loaded.
-        if let residency {
+        networkWatch = residency.map { residency in
             let changes = cloud.path.changes()
-            Task { for await reachable in changes { await residency.networkChanged(reachable: reachable) } }
+            return Task { for await reachable in changes { await residency.networkChanged(reachable: reachable) } }
         }
     }
+
+    deinit { networkWatch?.cancel() }
 
     /// fn-down. Starts streaming `feed` to the cloud model (when the plan has
     /// one and the network is up) and, if the local model is not resident, starts
@@ -323,7 +327,7 @@ final class AttemptCore: Sendable {
         }
         for timer in timers { timer.cancel() }
         post.finish()
-        if cloudState == .pending { session?.close() }  // local won: the socket is not needed any more
+        if decision != .useCloud { session?.close() }  // lost or gave up: the socket is not needed any more
         if localState == .pending { localRun?.cancel() }  // the cloud won; the hold on the model still ends
 
         var attempts: [AttemptRecord] = []
@@ -357,6 +361,8 @@ final class AttemptCore: Sendable {
         case (.useLocal, _, .done(let text)?):
             won = (text, .local(local!.model), localLatency)
         default:
+            // A broken local model waits for a working one, whatever the cloud did.
+            if let localFailure, case .localModelFailed = localFailure { return .unavailable(localFailure) }
             if cloud != nil {
                 return .unavailable(session == nil ? .offline : .providerError(cloudError ?? "failed"))
             }

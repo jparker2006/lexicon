@@ -169,15 +169,21 @@ private final class ScriptedSocket: CloudSocket {
             }
         case .text("finalize"):
             cloud.update { $0.finalized = true }
+            // One timer, replies in script order: a final and the session end due
+            // at the same moment always arrive final first.
             let clock = cloud.clock
-            for reply in cloud.script {
-                guard case .afterFinalize(let delay) = reply.cue else { continue }
-                let timer = Task { [self] in
-                    do { try await clock.sleep(for: delay) } catch { return }
-                    post(reply.message)
-                }
-                timers.withLock { $0.append(timer) }
+            let start = clock.now
+            let due = cloud.script.compactMap { reply -> (Duration, Reply.Message)? in
+                guard case .afterFinalize(let delay) = reply.cue else { return nil }
+                return (delay, reply.message)
             }
+            let timer = Task { [self] in
+                for (delay, message) in due {
+                    do { try await clock.sleep(until: start.advanced(by: delay), tolerance: nil) } catch { return }
+                    post(message)
+                }
+            }
+            timers.withLock { $0.append(timer) }
         case .text(let text):
             if let terms = text.dropPrefix("start:") { cloud.update { $0.sessionStarts.append(terms) } }
         }
