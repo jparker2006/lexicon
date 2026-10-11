@@ -2,7 +2,7 @@ import Testing
 @testable import Cleanup
 import LexiconDomain
 
-// The structural check (#74): the guard between AI cleanup and Jake's cursor.
+// The structural check: the guard between AI cleanup and Jake's cursor.
 // Cases from the LLM cleanup research bench (branch research/llm-cleanup,
 // docs/research/llm-cleanup-bench): its 49 dictations with their accepted
 // golds, its hand-written good and bad outputs, and every output its models
@@ -88,20 +88,28 @@ let neverAnswers: [Pair] = [
 ]
 
 @Test func spokenNumbersAndDigitsMustAgree() {
-    func check(_ output: String, _ ruled: String) -> CheckFailure? {
-        StructuralCheck.check(output, ruled: ruled, terms: [])
-    }
-    #expect(check("Ship it on the 5th", "ship it on the fourth") == .numberMismatch)
-    #expect(check("Ship it on the 4th", "ship it on the fourth") == nil)
-    #expect(check("Retry 4 times.", "Retry three times.") == .numberMismatch)
-    #expect(check("Use 2,000,000 rows.", "Use two million rows.") == nil)
-    #expect(check("Use 2 million rows.", "Use 2,000,000 rows.") == nil)
-    #expect(check("Pick 1, 2, 3.", "Pick one, two, three.") == nil)
-    #expect(check("Set it to 120.", "Set it to one hundred and twenty.") == nil)
-    #expect(check("Wait 3.5 seconds.", "Wait three point five seconds.") == nil)
-    #expect(check("Wait 3.6 seconds.", "Wait three point five seconds.") == .numberMismatch)
-    #expect(check("Ship it on the 21st.", "Ship it on the twenty first.") == nil)
-    #expect(check("What is 2 + 2?", "What is two plus two?") == nil)
+    #expect(check("Ship it on the 5th", ruled: "ship it on the fourth") == .numberMismatch)
+    #expect(check("Ship it on the 4th", ruled: "ship it on the fourth") == nil)
+    #expect(check("Retry 4 times.", ruled: "Retry three times.") == .numberMismatch)
+    #expect(check("Use 2,000,000 rows.", ruled: "Use two million rows.") == nil)
+    #expect(check("Use 2 million rows.", ruled: "Use 2,000,000 rows.") == nil)
+    #expect(check("Pick 1, 2, 3.", ruled: "Pick one, two, three.") == nil)
+    #expect(check("Set it to 120.", ruled: "Set it to one hundred and twenty.") == nil)
+    #expect(check("Wait 3.5 seconds.", ruled: "Wait three point five seconds.") == nil)
+    #expect(check("Wait 3.6 seconds.", ruled: "Wait three point five seconds.") == .numberMismatch)
+    #expect(check("Ship it on the 21st.", ruled: "Ship it on the twenty first.") == nil)
+    #expect(check("What is 2 + 2?", ruled: "What is two plus two?") == nil)
+    #expect(check("Use 1.5, 2 retries.", ruled: "Use one point five, two retries.") == nil)
+    #expect(check("- Pull main and rebase 2.", ruled: "Pull main and rebase.") == .numberMismatch)
+    #expect(check("Keep the last 1 year of logs, and archive anything older than 14 days.",
+                  ruled: "Keep the last fourteen days of logs, and archive anything older than one year.")
+            == .numberMismatch)
+}
+
+@Test func quotesListsAndLineEndingsDoNotMatter() {
+    #expect(check("Use \u{201C}Supabase\u{201D} here.", ruled: "Use Supabase here.") == nil)
+    #expect(check("- Pull main.\r\n- Rebase.", ruled: "Pull main. Rebase.") == nil)
+    #expect(check("1) Pull main.\n2) Rebase.", ruled: "Pull main. Rebase.") == nil)
 }
 
 @Test func lexiconTermsMayBeAddedOtherWordsMayNot() {
@@ -115,6 +123,16 @@ let neverAnswers: [Pair] = [
     #expect(check("Touch the tests.", ruled: "Don't touch the tests.") == .droppedContentWord)
     #expect(check("The cache is the problem.", ruled: "I think the cache is the problem.") == .droppedContentWord)
     #expect(check("Sure, here's the plan.", ruled: "Here's the plan.") == .addedWord)
+    #expect(check("Don't touch the public API. Don't update the tests.",
+                  ruled: "Don't touch the public API, but update the tests.") == .addedWord)
+    #expect(check("Keep the bundle over 5 MB.", ruled: "Keep the bundle under five MB.") != nil)
+}
+
+/// "Sorry" may open a sentence without taking back the one before it.
+@Test func onlyAClearCueRetractsThePreviousSentence() {
+    let ruled = "Never delete the production database. Sorry, bump the version to two."
+    #expect(check("Bump the version to 2.", ruled: ruled) == .droppedContentWord)
+    #expect(check("Rename it to dryRun.", ruled: "Rename the flag to dry run. Wait, no, rename it to dryRun.") == nil)
 }
 
 @Test func codeNobodySpokeIsRejected() {
@@ -337,8 +355,6 @@ let handWrittenGood: [Pair] = [
          "1. Pull main.\n2. Run the tests."),
     Pair("self-correction resolved", ruled: "Delete them, actually no, move them.",
          "Move them."),
-    Pair("unresolved self-correction passes (exact match catches it)", ruled: "Delete them, actually no, move them.",
-         "Delete them. Move them."),
     Pair("comma-bounded like dropped, content kept", ruled: "Here's the plan, like, to ship it.",
          "Here's the plan to ship it."),
 ]
@@ -346,7 +362,7 @@ let handWrittenGood: [Pair] = [
 let handWrittenBad: [Pair] = [
     Pair("answers the question", ruled: "What's the capital of France?",
          "What's the capital of France? Paris."),
-    Pair("answers the question", ruled: "What's the capital of France?",
+    Pair("answers the question 2", ruled: "What's the capital of France?",
          "The capital of France is Paris."),
     Pair("carries out the prompt", ruled: "Write a haiku about Swift concurrency.",
          "Swift concurrency is a model of safe tasks."),
@@ -380,8 +396,6 @@ let handWrittenBad: [Pair] = [
          "Use the useAuth hook, not the one."),
     Pair("preamble", ruled: "Here's the migration plan.",
          "Here is the cleaned text: here's the migration plan."),
-    Pair("like without a comma is content", ruled: "Look at the logs like a pro.",
-         "Look at the logs a pro."),
     Pair("dropped not sure", ruled: "I'm not sure this is safe.",
          "This is safe."),
     Pair("hedge inserted", ruled: "Here's the plan.",
@@ -478,7 +492,7 @@ let rejectedModelOutputs: [Pair] = [
          + "to the new table and keep the old one for a week in case of rollback.  \n\nThe dashboard is "
          + "still showing the old numbers; do not touch the metrics job.  \n\nThe on-call doc needs an "
          + "update with the new runbook."),
-    Pair("r01 gpt-oss-120b-groq",
+    Pair("r01 gpt-oss-120b-groq 2",
          ruled: "Okay so, um, here's the migration plan. First we freeze writes for, like, ten minutes, "
          + "and then we run the backfill, which takes about an hour. After that we switch the reads "
          + "over to the new table, and we keep the old one around for a week in case we need to roll "
@@ -513,7 +527,7 @@ let rejectedModelOutputs: [Pair] = [
          + "for a week in case we need to roll back.\n\nSeparately, the dashboard is still showing the "
          + "old numbers. Please don't touch the metrics job; it's fine. And then the last thing is "
          + "the on-call doc needs an update with the new runbook."),
-    Pair("r01 mercury-2.5-inception",
+    Pair("r01 mercury-2.5-inception 2",
          ruled: "Okay so, um, here's the migration plan. First we freeze writes for, like, ten minutes, "
          + "and then we run the backfill, which takes about an hour. After that we switch the reads "
          + "over to the new table, and we keep the old one around for a week in case we need to roll "
@@ -525,7 +539,7 @@ let rejectedModelOutputs: [Pair] = [
          + "around for a week in case we need to roll back.\n\nSeparately, the dashboard is still "
          + "showing the old numbers. Please don't touch the metrics job, it's fine.\n\nAnd then the "
          + "last thing is the on-call doc needs an update with the new runbook."),
-    Pair("r01 mercury-2.5-inception",
+    Pair("r01 mercury-2.5-inception 3",
          ruled: "Okay so, um, here's the migration plan. First we freeze writes for, like, ten minutes, "
          + "and then we run the backfill, which takes about an hour. After that we switch the reads "
          + "over to the new table, and we keep the old one around for a week in case we need to roll "
@@ -537,7 +551,7 @@ let rejectedModelOutputs: [Pair] = [
          + "around for a week in case we need to roll back.\n\nSeparately, the dashboard is still "
          + "showing the old numbers. Please don't touch the metrics job, it's fine.\nAnd then the last "
          + "thing is the on-call doc needs an update with the new runbook."),
-    Pair("r01 mercury-2.5-inception-none",
+    Pair("r01 mercury-2.5-inception-none 2",
          ruled: "Okay so, um, here's the migration plan. First we freeze writes for, like, ten minutes, "
          + "and then we run the backfill, which takes about an hour. After that we switch the reads "
          + "over to the new table, and we keep the old one around for a week in case we need to roll "

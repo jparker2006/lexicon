@@ -18,14 +18,15 @@ enum Sentences {
 /// candidate counts as kept, so a word repeated in a self-correction or a list
 /// is still found. Case and punctuation never matter. Passes when all hold:
 ///   - no code block or code-looking token nobody spoke (`unspokenCode`)
-///   - spoken numbers and digits agree: "one hundred" is "100", "two million" is
-///     "2,000,000", "fourth" is "4th" (`numberMismatch`)
+///   - spoken numbers and digits agree, in the order spoken: "one hundred" is
+///     "100", "two million" is "2,000,000", "fourth" is "4th" (`numberMismatch`)
 ///   - every content word of `ruled` survives, except a filler where the rules
 ///     would also drop it, or a word retracted by a self-correction ("delete
 ///     them, actually no, move them"). Negation, constraint and hedge words
 ///     (`mustKeep`) are content words here (`droppedContentWord`)
 ///   - no content word is added; Lexicon `terms`, list markers ("1.", "-", "•")
-///     and the ordinals those markers replace are allowed (`addedWord`)
+///     and the ordinals those markers replace are allowed. No negation or hedge
+///     appears more often than it was spoken (`addedWord`)
 ///   - at most `lengthCap` times the ruled length plus `lengthSlack` tokens (`tooLong`)
 /// Function words ("the", "to", "it's", "can") may come and go: dropping or
 /// adding one never changes what was asked.
@@ -34,11 +35,14 @@ enum Sentences {
 /// a self-correction span runs from the start of its sentence to the cue, so a
 /// clause in that sentence that was not retracted may go too; list markers
 /// excuse missing small numbers and ordinals; a correction resolved into other
-/// words passes if it adds no content word. And it is strict where it could be
+/// words, or back into its retracted words, passes if it adds no content word;
+/// word order is not checked, so swapped nouns ("from staging to prod") and
+/// swapped modals ("have to" to "can") pass. And it is strict where it could be
 /// lenient: a close miss the model fixes into a Term ("super base" to
 /// "Supabase") fails, because the misheard words are gone.
 enum StructuralCheck {
     static let lengthCap = 1.2
+    /// A short Dictation turned into a list gains a marker per line: "1. Ship it." on "Ship it."
     static let lengthSlack = 4
 
     /// nil = accept. Otherwise the first failing check, in the order listed above.
@@ -56,7 +60,7 @@ enum StructuralCheck {
         let openers = openerRun(ref)
         for (k, token) in ref.enumerated() where !retracted.contains(k) && !kept.contains(token.word) {
             let word = token.word
-            if hardFillers.contains(word) { continue }
+            if Fillers.hard.contains(word) { continue }
             if softFillers.contains(word) {
                 if !softFillerMayGo(ref, k, inOpener: openers[k]) { failures.insert(.droppedContentWord) }
             } else if mustKeep.contains(word) {
@@ -75,12 +79,30 @@ enum StructuralCheck {
         for token in out where !spoken.contains(token.word) {
             let word = token.word
             if !mustKeep.contains(word), stop.contains(word) || softFillers.contains(word)
-                || hardFillers.contains(word) || listSequence.contains(word) || (markers > 0 && smallNumber(word)) {
+                || Fillers.hard.contains(word) || listSequence.contains(word) {
                 continue
             }
             if lexicon == nil { lexicon = Set(terms.flatMap { canonical(tokens($0.text)).map(\.word) }) }
             if lexicon!.contains(word) { continue }
             failures.insert(isNumber(word) ? .numberMismatch : .addedWord)
+        }
+        // "Don't touch the API, but update the tests" must not gain a second "don't".
+        let negations = { (tokens: [Token]) in tokens.reduce(into: [String: Int]()) { counts, token in
+            if mustKeep.contains(token.word) { counts[token.word, default: 0] += 1 }
+        } }
+        let spokenNegations = negations(ref)
+        if negations(out).contains(where: { $0.value > spokenNegations[$0.key, default: 0] }) {
+            failures.insert(.addedWord)
+        }
+        // "14 days ... 1 year" must not become "1 year ... 14 days": numbers keep their order.
+        let spokenNumbers = ref.map(\.word).filter(isNumber)
+        var next = 0
+        for number in out.map(\.word) where isNumber(number) {
+            guard let at = spokenNumbers[next...].firstIndex(of: number) else {
+                failures.insert(.numberMismatch)
+                break
+            }
+            next = at + 1
         }
 
         if Double(out.count + markers) > lengthCap * Double(ref.count) + Double(lengthSlack) {
@@ -90,9 +112,6 @@ enum StructuralCheck {
     }
 
     // MARK: Word lists, all lowercase.
-
-    /// Dropped anywhere. Shared with the rules pass so the fallback always passes.
-    static var hardFillers: Set<String> { Fillers.hard }
 
     /// Dropped only where they are set off (`softFillerMayGo`). "you know" and
     /// "I mean" are joined into one token first.
@@ -112,17 +131,18 @@ enum StructuralCheck {
 
     /// Function words: dropping or adding one never changes what was asked.
     /// "sorry", "scratch" and "actually" are here because they only ever cue a self-correction.
+    /// Words that flip a meaning when swapped for their opposite ("under", "off", "all", "even")
+    /// are content words, so "under 5 MB" cannot become "over 5 MB".
     static let stop: Set<String> = [
-        "a", "an", "the", "and", "or", "but", "nor", "yet", "if", "then", "than", "that", "this", "these", "those",
-        "there", "here", "of", "to", "in", "on", "at", "by", "for", "with", "from", "into", "onto", "about", "over",
-        "under", "as", "up", "down", "out", "off", "is", "are", "was", "were", "be", "been", "being", "am", "do",
-        "does", "did", "have", "has", "had", "having", "i", "me", "my", "mine", "we", "us", "our", "ours", "you",
-        "your", "yours", "he", "him", "his", "she", "her", "hers", "it", "its", "they", "them", "their", "theirs",
-        "what", "which", "who", "whom", "whose", "when", "where", "why", "how", "all", "any", "both", "each", "few",
-        "more", "most", "other", "some", "such", "own", "same", "very", "just", "also", "too", "even", "still",
-        "already", "again", "once", "actually", "really", "sorry", "scratch", "s", "t", "d", "ll", "re", "ve", "m",
-        "can", "will", "shall", "could", "would", "may", "it's", "i'm", "i'll", "i've", "i'd", "that's", "there's",
-        "what's", "let's", "here's", "we're", "they're", "you're", "we'll", "he's", "she's", "who's",
+        "a", "an", "the", "and", "or", "but", "yet", "if", "then", "than", "that", "this", "these", "those",
+        "there", "here", "of", "to", "in", "on", "at", "by", "for", "with", "from", "into", "onto", "about", "as",
+        "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did", "have", "has", "had",
+        "having", "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours", "he", "him", "his",
+        "she", "her", "hers", "it", "its", "they", "them", "their", "theirs", "what", "which", "who", "whom",
+        "whose", "when", "where", "why", "how", "both", "each", "some", "such", "own", "very", "just", "also",
+        "too", "still", "already", "again", "once", "actually", "really", "sorry", "scratch", "can", "will",
+        "shall", "could", "would", "may", "it's", "i'm", "i'll", "i've", "i'd", "that's", "there's", "what's",
+        "let's", "here's", "we're", "they're", "you're", "we'll", "he's", "she's", "who's",
     ]
 
     /// Words a numbered or bulleted list replaces ("first, pull main" becomes "1. Pull main.").
@@ -139,7 +159,7 @@ enum StructuralCheck {
     static let marks: Set<Unicode.Scalar> = [".", ",", "!", "?", ";", ":"]
     static let sentenceMarks: Set<Unicode.Scalar> = [".", "!", "?"]
     static let edges: Set<Unicode.Scalar> = [
-        ".", ",", "!", "?", ";", ":", "\"", "'", "(", ")", "[", "]", "{", "}", "<", ">", "*", "`",
+        ".", ",", "!", "?", ";", ":", "\"", "'", "(", ")", "[", "]", "{", "}", "<", ">", "*", "`", "\u{201C}", "\u{201D}",
     ]
 
     /// Lowercased words with their trailing mark. Edge punctuation and quotes go,
@@ -177,7 +197,7 @@ enum StructuralCheck {
             case "\u{2019}", "\u{2018}": piece.append("'")
             case "\u{2010}", "\u{2011}", "\u{2012}", "\u{2013}": piece.append("-")
             case "\u{2014}": endPiece()
-            case " ", "\n", "\t", "\r": endPiece()
+            case " ", "\n", "\t", "\r", "\u{0B}", "\u{0C}": endPiece()
             default:
                 if !scalar.isASCII, scalar.properties.isWhitespace { endPiece() } else { piece.append(scalar) }
             }
@@ -262,15 +282,16 @@ enum StructuralCheck {
         return Int(digits)
     }
 
-    /// Ordinals become "#4" for both "fourth" and "4th"; "#" never starts a spoken word.
-    static func ordinalWord(_ value: Int) -> String { "#\(value)" }
+    /// Ordinals become "nth 4" for both "fourth" and "4th". Tokens are split at
+    /// whitespace, so no word from the text can look like one.
+    static func ordinalWord(_ value: Int) -> String { "nth \(value)" }
 
     static func isNumber(_ word: String) -> Bool {
         ordinalValue(word) != nil || digitValue(word) != nil
     }
 
     static func ordinalValue(_ word: String) -> Int? {
-        word.hasPrefix("#") ? Int(word.dropFirst()) : nil
+        word.hasPrefix("nth ") ? Int(word.dropFirst(4)) : nil
     }
 
     /// A list marker stands in for these when they go missing: "one, rebase" becomes "1. Rebase".
@@ -306,6 +327,7 @@ enum StructuralCheck {
                     while k < input.count, let d = units[input[k].word], d < 10 {
                         decimals += String(d)
                         k += 1
+                        if input[k - 1].mark != nil { break }
                     }
                     word += "." + decimals
                     j = k
@@ -321,7 +343,8 @@ enum StructuralCheck {
             }
             if var value = digitValue(token.word) {
                 var j = i + 1
-                if j < input.count, let scale = scales[input[j].word], !value.contains("."), let n = Int(value) {
+                if j < input.count, token.mark == nil, let scale = scales[input[j].word], !value.contains("."),
+                   let n = Int(value) {
                     value = String(n &* scale)
                     j += 1
                 }
@@ -360,7 +383,7 @@ enum StructuralCheck {
     static func endsSentence(_ token: Token) -> Bool { token.mark.map(sentenceMarks.contains) ?? false }
 
     /// Token indices a self-correction retracts: from the start of the cue's
-    /// sentence (or the sentence before, when the cue opens its own) through the cue.
+    /// sentence (or the sentence before, when a clear cue opens its own) through the cue.
     /// Cues: "actually no", "no actually", "no wait", "wait no", "scratch that",
     /// "sorry", "or rather", and a lone ", no,".
     static func retractedSpans(_ ref: [Token]) -> Set<Int> {
@@ -371,19 +394,22 @@ enum StructuralCheck {
         for p in ref.indices {
             let word = ref[p].word
             let next = p + 1 < ref.count ? ref[p + 1].word : ""
-            let cue: (start: Int, length: Int)? = switch word {
-            case "actually" where next == "no": (p, 2)
-            case "no" where next == "actually" || next == "wait": (p, 2)
-            case "wait" where next == "no": (p, 2)
-            case "scratch" where next == "that": (p, 2)
-            case "sorry": (p, 1)
-            case "rather" where p > 0 && ref[p - 1].word == "or": (p - 1, 2)
-            case "no" where p > 0 && ref[p - 1].mark == "," && ref[p].mark == ",": (p, 1)
+            // `reachesBack`: opening a sentence, the cue retracts the sentence before.
+            // "Sorry" and a lone "no" may open a sentence without correcting it.
+            let cue: (start: Int, length: Int, reachesBack: Bool)? = switch word {
+            case "actually" where next == "no": (p, 2, true)
+            case "no" where next == "actually" || next == "wait": (p, 2, true)
+            case "wait" where next == "no": (p, 2, true)
+            case "scratch" where next == "that": (p, 2, true)
+            case "sorry": (p, 1, false)
+            case "rather" where p > 0 && ref[p - 1].word == "or": (p - 1, 2, true)
+            case "no" where p > 0 && ref[p - 1].mark == "," && ref[p].mark == ",": (p, 1, false)
             default: nil
             }
             guard let cue else { continue }
             let sentence = starts.last(where: { $0 <= cue.start })!
-            let from = cue.start == sentence && sentence > 0 ? starts.last(where: { $0 < sentence })! : sentence
+            let from = cue.reachesBack && cue.start == sentence && sentence > 0
+                ? starts.last(where: { $0 < sentence })! : sentence
             spans.formUnion(from..<min(cue.start + cue.length, ref.count))
         }
         return spans
@@ -396,7 +422,7 @@ enum StructuralCheck {
         var open = true
         for token in ref {
             result.append(open)
-            open = endsSentence(token) || (open && (hardFillers.contains(token.word) || softFillers.contains(token.word)))
+            open = endsSentence(token) || (open && (Fillers.hard.contains(token.word) || softFillers.contains(token.word)))
         }
         return result
     }
@@ -419,7 +445,7 @@ enum StructuralCheck {
     /// Removes a leading "1.", "2)", "-", "*" or "•" marker from each line. Returns the text and the count.
     static func stripListMarkers(_ text: String) -> (String, Int) {
         var count = 0
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> Substring in
+        let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map { line -> Substring in
             let body = line.drop(while: { $0 == " " || $0 == "\t" })
             var rest = body
             if let c = rest.first, c == "-" || c == "*" || c == "•" {
