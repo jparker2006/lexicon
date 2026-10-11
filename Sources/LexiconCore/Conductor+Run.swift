@@ -112,7 +112,7 @@ extension Conductor {
             // Keep the audio and show "waiting"; Jake is never asked to redo it. A
             // waiting Dictation gives up its turn, so later Dictations still insert.
             history.record(.waiting(id, reason: String(describing: reason)))
-            if reason != .noModel { emit(.notice(.waitingForNetwork(id))) }
+            if reason.waitsForNetwork { emit(.notice(.waitingForNetwork(id))) }
             releaseInsertTurn(id)
             run.hold.end()
             // TODO(#59): once the network returns or a local model is installed,
