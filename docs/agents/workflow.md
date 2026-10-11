@@ -60,7 +60,7 @@ Deliberately not used:
 
 The lane is a lock: `scripts/live-lane.sh take "Live checks"` writes `~/Library/Application Support/Lexicon Dev/live-lane.lock` with the holder's name and its session's PID. `scripts/dev-run.sh` and `scripts/harness.sh` refuse to run for any other session, naming the holder. A lock whose process has ended is stale and cleared on the next read. `status` shows the holder; `release` gives the lane back.
 
-A builder whose ticket needs the live app sends the Live checks session one request by message once its branch is pushed:
+A builder whose ticket needs the live app sends the Live checks session one request once its branch is pushed, with `SendMessage` to the session named `Live checks` (`ListAgents` shows it):
 
 - the issue, branch, PR (or "no PR yet") and head sha;
 - a numbered checklist, one observable behavior per item, each with its pass bar ("3. Paste into TextEdit's empty document: the text lands at the cursor and the clipboard is restored");

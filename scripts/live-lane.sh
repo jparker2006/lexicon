@@ -22,17 +22,23 @@ flavor dev
 
 LOCK="$HOME/Library/Application Support/$NAME/live-lane.lock"
 
-started() { ps -o lstart= -p "$1" 2>/dev/null || true; }
+# In UTC, so a clock change or a new time zone never makes a live holder look stale.
+started() { TZ=UTC ps -o lstart= -p "$1" 2>/dev/null || true; }
 parent() { ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '; }
 
 # Sets holder and pid from a live lock. Fails, clearing it if stale, otherwise.
 read_lock() {
+    held=
     [ -f "$LOCK" ] || return 1
-    holder=$(sed -n 's/^name=//p' "$LOCK")
-    pid=$(sed -n 's/^pid=//p' "$LOCK")
-    since=$(sed -n 's/^started=//p' "$LOCK")
-    if [ -n "$pid" ] && [ -n "$since" ] && [ "$(started "$pid")" = "$since" ]; then return 0; fi
-    rm -f "$LOCK"
+    lock=$(cat "$LOCK")
+    holder=$(printf '%s\n' "$lock" | sed -n 's/^name=//p')
+    pid=$(printf '%s\n' "$lock" | sed -n 's/^pid=//p')
+    since=$(printf '%s\n' "$lock" | sed -n 's/^started=//p')
+    if [ -n "$pid" ] && [ -n "$since" ] && [ "$(started "$pid")" = "$since" ]; then held=1; return 0; fi
+    # Moved aside, not deleted, so a lock someone took since the read goes back.
+    mv -f "$LOCK" "$LOCK.stale.$$" 2>/dev/null || true
+    if [ -f "$LOCK.stale.$$" ] && [ "$(cat "$LOCK.stale.$$")" != "$lock" ]; then ln "$LOCK.stale.$$" "$LOCK" 2>/dev/null || true; fi
+    rm -f "$LOCK.stale.$$"
     echo "live-lane: cleared a stale lock from $holder (pid $pid, no longer running)" >&2
     holder=
     return 1
@@ -67,13 +73,14 @@ refuse() {
 
 case "${1:-}" in
     take)
-        name=$(printf %s "${2:?usage: live-lane.sh take <name>}" | tr -d '\n')
+        [ -n "${2:-}" ] || { echo "usage: live-lane.sh take <name>" >&2; exit 64; }
+        name=$(printf %s "$2" | tr -d '\n')
         if read_lock && ! holds; then refuse; fi
         me=$(session)
         mkdir -p "$(dirname "$LOCK")"
         printf 'name=%s\npid=%s\nstarted=%s\n' "$name" "$me" "$(started "$me")" > "$LOCK.$$"
         # A link fails if the lock appeared since the read, so a race never steals it.
-        if [ -n "${holder:-}" ]; then mv -f "$LOCK.$$" "$LOCK"
+        if [ -n "$held" ]; then mv -f "$LOCK.$$" "$LOCK"
         elif ! ln "$LOCK.$$" "$LOCK" 2>/dev/null; then rm -f "$LOCK.$$"; read_lock || true; refuse
         fi
         rm -f "$LOCK.$$"
