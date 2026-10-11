@@ -8,9 +8,9 @@ import LexiconDomain
 /// its deadline timer. Internal: nothing outside KeyInput can reach a CGEvent.
 ///
 /// Listen-only: macOS hands the tap a copy and delivers every key at once. An
-/// active tap holds each key until Lexicon's callback returns, which measured
-/// 26 to 74 ms on every keystroke against 4 to 10 ms with Lexicon quit, and M0
-/// swallows nothing (Esc while recording comes in M1).
+/// active tap holds each key until Lexicon's thread answers: keys reached apps
+/// 26 to 74 ms after they were pressed with it, 2 to 12 ms with listen-only.
+/// M0 swallows nothing (Esc while recording comes in M1).
 ///
 /// The callback (1) re-enables the tap if the system disabled it, (2) drops
 /// events Lexicon itself posted (its own Cmd-V), (3) ticks the InputClock on
