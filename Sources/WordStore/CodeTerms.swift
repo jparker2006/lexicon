@@ -61,6 +61,8 @@ public actor CodeTerms {
 
     /// Scans, hands the Lexicon its code Terms, starts watching, and returns once
     /// the recent history has picked the current repo (or the deadline passed).
+    /// The replay takes seconds after a day of builds, so launch calls this in a
+    /// task of its own, never before fn works.
     public func start() async {
         guard events == nil else { return }
         codeRoot = Self.realPath(code)
