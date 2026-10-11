@@ -52,9 +52,9 @@ enum AX {
     }
 }
 
-/// An AX element reference that crosses an `await` inside `TargetApp` only.
-/// Safe to send: AXUIElement is an immutable CF handle (pid plus element id), and
-/// AppText only ever messages it from the AX thread.
+/// An AX element reference inside a `TargetApp.Target`, which the Conductor
+/// holds from fn-up to the insert. Safe to send: AXUIElement is an immutable CF
+/// handle (pid plus element id), and only AppText messages it, on the AX thread.
 struct FieldRef: @unchecked Sendable {
     let element: AXUIElement
 }

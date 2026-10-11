@@ -85,7 +85,8 @@ public actor TargetApp: TextDestination {
 
     public func target() async -> Target? {
         let mark = input.mark()
-        guard let focus = Focus.now() else { return nil }
+        // A password field never gets a Dictation, in any mode: nothing takes text there.
+        guard let focus = Focus.now(), !focus.isSecure else { return nil }
         let bundleID = NSRunningApplication(processIdentifier: focus.pid)?.bundleIdentifier
         let fingerprint = focus.durableFingerprint(bundleID: bundleID)
         await Paster.shared.prefetch()  // Jake's clipboard, read now, off the text-ready-to-Cmd-V path

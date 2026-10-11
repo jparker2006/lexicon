@@ -27,9 +27,12 @@ struct PasteboardContents: Sendable, Equatable {
 /// receipt that the paste landed, and the previous clipboard is restored once
 /// reads have been quiet for 200 ms, at most 8 s after the write, and only if
 /// nobody wrote the pasteboard since (`changeCount`), so a restore never
-/// overwrites something Jake copied in between. No read within 1 s means the
-/// paste did not land: the text is withdrawn at once (the clipboard goes back),
-/// so it can never appear after History was told it didn't.
+/// overwrites something Jake copied in between. No read within 1 s is reported
+/// as not inserted, but the text stays up until the cap (or 200 ms after a late
+/// read): an app that gets to a queued Cmd-V late pastes the Dictation, never
+/// Jake's previous clipboard, which can be a password. Until a paste was read
+/// or has settled, no new text goes up (`released`), so a queued Cmd-V can't
+/// paste the wrong Dictation either.
 ///
 /// Time comes in as arguments, so the rules are tested with explicit instants;
 /// `TargetApp` drives `expire` from a real timer.
@@ -39,11 +42,14 @@ struct PasteboardContents: Sendable, Equatable {
     static let quiet: Duration = .milliseconds(200)
     static let cap: Duration = .seconds(8)
     static let receiptWait: Duration = .seconds(1)
+    /// A read-ahead copy no paste used (Esc, nowhere to type) is dropped after
+    /// this, so a big copied image does not stay in Lexicon's memory.
+    static let readAheadKept: Duration = .seconds(30)
 
     struct PasteID: Hashable, Sendable { let value: Int }
 
     enum Expiry: Equatable {
-        /// No read in time: the paste did not land, and the clipboard is back.
+        /// No read in time: reported as not inserted. The text stays up until the cap.
         case missed(PasteID)
         /// Reads went quiet (or the cap passed): the clipboard is back, unless Jake copied since.
         case settled(PasteID)
@@ -52,6 +58,7 @@ struct PasteboardContents: Sendable, Equatable {
     private struct Saved {
         let contents: PasteboardContents
         let changeCount: Int
+        let readAt: Instant
     }
 
     private struct Current {
@@ -59,6 +66,7 @@ struct PasteboardContents: Sendable, Equatable {
         let changeCount: Int
         let putAt: Instant
         var lastRead: Instant?
+        var missed = false
     }
 
     private let pasteboard: any Clipboard
@@ -69,6 +77,7 @@ struct PasteboardContents: Sendable, Equatable {
     private var serial = 0
     private var waiters: [PasteID: [CheckedContinuation<Bool, Never>]] = [:]
     private var receipts: [PasteID: Bool] = [:]
+    private var releases: [PasteID: [CheckedContinuation<Void, Never>]] = [:]
     /// After each read of the current paste: the deadline may have moved.
     var onRead: (@MainActor () -> Void)?
 
@@ -84,7 +93,7 @@ struct PasteboardContents: Sendable, Equatable {
         let count = pasteboard.changeCount
         if let current, current.changeCount == count { return }
         if saved?.changeCount == count { return }
-        saved = Saved(contents: pasteboard.contents(), changeCount: count)
+        saved = Saved(contents: pasteboard.contents(), changeCount: count, readAt: now())
     }
 
     /// Puts `text` up as a promise. Back to back pastes keep the clipboard Jake
@@ -105,18 +114,28 @@ struct PasteboardContents: Sendable, Equatable {
 
     /// When `expire` next has something to do.
     var deadline: Instant? {
-        guard let current else { return nil }
-        guard let lastRead = current.lastRead else { return current.putAt + Self.receiptWait }
+        guard let current else { return saved.map { $0.readAt + Self.readAheadKept } }
+        guard let lastRead = current.lastRead else {
+            return current.putAt + (current.missed ? Self.cap : Self.receiptWait)
+        }
         return min(lastRead + Self.quiet, current.putAt + Self.cap)
     }
 
     /// Runs whatever is due at `at`. nil when nothing is.
     func expire(at instant: Instant) -> Expiry? {
-        guard let current, let deadline, instant >= deadline else { return nil }
-        let receipt = current.lastRead != nil
+        guard let deadline, instant >= deadline else { return nil }
+        guard let current else {
+            saved = nil
+            return nil
+        }
+        if current.lastRead == nil, !current.missed {
+            self.current?.missed = true
+            resolve(current.id, false)
+            return .missed(current.id)
+        }
         restore(current)
-        settle(current.id, receipt: receipt)
-        return receipt ? .settled(current.id) : .missed(current.id)
+        settle(current.id, receipt: current.lastRead != nil)
+        return .settled(current.id)
     }
 
     /// True once the target read the text, false once it missed; waits until one happens.
@@ -126,10 +145,20 @@ struct PasteboardContents: Sendable, Equatable {
         return await withCheckedContinuation { waiters[id, default: []].append($0) }
     }
 
+    /// Returns once the paste was read or has settled. From then on new text
+    /// can go up without a still-queued Cmd-V pasting it.
+    func released(_ id: PasteID) async {
+        guard current?.id == id, current?.lastRead == nil else { return }
+        await withCheckedContinuation { releases[id, default: []].append($0) }
+    }
+
+    func isReleased(_ id: PasteID) -> Bool { current?.id != id || current?.lastRead != nil }
+
     private func didRead(_ id: PasteID) {
         guard current?.id == id else { return }  // withdrawn or superseded
         current?.lastRead = now()
         if receipts[id] == nil { resolve(id, true) }
+        release(id)
         onRead?()
     }
 
@@ -142,7 +171,12 @@ struct PasteboardContents: Sendable, Equatable {
 
     private func settle(_ id: PasteID, receipt: Bool) {
         if receipts[id] == nil { resolve(id, receipt) }
+        release(id)
         receipts = receipts.filter { $0.key.value > id.value - 8 }  // only recent pastes are ever asked about
+    }
+
+    private func release(_ id: PasteID) {
+        for waiter in releases.removeValue(forKey: id) ?? [] { waiter.resume() }
     }
 
     private func resolve(_ id: PasteID, _ value: Bool) {

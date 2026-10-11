@@ -46,7 +46,7 @@ enum PasteKey {
     /// can fail between the write and the keys. The flags are set outright, so
     /// a fn (or ⌃) still held, as when a hands-free stop is a fn-down, never
     /// reaches the target as part of the chord.
-    struct Chord: @unchecked Sendable {  // CGEvent: immutable once made here; posted once
+    struct Chord {
         let down: CGEvent
         let up: CGEvent
 

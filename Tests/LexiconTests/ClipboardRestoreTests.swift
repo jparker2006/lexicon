@@ -106,9 +106,9 @@ import Testing
     #expect(board.targetReads() == "Jake's")
 }
 
-@MainActor @Test func noReadWithin1sIsAMissAndTheTextIsWithdrawn() async {
+@MainActor @Test func noReadWithin1sIsAMissButTheTextStaysUpUntilTheCap() async {
     let board = FakePasteboard(), clock = FakeClock()
-    board.jakeCopies("Jake's")
+    board.jakeCopies("Jake's password")
     let keeper = keeper(board, clock)
 
     let paste = keeper.put("dictated")
@@ -116,9 +116,66 @@ import Testing
     #expect(keeper.expire(at: clock.at(999)) == nil)
     #expect(keeper.expire(at: clock.at(1_000)) == .missed(paste))
     #expect(await receipt.value == false)
-    // A target that finally gets to Cmd-V gets Jake's clipboard, never text History calls not inserted.
-    #expect(board.targetReads() == "Jake's")
+    // A target that gets to its Cmd-V late pastes the Dictation, never Jake's clipboard.
+    #expect(board.showing == "dictated")
+    #expect(keeper.expire(at: clock.at(7_999)) == nil)
+    #expect(keeper.expire(at: clock.at(8_000)) == .settled(paste))
+    #expect(board.showing == "Jake's password")
     #expect(await keeper.receipt(paste) == false)
+}
+
+@MainActor @Test func aReadAfterAMissStaysAMissAndTheClipboardIsBack200msLater() async {
+    let board = FakePasteboard(), clock = FakeClock()
+    board.jakeCopies("Jake's")
+    let keeper = keeper(board, clock)
+
+    let paste = keeper.put("dictated")
+    #expect(keeper.expire(at: clock.at(1_000)) == .missed(paste))
+    _ = clock.at(1_500)
+    #expect(board.targetReads() == "dictated")
+    #expect(await keeper.receipt(paste) == false)  // History was already told; it is not changed
+    #expect(keeper.expire(at: clock.at(1_699)) == nil)
+    #expect(keeper.expire(at: clock.at(1_700)) == .settled(paste))
+    #expect(board.showing == "Jake's")
+}
+
+@MainActor @Test func newTextWaitsUntilTheLastPasteWasRead() async {
+    let board = FakePasteboard(), clock = FakeClock()
+    let keeper = keeper(board, clock)
+
+    let paste = keeper.put("first")
+    #expect(!keeper.isReleased(paste))
+    let released = Task { await keeper.released(paste) }
+    _ = board.targetReads()
+    await released.value
+    #expect(keeper.isReleased(paste))
+}
+
+@MainActor @Test func aMissedPasteIsReleasedOnlyWhenItSettles() async {
+    let board = FakePasteboard(), clock = FakeClock()
+    let keeper = keeper(board, clock)
+
+    let paste = keeper.put("dictated")
+    #expect(keeper.expire(at: clock.at(1_000)) == .missed(paste))
+    #expect(!keeper.isReleased(paste))  // its Cmd-V may still be queued
+    let released = Task { await keeper.released(paste) }
+    #expect(keeper.expire(at: clock.at(8_000)) == .settled(paste))
+    await released.value
+    #expect(keeper.isReleased(paste))
+}
+
+@MainActor @Test func aReadAheadNoPasteUsedIsDroppedAfter30s() {
+    let board = FakePasteboard(), clock = FakeClock()
+    board.jakeCopies("a big image")
+    let keeper = keeper(board, clock)
+
+    keeper.prefetch()
+    #expect(keeper.expire(at: clock.at(29_999)) == nil)
+    #expect(keeper.deadline == clock.start + .seconds(30))
+    #expect(keeper.expire(at: clock.at(30_000)) == nil)
+    #expect(keeper.deadline == nil)  // nothing held
+    _ = keeper.put("dictated")
+    #expect(board.contentsReads == 2)  // read again for this paste
 }
 
 @MainActor @Test func backToBackPastesStillRestoreTheClipboardFromBeforeTheFirst() async {
