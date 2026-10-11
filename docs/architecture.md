@@ -80,7 +80,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 
 ### Who owns what
 
-- **The Conductor** decides the order of events for every Dictation and holds no durable state. It owns one live capture slot (one mic) and the tasks of Dictations past fn-up.
+- **The Conductor** decides the order of events for every Dictation and holds no durable state. It owns one live capture slot (one mic), the tasks of Dictations past fn-up, and the insert order: fn never waits, so a new Dictation can start while the last one finishes (its tail is cut), and Dictations insert in the order they were spoken. A waiting Dictation gives up its turn. Esc still transcribes and saves the Dictation, untyped, for paste-last ([fn and recording behavior](https://github.com/jparker2006/lexicon/issues/18)).
 - **History** owns rows. Callers describe events (`.began`, `.audioEnded`, `.textReady`, `.delivered`, `.notInserted`, `.fixRecorded`, `.deleted`). One `apply` switch holds every row rule. A status move applies only when `canMove(to:)` allows it from the stored status, so a replayed or racing event is a no-op. A Dictation about to be typed sits in `ready` (text saved, paste in progress) until the paste's real outcome moves it to `inserted` or `notInserted`. Only History holds the final text (cleaned text plus Fixes).
 - **The open `LiveCapture`** owns audio bytes until stop (`~Copyable`, stopped exactly once). After stop, the file belongs to History.
 - **AppText** owns live Accessibility references, keyed by `DictationID`. The durable `InsertionReceipt` (app, field fingerprint, caret, short context) is stored by History.
@@ -99,7 +99,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 
 ### One push-to-talk Dictation
 
-1. fn-down. The tap callback (`KeyInput/EventTap.swift`) feeds `FnGesture`, which yields `.dictationBegan`. fn passes through.
+1. fn-down. The tap callback (`KeyInput/EventTap.swift`) feeds `FnGesture` (hold 0.30 s, double-tap within 0.25 s, 20-minute cap), which yields `.dictationBegan`. fn passes through.
 2. The Conductor starts the capture first (`AudioCapture/Recorder.swift`), so audio is in the page cache before anything else can fail. Then it records `.began` (the row exists from the start), takes the Lexicon terms, opens the speech socket (TLS overlaps speech), starts a `CleanupSession` on the attempt's finished segments, loads the local model if it isn't resident, and starts a `beginActivity(.userInitiated, .latencyCritical)` so App Nap can't slow the Dictation.
 3. While Jake talks: chunks stream to the provider; finished sentences go through Rules and the LLM as they arrive.
 4. fn-up. In parallel: AppText captures the target field and an input mark; the capture keeps the adaptive tail (stop on silence, cap 200 ms).
@@ -200,8 +200,7 @@ Builders record accepted deviations here, with who accepted them, and update the
 
 ## Hand-offs
 
-- [fn and recording behavior](https://github.com/jparker2006/lexicon/issues/18): the 200 ms tail (#4) vs finalize at fn-up (#8). The sketch supports an adaptive tail capped at 200 ms. Also: does Esc-cancel keep the audio? Recommended: keep it, status cancelled, retryable.
-- [Speech pipeline](https://github.com/jparker2006/lexicon/issues/19): the p95 lag sum above, and whether to keep a speech socket pre-opened (a cold TLS connect is up to 635 ms and can miss a very short Dictation before M2).
+- [Speech pipeline](https://github.com/jparker2006/lexicon/issues/19): the p95 lag sum above; the 200 ms tail (#4) vs finalize at fn-up (#8), which [fn and recording behavior](https://github.com/jparker2006/lexicon/issues/18) closed without settling (the sketch supports an adaptive tail: stop on silence, cap 200 ms); and whether to keep a speech socket pre-opened (a cold TLS connect is up to 635 ms and can miss a very short Dictation before M2).
 - [Hand fix](https://github.com/jparker2006/lexicon/issues/24): who installs the Claude Code and Codex hook config, a Settings button or Jake by hand.
 - [Private mode, keys, and what leaves the Mac](https://github.com/jparker2006/lexicon/issues/5) (closed): the Secret guard can't stop audio already streamed; and "losing wifi behaves like Private mode, nothing queued" (#5) vs "cloud fails: waiting, retry when the network returns" (#4). The sketch keeps the waiting branch for when no local model is available yet (before M2).
 
