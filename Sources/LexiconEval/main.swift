@@ -2,20 +2,34 @@ import Foundation
 import LexiconDomain
 import LexiconCore
 
-// `lexicon-eval`: dev tool, never shipped. Runs the real Conductor headless on a
-// WAV, at the speed of speech, and prints one JSON line:
+// `lexicon-eval`: dev tool, never shipped. Runs the real Conductor headless, at
+// the speed of speech, on one WAV or on every entry of a manifest.
 //
 //   swift run lexicon-eval <wav> [--scripted <text>]
 //       {"status": "inserted", "text": "...", "lag_ms": 42}
 //
+//   swift run lexicon-eval --manifest <manifest.jsonl> [--split <name>]
+//       [--baseline <run.jsonl>] [--out <run.jsonl>] [--scripted-gold]
+//       the report from `scorer/score report` (see scorer/README.md)
+//
 // `lag_ms` is end of audio to text typed (the recording destination's "paste").
-// `--scripted` stands in a fake engine that hears <text>, to check the pipeline
-// on a Mac with no model. Without it the local model runs; until it is wired
-// in (#47) there is none, so the Dictation waits and prints no text.
+// `--scripted` stands in a fake engine that hears <text>, and `--scripted-gold`
+// one that hears each entry's gold text, to check the pipeline on a Mac with no
+// model. Without them the local model runs; until it is wired in (#47) there is
+// none, so every Dictation waits and scores as no text.
+//
+// A manifest run writes one run line per entry (`--out` keeps the file; it is
+// what a later run's `--baseline` reads), then passes it to the scorer and exits
+// with the scorer's code: 0, or 3 when a score got worse than the baseline.
+// The quick run is `--split everyday`; the full run is `--split held-back`.
 //
 // Keys come from LEXICON_KEY_* environment variables (Secrets(.environment)).
-// History and audio go to a temporary folder that is deleted on exit, never to
-// an app's data folder.
+// History and audio go to temporary folders deleted after each Dictation, never
+// to an app's data folder.
+
+/// This checkout. The scorer lives here, and run files from a private manifest
+/// may never be written inside it.
+let repo = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
 struct Line: Encodable {
     let status: String
@@ -24,15 +38,32 @@ struct Line: Encodable {
 }
 
 func runEval(arguments: [String]) async -> Int32 {
+    var options: [String: String] = [:]
+    var scriptedGold = false
+    var files: [String] = []
     var rest = arguments.dropFirst()
-    var scripted: String?
-    if let flag = rest.firstIndex(of: "--scripted") {
-        guard rest.index(after: flag) < rest.endIndex else { return usage() }
-        scripted = rest[rest.index(after: flag)]
-        rest.removeSubrange(flag...rest.index(after: flag))
+    while let argument = rest.popFirst() {
+        switch argument {
+        case "--scripted-gold": scriptedGold = true
+        case "--scripted", "--manifest", "--split", "--baseline", "--out":
+            guard let value = rest.popFirst() else { return usage() }
+            options[argument] = value
+        default:
+            guard !argument.hasPrefix("--") else { return usage() }
+            files.append(argument)
+        }
     }
-    guard rest.count == 1, let path = rest.first else { return usage() }
+    if let manifest = options["--manifest"] {
+        guard files.isEmpty, options["--scripted"] == nil else { return usage() }
+        return await evalManifest(URL(filePath: manifest), split: options["--split"],
+                                  baseline: options["--baseline"].map { URL(filePath: $0) },
+                                  out: options["--out"].map { URL(filePath: $0) }, scriptedGold: scriptedGold)
+    }
+    guard files.count == 1, options.keys.allSatisfy({ $0 == "--scripted" }), !scriptedGold else { return usage() }
+    return await evalFile(URL(filePath: files[0]), scripted: options["--scripted"])
+}
 
+func evalFile(_ wav: URL, scripted: String?) async -> Int32 {
     let paths = AppPaths.temporary()
     defer { try? FileManager.default.removeItem(at: paths.root) }
     let system: HeadlessSystem
@@ -40,10 +71,9 @@ func runEval(arguments: [String]) async -> Int32 {
         system = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
                                          local: scripted.map(ScriptedTranscriber.init(text:)))
     } catch {
-        FileHandle.standardError.write(Data("lexicon-eval: \(error)\n".utf8))
-        return 1
+        return fail("\(error)")
     }
-    let result = await system.conductor.dictate(file: URL(filePath: path), pace: .realtime)
+    let result = await system.conductor.dictate(file: wav, pace: .realtime)
     await system.history.flush()
 
     let line = Line(status: result.status?.rawValue ?? "nothing", text: result.versions?.cleaned,
@@ -54,8 +84,57 @@ func runEval(arguments: [String]) async -> Int32 {
     return result.status == nil ? 1 : 0
 }
 
+func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, scriptedGold: Bool) async -> Int32 {
+    if let out, !mayWriteRun(to: out, manifest: manifest, repo: repo) {
+        return fail("--out is inside the repo but the manifest is not; Test set text never goes in the repo")
+    }
+    let lines: [RunLine]
+    do {
+        lines = try await runManifest(manifest, split: split, pace: .realtime) { entry in
+            scriptedGold ? ScriptedTranscriber(text: entry.text) : nil
+        } progress: { done, total in
+            FileHandle.standardError.write(Data("lexicon-eval: \(done)/\(total)\r".utf8))
+        }
+    } catch {
+        return fail("\(error)")
+    }
+    FileHandle.standardError.write(Data("\n".utf8))
+
+    let runFile = out ?? FileManager.default.temporaryDirectory.appending(path: "lexicon-run-\(UUID().uuidString).jsonl")
+    defer { if out == nil { try? FileManager.default.removeItem(at: runFile) } }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    do {
+        let body = try lines.map { String(decoding: try encoder.encode($0), as: UTF8.self) + "\n" }.joined()
+        try body.write(to: runFile, atomically: true, encoding: .utf8)
+    } catch {
+        return fail("cannot write the run file: \(error.localizedDescription)")
+    }
+
+    var arguments = [repo.appending(path: "scorer/score").path(), "report", "--gold", manifest.path(),
+                     "--run", runFile.path()]
+    if let split { arguments += ["--split", split] }
+    if let baseline { arguments += ["--baseline", baseline.path()] }
+    let scorer = Process()
+    scorer.executableURL = URL(filePath: "/bin/sh")
+    scorer.arguments = arguments
+    do { try scorer.run() } catch { return fail("cannot start the scorer: \(error.localizedDescription)") }
+    scorer.waitUntilExit()
+    return scorer.terminationStatus
+}
+
+func fail(_ message: String) -> Int32 {
+    FileHandle.standardError.write(Data("lexicon-eval: \(message)\n".utf8))
+    return 1
+}
+
 func usage() -> Int32 {
-    FileHandle.standardError.write(Data("usage: lexicon-eval <wav> [--scripted <text>]\n".utf8))
+    FileHandle.standardError.write(Data("""
+        usage: lexicon-eval <wav> [--scripted <text>]
+               lexicon-eval --manifest <manifest.jsonl> [--split <name>] [--baseline <run.jsonl>]
+                            [--out <run.jsonl>] [--scripted-gold]
+
+        """.utf8))
     return 2
 }
 
