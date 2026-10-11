@@ -138,8 +138,8 @@ extension Conductor {
                 await insertTurn(id)  // Dictations insert in the order they were spoken (#18)
                 delivery = await destination.insert(cleaned.versions.cleaned, for: id, at: target)  // text at the cursor
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
-                releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
             }
+            releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
             run.hold.end()  // the Dictation landed: App Nap may return
 
             // Everything below is after the text landed: off the fn-up path.
@@ -168,16 +168,15 @@ extension Conductor {
     /// First of: a key/sleep end from `ends`, or end of input for a file source.
     /// A microphone's `inputEnded()` returns only once the capture stops, and
     /// cancelling it returns nil at once, so the losing side never holds this up.
+    /// Before either, nil means the input broke off (a file read failed): stop now,
+    /// since nothing else will end a file Dictation.
     func nextEnd(_ ends: AsyncStream<RunEnd>, signals: CaptureSignals) async -> RunEnd {
-        await withTaskGroup(of: RunEnd?.self) { group in
+        await withTaskGroup(of: RunEnd.self) { group in
             // `ends` finishing with no element should not happen; stopping is the safe reading.
             group.addTask { await ends.first { _ in true } ?? .stop(at: .now()) }
-            group.addTask { await signals.inputEnded().map { .stop(at: $0) } }
+            group.addTask { .stop(at: await signals.inputEnded() ?? .now()) }
             defer { group.cancelAll() }
-            for await end in group {
-                if let end { return end }
-            }
-            return .stop(at: .now())
+            return await group.next() ?? .stop(at: .now())
         }
     }
 }

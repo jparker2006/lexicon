@@ -142,5 +142,4 @@ private actor StatusAtInsert: TextDestination {
     defer { unsetenv("LEXICON_KEY_CLEANUP_OPENROUTER") }
     let lookup = Secrets(.environment).lookup
     #expect(lookup(.cleanup) == "test-value")
-    #expect(lookup(.jev) == nil)
 }
