@@ -22,6 +22,7 @@ let soleOwners: [String: Set<String>] = [
     "Cocoa": ["AppText", "LexiconUI", "LexiconApp", "LexiconHarness"],  // re-exports AppKit
     "ApplicationServices": ["AppText"],
     "FoundationModels": ["Cleanup"],
+    "Security": ["LexiconCore"],  // keys live only in the Keychain code
     "SwiftUI": [],  // AppKit only (Jake's decision)
     "Combine": [],
 ]
