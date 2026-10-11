@@ -261,9 +261,10 @@ private func pcm(_ index: Int) -> PCMChunk {
     input.yield(pcm(0))
     input.finish()
     await cloud.wait { $0.finalized }
+    let giveUp = plan.race.giveUp
     let steps = Task {
-        await clock.waitForSleep(endingAt: .seconds(10))  // the give-up time
-        await clock.advance(by: .seconds(10))
+        await clock.waitForSleep(endingAt: giveUp)
+        await clock.advance(by: giveUp)
     }
     let outcome = await attempt.finish(AudioClip(samples: [1, 2, 3]))
     await steps.value
@@ -367,4 +368,57 @@ private actor HeldModel: LocalTranscriber {
     }
 
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String { "Local text." }
+}
+
+@Test(.timeLimit(.minutes(1))) func afterTheDeadlineACloudFinalBeatsASlowLocalModel() async throws {
+    // Local still loading (a cold model) when the deadline passes: the first answer
+    // after it wins, so a cloud final at 400 ms is not held back behind local.
+    let clock = TestClock()
+    let cloud = ScriptedCloud(clock: clock, script: Reply.finalText("Cloud text.", after: .milliseconds(400)))
+    let local = SlowModel()
+    let engine = SpeechEngine(local: local, cloud: cloud.link, clock: clock)
+    let plan = SpeechPlan.make(preferences: cloudPreferences, access: try grantedAccess(cloudPreferences), terms: [])
+    let (feed, input) = AudioFeed.makeStream()
+    let attempt = await engine.begin(feed: feed, plan: plan)
+
+    input.yield(pcm(0))
+    input.finish()
+    let steps = Task {
+        await clock.waitForSleep(endingAt: .milliseconds(400))
+        await clock.waitForSleep(endingAt: .milliseconds(300))
+        await clock.advance(by: .milliseconds(300))  // the deadline passes; local is still busy
+        await clock.advance(by: .milliseconds(100))
+    }
+    let outcome = await attempt.finish(AudioClip(samples: [1, 2, 3]))
+    await steps.value
+    await local.release()
+
+    guard case .text(let heard) = outcome else {
+        Issue.record("expected text, got \(outcome)")
+        return
+    }
+    #expect(heard.model == .cloud(.museVoice))
+    #expect(heard.attempts.first { $0.model == .local(.parakeetUnified) }?.result == .cancelled)
+}
+
+/// A local model whose transcription waits until the test releases it.
+private actor SlowModel: LocalTranscriber {
+    nonisolated let model = LocalModel.parakeetUnified
+    var isResident: Bool { true }
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func load() {}
+    func unload() {}
+
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async -> String {
+        if !released { await withCheckedContinuation { waiters.append($0) } }
+        return "Local text."
+    }
+
+    func release() {
+        released = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
+    }
 }

@@ -109,6 +109,7 @@ private struct Race {
 
     #expect(model == .local(.parakeetUnified))
     #expect(attempts[.cloud(.museVoice)] == .failed)
+    #expect(race.cloud.log.connects == 1)  // no second connection: local is already racing
     #expect(race.clock.now.offset == .zero)
 }
 
@@ -168,4 +169,41 @@ private struct Race {
     #expect(model == .local(.parakeetUnified))
     #expect(attempts[.cloud(.museVoice)] == .failed)
     #expect(race.clock.now.offset == .zero)  // local was used at once, not after the deadline
+}
+
+@Test(.timeLimit(.minutes(1))) func privateModeAtFnDownOpensNoSocketEvenWithACloudModel() async throws {
+    _ = fakeKey
+    var privateMode = withCloud
+    privateMode.privacy = .private
+    let clock = TestClock()
+    let cloud = ScriptedCloud(clock: clock, script: Reply.finalText(cloudHeard, after: .milliseconds(100)))
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: privateMode,
+                                         local: ScriptedTranscriber(text: localHeard), cloud: cloud.link, clock: clock)
+
+    let result = await system.conductor.dictate(file: try writeWAV(syntheticSamples(count: 8_000), rate: 16_000,
+                                                                     in: try scratchDirectory()),
+                                                pace: .asFastAsPossible)
+
+    #expect(result.model == .local(.parakeetUnified))
+    #expect(result.attempts.map(\.model) == [.local(.parakeetUnified)])
+    #expect(cloud.log.connects == 0)
+}
+
+/// `lexicon-eval` builds its system with `HeadlessSystem.make`: the race runs through the link it is given.
+@Test(.timeLimit(.minutes(1))) func theHeadlessSystemRacesThroughTheLinkItIsGiven() async throws {
+    _ = fakeKey  // the environment key HeadlessSystem's Secrets read
+    let clock = TestClock()
+    let cloud = ScriptedCloud(clock: clock, script: Reply.finalText(cloudHeard, after: .milliseconds(100)))
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: withCloud,
+                                         local: ScriptedTranscriber(text: localHeard), cloud: cloud.link, clock: clock)
+    let wav = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: try scratchDirectory())
+    let running = Task { await system.conductor.dictate(file: wav, pace: .asFastAsPossible) }
+
+    await clock.waitForSleep(endingAt: .milliseconds(100))
+    await clock.advance(by: .milliseconds(100))
+    let result = await running.value
+    await system.history.flush()
+
+    #expect(result.model == .cloud(.museVoice))
+    #expect(await system.history.dictation(result.id)?.model == .cloud(.museVoice))
 }
