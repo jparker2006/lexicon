@@ -2,6 +2,7 @@
 import AppKit
 import os
 import LexiconDomain
+import AudioCapture
 import LexiconUI
 import TestHooks
 
@@ -39,6 +40,19 @@ enum AppTestHooks {
             } else {
                 .failed("the \(cue.rawValue) sound did not play: Sounds is off, or no output device")
             }
+        case .capture(let seconds, let preparedIdle, let deviceChange, let deviceUID):
+            await capture(seconds: seconds, preparedIdle: preparedIdle, deviceChange: deviceChange, deviceUID: deviceUID)
+        }
+    }
+
+    /// Off the main actor: the probe sleeps while the mic records.
+    nonisolated static func capture(seconds: Double, preparedIdle: Double?, deviceChange: Bool,
+                                    deviceUID: String?) async -> TestHookReply {
+        do {
+            return .capture(try await MicProbe.measure(seconds: seconds, preparedIdle: preparedIdle, deviceChange: deviceChange,
+                                                       deviceUID: deviceUID, folder: FileManager.default.temporaryDirectory))
+        } catch {
+            return .failed("the mic did not start: \(error)")
         }
     }
 

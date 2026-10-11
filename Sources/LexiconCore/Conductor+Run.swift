@@ -29,11 +29,12 @@ extension Conductor {
         async let contextValue = destination.context()
         let capture: LiveCapture
         do {
-            capture = try await recorder.start(start.input, writingTo: history.audioURL(for: id))
+            capture = try await recorder.start(start.input, writingTo: history.audioURL(for: id), since: start.began)
         } catch {
-            emit(.notice(.microphoneUnavailable(String(describing: error))))
-            // Free the one capture slot, or every later fn-down is refused and its confirmation lands on this one.
+            // Give up the capture slot, or every later fn-down finds it taken and is dropped. A discard,
+            // not a cancel: a cancel sends `stopped`, and the pill would play a stop sound for a mic that never started.
             if capturingID == id { endCapture(.discard) }
+            emit(.notice(.microphoneUnavailable(String(describing: error))))
             keyboard?.endDictation()
             return .nothing(id)  // nothing was captured, so nothing can be lost
         }
@@ -76,6 +77,7 @@ extension Conductor {
             // It lands as notInserted with text, and paste-last gets it back.
             let take = await capture.stop(.immediately)
             history.record(.audioEnded(id, take.summary))
+            noteStorage(take.summary)
             emit(.transcribing(id))
             let outcome = await attempt.finish(take.clip)
             let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
@@ -89,6 +91,7 @@ extension Conductor {
             async let target = destination.target()
             let take = await capture.stop(.released(at: releasedAt))  // adaptive tail, cap 200 ms
             history.record(.audioEnded(id, take.summary))              // enqueue only; never waits on SQLite
+            noteStorage(take.summary)
             emit(.transcribing(id))
             let outcome = await attempt.finish(take.clip)              // finalize + race local + deadline
             let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
@@ -165,6 +168,12 @@ extension Conductor {
             return DictationResult(id: id, status: status, versions: cleaned.versions, cleanup: cleaned.outcome,
                                    model: heard.model, lag: lag, attempts: heard.attempts)
         }
+    }
+
+    /// The disk was nearly full or a write failed: the Dictation finishes from
+    /// RAM as normal, and Jake is told its audio was not saved (#4).
+    func noteStorage(_ summary: AudioSummary) {
+        if summary.storage == .ramOnly { emit(.notice(.diskTrouble)) }
     }
 
     /// First of: a key/sleep end from `ends`, or end of input for a file source.

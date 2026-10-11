@@ -25,6 +25,11 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     case indicator(IndicatorState)
     /// Play one sound and report how long it took to reach the speaker.
     case sound(SoundCue)
+    /// Record from the mic for `seconds` and measure it (#52). `preparedIdle`:
+    /// prepare the engine as at launch and wait this long before fn-down; nil
+    /// builds it on fn-down (cold). `deviceChange`: rebuild the engine halfway,
+    /// as when hardware changes. `deviceUID` nil: built-in mic.
+    case capture(seconds: Double, preparedIdle: Double?, deviceChange: Bool, deviceUID: String?)
 }
 
 public enum TestHookReply: Codable, Sendable, Equatable {
@@ -32,6 +37,7 @@ public enum TestHookReply: Codable, Sendable, Equatable {
     case done
     /// From the call to play until its first sample reaches the output device.
     case soundPlayed(latency: Duration)
+    case capture(MicMeasurement)
     /// The app understood the command but could not do it; the text says why.
     case failed(String)
 }

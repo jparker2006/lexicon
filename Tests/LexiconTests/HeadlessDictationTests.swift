@@ -75,6 +75,58 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples == source)
 }
 
+@Test(.timeLimit(.minutes(1)))
+func onAFullDiskTheTextIsStillTypedAndJakeIsTold() async throws {
+    let source = syntheticSamples(count: 19_200)
+    let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
+    let paths = AppPaths.temporary()
+    let history = try HistoryStore(paths: paths)
+    let conductor = Conductor(
+        recorder: Recorder(policy: .diskFull), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)),
+        cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: history, destination: HeadlessDestination(),
+        preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
+        keyboard: nil, fixes: nil, jev: nil)
+    let events = await conductor.events()
+
+    let result = await conductor.dictate(file: wav, pace: .asFastAsPossible)
+    await history.flush()
+
+    #expect(result.status == .inserted)
+    #expect(result.versions?.cleaned == typed)
+    let row = try #require(await history.dictation(result.id))
+    #expect(row.audio == .ramOnly)
+    #expect(!FileManager.default.fileExists(atPath: history.audioURL(for: result.id).path))
+    var notices: [Notice] = []
+    for await event in events {
+        if case .notice(let notice) = event { notices.append(notice) }
+        if case .finished = event { break }
+    }
+    #expect(notices.contains(.diskTrouble))
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aMicThatFailsToStartLeavesTheNextFnPressWorking() async throws {
+    let paths = AppPaths.temporary()
+    let conductor = Conductor(
+        recorder: Recorder(hardware: .noMic), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)),
+        cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: try HistoryStore(paths: paths),
+        destination: HeadlessDestination(), preferences: PreferencesStore(fixed: .defaults),
+        secrets: Secrets(.environment), keyboard: nil, fixes: nil, jev: nil)
+    var events = await conductor.events().makeAsyncIterator()
+
+    var unavailable = 0
+    for _ in 1...2 {
+        await conductor.handle(.dictationBegan(at: .now()))
+        while let event = await events.next() {
+            if case .notice(.microphoneUnavailable) = event {
+                unavailable += 1
+                break
+            }
+        }
+    }
+    #expect(unavailable == 2)  // the second fn press tried the mic again instead of being dropped
+}
+
 @Test func insertTargetsCannotBeMadeOutsideTheirModules() async throws {
     let imports = "import AppText\nimport KeyInput\nimport LexiconCore\nimport LexiconDomain\n"
     let fetched = try await compile(imports + """
