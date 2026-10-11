@@ -171,7 +171,10 @@ extension Conductor {
             let cleaned = await run.cleaning.finish(modelText: heard.text, deadline: run.cleanupDeadline)
             // A filler-only answer ("Um.") gets past the engine's silence check and Cleanup strips
             // it to nothing: that is silence too. Typed, the empty Cmd-V would replace Jake's selection.
-            guard cleaned.versions.cleaned.contains(where: { !$0.isWhitespace }) else { return failed(id, .silence) }
+            // A Retry of a settled row leaves it as it was, as Retry does when the engine hears silence.
+            guard cleaned.versions.cleaned.contains(where: { !$0.isWhitespace }) else {
+                return run.previous?.isTerminal == true ? .nothing(id) : failed(id, .silence)
+            }
             // Queued for disk BEFORE it is typed. Fire-and-forget FIFO: still no wait on SQLite.
             let typing = run.purpose == .type && run.target != nil
             history.record(.textReady(id, cleaned.versions, cleanup: cleaned.outcome, model: heard.model,
@@ -220,8 +223,7 @@ extension Conductor {
         }
     }
 
-    /// No text to land. The row keeps its audio; one that already has text keeps it,
-    /// since History refuses the move to failed.
+    /// No text to land: the row keeps its audio.
     private func failed(_ id: DictationID, _ reason: SpeechUnavailable) -> DictationResult {
         history.record(.failed(id, reason: String(describing: reason)))
         log.notice("Dictation \(id, privacy: .public) failed: \(String(describing: reason), privacy: .private)")

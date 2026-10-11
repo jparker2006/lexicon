@@ -70,8 +70,10 @@ private func wav() throws -> URL {
     #expect(await system.conductor.destination.delivered.isEmpty)
 }
 
-@Test func aRetryThatHearsNothingLeavesTheRowAsItWas() async throws {
-    let system = try system(hearing: "kept text", " ")
+/// " " is silence to the engine; "Um." is text that Cleanup empties.
+@Test(arguments: [" ", "Um."])
+func aRetryThatHearsNothingLeavesTheRowAsItWas(_ heard: String) async throws {
+    let system = try system(hearing: "kept text", heard)
     let first = await system.conductor.dictate(file: try wav(), pace: .asFastAsPossible)
     await system.history.flush()
     let before = try #require(await system.history.dictation(first.id))
@@ -79,6 +81,7 @@ private func wav() throws -> URL {
     let retried = await system.conductor.retry(first.id, with: nil)
     await system.history.flush()
 
+    #expect(retried.status == nil)  // nothing to report: no "No speech heard" for a row that has text
     #expect(retried.versions == nil)
     #expect(await system.history.dictation(first.id) == before)
 }

@@ -172,7 +172,7 @@ private func snapshot(_ store: HistoryStore) async throws -> [String] {
     return rows + files.sorted()
 }
 
-private func statusReason(_ store: HistoryStore, _ id: DictationID) async throws -> String? {
+func statusReason(_ store: HistoryStore, _ id: DictationID) async throws -> String? {
     try await store.read { db in
         try db.query("SELECT status_reason FROM dictation WHERE id = ?", [.text(id.description)]).first?.text(0)
     }

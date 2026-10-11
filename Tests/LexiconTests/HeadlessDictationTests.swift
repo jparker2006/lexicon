@@ -4,7 +4,7 @@ import Testing
 @testable import LexiconCore
 import AppText
 import Cleanup
-@testable import History
+import History
 import LexiconDomain
 import Transcription
 import WordStore
@@ -28,6 +28,7 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(result.status == .inserted)
     #expect(result.versions == TextVersions(model: spoken, cleaned: typed))
     #expect(result.lag != nil)
+    #expect(await system.conductor.destination.delivered[result.id] == typed)
     #expect(await engine.heard.map(\.samples) == [source])
 
     let row = try #require(await system.history.dictation(result.id))
@@ -42,7 +43,8 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples == source)
 }
 
-@Test func aFillerOnlyDictationIsSilenceAndPastesNothing() async throws {
+@Test(.timeLimit(.minutes(1)))
+func aFillerOnlyDictationIsSilenceAndPastesNothing() async throws {
     let source = syntheticSamples(count: 19_200)
     let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
     // Past the engine's silence check, but Cleanup drops the filler and leaves nothing.
@@ -57,10 +59,7 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(await system.conductor.destination.typedOrder.isEmpty)
     let row = try #require(await system.history.dictation(result.id))
     #expect(row.status == .failed)
-    let reason = try await system.history.read { db in
-        try db.query("SELECT status_reason FROM dictation WHERE id = ?", [.text(result.id.description)]).first?.text(0)
-    }
-    #expect(reason == "silence")
+    #expect(try await statusReason(system.history, result.id) == "silence")
     #expect(row.audio == .onDisk)
     #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples == source)
     var notices: [Notice] = []
