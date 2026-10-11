@@ -81,13 +81,22 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     let table = NSTableView()
     let search = NSSearchToolbarItem(itemIdentifier: NSToolbarItem.Identifier("search"))
     let empty = NSTextField(labelWithString: "")
+    /// The days on the table, newest first: a screenful at open, more as Jake scrolls.
     var sections: [DaySection] = []
+    /// The search the sections were read with.
+    var query = ""
+    /// No older day matches: scrolling to the end asks for nothing more.
+    var complete = false
     /// The flat index of each section's header.
     var headers: [Int] = []
     var rowCount = 0
     var pages: [Page: [HistoryRow]] = [:]
     var version = 0
     static let pageSize = 50
+    /// Rows read at a time. Reading, and handing the table, a year of rows
+    /// costs more than the whole open budget, so the window starts with the
+    /// newest days and grows as Jake scrolls toward the end.
+    static let batch = 300
 
     struct Page: Hashable {
         let section: Int
@@ -145,6 +154,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(scrolled(_:)),
+                                               name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         empty.textColor = .secondaryLabelColor
         empty.translatesAutoresizingMaskIntoConstraints = false
         let content = NSView()
@@ -165,16 +177,34 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func reload() {
         // Version first: a commit landing between the two reads then costs one extra reload, never a missed one.
         version = reader.version
-        sections = reader.sections(matching: search.searchField.stringValue)
-        pages = [:]
+        query = search.searchField.stringValue
+        sections = []
+        headers = []
         rowCount = 0
-        headers = sections.map { section in
-            defer { rowCount += 1 + section.count }
-            return rowCount
-        }
-        empty.stringValue = search.searchField.stringValue.isEmpty ? "No Dictations yet" : "No matches"
+        pages = [:]
+        complete = false
+        _ = showMore()
+        empty.stringValue = query.isEmpty ? "No Dictations yet" : "No matches"
         empty.isHidden = !sections.isEmpty
         table.reloadData()
+    }
+
+    /// Reads the next `batch` rows' worth of whole days. false: nothing older matches.
+    func showMore() -> Bool {
+        guard !complete else { return false }
+        let more = reader.sections(matching: query, after: sections.last, rows: Self.batch)
+        complete = more.reduce(0) { $0 + $1.count } < Self.batch
+        for section in more {
+            headers.append(rowCount)
+            rowCount += 1 + section.count
+        }
+        sections += more
+        return !more.isEmpty
+    }
+
+    @objc func scrolled(_ notification: Notification) {
+        guard table.rows(in: table.visibleRect).upperBound > rowCount - Self.batch / 2, showMore() else { return }
+        table.noteNumberOfRowsChanged()
     }
 
     @objc func searched(_ sender: NSSearchField) {

@@ -9,13 +9,13 @@ import os
 /// when it closes, so a closed window costs nothing.
 ///
 /// Access pattern (NSTableView asks only for rows on screen): the table's flat
-/// index is [day header, rows..., day header, rows...]. `sections` reads only
-/// the `started_at` index (plus the table for the search match) and buckets it
-/// into local days in Swift, so the calendar decides where a day ends, DST
-/// included. Rows are then fetched a page at a time within one day (its
-/// `started_at` range plus a small OFFSET). Opening the window costs one pass
-/// over the time index plus one page: no Dictation's text is read until its
-/// row is on screen.
+/// index is [day header, rows..., day header, rows...]. `sections` reads the
+/// newest stretch of the `started_at` index (plus the table for the search
+/// match) and buckets it into local days in Swift, so the calendar decides
+/// where a day ends, DST included. Rows are then fetched a page at a time
+/// within one day (its `started_at` range plus a small OFFSET). Opening the
+/// window costs a few hundred index entries plus one page, whatever the
+/// History size: no Dictation's text is read until its row is on screen.
 @MainActor
 public final class HistoryReader {
     private let file: URL
@@ -45,15 +45,20 @@ public final class HistoryReader {
     /// is something new. 0 means no History yet; it moves when History appears.
     public var version: Int { db.map { $0.dataVersion &+ 1 } ?? 0 }
 
-    /// Newest day first. `matching` is a plain-text search over final text,
-    /// case-insensitive for ASCII as SQLite's LIKE is (FTS5 only if measured
-    /// slow: #4). Blank means everything.
-    public func sections(matching query: String?) -> [DaySection] {
-        guard let db else { return [] }
+    /// Whole days, newest first: the days after `last` (nil: from the newest),
+    /// until they hold at least `rows` Dictations or History runs out. The window
+    /// asks for a screenful at open and for more as Jake scrolls, so opening
+    /// reads the same few hundred timestamps whatever the History size.
+    ///
+    /// `matching` is a plain-text search over final text, case-insensitive for
+    /// ASCII as SQLite's LIKE is (FTS5 only if measured slow: #4). Blank means everything.
+    public func sections(matching query: String?, after last: DaySection? = nil, rows: Int) -> [DaySection] {
+        guard let db, rows > 0 else { return [] }
         let filter = Filter(query)
+        let before = last?.startMs ?? .max
         let times = (try? db.query("""
-            SELECT started_at FROM dictation WHERE \(filter.sql) ORDER BY started_at DESC
-            """, filter.bindings)) ?? []
+            SELECT started_at FROM dictation WHERE started_at < ? AND \(filter.sql) ORDER BY started_at DESC LIMIT ?
+            """, [.int(before)] + filter.bindings + [.int(Int64(rows))])) ?? []
         var sections: [DaySection] = []
         var day = Int64.max..<Int64.max
         for row in times {
@@ -62,11 +67,20 @@ public final class HistoryReader {
                 let start = calendar.startOfDay(for: Date(unixMs: ms))
                 let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
                 day = start.unixMs..<end.unixMs
-                sections.append(DaySection(day: calendar.dateComponents([.year, .month, .day], from: start),
-                                           count: 0, newestMs: ms, oldestMs: ms, query: filter.query))
+                sections.append(DaySection(day: calendar.dateComponents([.year, .month, .day], from: start), count: 0,
+                                           startMs: day.lowerBound, newestMs: ms, oldestMs: ms, query: filter.query))
             }
             sections[sections.count - 1].count += 1
             sections[sections.count - 1].oldestMs = ms
+        }
+        // The limit may have cut the last day short: count all of it (its newest rows all came back).
+        if times.count == rows, let open = sections.last,
+           let whole = try? db.query("""
+               SELECT count(*), min(started_at) FROM dictation WHERE started_at BETWEEN ? AND ? AND \(filter.sql)
+               """, [.int(open.startMs), .int(open.newestMs)] + filter.bindings).first,
+           let count = whole.int(0), let oldest = whole.int(1) {
+            sections[sections.count - 1].count = Int(count)
+            sections[sections.count - 1].oldestMs = oldest
         }
         return sections
     }
@@ -120,6 +134,8 @@ public struct DaySection: Sendable, Hashable {
     /// Year, month and day in the reader's calendar.
     public let day: DateComponents
     public internal(set) var count: Int
+    /// Local midnight that starts the day.
+    let startMs: Int64
     let newestMs: Int64
     var oldestMs: Int64
     /// The search that made this section, so its pages match its count.

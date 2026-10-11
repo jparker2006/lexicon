@@ -32,6 +32,7 @@ enum HistoryCheck {
         let (window, table, _) = try await open(app)
         let open = try footprint(pid)
         try await copyNewest(table)
+        try await scrollToTheEnd(window: window, table: table)
         if let word { try await search(word, window: window, table: table) }
         try await close(window, app)
         try await Task.sleep(for: .seconds(2))
@@ -42,14 +43,20 @@ enum HistoryCheck {
     /// Presses the menu bar item's History entry and waits for rows on screen.
     static func open(_ app: DevApp) async throws -> (window: AXUIElement, table: AXUIElement, elapsed: Duration) {
         let item = try await app.statusItem()
-        // Opening a menu tracks it modally, so the press may not reply before the timeout.
-        let opened = AXUIElementPerformAction(item, kAXPressAction as CFString)
-        guard opened == .success || opened == .cannotComplete else { throw HarnessError("opening the menu failed (AXError \(opened.rawValue))") }
-        let entry = try await poll("the History menu item") {
-            AX.elements(item, kAXChildrenAttribute).lazy
-                .flatMap { AX.elements($0, kAXChildrenAttribute) }
-                .first { AX.string($0, kAXTitleAttribute) == "History" }
+        var entry: AXUIElement?
+        for _ in 0..<3 where entry == nil {
+            // Opening a menu tracks it modally, so the press may not reply before the timeout.
+            let opened = AXUIElementPerformAction(item, kAXPressAction as CFString)
+            guard opened == .success || opened == .cannotComplete else { throw HarnessError("opening the menu failed (AXError \(opened.rawValue))") }
+            entry = try? await poll("the History menu item", within: .seconds(2)) {
+                AX.elements(item, kAXChildrenAttribute).lazy
+                    .flatMap { AX.elements($0, kAXChildrenAttribute) }
+                    .first { AX.string($0, kAXTitleAttribute) == "History" }
+            }
+            // A press that toggled a menu already open leaves it shut or stuck: Escape and try again.
+            if entry == nil { key(53) }
         }
+        guard let entry else { throw HarnessError("the menu bar menu never showed its History item") }
         let clock = ContinuousClock()
         let pressed = clock.now
         try press(entry)
@@ -89,6 +96,19 @@ enum HistoryCheck {
         ok("clicking the newest row put its \(text.count) characters on the clipboard and showed \"Copied\"")
     }
 
+    /// The window starts with the newest days; scrolling to the end adds older ones.
+    static func scrollToTheEnd(window: AXUIElement, table: AXUIElement) async throws {
+        let before = AX.elements(table, kAXRowsAttribute).count
+        guard let scroll = AX.element(table, kAXParentAttribute),
+              let bar = AX.element(scroll, kAXVerticalScrollBarAttribute) else { throw HarnessError("no scroll bar on the History table") }
+        try AX.set(bar, kAXValueAttribute, 1.0 as CFNumber)
+        let after = try await poll("older days after scrolling to the end") { () -> Int? in
+            let count = AX.elements(table, kAXRowsAttribute).count
+            return count > before ? count : nil
+        }
+        ok("scrolling to the end grew the table from \(before) to \(after) rows")
+    }
+
     static func search(_ word: String, window: AXUIElement, table: AXUIElement) async throws {
         guard let field = AX.find(AccessibilityID.historySearch, in: [window]) else {
             throw HarnessError("no search field with identifier \(AccessibilityID.historySearch)")
@@ -124,6 +144,10 @@ enum HistoryCheck {
             let own = AX.string(child, kAXRoleAttribute) == kAXStaticTextRole ? [AX.string(child, kAXValueAttribute) ?? ""] : []
             return own + (depth > 0 ? texts(in: child, depth: depth - 1) : [])
         }
+    }
+
+    static func key(_ code: CGKeyCode) {
+        for down in [true, false] { CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)?.post(tap: .cghidEventTap) }
     }
 
     static func press(_ element: AXUIElement) throws {
