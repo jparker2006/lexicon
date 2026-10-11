@@ -1,6 +1,8 @@
 """Builds and grows Jake's private Test set from his Wispr Flow history (#50).
 
     scorer/testset update --lexicon-eval BIN
+    scorer/testset review [--no-open]              (review.py, Jake's gold review)
+    scorer/testset baselines --lexicon-eval BIN    (baselines.py)
 
 `scripts/test-set.sh` builds `lexicon-eval` and runs this; run it weekly until
 Jake switches off Wispr, which keeps only about two weeks of audio. Each run:
@@ -16,7 +18,8 @@ Jake switches off Wispr, which keeps only about two weeks of audio. Each run:
 3. Build: adds each new clip to `manifest.jsonl` (the Test set),
    `wispr-run.jsonl` (Wispr's run from its own logs, the baseline's input) and,
    when its texts disagree, `disagreements.jsonl` (Jake's gold review, #51).
-   Lines already there are never changed, so reviewed gold and the split stay.
+   Lines already there are never changed, so reviewed gold and the split stay;
+   only the gold review (review.py) rewrites a `review` entry's gold.
 
 Everything is written under the Test set folder with owner-only permissions,
 never inside a git work tree. It prints counts and paths only, never text, ids
@@ -517,26 +520,34 @@ def build(root: Path, clips: dict[str, dict], parakeet: dict[str, str], lexicon:
 # The whole run
 
 
-def update(root: Path, wispr_db: Path, lexicon_file: Path, lexicon_eval: Path,
-           today: datetime.date, out=sys.stdout) -> None:
-    def say(line: str) -> None:
-        print(line, file=out, flush=True)
-
+@contextlib.contextmanager
+def locked(root: Path):
+    """Holds the Test set for one command: an update, the review page (#51) or
+    the baselines. One at a time: two updates would delete each other's work
+    folder and append the same clips, and the review page rewrites the manifest
+    an update appends to."""
     os.umask(0o077)
     if _in_git_work_tree(root):
         raise TestSetError(f"{root} is inside a git work tree; the Test set never goes in a repo")
     _private_dir(root)
-    # One run at a time: a second would delete the first's work folder, and
-    # both would append the same clips.
     lock = os.open(root / ".lock", os.O_WRONLY | os.O_CREAT, 0o600)
     try:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise TestSetError("another test-set run is in progress") from None
-        _update(root, wispr_db, lexicon_file, lexicon_eval, today, say)
+            raise TestSetError("another test-set command is running (an update, the review page or baselines)") from None
+        yield
     finally:
         os.close(lock)
+
+
+def update(root: Path, wispr_db: Path, lexicon_file: Path, lexicon_eval: Path,
+           today: datetime.date, out=sys.stdout) -> None:
+    def say(line: str) -> None:
+        print(line, file=out, flush=True)
+
+    with locked(root):
+        _update(root, wispr_db, lexicon_file, lexicon_eval, today, say)
 
 
 def _update(root: Path, wispr_db: Path, lexicon_file: Path, lexicon_eval: Path, today: datetime.date, say) -> None:
@@ -586,13 +597,24 @@ def _update(root: Path, wispr_db: Path, lexicon_file: Path, lexicon_eval: Path, 
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="scorer/testset", description="Grow the private Test set from Wispr (#50).")
+    parser = argparse.ArgumentParser(prog="scorer/testset", description="Jake's private Test set (#50, #51).")
     sub = parser.add_subparsers(dest="command", required=True)
     up = sub.add_parser("update", help="export new Wispr clips, transcribe them locally, add them to the Test set")
     up.add_argument("--lexicon-eval", required=True, type=Path, help="the built lexicon-eval binary")
+    rv = sub.add_parser("review", help="open Jake's gold review page (#51)")
+    rv.add_argument("--no-open", action="store_true", help="print the link without opening it")
+    bl = sub.add_parser("baselines", help="save Wispr's and local Parakeet's baselines on both splits (#51)")
+    bl.add_argument("--lexicon-eval", required=True, type=Path, help="the built lexicon-eval binary")
     args = parser.parse_args(argv)
     try:
-        update(ROOT, WISPR_DB, LEXICON, args.lexicon_eval, datetime.date.today())
+        if args.command == "update":
+            update(ROOT, WISPR_DB, LEXICON, args.lexicon_eval, datetime.date.today())
+        elif args.command == "review":
+            from .review import serve
+            serve(ROOT, LEXICON, open_page=not args.no_open)
+        else:
+            from .baselines import baselines
+            baselines(ROOT, args.lexicon_eval, datetime.date.today())
     except TestSetError as e:
         print(f"testset: {e}", file=sys.stderr)
         return 1
