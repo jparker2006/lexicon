@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template for Lexicon.app. scripts/bundle.sh fills the identity and version keys per flavor. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>Lexicon</string>
+	<key>CFBundleIdentifier</key>
+	<string>FILLED_BY_BUNDLE_SH</string>
+	<key>CFBundleName</key>
+	<string>FILLED_BY_BUNDLE_SH</string>
+	<key>CFBundleDisplayName</key>
+	<string>FILLED_BY_BUNDLE_SH</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>FILLED_BY_BUNDLE_SH</string>
+	<key>LexiconCommit</key>
+	<string>FILLED_BY_BUNDLE_SH</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lexicon listens only while you hold fn, and types what you say.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>
