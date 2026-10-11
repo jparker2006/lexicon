@@ -1,4 +1,4 @@
-public import Foundation
+import Foundation
 public import LexiconDomain
 import SQLiteKit
 
@@ -10,6 +10,9 @@ public actor Lexicon {
     private let database: Database
     public private(set) var terms: [Term] = []
     public private(set) var rules: [Rule] = []
+    /// The current repo's code Terms, in the order selection takes them
+    /// (`CodeTerms`). Held in memory, never stored.
+    public private(set) var codeTerms: [Term] = []
     /// The plain-English words among those inside Terms (`EnglishWords`).
     private var english = Set<String>()
     private var compiled = RuleSet.empty
@@ -69,9 +72,8 @@ public actor Lexicon {
     /// Feeds Re-speak candidate search (M4).
     public func closeCalls(in text: String) -> [CloseCall] { fatalError("not implemented") }
 
-    /// Context Lexicon may use (D5): a project directory seen via the Claude Code
-    /// hook or a terminal title. Scanning it for code terms is #21.
-    public func noteProject(_ directory: URL) { fatalError("not implemented") }
+    /// `CodeTerms` hands over the current repo's code Terms whenever they change.
+    func useCodeTerms(_ terms: [Term]) { codeTerms = terms }
 
     /// Rereads both tables and recompiles. The word list is read again only when
     /// the Terms changed: plainness is a question about the words inside Terms.

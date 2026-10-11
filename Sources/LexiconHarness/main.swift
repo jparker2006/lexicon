@@ -13,20 +13,27 @@ import TestHooks
 
 let usage = """
     usage: lexicon-harness check | paste-check
-           lexicon-harness hook status | dictate <wav> | indicator <state> | insert [--delay <seconds>] <text>
+           lexicon-harness hook status | dictate <wav> | indicator <state> [message] | sound <cue>
+           lexicon-harness hook insert [--delay <seconds>] <text>
            lexicon-harness hook capture <seconds> [prepared[=<idle s>]] [change] [device=<uid>]
+           lexicon-harness pill [--shots <dir>]
 
-      check        launch Lexicon Dev with test hooks, find its status item by identifier,
-                   list its windows, open the target field, read it and clear it
+      check   launch Lexicon Dev with test hooks, find its status item by identifier,
+              list its windows, open the target field, read it and clear it
       paste-check  focus the target field, paste a sentence into it through the real
-                   paste path, then check the field reads it and the clipboard is restored
-      hook         send one test hook to the running Lexicon Dev and print the reply
-                   insert: paste <text> at the focused field after --delay seconds (default 0)
-                   capture: record from the mic and measure the start gap, tail, file
-                   and mic release; `prepared` prepares the engine first and waits
-                   0.3 s (or the idle seconds given) before fn-down, else it is built
-                   cold on fn-down; `change` rebuilds the engine halfway as a device
-                   change would
+              paste path, then check the field reads it and the clipboard is restored
+      hook    send one test hook to the running Lexicon Dev and print the reply
+              states: hidden held handsfree warning finishing landed paste error
+              cues:   start stop warning error
+              insert: paste <text> at the focused field after --delay seconds (default 0)
+              capture: record from the mic and measure the start gap, tail, file
+              and mic release; `prepared` prepares the engine first and waits
+              0.3 s (or the idle seconds given) before fn-down, else it is built
+              cold on fn-down; `change` rebuilds the engine halfway as a device
+              change would
+      pill    show each indicator state on Lexicon Dev and check the pill, the menu bar
+              icon and the focus; then play each sound and time it. --shots <dir> saves
+              a picture of the pill and the menu bar icon for each state
     """
 
 func ok(_ line: String) { print("ok    \(line)") }
@@ -36,11 +43,11 @@ func fail(_ message: String, code: Int32 = 1) -> Never {
     exit(code)
 }
 
-/// Pretty-printed with sorted keys, so two runs diff cleanly.
-func printJSON<Value: Encodable>(_ value: Value) throws {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    print(String(decoding: try encoder.encode(value), as: UTF8.self))
+/// A duration in milliseconds, one decimal place.
+func milliseconds(_ duration: Duration) -> String {
+    let parts = duration.components
+    let ms = Double(parts.seconds) * 1_000 + Double(parts.attoseconds) / 1_000_000_000_000_000
+    return String(format: "%.1f", ms)
 }
 
 @MainActor
@@ -116,7 +123,7 @@ func pasteCheck() async throws {
         guard insertion.outcome == "inserted" else { throw HarnessError("Lexicon did not insert: \(insertion.outcome)") }
     case .failed(let reason):
         throw HarnessError(reason)
-    case .status, .capture:
+    case .status, .capture, .done, .soundPlayed:
         throw HarnessError("unexpected reply to insert: \(reply)")
     }
 
@@ -145,9 +152,44 @@ func pasteCheck() async throws {
 }
 
 func hook(_ arguments: [String]) async throws {
+    let command = hookCommand(arguments)
     var timeout = Duration.seconds(10)
-    let command: TestHookCommand
-    if arguments.first == "insert" {
+    if case .capture(let seconds, let idle, _, _) = command { timeout += .seconds(seconds + (idle ?? 0)) }
+    // The app waits `delay` seconds for a click into the field before it pastes.
+    if case .insert(_, let delay) = command { timeout += .seconds(delay) }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    switch try await DevApp.hooks.send(command, timeout: timeout) {
+    case .status(let status):
+        print(String(decoding: try encoder.encode(status), as: UTF8.self))
+    case .done:
+        print("ok")
+    case .soundPlayed(let latency):
+        print("played in \(milliseconds(latency)) ms")
+    case .capture(let measurement):
+        print(String(decoding: try encoder.encode(measurement), as: UTF8.self))
+    case .inserted(let insertion):
+        print(String(decoding: try encoder.encode(insertion), as: UTF8.self))
+    case .failed(let reason):
+        fail("FAIL  \(reason)")
+    }
+}
+
+/// The command a `hook` line asks for. A bad line prints the usage.
+func hookCommand(_ arguments: [String]) -> TestHookCommand {
+    switch arguments.first ?? "" {
+    case "status" where arguments.count == 1:
+        return .status
+    case "dictate" where arguments.count == 2:
+        return .dictate(wav: URL(filePath: arguments[1]).standardizedFileURL.path)
+    case "indicator" where arguments.count == 2 || arguments.count == 3:
+        guard let state = indicatorState(named: arguments[1], message: arguments.count == 3 ? arguments[2] : nil) else {
+            fail(usage, code: 64)
+        }
+        return .indicator(state)
+    case "capture" where arguments.count >= 2:
+        return capture(seconds: arguments[1], options: arguments.dropFirst(2))
+    case "insert" where arguments.count >= 2:
         var words = arguments.dropFirst()
         var delay = 0.0
         if words.first == "--delay" {
@@ -156,28 +198,12 @@ func hook(_ arguments: [String]) async throws {
             words = words.dropFirst(2)
         }
         guard !words.isEmpty else { fail(usage, code: 64) }
-        command = .insert(text: words.joined(separator: " "), delay: delay)
-        // The app waits `delay` seconds for a click into the field before it pastes.
-        timeout += .seconds(delay)
-    } else {
-        command = switch (arguments.first, arguments.dropFirst().first, arguments.count) {
-        case ("status", _, 1): .status
-        case ("dictate", let wav?, 2): .dictate(wav: URL(filePath: wav).standardizedFileURL.path)
-        case ("indicator", let state?, 2): .indicator(state: state)
-        case ("capture", let seconds?, _): capture(seconds: seconds, options: arguments.dropFirst(2))
-        default: fail(usage, code: 64)
-        }
-    }
-    if case .capture(let seconds, let idle, _, _) = command { timeout += .seconds(seconds + (idle ?? 0)) }
-    switch try await DevApp.hooks.send(command, timeout: timeout) {
-    case .status(let status):
-        try printJSON(status)
-    case .inserted(let insertion):
-        try printJSON(insertion)
-    case .capture(let measurement):
-        try printJSON(measurement)
-    case .failed(let reason):
-        fail("FAIL  \(reason)")
+        return .insert(text: words.joined(separator: " "), delay: delay)
+    case "sound" where arguments.count == 2:
+        guard let cue = SoundCue(rawValue: arguments[1]) else { fail(usage, code: 64) }
+        return .sound(cue)
+    default:
+        fail(usage, code: 64)
     }
 }
 
@@ -203,8 +229,9 @@ let arguments = Array(CommandLine.arguments.dropFirst())
 do {
     switch arguments.first {
     case "check": try await check()
-    case "paste-check": try await pasteCheck()
     case "hook": try await hook(Array(arguments.dropFirst()))
+    case "pill": try await pill(Array(arguments.dropFirst()))
+    case "paste-check": try await pasteCheck()
     case TargetField.mode: TargetField.serve(text: arguments.dropFirst().first ?? "", focused: arguments.dropFirst(2).first == "focused")
     default: fail(usage, code: 64)
     }

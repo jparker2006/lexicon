@@ -51,5 +51,30 @@ enum AX {
         }
         return nil
     }
+
+    /// The AXValue of each static text under `element`, depth first.
+    static func staticTexts(_ element: AXUIElement, depth: Int = 12) -> [String] {
+        var texts: [String] = []
+        if string(element, kAXRoleAttribute) == kAXStaticTextRole, let text = string(element, kAXValueAttribute) {
+            texts.append(text)
+        }
+        if depth > 0 {
+            for child in elements(element, kAXChildrenAttribute) {
+                texts += staticTexts(child, depth: depth - 1)
+            }
+        }
+        return texts
+    }
+
+    /// The on-screen rectangle from AXPosition and AXSize, in points, top left origin.
+    static func frame(_ element: AXUIElement) -> CGRect? {
+        guard let position = value(element, kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
+              let size = value(element, kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+        var origin = CGPoint.zero
+        var extent = CGSize.zero
+        guard AXValueGetValue(position as! AXValue, .cgPoint, &origin),  // the type ids were checked above
+              AXValueGetValue(size as! AXValue, .cgSize, &extent) else { return nil }
+        return CGRect(origin: origin, size: extent)
+    }
 }
 #endif
