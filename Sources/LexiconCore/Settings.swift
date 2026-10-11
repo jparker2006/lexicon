@@ -25,7 +25,8 @@ public final class PreferencesStore: Sendable {
 
 /// API keys in the Keychain (#8): generic passwords, service = bundle id,
 /// account = `CredentialID.account`. Each key is read once, on first use, and
-/// kept in memory (a missing key too, until `set` stores one).
+/// kept in memory (a missing key too, until `set` stores one). A read that
+/// fails, such as a denied Keychain prompt, is not kept: the next call asks again.
 /// Headless runs (`lexicon-eval`) read `LEXICON_KEY_<ACCOUNT>` environment
 /// variables instead, since the Keychain item's ACL belongs to the app.
 /// Nothing here logs: a key never reaches a log, an error message or History.
@@ -44,10 +45,18 @@ public final class Secrets: Sendable {
         case .keychain(let service): { [self] id in
             if let known = cache.withLock({ $0[id] }) { return known }
             // Read outside the lock: the first read can wait on a Keychain prompt.
-            // Two racing first reads both read the same item, which is harmless.
-            let key = Keychain.read(service: service, account: id.account)
-            cache.withLock { $0[id] = key }
-            return key
+            let key: String?
+            switch Keychain.read(service: service, account: id.account) {
+            case .found(let value): key = value
+            case .missing: key = nil
+            case .failed: return nil
+            }
+            // A `set` that landed during the read wins over what the read saw.
+            return cache.withLock { cache in
+                if let newer = cache[id] { return newer }
+                cache[id] = key
+                return key
+            }
         }
         case .environment: { ProcessInfo.processInfo.environment[Secrets.environmentName(for: $0)] }
         }
@@ -77,16 +86,21 @@ public enum KeychainError: Error, Equatable {
 
 /// Login Keychain generic passwords. The only Security importer (scripts/check-imports.swift).
 private enum Keychain {
-    static func read(service: String, account: String) -> String? {
+    enum Read { case found(String), missing, failed }
+
+    static func read(service: String, account: String) -> Read {
         var query = item(service: service, account: account)
         query[kSecReturnData] = true
         query[kSecMatchLimit] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else {
-            return nil
+        switch SecItemCopyMatching(query as CFDictionary, &result) {
+        case errSecSuccess:
+            guard let data = result as? Data else { return .failed }
+            let key = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return key.isEmpty ? .missing : .found(key)
+        case errSecItemNotFound: return .missing
+        default: return .failed
         }
-        let key = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        return key.isEmpty ? nil : key
     }
 
     /// Updates in place when the item exists, so the apps Jake already allowed

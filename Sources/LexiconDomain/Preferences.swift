@@ -129,9 +129,11 @@ public final class CloudAccess: Sendable {
     }
 
     /// Key for a call that carries no Dictation text: the speech audio stream, a
-    /// model download. nil once revoked.
+    /// model download. nil once revoked, including by a revoke that lands while
+    /// the first Keychain read waits on its prompt.
     public func key(_ id: CredentialID) -> String? {
-        revoked == nil ? lookup(id) : nil
+        guard revoked == nil, let key = lookup(id), revoked == nil else { return nil }
+        return key
     }
 
     /// Key for a call that sends `text` (Cleanup's LLM, Jev). Runs the Secret guard
