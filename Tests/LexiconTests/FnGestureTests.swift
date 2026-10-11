@@ -124,3 +124,9 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
         == [.dictationBegan(at: at(0)), .dictationDiscarded,
             .dictationBegan(at: at(400)), .dictationConfirmed(.hold), .dictationStopped(at: at(1_000))])
 }
+
+@Test func onlyDoNothingLeavesTheGlobeKeyQuiet() {
+    #expect(!GlobeKey.hasSystemAction(usageType: 0))
+    for usage in [1, 2, 3] { #expect(GlobeKey.hasSystemAction(usageType: usage)) }
+    #expect(GlobeKey.hasSystemAction(usageType: nil))  // unset: the macOS default shows the emoji viewer
+}

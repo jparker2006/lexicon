@@ -1,8 +1,10 @@
 import AppKit
 import AVFAudio
+import KeyInput
 
 /// The two grants Lexicon needs, as menu lines: "Microphone: allowed", or an
-/// "Allow Microphone…" item that asks. A stopgap so a build can be granted and
+/// "Allow Microphone…" item that asks. Plus one line while the globe key has a
+/// system action, read each time the menu opens (#53). A stopgap so a build can be granted and
 /// its grants checked across rebuilds; first-run setup and the warning dot
 /// replace it (#57).
 @MainActor
@@ -31,7 +33,9 @@ enum Permissions {
             accessibility
                 ? status("Accessibility: allowed")
                 : action("Allow Accessibility…", Handler.shared, #selector(Handler.requestAccessibility)),
-        ]
+        ] + (GlobeKey.hasSystemAction
+            ? [action("Set “Press globe key to” to Do Nothing…", Handler.shared, #selector(Handler.openKeyboardSettings))]
+            : [])
     }
 
     private static func status(_ title: String) -> NSMenuItem {
@@ -63,6 +67,11 @@ enum Permissions {
         @objc func requestAccessibility() {
             let prompt = "AXTrustedCheckOptionPrompt" as CFString
             _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
+        }
+
+        /// Jake changes it there; Lexicon never writes the setting.
+        @objc func openKeyboardSettings() {
+            open("x-apple.systempreferences:com.apple.Keyboard-Settings.extension")
         }
 
         private func open(_ url: String) {
