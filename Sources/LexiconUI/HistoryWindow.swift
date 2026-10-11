@@ -357,8 +357,12 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         let again = playing == row.id
         stopPlaying()
         guard !again else { return }
-        // Aged out or deleted since the row was drawn.
-        guard let url = reader.audioURL(row.id) else { return refresh() }
+        // Aged out or deleted since the row was drawn, or a crash lost the file.
+        guard let url = reader.audioURL(row.id) else {
+            refresh()
+            cell(for: row.id)?.flash("No audio")
+            return
+        }
         let player = try? AVAudioPlayer(contentsOf: url)
         player?.delegate = self
         // A file a crash left unreadable: say so rather than doing nothing.
