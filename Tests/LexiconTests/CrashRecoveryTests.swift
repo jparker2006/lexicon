@@ -177,7 +177,16 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
         try db.query("SELECT \(DictationRecord.columns) FROM dictation").compactMap(DictationRecord.init(row:))
     }
     let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
-    for id in started.keys { #expect(byID[id] != nil, "Dictation \(id) has no row") }
+    var unborn = 0
+    for id in started.keys where byID[id] == nil {
+        // The writer creates the file, and History commits the row, a few ms after fn-down.
+        // A kill inside that window leaves nothing, and costs less audio than the 0.1 s
+        // a crash may lose; any later kill must leave a row.
+        let killedAt = unfinished.first { $0.0 == id }.map { Duration.nanoseconds(Int64($0.2) - Int64($0.1)) }
+        #expect(killedAt.map { $0 < .milliseconds(100) } == true, "Dictation \(id) has no row (killed \(String(describing: killedAt)) in)")
+        #expect(!FileManager.default.fileExists(atPath: relaunch.history.audioURL(for: id).path), "Dictation \(id) has audio but no row")
+        unborn += 1
+    }
     for row in rows {
         let file = relaunch.history.audioURL(for: row.id)
         if row.status == .failed {
@@ -200,7 +209,7 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
     }
     let worst = shortfalls.max() ?? .zero
     let statuses = Dictionary(grouping: rows, by: \.status).map { "\($0.value.count) \($0.key)" }.sorted()
-    print("lane \(lane): \(started.count) Dictations, \(kills) kills, \(statuses.joined(separator: ", ")), worst audio lost \(worst)")
+    print("lane \(lane): \(started.count) Dictations, \(kills) kills, \(statuses.joined(separator: ", ")), \(unborn) killed before their file, worst audio lost \(worst)")
     // Not asserted: it is wall-clock time, and a loaded machine stretches it with
     // nothing lost. Bit-exact audio above, and the kill test's bytes-on-disk check,
     // are the assertions; this is the evidence for "about 0.1 s per crash".
