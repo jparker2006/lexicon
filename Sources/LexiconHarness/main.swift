@@ -4,8 +4,8 @@ import Foundation
 // launches the dev app with `open` and `--test-hooks`, asks it things through
 // test hooks, and reads its status item, its windows and a target text field
 // through the Accessibility API. Run it with scripts/harness.sh, from a shell
-// whose app has the Accessibility grant (the harness inherits it). One builder
-// at a time: it drives the live app.
+// whose app has the Accessibility grant (the harness inherits it). It drives the
+// live app, so only the live-app lane's holder runs it (scripts/live-lane.sh).
 #if DEBUG
 import LexiconDomain
 import TestHooks

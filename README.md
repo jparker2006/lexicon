@@ -22,7 +22,7 @@ Command Line Tools only (no Xcode), macOS 26. Builds are signed with a self-sign
 | Command | What it does |
 |---|---|
 | `scripts/check.sh` | Every check: build, import rules, tests. |
-| `scripts/dev-run.sh` | Builds "Lexicon Dev" (`dev.jparker.lexicon.dev`), installs it to `~/Applications/Lexicon Dev.app` and launches it. For builders. |
+| `scripts/dev-run.sh` | Builds "Lexicon Dev" (`dev.jparker.lexicon.dev`), installs it to `~/Applications/Lexicon Dev.app` and launches it. Only for the live-app lane's holder, the Live checks session (`scripts/live-lane.sh`). |
 | `scripts/install.sh` | Builds a release of "Lexicon" (`dev.jparker.lexicon`), swaps it into `~/Applications/Lexicon.app` and relaunches it, after any Dictation in progress. The daily copy's only update command. |
 
 The two apps have separate bundle IDs and data folders (`~/Library/Application Support/Lexicon Dev/` and `.../Lexicon/`); neither command touches the other's. Launch Lexicon with these scripts or `open`, never by running the binary: a binary run from a shell inherits the shell's Accessibility trust, so Lexicon refuses to start that way.

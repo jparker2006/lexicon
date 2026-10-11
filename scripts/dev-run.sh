@@ -11,9 +11,11 @@
 # refuses to start that way. Same certificate and bundle id every build, so the
 # dev app keeps its Accessibility and Microphone grants across rebuilds.
 #
-# One install at a time: a lock stops two builders swapping the dev app at once.
+# Only the live-app lane's holder runs this (scripts/live-lane.sh). Within it,
+# a second lock stops two runs swapping the dev app at once.
 set -eu
 cd "$(dirname "$0")/.."
+scripts/live-lane.sh check
 
 RELEASE=
 if [ "${1:-}" = --release ]; then RELEASE=--release; shift; fi
