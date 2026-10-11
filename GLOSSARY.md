@@ -1,0 +1,37 @@
+# Lexicon
+
+Lexicon is a Mac dictation app: you speak, it types at your cursor, and it learns the words you use from every correction.
+
+## Language
+
+**Dictation**:
+One spoken session, held or hands-free, from the audio through to the text inserted at the cursor.
+_Avoid_: Recording, transcript, utterance
+
+**Fix**:
+A correction to a Dictation's text. Either a Re-speak fix or a Hand fix.
+_Avoid_: Edit, correction
+
+**Re-speak fix**:
+A Fix made by saying the right word again instead of typing it.
+_Avoid_: Voice edit, respeak
+
+**Hand fix**:
+A Fix made by editing the inserted text yourself.
+_Avoid_: Manual edit
+
+**Rule**:
+A learned "when you hear X, write Y", created from a Fix the user confirmed.
+_Avoid_: Replacement, correction, mapping
+
+**Lexicon**:
+The user's personal word store: their Rules, names and code terms.
+_Avoid_: Dictionary, vocabulary, word list
+
+**Test set**:
+The user's recorded Dictations paired with the text they should have produced.
+_Avoid_: Eval set, benchmark, dataset
+
+**Private mode**:
+A mode in which nothing leaves the Mac.
+_Avoid_: Offline mode, local mode
