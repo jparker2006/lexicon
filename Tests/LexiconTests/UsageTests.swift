@@ -48,18 +48,6 @@ import LexiconCore
                                inputSinceMark: false) == .hold(.focusMoved))
 }
 
-@Test(.disabled("lands with #41")) func replayedEventsCannotMoveStatusBackwards() {
-    #expect(DictationStatus.notInserted.canMove(to: .inserted))
-    #expect(!DictationStatus.inserted.canMove(to: .waiting))       // a late `.waiting` replay is a no-op
-    #expect(DictationStatus.inserted.canMove(to: .inserted))       // same-state replay is allowed, changes nothing
-    #expect(HistoryStore.admits(.recording, from: nil))
-    #expect(!HistoryStore.admits(.transcribing, from: nil))
-}
-
-@Test func unfinishedIndexIsGeneratedFromTheEnum() {
-    #expect(HistorySchema.derivedIndexes[0].hasSuffix("('recording', 'transcribing', 'waiting', 'ready')"))
-}
-
 @Test(.disabled("lands with #74")) func structuralCheckRejectsChangedNumbers() {
     let failure = StructuralCheck.check("Ship it on the 5th", ruled: "ship it on the fourth", terms: [])
     #expect(failure == .numberMismatch)

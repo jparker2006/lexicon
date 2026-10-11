@@ -92,18 +92,18 @@ public enum DictationStatus: String, Sendable, Codable, CaseIterable {
     /// from the STORED status, so a replayed or racing event is a no-op by
     /// construction. Same-state moves are allowed and change nothing (replays).
     public func canMove(to next: DictationStatus) -> Bool {
-        // TODO: self == next -> true; otherwise:
-        //   recording    -> transcribing | waiting | failed | notInserted | recovered
-        //                   (the last two only via recovery, which re-marks origin first)
-        //   transcribing -> ready | waiting | failed | notInserted | recovered
-        //   waiting      -> ready | failed | notInserted | recovered   (late text, #4)
-        //   ready        -> inserted | notInserted   (the paste's real outcome; recovery: notInserted)
-        //   notInserted  -> inserted          (paste-last)
-        //   recovered    -> inserted          (paste-last)
-        //   failed       -> notInserted | recovered   (manual Retry produced text)
-        //   inserted     -> (nothing else)
-        // Write it as an exhaustive switch over `self`, so a new case fails the build here.
-        fatalError("not implemented")
+        if self == next { return true }
+        switch self {
+        case .recording:
+            // notInserted and recovered only via launch recovery, which re-marks origin first.
+            return [.transcribing, .waiting, .failed, .notInserted, .recovered].contains(next)
+        case .transcribing: return [.ready, .waiting, .failed, .notInserted, .recovered].contains(next)
+        case .waiting: return [.ready, .failed, .notInserted, .recovered].contains(next)  // late text (#4)
+        case .ready: return [.inserted, .notInserted].contains(next)  // the paste's real outcome
+        case .notInserted, .recovered: return next == .inserted  // paste-last
+        case .failed: return [.notInserted, .recovered].contains(next)  // manual Retry produced text
+        case .inserted: return false
+        }
     }
 }
 
@@ -223,8 +223,13 @@ extension DictationStatus {
     /// The one rule for the status a Dictation lands in. History applies it to the
     /// row and the Conductor to its report, so they cannot disagree.
     public static func landed(_ delivery: Delivery, origin: DictationOrigin, previous: DictationStatus?) -> DictationStatus {
-        // TODO: .inserted -> .inserted; .notInserted -> .notInserted;
-        // .historyOnly -> origin == .recovered ? .recovered : (previous?.hasText == true ? previous! : .notInserted)
-        fatalError("not implemented")
+        switch delivery {
+        case .inserted: return .inserted
+        case .notInserted: return .notInserted
+        case .historyOnly:
+            if origin == .recovered { return .recovered }
+            if let previous, previous.hasText { return previous }
+            return .notInserted
+        }
     }
 }
