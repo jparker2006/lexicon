@@ -12,13 +12,16 @@ import LexiconDomain
 /// the InputClock on key-down / mouse-down, (4) feeds fn and every other key-down
 /// to `FnGesture` and yields its commands, (5) passes every event on: nothing is
 /// swallowed in M0.
+///
+/// `@unchecked Sendable` is safe because `gesture` and `deadline` are touched
+/// only on the tap thread (the callback, the timer and `perform`'s blocks all
+/// run on its run loop), and `tap` and `runLoop` are written once in `start()`
+/// before it returns, ordered by the semaphore.
 final class EventTapThread: @unchecked Sendable {
-    // Confined to the tap thread after start().
     private var gesture: FnGesture
     private var deadline: CFRunLoopTimer?
     private let input: InputClock
     private let continuation: AsyncStream<KeyCommand>.Continuation
-    // Set once in start(), before the thread runs.
     private var tap: CFMachPort?
     private var runLoop: CFRunLoop?
     private let ownPID = Int64(getpid())
@@ -83,7 +86,10 @@ final class EventTapThread: @unchecked Sendable {
 
     private func feed(_ key: KeyInput) {
         let output = gesture.handle(key)
-        for command in output.commands { continuation.yield(command) }
+        for command in output.commands {
+            continuation.yield(command)
+            log.notice("fn gesture: \(String(describing: command), privacy: .public)")
+        }
         if let wakeAt = output.wakeAt { schedule(wakeAt) }
     }
 
@@ -135,12 +141,14 @@ extension KeyInput {
 }
 
 extension HostTime {
-    /// A CGEvent's timestamp is mach absolute time in ticks; HostTime is the same
-    /// clock in nanoseconds. An event posted without a time (stamp 0) or one
-    /// that reads as not yet happened or over a second old is taken as `now`.
-    init(eventTimestamp ticks: CGEventTimestamp, now: HostTime) {
-        let stamp = HostTime(nanoseconds: ticks * machTimebase.numer / machTimebase.denom)
-        self = stamp <= now && now.duration(since: stamp) < .seconds(1) ? stamp : now
+    /// A CGEvent's timestamp on the HostTime clock. An event posted without a
+    /// time (stamp 0), or one that reads as not yet happened or over a second
+    /// old, is taken as `now`.
+    init(eventTimestamp stamp: CGEventTimestamp, now: HostTime) {
+        // TODO(#53 live check): the header says "roughly nanoseconds"; keep whichever reading the live log proves.
+        let readings = [HostTime(nanoseconds: stamp),
+                        HostTime(nanoseconds: stamp * machTimebase.numer / machTimebase.denom)]
+        self = readings.first { $0 <= now && now.duration(since: $0) < .seconds(1) } ?? now
     }
 }
 
