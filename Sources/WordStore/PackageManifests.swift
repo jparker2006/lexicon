@@ -1,12 +1,15 @@
 import Foundation
 
 extension Manifest {
-    /// The name each `.package(...)` call gives, in the order written. Each call
-    /// has one name argument, so no Swift parser: comments go first, which keeps a
-    /// commented-out call out. `.product(package:)` never matches `.package(`.
+    /// The name each `.package(...)` call gives, in the order written. No Swift parser:
+    /// comments go first, which keeps a commented-out call out. An argument may be a call
+    /// itself, as in `.exact("1.0.0")`, so one level of parentheses is matched.
+    /// `.product(package:)` never matches `.package(`.
     static func swiftPackage(_ text: String) -> [String] {
         var names: [String] = []
-        for call in groups(of: #"\.package\(((?:"[^"\n]*"|[^"()])*)\)"#, in: withoutComments(text)) {
+        // A string matches whole, so a parenthesis inside one does not end the call.
+        let pattern = #"\.package\(((?:"[^"\n]*"|\((?:"[^"\n]*"|[^"()])*\)|[^"()])*)\)"#
+        for call in groups(of: pattern, in: withoutComments(text)) {
             if let name = swiftPackageName(call[0]) { names.append(name) }
         }
         return names

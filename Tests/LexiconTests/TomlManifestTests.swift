@@ -188,7 +188,7 @@ struct TomlManifestTests {
     @Test func pyprojectProjectDependenciesOnOneLine() {
         let text = #"""
             [build-system]
-            requires = ["setuptools>=61", "wheel"]
+            requires = ["zorbstand-build>=61", "wheelish"]
 
             [project]
             name = "zorblax"
@@ -205,8 +205,8 @@ struct TomlManifestTests {
             [project]
             name = "zorblax"
             dependencies = [
-                "fastapi[standard]>=0.1",  # a comment with ] and [
-                'pandas ; python_version<"3.9"',
+                "glorp-api[standard]>=0.1",  # a comment with ] and [
+                'zorb-frame ; python_version<"3.9"',
                 "foo @ git+https://example.com/foo.git",
                 "bar~=2.0 ; sys_platform == 'linux'",
                 "baz (>=1.0)",
@@ -217,38 +217,56 @@ struct TomlManifestTests {
             ]
             """#
         #expect(pyprojectNames(text) == [
-            "fastapi", "pandas", "foo", "bar", "baz", "qux", "quux", "ni-ce_name.x", "Mixed_Case.Name",
+            "glorp-api", "zorb-frame", "foo", "bar", "baz", "qux", "quux", "ni-ce_name.x", "Mixed_Case.Name",
         ])
+    }
+
+    @Test func pyprojectURLsAndPathsGiveNoName() {
+        let text = #"""
+            [project]
+            name = "zorblax"
+            dependencies = [
+                "git+https://github.com/zorblax/plimber.git",
+                "https://e.com/p.tar.gz",
+                "vendor/flimflam",
+                "./local",
+                "snarlet @ git+https://x/y.git",
+                "flimflam>=1",
+                "wobblet[extra]",
+                "gribble ; python_version<'3.9'",
+            ]
+            """#
+        #expect(pyprojectNames(text) == ["snarlet", "flimflam", "wobblet", "gribble"])
     }
 
     @Test func pyprojectOptionalAndGroupDependencies() {
         let text = #"""
             [project.optional-dependencies]
-            cron = ["croniter>=1"]
+            cron = ["snarl-cron>=1"]
             web = [
-              "uvicorn",
+              "flimco-serve",
             ]
 
             [dependency-groups]
-            dev = ["pytest", { include-group = "lint" }]
-            lint = ["ruff"]
+            dev = ["wobble-test", { include-group = "lint" }]
+            lint = ["gribble-lint"]
 
             [tool.pdm.dev-dependencies]
-            test = ["hypothesis"]
+            test = ["quibble-check"]
             """#
-        #expect(pyprojectNames(text) == ["croniter", "uvicorn", "pytest", "ruff", "hypothesis"])
+        #expect(pyprojectNames(text) == ["snarl-cron", "flimco-serve", "wobble-test", "gribble-lint", "quibble-check"])
     }
 
     @Test func pyprojectUvDevDependencies() {
         let text = #"""
             [tool.uv]
-            dev-dependencies = ["pytest-cov", "mypy"]
+            dev-dependencies = ["zorb-cov", "plimber-types"]
             managed = true
 
             [tool.uv.sources]
             flimflam-rs = { git = "https://example.com/flimflam-rs" }
             """#
-        #expect(pyprojectNames(text) == ["pytest-cov", "mypy"])
+        #expect(pyprojectNames(text) == ["zorb-cov", "plimber-types"])
     }
 
     @Test func poetryDependenciesSkipPython() {
@@ -258,24 +276,42 @@ struct TomlManifestTests {
 
             [tool.poetry.dependencies]
             python = "^3.11"
-            requests = { version = "2.31", extras = [
+            glorp-http = { version = "2.31", extras = [
               "socks",
             ] }
-            tqdm = "4"
+            snarlet-bar = "4"
 
             [tool.poetry.dev-dependencies]
-            black = "24"
+            blorpo-fmt = "24"
 
             [tool.poetry.group.docs.dependencies]
-            sphinx = "7"
+            quibble-docs = "7"
             """#
-        #expect(pyprojectNames(text) == ["requests", "tqdm", "black", "sphinx"])
+        #expect(pyprojectNames(text) == ["glorp-http", "snarlet-bar", "blorpo-fmt", "quibble-docs"])
+    }
+
+    @Test func poetryPerPackageTablesGiveTheirPackage() {
+        let text = #"""
+            [tool.poetry.dependencies.glorp-http]
+            version = "2.31"
+            extras = ["socks"]
+
+            [tool.poetry.dependencies.python]
+            version = "^3.11"
+
+            [tool.poetry.dev-dependencies.zorbstand]
+            version = "3"
+
+            [tool.poetry.group.docs.dependencies.snarlet]
+            version = "7"
+            """#
+        #expect(pyprojectNames(text) == ["glorp-http", "zorbstand", "snarlet"])
     }
 
     @Test func pyprojectOwnNameAndBuildToolsAreNotDependencies() {
         let text = #"""
             [build-system]
-            requires = ["setuptools>=61", "wheel"]
+            requires = ["zorbstand-build>=61", "wheelish"]
 
             [project]
             name = "flimflam-rs"

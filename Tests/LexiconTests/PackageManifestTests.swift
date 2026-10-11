@@ -36,6 +36,23 @@ import Testing
     #expect(Manifest.dependencies(fileName: "Package.swift", text: text) == ["Frobnitz", "LocalThing", "Gremlin"])
 }
 
+@Test func swiftPackageNestedCallsGiveTheirName() {
+    let text = """
+        let package = Package(
+            name: "Glimmer",
+            dependencies: [
+                .package(url: "https://github.com/Zorblax/Plimber.git", .upToNextMajor(from: "2.0.0")),
+                .package(url: "https://github.com/flimflam/Grommet.git", .exact("1.0.0")),
+                .package(url: "https://github.com/Zorblax/Dingle.git", .branch("main")),
+                .package(url: "https://github.com/flimflam/Brattle.git", .revision("abc")),
+                .package(url: "https://github.com/Zorblax/Smorgle.git", "1.0.0"..<"2.0.0"),
+            ]
+        )
+        """
+    #expect(Manifest.dependencies(fileName: "Package.swift", text: text)
+        == ["Plimber", "Grommet", "Dingle", "Brattle", "Smorgle"])
+}
+
 @Test func swiftPackageMultiLineCallsCountAndCommentsDoNot() {
     let text = """
         let package = Package(
@@ -65,7 +82,7 @@ import Testing
                 .package(url: "https://github.com/flimflam/Spanning", from: "1.0.0"),
             ],
             targets: [
-                .target(name: "Gremlin", dependencies: [.product(name: "Gnome", package: "Spanning")]),
+                .target(name: "Gremlin", dependencies: [.product(name: "Gnarlet", package: "Spanning")]),
                 .binaryTarget(name: "Blob", url: "https://example.com/Blob.zip", checksum: "abc"),
                 .testTarget(name: "GlimmerTests", dependencies: ["Gremlin"]),
             ]
@@ -78,16 +95,16 @@ import Testing
     let text = """
         {
           "name": "glimmer-web",
-          "dependencies": { "zorblax-ui": "^1.2.0", "@supabase/supabase-js": "^2.0.0", "alpha-tool": "1.0.0" },
-          "devDependencies": { "@types/node": "^20.0.0", "flimflam-kit": "^3.0.0" },
+          "dependencies": { "zorblax-ui": "^1.2.0", "@flimco/flim-js": "^2.0.0", "alpha-tool": "1.0.0" },
+          "devDependencies": { "@types/glorp": "^20.0.0", "flimflam-kit": "^3.0.0" },
           "peerDependencies": { "snarl-peer": "*" },
-          "optionalDependencies": { "fsevents-lite": "^1.0.0" },
+          "optionalDependencies": { "zorb-lite": "^1.0.0" },
           "bundleDependencies": ["bundled-bits", 7]
         }
         """
     #expect(Manifest.dependencies(fileName: "package.json", text: text) == [
-        "@supabase/supabase-js", "alpha-tool", "zorblax-ui",
-        "flimflam-kit", "snarl-peer", "fsevents-lite", "bundled-bits",
+        "@flimco/flim-js", "alpha-tool", "zorblax-ui",
+        "flimflam-kit", "snarl-peer", "zorb-lite", "bundled-bits",
     ])
 }
 
@@ -96,7 +113,7 @@ import Testing
         {
           "name": "glimmer-web",
           "version": "1.0.0",
-          "scripts": { "build-all": "tsc && vite build" },
+          "scripts": { "build-all": "zorb-check && glorp build" },
           "bin": { "glimmer-cli": "./bin/cli.js" },
           "workspaces": ["packages/zorblax-core"],
           "dependencies": {

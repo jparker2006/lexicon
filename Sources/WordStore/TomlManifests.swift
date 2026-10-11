@@ -44,6 +44,9 @@ extension Manifest {
             } else if isPoetryDependencies(path) {
                 // Poetry's keys are the names themselves; `python` is the interpreter, not a package.
                 for pair in table.pairs where pair.key != ["python"] { names.append(pair.key[0]) }
+            } else if let package = poetryPackageTable(path), package != "python" {
+                // A table per package names it in its header; body keys such as `version` name nothing.
+                names.append(package)
             }
         }
         return names.filter { own == nil || pep503($0) != own }
@@ -84,13 +87,18 @@ extension Manifest {
         }
     }
 
-    /// The project name at the front of a requirement: `fastapi[standard]>=0.1` is `fastapi`.
+    /// The project name at the front of a requirement: `glorp-api[standard]>=0.1` is `glorp-api`.
     /// The name stops at extras, specifiers, markers, `@` and spaces, and keeps its spelling.
+    /// A URL or path has no name to read, so it gives nothing: `git+https://...` would give `git`.
     private static func pep508Name(_ requirement: String) -> String {
-        let name = requirement.trimmingCharacters(in: .whitespaces).prefix { character in
+        let text = requirement.trimmingCharacters(in: .whitespaces)
+        let name = text.prefix { character in
             (character.isASCII && (character.isLetter || character.isNumber)) || ".-_".contains(character)
         }
         guard let first = name.first, first.isLetter || first.isNumber else { return "" }
+        // The name is followed by the end, or by the start of extras, a specifier, a marker or `@`.
+        let next = text.dropFirst(name.count).first { !$0.isWhitespace }
+        if let next, !"[<>=!~;@(,".contains(next) { return "" }
         return String(name)
     }
 
@@ -98,6 +106,18 @@ extension Manifest {
     private static func isPoetryDependencies(_ path: [String]) -> Bool {
         path == ["tool", "poetry", "dependencies"] || path == ["tool", "poetry", "dev-dependencies"]
             || (path.count == 5 && path.starts(with: ["tool", "poetry", "group"]) && path[4] == "dependencies")
+    }
+
+    /// The package a per-package Poetry table names: `[tool.poetry.dependencies.foo]`, its dev
+    /// table, or `[tool.poetry.group.<name>.dependencies.foo]`. Nil for any other table.
+    private static func poetryPackageTable(_ path: [String]) -> String? {
+        let direct = path.count == 4 && path.starts(with: ["tool", "poetry"])
+            && (path[2] == "dependencies" || path[2] == "dev-dependencies")
+        if direct { return path[3] }
+        if path.count == 6 && path.starts(with: ["tool", "poetry", "group"]) && path[4] == "dependencies" {
+            return path[5]
+        }
+        return nil
     }
 
     /// PEP 503 spelling, so that comparing names ignores case and reads `_` and `.` as `-`.
