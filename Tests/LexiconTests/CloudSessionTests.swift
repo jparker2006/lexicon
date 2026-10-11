@@ -192,6 +192,28 @@ private func pcm(_ index: Int) -> PCMChunk {
     #expect(clock.now.offset == .zero)
 }
 
+@Test(.timeLimit(.minutes(1))) func aCloudThatHeardNothingHandsOverToLocalWords() async throws {
+    let clock = TestClock()
+    let cloud = ScriptedCloud(clock: clock, script: [Reply(cue: .afterFinalize(.zero), message: .end)])
+    let engine = SpeechEngine(local: ScriptedTranscriber(text: "Local text."), cloud: cloud.link, clock: clock)
+    let plan = SpeechPlan.make(preferences: cloudPreferences, access: try grantedAccess(cloudPreferences), terms: [])
+    let (feed, input) = AudioFeed.makeStream()
+    let attempt = await engine.begin(feed: feed, plan: plan)
+
+    input.yield(pcm(0))
+    input.finish()
+    let outcome = await attempt.finish(AudioClip(samples: [1, 2, 3]))
+
+    guard case .text(let heard) = outcome else {
+        Issue.record("expected text, got \(outcome)")
+        return
+    }
+    #expect(heard.model == .local(.parakeetUnified))
+    #expect(heard.text == "Local text.")
+    #expect(heard.attempts.first { $0.model == .cloud(.museVoice) }?.result == .failed)
+    #expect(clock.now.offset == .zero)
+}
+
 @Test(.timeLimit(.minutes(1))) func withNoLocalModelTheCloudWaitsPastTheDeadline() async throws {
     var preferences = cloudPreferences
     preferences.localModel = nil

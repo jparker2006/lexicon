@@ -86,11 +86,17 @@ final class CloudSession: Sendable {
                 group.addTask {
                     do {
                         // Terms are text leaving the Mac: one that looks like a key stays home.
+                        // Checked before every send, not only when the group is cancelled: once
+                        // access is revoked, not one more byte leaves.
                         let terms = terms.filter { !SecretGuard.matches($0.text) }
+                        guard access.revoked == nil else { return .sent }
                         if let start = provider.sessionStart(terms: terms) { try await socket.send(start) }
-                        for await chunk in audio { try await socket.send(provider.audio(chunk)) }
+                        for await chunk in audio {
+                            guard access.revoked == nil else { return .sent }
+                            try await socket.send(provider.audio(chunk))
+                        }
                         // A cancelled iteration also ends the loop; that is not the end of the recording.
-                        guard !Task.isCancelled else { return .sent }
+                        guard !Task.isCancelled, access.revoked == nil else { return .sent }
                         finalizing.sent.store(true, ordering: .releasing)
                         try await socket.send(provider.finalize())
                         return .sent
@@ -115,8 +121,9 @@ final class CloudSession: Sendable {
                                 segments.yield(SpeechSegment(text: text, isFinal: true))
                             case .sessionEnded:
                                 return .serverEnded(finals)
-                            case .error(let message):
-                                return .ended(.failed("provider: \(message)"))
+                            case .error:
+                                // Not the provider's own words: an auth error can echo the key.
+                                return .ended(.failed("provider error"))
                             case .ignore:
                                 continue
                             }

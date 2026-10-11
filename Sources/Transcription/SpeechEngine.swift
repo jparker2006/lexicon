@@ -78,7 +78,7 @@ public struct SpeechPlan: Sendable {
     let residency: ResidencyPolicy
 
     /// - `forcing`: the Retry model picker. A cloud model in Private mode yields
-    ///   a plan with no engine, which finishes as `.unavailable(.privateMode)`.
+    ///   a plan with no engine, which waits as `.unavailable(.noModel)`.
     ///
     /// No `access` (Private mode, an always-private app) or no cloud model: local only.
     public static func make(preferences: Preferences, access: CloudAccess?, terms: [Term],
@@ -297,11 +297,17 @@ final class AttemptCore: Sendable {
         var localState: RacePolicy.State? = local == nil ? nil : .pending
         var localFailure: SpeechUnavailable?
         var cloudLatency: Duration?, localLatency: Duration?
+        var cloudHeardNothing = false
         var deadlinePassed = false
         var decision = plan.race.decide(cloud: cloudState, local: localState, deadlinePassed: false)
         if decision == .wait {
             for await event in events {
                 switch event {
+                case .cloud(.text(let text)) where !text.contains(where: { !$0.isWhitespace }):
+                    // No words is no answer: local may have heard what the cloud missed.
+                    cloudState = .failed
+                    cloudError = "heard nothing"
+                    cloudHeardNothing = true
                 case .cloud(.text(let text)):
                     cloudState = .done(text)
                     cloudLatency = stopped.duration(to: .now)
@@ -363,6 +369,7 @@ final class AttemptCore: Sendable {
         default:
             // A broken local model waits for a working one, whatever the cloud did.
             if let localFailure, case .localModelFailed = localFailure { return .unavailable(localFailure) }
+            if cloudHeardNothing { return .unavailable(.silence) }
             if cloud != nil {
                 return .unavailable(session == nil ? .offline : .providerError(cloudError ?? "failed"))
             }

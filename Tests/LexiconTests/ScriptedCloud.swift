@@ -184,6 +184,7 @@ private final class ScriptedSocket: CloudSocket {
                 }
             }
             timers.withLock { $0.append(timer) }
+            if cloud.log.closed { timer.cancel() }  // closed while this finalize was going out
         case .text(let text):
             if let terms = text.dropPrefix("start:") { cloud.update { $0.sessionStarts.append(terms) } }
         }
