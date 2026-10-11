@@ -29,12 +29,16 @@ public struct JevClient: Sendable {
 
     /// fn-down: open the TLS connection so a later decision skips the cold start
     /// (measured 359 ms cold vs 150 ms warm). A HEAD carries no text and isn't a
-    /// model call; URLSession keeps the connection for the next request.
+    /// model call; URLSession keeps the connection for the next request. The key
+    /// is read inside the task: a first Keychain read can wait on a prompt, and
+    /// the Conductor calls this on the fn-down path.
     public func prewarm(_ access: CloudAccess?) {
-        guard let key = access?.key(.jev) else { return }
-        let request = Self.request("HEAD", key: key, body: nil)
+        guard let access else { return }
         let session = session
-        Task { _ = try? await session.data(for: request) }
+        Task {
+            guard let key = access.key(.jev) else { return }
+            _ = try? await session.data(for: Self.request("HEAD", key: key, body: nil))
+        }
     }
 
     public func decide<Answer: Sendable>(

@@ -169,6 +169,18 @@ private let generous: Duration = .seconds(60)
     #expect(await deciding.value.source == .fallback(.privateMode))
 }
 
+@Test func aCallerThatGaveUpStillGetsTheFallbackWithoutWaiting() async {
+    let server = FakeJev { _ in nil }
+    let deciding = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return await JevClient(session: server.session).decide(question, access: server.access(), budget: generous,
+                                                                fallback: soundRanking)
+    }
+    let decision = await deciding.value
+    #expect(decision.answer == soundRanking)
+    guard case .fallback = decision.source else { Issue.record("answered after the caller gave up"); return }
+}
+
 @Test func aSecretInTheWordsSendsNothing() async {
     let server = FakeJev { _ in (200, answer(["c1": 1])) }
     let access = server.access()
