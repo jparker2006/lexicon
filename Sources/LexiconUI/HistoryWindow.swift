@@ -378,6 +378,8 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         Task {
             await system.history.flush()
             refresh()
+            // History refuses a pin with no audio file to keep (a crash lost it): say so.
+            if !row.pinned, reader.detail(row.id)?.row.pinned == false { cell(for: row.id)?.flash("No audio") }
         }
     }
 
@@ -512,6 +514,8 @@ final class RowCell: NSTableCellView {
     let more = RowCell.button(AccessibilityID.historyMore, symbol: "ellipsis.circle", label: "More")
     weak var owner: HistoryWindowController?
     var row: HistoryRow?
+    /// The note goes back to "Retrying…" after a flash while this is true.
+    private var retrying = false
     /// Which flash may hide the note: a newer one keeps it up.
     private var flashes = 0
 
@@ -564,6 +568,7 @@ final class RowCell: NSTableCellView {
     func show(_ row: HistoryRow?, actions: RowActions?, playing: Bool, retrying: Bool) {
         flashes += 1
         self.row = row
+        self.retrying = retrying
         note.stringValue = "Retrying…"
         note.isHidden = !retrying
         time.stringValue = row?.startedAt.formatted(date: .omitted, time: .shortened) ?? ""
@@ -587,7 +592,9 @@ final class RowCell: NSTableCellView {
         note.isHidden = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard let self, flashes == flash else { return }
-            note.isHidden = true
+            // A Copy mid-Retry: back to saying it is still retrying.
+            note.stringValue = "Retrying…"
+            note.isHidden = !retrying
         }
     }
 
