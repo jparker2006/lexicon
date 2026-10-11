@@ -12,7 +12,7 @@ private actor SlowLane: PasteLane {
         if unread { await withCheckedContinuation { waiting.append($0) } }
     }
 
-    func paste(_ text: String) -> PasteAttempt {
+    func paste(_ text: String, as kind: PasteKind) -> PasteAttempt {
         pasted.append(text)
         return .sent(ClipboardKeeper.PasteID(value: pasted.count))
     }
@@ -33,7 +33,7 @@ private actor Desk {
     func move(to snapshot: FocusSnapshot) { focus = snapshot }
 
     func insert(_ text: String, lane: SlowLane, target: FocusSnapshot) async -> PasteOrder.Result<FocusSnapshot> {
-        await PasteOrder.run(text, lane: lane) {
+        await PasteOrder.run(text, as: .dictation, lane: lane) {
             (InsertGuard.decide(target: target, focusNow: focus, inputSinceMark: false), focus)
         }
     }
@@ -65,13 +65,13 @@ private actor Desk {
 /// A lane on a Mac where Jake denied Lexicon "Paste from Other Apps".
 private struct DeniedLane: PasteLane {
     func idle() async {}
-    func paste(_ text: String) -> PasteAttempt { .denied }
+    func paste(_ text: String, as kind: PasteKind) -> PasteAttempt { .denied }
 }
 
 @Test func withClipboardAccessDeniedNothingIsPastedAndTheDictationWaitsForPasteLast() async {
     let desk = Desk()
     let fnUp = await desk.focus
-    let result = await PasteOrder.run("dictated", lane: DeniedLane()) {
+    let result = await PasteOrder.run("dictated", as: .dictation, lane: DeniedLane()) {
         (InsertGuard.decide(target: fnUp, focusNow: fnUp, inputSinceMark: false), ())
     }
     guard case .held(.clipboardDenied) = result else { Issue.record("not held: \(result)"); return }

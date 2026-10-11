@@ -25,12 +25,11 @@ import AppKit
         while let unread = latest, !keeper.isReleased(unread) { await keeper.released(unread) }
     }
 
-    func paste(_ text: String) -> PasteAttempt {
+    func paste(_ text: String, as kind: PasteKind) -> PasteAttempt {
         if let unread = latest, !keeper.isReleased(unread) { return .busy }
-        // A clipboard Lexicon can't read, it could never put back: Jake's call is no paste.
-        guard keeper.canSave else { return .denied }
+        guard let plan = keeper.plan(for: kind) else { return .denied }
         guard let code = PasteKey.current(), let chord = PasteKey.Chord(code) else { return .failed }
-        let id = keeper.put(text)
+        let id = keeper.put(text, restoring: plan == .restore)
         latest = id
         chord.post()
         schedule()

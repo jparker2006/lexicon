@@ -53,6 +53,14 @@ struct PasteboardContents: Sendable, Equatable {
 
     struct PasteID: Hashable, Sendable { let value: Int }
 
+    /// What happens to Jake's clipboard around a paste.
+    enum Plan: Equatable {
+        /// Saved before, put back after.
+        case restore
+        /// Not read and not put back: Lexicon may not read it (⌃⌘V only).
+        case keep
+    }
+
     enum Expiry: Equatable {
         /// No read in time: reported as not inserted. The text stays up until `missedHold`.
         case missed(PasteID)
@@ -70,6 +78,7 @@ struct PasteboardContents: Sendable, Equatable {
         let id: PasteID
         let changeCount: Int
         let putAt: Instant
+        let restores: Bool
         var lastRead: Instant?
         var missed = false
     }
@@ -103,22 +112,30 @@ struct PasteboardContents: Sendable, Equatable {
 
     /// Puts `text` up as a promise. Back to back pastes keep the clipboard Jake
     /// had before the first one: the pasteboard then still holds our own text.
-    func put(_ text: String) -> PasteID {
+    func put(_ text: String, restoring: Bool = true) -> PasteID {
         if let current {
             // Superseded. While the pasteboard still holds its text, `saved` stays Jake's.
             settle(current.id, receipt: current.lastRead != nil)
             self.current = current.changeCount == pasteboard.changeCount ? current : nil
         }
-        prefetch()
+        if restoring { prefetch() } else { saved = nil }
         serial += 1
         let id = PasteID(value: serial)
         let count = pasteboard.promise(text) { [weak self] in self?.didRead(id) }
-        current = Current(id: id, changeCount: count, putAt: now(), lastRead: nil)
+        current = Current(id: id, changeCount: count, putAt: now(), restores: restoring, lastRead: nil)
         return id
     }
 
     /// Lexicon can put Jake's clipboard back only if it can read it first.
     var canSave: Bool { pasteboard.readable }
+
+    /// nil means don't paste. With "Paste from Other Apps" denied, a Dictation
+    /// never replaces a clipboard Lexicon couldn't save; ⌃⌘V still pastes,
+    /// without the restore, because Jake asked for it (his calls on #54).
+    func plan(for kind: PasteKind) -> Plan? {
+        if canSave { return .restore }
+        return kind == .pasteLast ? .keep : nil
+    }
 
     /// When `expire` next has something to do.
     var deadline: Instant? {
@@ -173,7 +190,7 @@ struct PasteboardContents: Sendable, Equatable {
     private func restore(_ current: Current) {
         self.current = nil
         defer { saved = nil }
-        guard pasteboard.changeCount == current.changeCount, let saved else { return }
+        guard current.restores, pasteboard.changeCount == current.changeCount, let saved else { return }
         pasteboard.write(saved.contents)
     }
 

@@ -101,7 +101,15 @@ public actor TargetApp: TextDestination {
     }
 
     public func insert(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
-        let order = await PasteOrder.run(text, lane: Paster.shared) {
+        await paste(text, as: .dictation, at: target)
+    }
+
+    public func pasteLast(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
+        await paste(text, as: .pasteLast, at: target)
+    }
+
+    private func paste(_ text: String, as kind: PasteKind, at target: Target) async -> Delivery {
+        let order = await PasteOrder.run(text, as: kind, lane: Paster.shared) {
             let now = Focus.now()
             // The same element as at fn-up keeps fn-up's snapshot; anything else differs from it.
             let focusNow = now.map { now in

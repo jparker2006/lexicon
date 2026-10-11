@@ -165,12 +165,29 @@ import Testing
     #expect(keeper.isReleased(paste))
 }
 
-@MainActor @Test func aClipboardLexiconMayNotReadIsOneItCannotSave() {
+@MainActor @Test func withAccessDeniedADictationIsNotPastedButPasteLastIsWithoutARestore() {
     let board = FakePasteboard(), clock = FakeClock()
     let keeper = keeper(board, clock)
-    #expect(keeper.canSave)
+    #expect(keeper.plan(for: .dictation) == .restore)
+    #expect(keeper.plan(for: .pasteLast) == .restore)
     board.readable = false  // Jake denied "Paste from Other Apps"
-    #expect(!keeper.canSave)
+    #expect(keeper.plan(for: .dictation) == nil)
+    #expect(keeper.plan(for: .pasteLast) == .keep)  // he asked for it
+}
+
+@MainActor @Test func aPasteThatKeepsTheClipboardNeverReadsOrRestoresIt() async {
+    let board = FakePasteboard(), clock = FakeClock()
+    board.jakeCopies("unreadable to Lexicon")
+    board.readable = false
+    let keeper = keeper(board, clock)
+
+    let paste = keeper.put("newest Dictation", restoring: false)
+    _ = clock.at(20)
+    #expect(board.targetReads() == "newest Dictation")
+    #expect(await keeper.receipt(paste))
+    #expect(keeper.expire(at: clock.at(220)) == .settled(paste))
+    #expect(board.showing == "newest Dictation")
+    #expect(board.contentsReads == 0)
 }
 
 @MainActor @Test func aReadAheadNoPasteUsedIsDroppedAfter30s() {
