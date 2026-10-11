@@ -72,7 +72,14 @@ public actor Conductor<Destination: TextDestination> {
 
     // MARK: Commands
 
-    /// Every key command, one exhaustive switch. The single consumer of `Keyboard.commands`.
+    /// The key loop: every command from the fn tap, in order, for the life of the
+    /// app (`LexiconSystem.run` passes `Keyboard.commands`). One consumer, one
+    /// actor hop per command, so fn-down and fn-up are never reordered.
+    public func follow(_ commands: AsyncStream<KeyCommand>) async {
+        for await command in commands { handle(command) }
+    }
+
+    /// Every key command, one exhaustive switch.
     public func handle(_ command: KeyCommand) {
         switch command {
         case .dictationBegan(let at):

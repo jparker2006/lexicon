@@ -1,6 +1,7 @@
 import AppKit
 import os
 import LexiconDomain
+import KeyInput
 import LexiconCore
 import LexiconUI
 #if DEBUG
@@ -23,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var system: LexiconSystem?
     var statusItem: StatusItemController?
     var indicator: DictationIndicator?
+    var keyboard: Keyboard?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     #if DEBUG
     var testHooks: TestHookServer?
@@ -49,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = statusItem
         self.indicator = indicator
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
+        // TODO(#56): `LexiconSystem.live` starts the tap and `run()` hands its commands to `conductor.follow`.
+        keyboard = Self.startKeyboard(log: log)
         #if DEBUG
         testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator)
         #endif
@@ -83,6 +87,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "launch").notice("quitting")
         // TODO(#56): stop the recording Dictation as a normal stop; await history.flush() with a short cap.
+    }
+
+    /// The fn tap. Until #56 wires the Conductor, its commands go only to the
+    /// tap's own log (`log stream --predicate 'subsystem == "Lexicon" && category == "fn"'`).
+    static func startKeyboard(log: Logger) -> Keyboard? {
+        do {
+            let keyboard = try Keyboard.start(KeyboardConfig(), input: InputClock())
+            Task { for await _ in keyboard.commands {} }
+            let ms = LaunchClock.sinceProcessStart().map { Int(($0 * 1000).rounded()) } ?? -1
+            log.notice("fn tap up \(ms, privacy: .public) ms after process start")
+            return keyboard
+        } catch {
+            log.error("no fn tap: Accessibility is not granted")
+            return nil
+        }
     }
 
     /// SIGTERM ends the app through `terminate(_:)`, the same path as Quit, so
