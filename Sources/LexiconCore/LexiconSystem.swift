@@ -50,7 +50,6 @@ public final class LexiconSystem: Sendable {
     func route(_ message: InboxMessage) async {
         switch message {
         case .promptSubmitted(let prompt):
-            if let directory = prompt.workingDirectory { await lexicon.noteProject(URL(filePath: directory)) }
             await fixes.promptSubmitted(prompt)
         }
     }
