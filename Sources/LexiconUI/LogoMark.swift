@@ -8,22 +8,41 @@ import AppKit
 /// measured off the logo raster.
 @MainActor
 enum LogoMark {
-    /// A monochrome template image, so macOS tints it for light, dark and
-    /// highlighted menu bars.
-    static func templateImage(side: CGFloat = 18) -> NSImage {
-        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { bounds in
-            draw(in: bounds.insetBy(dx: 1, dy: 1))
+    /// The menu bar icon. With no color it is a monochrome template image, so
+    /// macOS tints it for light, dark and highlighted menu bars. A color draws it
+    /// in that color instead: the menu bar ignores tint on template images, so
+    /// active states can't be shown any other way. `open` 0...1 opens the mouth
+    /// with the voice; `badge` is an SF Symbol drawn to the right.
+    static func image(side: CGFloat = 18, open: CGFloat = 0, color: NSColor? = nil, badge: String? = nil,
+                      description: String = "Lexicon") -> NSImage {
+        let symbol = badge.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+                .applying(.init(paletteColors: [color ?? .black])))
+        let width = side + (symbol == nil ? 0 : 11)
+        let image = NSImage(size: NSSize(width: width, height: side), flipped: false) { _ in
+            (color ?? .black).setFill()
+            draw(in: NSRect(x: 0, y: 0, width: side, height: side).insetBy(dx: 1, dy: 1), open: open)
+            if let symbol {
+                let size = symbol.size
+                symbol.draw(in: NSRect(x: side + 1 + (10 - size.width) / 2, y: (side - size.height) / 2,
+                                       width: size.width, height: size.height))
+            }
             return true
         }
-        image.isTemplate = true
-        image.accessibilityDescription = "Lexicon"
+        image.isTemplate = color == nil
+        image.accessibilityDescription = description
         return image
     }
 
-    static func draw(in rect: NSRect) {
+    /// Fills with the current fill color.
+    static func draw(in rect: NSRect, open: CGFloat = 0) {
         let radius = min(rect.width, rect.height) / 2
         let center = NSPoint(x: rect.midX, y: rect.midY)
-        func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: center.x + x * radius, y: center.y + y * radius) }
+        // Opening stretches the mouth (and moves the tongue) up to 1.6 times taller about its middle.
+        let mouthMiddle: CGFloat = -0.185, stretch = 1 + 0.6 * min(1, max(0, open))
+        func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+            NSPoint(x: center.x + x * radius, y: center.y + (mouthMiddle + (y - mouthMiddle) * stretch) * radius)
+        }
 
         let mouth = NSBezierPath()
         mouth.move(to: p(-0.10, 0.11))
@@ -34,7 +53,6 @@ enum LogoMark {
         mouth.curve(to: p(-0.10, 0.11), controlPoint1: p(-0.27, 0.06), controlPoint2: p(-0.19, 0.11))
         mouth.close()
 
-        NSColor.black.setFill()
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: 2 * radius, height: 2 * radius))
             .addClip()

@@ -45,11 +45,13 @@ public struct Preferences: Sendable, Hashable, Codable {
     public var speechTerms: Int
     public var cleanupTerms: Int
     public var startAtLogin: Bool
+    /// The "Sounds on" toggle (#55): the start, stop, warning and error blips. On by default.
+    public var soundsOn: Bool
 
     public init(privacy: PrivacyMode, alwaysPrivateApps: Set<String>, cloudModel: CloudModel?, localModel: LocalModel?, microphoneUID: String?,
                 raceDeadline: Duration, localModelLinger: Duration, aiCleanup: Bool,
                 cleanupModel: CloudCleanupModel, cleanupDeadline: Duration, speechTerms: Int, cleanupTerms: Int,
-                startAtLogin: Bool) {
+                startAtLogin: Bool, soundsOn: Bool) {
         self.privacy = privacy
         self.alwaysPrivateApps = alwaysPrivateApps
         self.cloudModel = cloudModel
@@ -63,13 +65,14 @@ public struct Preferences: Sendable, Hashable, Codable {
         self.speechTerms = speechTerms
         self.cleanupTerms = cleanupTerms
         self.startAtLogin = startAtLogin
+        self.soundsOn = soundsOn
     }
 
     public static let defaults = Preferences(
         privacy: .standard, alwaysPrivateApps: [], cloudModel: nil, localModel: .parakeetUnified, microphoneUID: nil,
         raceDeadline: .milliseconds(300), localModelLinger: .seconds(600), aiCleanup: true,
         cleanupModel: .openRouterFast, cleanupDeadline: .milliseconds(450), speechTerms: 50, cleanupTerms: 200,
-        startAtLogin: true
+        startAtLogin: true, soundsOn: true
     )
 }
 
