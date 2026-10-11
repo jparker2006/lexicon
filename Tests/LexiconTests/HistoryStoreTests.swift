@@ -385,6 +385,19 @@ private func captured(_ store: HistoryStore, _ samples: [Int16], storage: AudioS
     #expect(await store.dictation(partial)?.pinned == false)
 }
 
+@Test func aPinNeedsTheAudioFileNotJustTheColumn() async throws {
+    // A crash can lose a file whose row still says onDisk; recovery marks it failed, audio missing.
+    let (store, _) = try makeStore()
+    let id = try begin(store)
+    try FileManager.default.removeItem(at: store.audioURL(for: id))
+    store.record(.failed(id, reason: "audio missing"))
+    store.record(.pinned(id, true))
+    await store.flush()
+
+    #expect(await store.dictation(id)?.audio == .onDisk)
+    #expect(await store.dictation(id)?.pinned == false)
+}
+
 @Test func aPinComesOff() async throws {
     let (store, _) = try makeStore()
     let id = try begin(store)

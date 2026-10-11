@@ -378,11 +378,12 @@ extension HistoryStore {
             if wroteChild { try Self.materializeFinalText(id, in: db) }
 
         case .pinned(_, let pinned):
-            // Pinning keeps audio for the Test set, so a row whose audio is partial or gone stays unpinned.
-            if pinned {
+            // Pinning keeps audio for the Test set, so a row whose audio is partial or gone
+            // stays unpinned. The column can say onDisk for a file a crash lost, so check both.
+            if pinned, FileManager.default.fileExists(atPath: audioURL(for: id).path(percentEncoded: false)) {
                 try db.execute("UPDATE dictation SET pinned = 1 WHERE id = ? AND audio_storage = ?",
                                [key, .text(AudioStorage.onDisk.rawValue)])
-            } else {
+            } else if !pinned {
                 try db.execute("UPDATE dictation SET pinned = 0 WHERE id = ?", [key])
             }
         }
