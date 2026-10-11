@@ -1,0 +1,156 @@
+import Foundation
+import Synchronization
+
+public enum PrivacyMode: String, Sendable, Codable, CaseIterable {
+    case standard
+    /// Nothing leaves the Mac (#5): no network at all from Lexicon, model
+    /// downloads and status checks included. Survives quit and reboot.
+    case `private`
+}
+
+/// Every user setting, as one value. Owned by `PreferencesStore` (LexiconCore),
+/// which is the only code that touches UserDefaults. The Conductor snapshots it
+/// once per Dictation and passes the values down, so a setting changed while
+/// Jake talks never changes the Dictation in flight (same rule as the pinned mic).
+public struct Preferences: Sendable, Hashable, Codable {
+    public var privacy: PrivacyMode
+    /// Bundle IDs that are always private (#5). Starts empty; Jake adds apps.
+    public var alwaysPrivateApps: Set<String>
+    public var cloudModel: CloudModel
+    public var localModel: LocalModel?
+    /// Core Audio device UID. nil means the built-in mic (#4). Also settable with
+    /// `--args -microphone <uid>` for the BlackHole head-to-head (#15).
+    public var microphoneUID: String?
+    /// Race deadline after fn-up before local text is used (#19 owns the value).
+    public var raceDeadline: Duration
+    /// Keep the local model resident this long after the last Dictation. Ignored
+    /// (always resident) while Private mode is on or the network is unreachable:
+    /// the rule lives in `Transcription/RacePolicy.swift` `ResidencyPolicy`.
+    public var localModelLinger: Duration
+    /// The "AI cleanup" toggle (#20), on by default. Off = rules-only cleanup and
+    /// nothing leaves the Mac for cleanup (Cleanup withholds `CloudAccess`).
+    public var aiCleanup: Bool
+    public var cleanupModel: CloudCleanupModel
+    /// How long a live Dictation's cleanup may wait for the LLM after the model
+    /// text arrives, before the rules-only text is typed (#20: 250 ms p95).
+    public var cleanupBudget: Duration
+    public var startAtLogin: Bool
+
+    public init(privacy: PrivacyMode, alwaysPrivateApps: Set<String>, cloudModel: CloudModel, localModel: LocalModel?, microphoneUID: String?,
+                raceDeadline: Duration, localModelLinger: Duration, aiCleanup: Bool,
+                cleanupModel: CloudCleanupModel, cleanupBudget: Duration, startAtLogin: Bool) {
+        self.privacy = privacy
+        self.alwaysPrivateApps = alwaysPrivateApps
+        self.cloudModel = cloudModel
+        self.localModel = localModel
+        self.microphoneUID = microphoneUID
+        self.raceDeadline = raceDeadline
+        self.localModelLinger = localModelLinger
+        self.aiCleanup = aiCleanup
+        self.cleanupModel = cleanupModel
+        self.cleanupBudget = cleanupBudget
+        self.startAtLogin = startAtLogin
+    }
+
+    public static let defaults = Preferences(
+        privacy: .standard, alwaysPrivateApps: [], cloudModel: .museVoice, localModel: .parakeetUnified, microphoneUID: nil,
+        raceDeadline: .milliseconds(800), localModelLinger: .seconds(600), aiCleanup: true,
+        cleanupModel: .openRouterFast, cleanupBudget: .milliseconds(250), startAtLogin: true
+    )
+}
+
+/// Which secret a cloud call needs. Derived from `CloudModel`, never hand-listed.
+public enum CredentialID: Hashable, Sendable {
+    case speech(CloudModel)
+    case jev
+    /// OpenRouter, for AI cleanup (one key for every `CloudCleanupModel`).
+    case cleanup
+    /// Keychain account name (service = bundle id).
+    public var account: String {
+        switch self {
+        case .speech(let m): "speech." + m.rawValue
+        case .jev: "jev"
+        case .cleanup: "cleanup.openrouter"
+        }
+    }
+}
+
+/// Why network access ended in the middle of a Dictation (#5).
+public enum AccessRevoked: String, Sendable, Codable, CaseIterable {
+    /// Jake turned Private mode on.
+    case privateModeOn
+    /// Focus moved into an always-private app.
+    case alwaysPrivateApp
+    /// The Secret guard matched text from this Dictation.
+    case secretFound
+}
+
+/// Permission to use the network, plus the keys to do it. The ONLY door to the
+/// network: speech, Cleanup's LLM, Jev and model downloads all take one.
+///
+/// Private mode is encoded as the ABSENCE of this value: the only constructor
+/// returns nil in Private mode or for an always-private app. A new cloud feature
+/// cannot forget to check Private mode, because it cannot be called without this.
+/// One value per Dictation, revocable mid-Dictation (#5): once revoked, every key
+/// lookup returns nil, speech sessions cut their stream, and the local model,
+/// already racing, finishes the text.
+public final class CloudAccess: Sendable {
+    private let lookup: @Sendable (CredentialID) -> String?
+    private let revocation = Mutex<AccessRevoked?>(nil)
+    private init(lookup: @escaping @Sendable (CredentialID) -> String?) { self.lookup = lookup }
+
+    /// The only constructor. Called by the Conductor once per Dictation (after the
+    /// active app is known) and by model install with `app: .unknown`.
+    public static func granted(by preferences: Preferences, app: AppContext,
+                               keys: @escaping @Sendable (CredentialID) -> String?) -> CloudAccess? {
+        guard preferences.privacy == .standard else { return nil }
+        if let id = app.bundleID, preferences.alwaysPrivateApps.contains(id) { return nil }
+        return CloudAccess(lookup: keys)
+    }
+
+    /// Key for a call that carries no Dictation text: the speech audio stream, a
+    /// model download. nil once revoked.
+    public func key(_ id: CredentialID) -> String? {
+        revocation.withLock { $0 } == nil ? lookup(id) : nil
+    }
+
+    /// Key for a call that sends `text` (Cleanup's LLM, Jev). Runs the Secret guard
+    /// first: a match revokes this access for the rest of the Dictation and
+    /// returns nil, so the text never leaves.
+    public func key(_ id: CredentialID, sending text: String) -> String? {
+        if SecretGuard.matches(text) {
+            revoke(.secretFound)
+            return nil
+        }
+        return key(id)
+    }
+
+    /// Ends network use for the rest of this Dictation. Idempotent: the first reason wins.
+    public func revoke(_ reason: AccessRevoked) {
+        // TODO: set once under the lock; resume every `whenRevoked()` waiter.
+        fatalError("not implemented")
+    }
+
+    public var revoked: AccessRevoked? { revocation.withLock { $0 } }
+
+    /// Resumes when access is revoked. A speech session races this against its
+    /// socket and closes the stream the instant it fires.
+    public func whenRevoked() async -> AccessRevoked { fatalError("not implemented") }
+}
+
+/// The Secret guard (#5): a local check, microseconds, that finds API keys,
+/// tokens, passwords and similar in text before it leaves the Mac. A match keeps
+/// the whole Dictation local-only (`CloudAccess.key(_:sending:)` revokes).
+///
+/// Limit: speech streams audio while Jake talks, so a spoken secret reaches the
+/// speech provider before any text exists to check. The guard protects every
+/// text call and cuts the rest of the stream (Transcription checks each finalized
+/// segment); it cannot recall audio already sent.
+public enum SecretGuard {
+    public static func matches(_ text: String) -> Bool {
+        // TODO: known key prefixes (sk-, ghp_, xox, AKIA, ...), JWT shape, long
+        // high-entropy tokens, "password is ..." phrases. Tune on the Test set:
+        // a false positive costs Cleanup quality, a false negative leaks.
+        fatalError("not implemented")
+    }
+}
