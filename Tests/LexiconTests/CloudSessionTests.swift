@@ -422,3 +422,29 @@ private actor SlowModel: LocalTranscriber {
         waiters = []
     }
 }
+
+@Test(.timeLimit(.minutes(1))) func aDictationWaitingOnTheNetworkTriesAgainWhenItReturns() async throws {
+    let clock = TestClock()
+    let cloud = ScriptedCloud(clock: clock, script: [], networkUp: false)
+    let engine = SpeechEngine(local: nil, cloud: cloud.link, clock: clock)
+
+    let waiting = Task { await engine.untilRetry(after: .offline) }
+    await clock.waitForSleep(endingAt: SpeechEngine.retryInterval)
+    cloud.path.update(isUp: true)
+    await waiting.value
+
+    #expect(clock.now.offset == .zero)  // woken by the network, not the retry timer
+}
+
+@Test(.timeLimit(.minutes(1))) func aProviderErrorWithTheNetworkUpWaitsTheFullInterval() async throws {
+    let clock = TestClock()
+    let cloud = ScriptedCloud(clock: clock, script: [])
+    let engine = SpeechEngine(local: nil, cloud: cloud.link, clock: clock)
+
+    let waiting = Task { await engine.untilRetry(after: .providerError("provider error")) }
+    await clock.waitForSleep(endingAt: SpeechEngine.retryInterval)
+    await clock.advance(by: SpeechEngine.retryInterval)
+    await waiting.value
+
+    #expect(clock.now.offset == SpeechEngine.retryInterval)  // an up path is no reason to retry at once
+}
