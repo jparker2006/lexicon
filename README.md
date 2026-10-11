@@ -41,4 +41,4 @@ security add-generic-password -U -s dev.jparker.lexicon.dev -a cleanup.openroute
 | OpenRouter (AI cleanup) | `cleanup.openrouter` | `LEXICON_KEY_CLEANUP_OPENROUTER` |
 | TypeSafe (Jev) | `jev` | `LEXICON_KEY_JEV` |
 
-Lexicon reads each key once and keeps it in memory, so quit and reopen the app after adding one. The first time it reads a key added this way, macOS asks for your login password: choose Always Allow. `lexicon-eval` reads the environment variables instead. Lexicon has no analytics or crash reporting, and never logs a key or Dictation text.
+Lexicon reads each key once, on the first cloud call that needs it (from cloud speech in M2), and keeps it in memory, so quit and reopen the app after adding one. The first time it reads a key added this way, macOS asks for your login password: choose Always Allow. `lexicon-eval` reads the environment variables instead. Lexicon has no analytics or crash reporting, and never logs a key or Dictation text.
