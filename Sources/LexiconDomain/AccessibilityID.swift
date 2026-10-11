@@ -22,4 +22,7 @@ public enum AccessibilityID {
     public static let statusItem = "lexicon.statusItem"
     /// The recording pill's panel.
     public static let indicator = "lexicon.indicator"
+    /// First-run setup: its window, and the box the "Try it" step's Dictation lands in.
+    public static let setupWindow = "lexicon.setup"
+    public static let setupTryField = "lexicon.setup.tryField"
 }
