@@ -6,20 +6,40 @@ private let fakeKeys: @Sendable (CredentialID) -> String? = { "fake-key-for-" + 
 private let fakeSecret = "ghp_" + "aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY2zA4"
 
 private func access(_ preferences: Preferences = .defaults, app: AppContext = .unknown) throws -> CloudAccess {
-    try #require(CloudAccess.granted(by: preferences, app: app, keys: fakeKeys))
+    try #require(CloudAccess.granted(by: preferences, for: .app(app), keys: fakeKeys))
 }
 
 @Test func privateModeAndAlwaysPrivateAppsGetNoAccess() throws {
     var privateMode = Preferences.defaults
     privateMode.privacy = .private
-    #expect(CloudAccess.granted(by: privateMode, app: .unknown, keys: fakeKeys) == nil)
+    #expect(CloudAccess.granted(by: privateMode, for: .app(.unknown), keys: fakeKeys) == nil)
 
     var alwaysPrivate = Preferences.defaults
     alwaysPrivate.alwaysPrivateApps = ["com.example.bank"]
     let bank = AppContext(bundleID: "com.example.bank", appName: nil, windowTitle: nil, workingDirectory: nil)
     let editor = AppContext(bundleID: "com.example.editor", appName: nil, windowTitle: nil, workingDirectory: nil)
-    #expect(CloudAccess.granted(by: alwaysPrivate, app: bank, keys: fakeKeys) == nil)
+    #expect(CloudAccess.granted(by: alwaysPrivate, for: .app(bank), keys: fakeKeys) == nil)
     #expect(try access(alwaysPrivate, app: editor).key(.jev) == "fake-key-for-jev")
+}
+
+@Test func anAppLexiconCannotNameFailsClosedOnceTheListHasAnyApp() throws {
+    var alwaysPrivate = Preferences.defaults
+    alwaysPrivate.alwaysPrivateApps = ["com.example.bank"]
+    #expect(CloudAccess.granted(by: alwaysPrivate, for: .app(.unknown), keys: fakeKeys) == nil)
+    #expect(alwaysPrivate.cloudDenied(for: .app(.unknown)) == .alwaysPrivateApp)
+    // With an empty list no app is private, so an unnamed one is no risk.
+    #expect(Preferences.defaults.cloudDenied(for: .app(.unknown)) == nil)
+}
+
+@Test func modelInstallIsStoppedByPrivateModeButNotByTheAppList() throws {
+    var alwaysPrivate = Preferences.defaults
+    alwaysPrivate.alwaysPrivateApps = ["com.example.bank"]
+    #expect(CloudAccess.granted(by: alwaysPrivate, for: .modelInstall, keys: fakeKeys) != nil)
+
+    var privateMode = Preferences.defaults
+    privateMode.privacy = .private
+    #expect(CloudAccess.granted(by: privateMode, for: .modelInstall, keys: fakeKeys) == nil)
+    #expect(privateMode.cloudDenied(for: .modelInstall) == .privateModeOn)
 }
 
 @Test func aTextCallWithASecretGetsNoKeyAndLaterCallsGetNothing() throws {

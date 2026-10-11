@@ -106,7 +106,7 @@ public final class Secrets: Sendable {
 
     public init(_ source: Source) { self.source = source }
 
-    /// Handed to `CloudAccess.granted(by:app:keys:)`. Called only when a cloud
+    /// Handed to `CloudAccess.granted(by:for:keys:)`. Called only when a cloud
     /// call needs its key: the speech stream asks at fn-down, when it opens.
     public var lookup: @Sendable (CredentialID) -> String? {
         switch source {
