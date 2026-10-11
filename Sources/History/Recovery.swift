@@ -41,17 +41,22 @@ extension HistoryStore {
 
     private func recover(in db: Database) throws -> [UnfinishedDictation] {
         let opened = openedAt.unixMs
-        // Every audio file an earlier run made. Its name is its Dictation's id.
-        let earlier = try FileManager.default
+        // Every audio file an earlier run made. Its name is its Dictation's id. A file
+        // whose birth date can't be read might be this run's: only an earlier row claims it.
+        var created: [DictationID: Date] = [:]
+        var undated: Set<DictationID> = []
+        let listed = try FileManager.default
             .contentsOfDirectory(at: audioFolder, includingPropertiesForKeys: [.creationDateKey])
-            .filter { $0.pathExtension == "caf" }
-            .compactMap { url -> (DictationID, Date)? in
-                guard let id = DictationID(column: url.deletingPathExtension().lastPathComponent) else { return nil }
-                let created = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-                return created.unixMs < opened ? (id, created) : nil
+        for url in listed where url.pathExtension == "caf" {
+            guard let id = DictationID(column: url.deletingPathExtension().lastPathComponent) else { continue }
+            if let date = try? url.resourceValues(forKeys: [.creationDateKey]).creationDate {
+                if date.unixMs < opened { created[id] = date }
+            } else {
+                undated.insert(id)
             }
-        let created = Dictionary(earlier, uniquingKeysWith: { first, _ in first })
-        let fileIDs = String(decoding: try JSONEncoder().encode(created.keys.map(\.description)), as: UTF8.self)
+        }
+        let fileIDs = String(decoding: try JSONEncoder().encode((Set(created.keys).union(undated)).map(\.description)),
+                             as: UTF8.self)
 
         // The rows recovery may act on: unfinished, half deleted, or owning a file.
         let found = try db.query("""
@@ -74,7 +79,8 @@ extension HistoryStore {
         let parsed = Set(rows.map(\.id))
         let settled = Set(rows.filter { $0.status.isTerminal && $0.audio == .onDisk }.map(\.id))
         var files: [DictationID: RecoveryPlan.FileState] = [:]
-        for id in created.keys where !settled.contains(id) && (parsed.contains(id) || !owned.contains(id)) {
+        let candidates = Set(created.keys).union(undated.filter(parsed.contains))
+        for id in candidates where !settled.contains(id) && (parsed.contains(id) || !owned.contains(id)) {
             files[id] = switch CAFFile.state(of: audioURL(for: id)) {
             case .open: .open
             case .closed: .closed
