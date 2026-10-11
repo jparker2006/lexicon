@@ -68,7 +68,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 | `LexiconDomain` | Shared values only: `DictationID`, `DictationStatus` (with `canMove`, `isInFlight`, `needsAudio`), `TextVersions`, `SpeechSegment`, `InsertionReceipt`, `Term`/`Rule`/`RuleSet`, `Preferences`, `CloudAccess`, `AppPaths` (root only) | Foundation |
 | `SQLiteKit` | One connection to system SQLite, WAL, migrations | SQLite3 |
 | `KeyInput` | Event tap thread, `FnGesture`, hotkeys, `InputClock` (single writer) | Domain |
-| `AudioCapture` | Engine, sink node, ring, converter, CAF writer, fsync, device rebuild, adaptive tail | Domain |
+| `AudioCapture` | Engine, sink node, ring, converter, CAF writer, `F_FULLFSYNC` every 1 s and at stop, device rebuild, adaptive tail | Domain |
 | `Transcription` | One adapter file per cloud provider (Muse from M2), sockets, keywords, finalize, retry, local race, residency, reachability | Domain |
 | `LocalParakeet` | The FluidAudio adapter (Parakeet Unified; Ultra or v3 as the multilingual pick), model install and compile. No word boosting; Rules in code instead. The only FluidAudio importer | Domain, Transcription |
 | `Cleanup` | Rules, the AI cleanup stage (OpenRouter, from M3), the structural check, the rules-only fallback | Domain |
@@ -103,20 +103,20 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 
 ### One push-to-talk Dictation
 
-1. fn-down. The tap callback (`KeyInput/EventTap.swift`) feeds `FnGesture` (hold 0.30 s, double-tap within 0.25 s, 20-minute cap), which yields `.dictationBegan`. fn passes through.
+1. fn-down. The tap callback (`KeyInput/EventTap.swift`) feeds `FnGesture` (hold 0.30 s, second fn-down within 0.25 s of the first fn-up, 20-minute cap), which yields `.dictationBegan`. fn passes through.
 2. The Conductor starts the capture first (`AudioCapture/Recorder.swift`), so audio is in the page cache before anything else can fail. Then it records `.began` (the row exists from the start), takes the Lexicon Terms, opens the cloud speech socket from M2 (TLS overlaps speech), starts a `CleanupSession` on the attempt's finished segments, loads the local model if it isn't resident, and starts a `beginActivity(.userInitiated, .latencyCritical)` so App Nap can't slow the Dictation.
 3. While Jake talks: from M2, chunks stream to the cloud provider; finished sentences go through Rules and, from M3, AI cleanup as they arrive.
 4. fn-up. In parallel: AppText captures the target field and an input mark; the capture keeps the adaptive tail (stop on silence, cap 200 ms).
 5. `attempt.finish` sends finalize and races local. The cloud final wins only if it arrives within 300 ms after recording stops; otherwise local wins. Offline, Private mode, no key or a cloud error go straight to local. In M0 and M1 there is no cloud, so local text is the outcome.
 6. `cleanup.finish` cleans the last sentence (and may revise the one before), runs the structural check against the Rules output, and returns the AI cleanup text or the rules-only text with the reason. The Cleanup deadline starts at about 450 ms after the speech final, tuned on the Test set so total lag stays within the pass mark; a miss types the rules-only text. Until M3, Cleanup is rules only.
-7. `.textReady` is queued for History (status `ready`), then `InsertGuard.decide` checks same app, same field, no input since the mark, and AppText pastes (pasteboard promise, Cmd-V). Text that fails the check, or has nowhere to go, is not typed: it waits in History for paste-last, with a notice. The clipboard restore, fsync, the `.delivered` write, Fix watching and Jev all run after, off the path.
+7. `.textReady` is queued for History (status `ready`), then `InsertGuard.decide` checks same app, same field, no input since the mark (where an app's field can't be detected reliably: same app and under 5 s), and AppText pastes (pasteboard promise, Cmd-V). Text that fails the check, or has nowhere to go, is not typed: it waits in History for paste-last, with a notice. The clipboard restore, fsync, the `.delivered` write, Fix watching and Jev all run after, off the path.
 
 ### Concurrency
 
 | Where | Runs |
 |---|---|
 | Core Audio IO thread | Sink block: memcpy into the SPSC ring, nothing else |
-| Audio writer queue | Drain, convert to 16 kHz, write CAF, fsync each 1 s, yield chunks |
+| Audio writer queue | Drain, convert to 16 kHz, write CAF, `F_FULLFSYNC` each 1 s and at stop, yield chunks |
 | Event tap thread (own run loop) | Tap callback in microseconds, `FnGesture`, `InputClock` |
 | AX thread (own run loop, custom executor) | `TargetApp`: Accessibility calls with timeouts, observers, Cmd-V |
 | Main actor | AppKit, the History window's read-only connection, pasteboard promise callbacks |
@@ -129,7 +129,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 
 - One `CloudAccess` per Dictation, granted at fn-down once the active app is known. Turning Private mode on, or focus moving into an always-private app, revokes it mid-Dictation: every key lookup returns nil, the speech stream is cut at once, and the local model, already racing, finishes the text.
 - The Secret guard is a pure check in `LexiconDomain`. Calls that send text get their key through `access.key(_:sending:)`, which runs the guard first; a match revokes access for the rest of the Dictation. Transcription also checks each finalized segment, so a secret spoken early cuts the rest of the stream. Limit: audio streams while Jake talks, so a spoken secret has already reached the speech provider before any text exists. The guard protects text calls and later audio, not audio already sent; Private mode is the answer for that.
-- The most each service sees in normal mode: Meta Muse gets the audio plus up to 50 Lexicon words; the cleanup model gets the Dictation text plus up to 200 (OpenRouter with `zdr: true`); Jev gets only the few words around a Re-speak or Hand fix target plus candidates. In Private mode and offline: local Parakeet, rules-only Cleanup, Re-speak by sound matching alone. No on-device LLM for now (Apple Foundation Models doesn't qualify).
+- The most each service sees in normal mode: Meta Muse gets the audio plus up to 50 Lexicon words; the cleanup model gets the Dictation text plus up to 200 (OpenRouter with `zdr: true`); Jev gets only the few words around a Re-speak or Hand fix target plus candidates. In Private mode and offline: local Parakeet, rules-only Cleanup, Re-speak by sound matching alone, Hand fixes without Jev. No on-device LLM for now (Apple Foundation Models doesn't qualify).
 - fn-down while macOS secure input is on (a password field) starts nothing.
 - No analytics or crash reporting; Dictation text and keys are never logged. Keys are read from the Keychain once and kept in memory.
 
@@ -154,7 +154,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 | History window, click to first rows | 100 ms or less at p95 (AppKit measured 52 ms cold) |
 | fn-down to first audio | 60 ms or less, logged per Dictation |
 | Lexicon's own work, fn-up to Cmd-V | 10 ms or less |
-| fn-up to text on screen | p50 700 ms or less, p95 1 s or less (the pass mark) |
+| fn-up to text on screen | p50 700 ms or less, p95 1 s or less (the lag part of the pass mark) |
 | fn-up to text, p95 ceiling | adaptive tail (up to 200 ms) + cloud cutoff (300 ms after recording stops) + Cleanup deadline (about 450 ms) + 10 ms = about 960 ms |
 
 The p95 ceiling sits inside 1 s, against Wispr's own logged lag on Jake's Mac (p50 740 ms, p95 1,671 ms). It assumes the local text is ready by the cloud cutoff (local Parakeet measured about 80 ms for clips of 6 s or less; long hands-free Dictations are an M0 measurement) and that paste itself is fast (about 12 ms in a native field; slow apps unmeasured), so the margin is thin. The p50 estimate, roughly 500 to 550 ms, is an assumption until M0 and M2 measure it.
@@ -163,10 +163,10 @@ The p95 ceiling sits inside 1 s, against Wispr's own logged lag on Jake's Mac (p
 
 | Milestone | Fills | Seams already there |
 |---|---|---|
-| M0 It types (local model) | The never-lose spine headless (file input, CAF writer, History `began`/`audioEnded`/`textReady`/recovery, `Conductor.run` on a WAV with a scripted fake engine), then the mic, `FnGesture` (hold), `LocalParakeet` (install, residency), rules-only Cleanup, paste and restore, status item, indicator pill and sounds, first-run onboarding, start at login, the bundle and dev-run scripts, `lexicon-eval` | WordStore returns empty; Cleanup is rules only; `SpeechPlan` is local only |
+| M0 It types (local model) | First the early build tickets (Glox workflow, pstack, this doc). Then the never-lose spine headless (file input, CAF writer, History `began`/`audioEnded`/`textReady`/recovery, `Conductor.run` on a WAV with a scripted fake engine), then the mic, `FnGesture` (hold), `LocalParakeet` (install, residency), rules-only Cleanup, paste and restore, status item, indicator pill and sounds, first-run onboarding, start at login, the bundle and dev-run scripts, `lexicon-eval`. In parallel once `lexicon-eval` exists: Test set gold, the review page and the weekly export script | WordStore returns empty; Cleanup is rules only; `SpeechPlan` is local only |
 | M1 Never loses it | Hands-free double-tap, Esc, chord cancel, 20-minute cap and warning, crash recovery, retention, History window (search, copy, play, pin, retry with picker, show versions, delete), paste-last, the late-text rule and notices, the waiting path | Row at start and CAF from M0; `land` already has the waiting branch, retried when the network returns or a local model becomes available |
 | M2 Cloud and Private mode | The Muse adapter, the 300 ms race, Keychain keys, the Settings window, Private mode (toggle, always-private apps, outlined logo, hard kill, survives restart, mid-Dictation revoke), the Secret guard, network-loss behavior, the model picker | `CloudAccess` gates every cloud call already; local already produces the text |
-| M3 Good enough to swap | AI cleanup with the structural check and deadline; WordStore (Terms, Rules, folding, code Terms, selection), the Lexicon page and Import; current repo from the most recently changed folder; bake-off adapters and the speech and cleanup bake-offs; the head-to-head run on the held-back 100 | One adapter file per provider; `CleanupModel` seam |
+| M3 Good enough to swap | AI cleanup with the structural check and deadline; WordStore (Terms, Rules, folding, code Terms, selection), the Lexicon page and Import (load the starter Lexicon); current repo from the most recently changed folder; bake-off adapters (Cartesia, MAI, a mature backup) and the speech and cleanup bake-offs; the head-to-head run on the held-back 100 | One adapter file per provider; `CleanupModel` seam |
 | M4 Fix by voice | The fn+Shift trigger, candidate ranking, Jev choice with fallback, the select-first path, the "fix X" backup, the cursor pill and choices, `TargetApp.replace` and terminal paths, Re-speak fixes saved to the Test set. No Jev for close calls | `DictationPurpose.respeak` and `InsertionReceipt` exist from day one |
 | M5 Learns from you | Designed in the after-M1 grill: Hand fix (when and how Lexicon asks, #24), when a Fix becomes a Rule and how Rules are undone, light app formatting; the `lexicon` hook CLI only if the grill brings hooks back | Every insert stores a receipt; `fixes.didInsert` runs after every insert; Fix rows in History; Rules have a source field and reach Cleanup through the fn-down snapshot; the inbox exists |
 
@@ -214,4 +214,4 @@ All settled by [Spec: Lexicon v0](https://github.com/jparker2006/lexicon/issues/
 
 ## Next implementation step
 
-Build the never-lose spine headless first: `AudioCapture`'s file input and CAF writer, History's `began`/`audioEnded`/`textReady`/recovery, and `Conductor.dictate(file:)` with the headless destination and a scripted fake engine, proven by a Swift Testing test on a short 16 kHz WAV. Then add the mic, the fn key and local Parakeet.
+After the early build tickets (Glox workflow, pstack, this doc update), build the never-lose spine headless first: `AudioCapture`'s file input and CAF writer, History's `began`/`audioEnded`/`textReady`/recovery, and `Conductor.dictate(file:)` with the headless destination and a scripted fake engine, proven by a Swift Testing test on a short 16 kHz WAV. Then add the mic, the fn key and local Parakeet.
