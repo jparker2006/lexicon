@@ -178,8 +178,8 @@ public final class HistoryStore: @unchecked Sendable {
     }
 
     /// The second half of a delete: the row already says `deleted` and is committed,
-    /// so a crash from here on leaves a file recovery deletes (`deleteGarbage`),
-    /// never an orphan it would adopt and transcribe again.
+    /// so a crash from here on leaves a row, and maybe its file, that recovery drops
+    /// (`deleteGarbage`), never an orphan it would adopt and transcribe again.
     func dropAudio(_ id: DictationID) throws {
         try removeAudioFile(id)
         try db.transaction {
@@ -408,6 +408,10 @@ extension HistoryStore {
         try db.execute("""
             UPDATE dictation SET audio_storage = ?, model_text = NULL, cleaned_text = NULL, final_text = NULL WHERE id = ?
             """, [.text(AudioStorage.deleted.rawValue), key])
+        // The rows that hold its text too (engine attempts, Fixes, the words around the paste).
+        for table in ["attempt", "fix", "insertion"] {
+            try db.execute("DELETE FROM \(table) WHERE dictation_id = ?", [key])
+        }
         return true
     }
 }

@@ -273,17 +273,25 @@ private func statusReason(_ store: HistoryStore, _ id: DictationID) async throws
 func aDeleteCutShortAfterItsMarkIsFinishedOnRelaunch(fileSurvived: Bool) async throws {
     let (store, paths) = try makeStore()
     let id = DictationID()
+    let receipt = InsertionReceipt(appBundleID: "com.example.editor", fieldFingerprint: "f1", caretAfter: 37,
+                                   contextBefore: "the words around", contextAfter: "the paste", insertedAt: earlier())
     store.record(.began(id, origin: .live, purpose: .type, at: earlier(), app: app))
     store.record(.audioEnded(id, audio))
-    store.record(.failed(id, reason: "silent"))
+    store.record(.attempted(id, AttemptRecord(model: parakeet, result: .won, text: text.model, latency: nil, error: nil)))
+    store.record(.textReady(id, text, cleanup: .rulesOnly(.off), model: parakeet, typing: true))
+    store.record(.delivered(id, receipt, lag: .milliseconds(420)))
     try await writeClosedCAF(syntheticSamples(count: 16_000), at: store.audioURL(for: id))
     await store.flush()
-    // Delete's first half is committed. The crash came before the unlink (file kept) or after it
-    // (file already gone), and before the row was dropped either way.
-    try await store.read { db in
-        try db.execute("UPDATE dictation SET audio_storage = 'deleted' WHERE id = ?", [.text(id.description)])
-    }
+    // Delete's first half, committed on its own. The crash came before the unlink (file kept) or
+    // after it (file already gone), and before the row was dropped either way.
+    try await store.read { db in _ = try db.transaction { try store.apply(.deleted(id), in: $0) } }
     if !fileSurvived { try FileManager.default.removeItem(at: store.audioURL(for: id)) }
+    // Already no text anywhere: not in the row, not in the rows that hang off it.
+    let leftover = try await store.read { db in
+        try ["attempt", "fix", "insertion"].map { try db.query("SELECT 1 FROM \($0) WHERE dictation_id = ?", [.text(id.description)]).count }
+    }
+    #expect(leftover == [0, 0, 0])
+    #expect(await store.dictation(id)?.finalText == nil)
 
     let relaunched = try await relaunch(paths)
     #expect(await relaunched.recover().isEmpty)
