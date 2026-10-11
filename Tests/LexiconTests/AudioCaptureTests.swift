@@ -254,9 +254,9 @@ func report(_ line: String) {
     FileHandle.standardOutput.write(Data((line + "\n").utf8))
 }
 
-/// Compiles `source` against the modules this test run built, as far as SIL:
-/// ownership ("consumed more than once") is checked there, after type checking.
-func compile(_ source: String, importing modules: [String] = ["AudioCapture"]) throws -> (status: Int32, output: String) {
+/// Compiles `source` against the AudioCapture module this test run built, as
+/// far as SIL: ownership ("consumed more than once") is checked there, after type checking.
+func compile(_ source: String) throws -> (status: Int32, output: String) {
     var image = Dl_info()
     try #require(dladdr(#dsohandle, &image) != 0)
     var bundle = URL(filePath: String(cString: image.dli_fname))
@@ -264,10 +264,9 @@ func compile(_ source: String, importing modules: [String] = ["AudioCapture"]) t
         try #require(bundle.pathComponents.count > 1, "test binary is not inside an .xctest bundle")
         bundle.deleteLastPathComponent()
     }
-    let built = bundle.deletingLastPathComponent().appending(path: "Modules")
+    let modules = bundle.deletingLastPathComponent().appending(path: "Modules")
     let file = try scratchDirectory().appending(path: "snippet.swift")
-    let imports = modules.map { "import \($0)\n" }.joined()
-    try (imports + source).write(to: file, atomically: true, encoding: .utf8)
+    try ("import AudioCapture\n" + source).write(to: file, atomically: true, encoding: .utf8)
     #if arch(arm64)
     let target = "arm64-apple-macos26.0"
     #else
@@ -276,7 +275,7 @@ func compile(_ source: String, importing modules: [String] = ["AudioCapture"]) t
     let process = Process()
     process.executableURL = URL(filePath: "/usr/bin/xcrun")
     process.arguments = ["swiftc", "-emit-sil", "-o", "/dev/null", "-swift-version", "6", "-target", target,
-                         "-I", built.path, file.path]
+                         "-I", modules.path, file.path]
     let pipe = Pipe()
     process.standardOutput = pipe
     process.standardError = pipe
