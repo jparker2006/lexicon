@@ -96,7 +96,7 @@ final class EventTapThread: @unchecked Sendable {
         CFRunLoopWakeUp(runLoop)
     }
 
-    fileprivate func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+    func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         let pass = Unmanaged.passUnretained(event)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             reenable(because: type == .tapDisabledByTimeout ? "timeout" : "user input")
@@ -130,6 +130,7 @@ final class EventTapThread: @unchecked Sendable {
     /// One timer slot: a new deadline replaces the old one, and a stale one that
     /// still fires is ignored by the recognizer (it judges by time).
     private func schedule(_ wakeAt: HostTime) {
+        guard let runLoop else { return }
         if let deadline { CFRunLoopTimerInvalidate(deadline) }
         let (whole, atto) = wakeAt.duration(since: .now()).components
         let seconds = Double(whole) + Double(atto) / 1e18
