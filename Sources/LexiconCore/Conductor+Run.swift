@@ -32,6 +32,8 @@ extension Conductor {
             capture = try await recorder.start(start.input, writingTo: history.audioURL(for: id))
         } catch {
             emit(.notice(.microphoneUnavailable(String(describing: error))))
+            // Free the one capture slot, or every later fn-down is refused and its confirmation lands on this one.
+            if capturingID == id { endCapture(.discard) }
             keyboard?.endDictation()
             return .nothing(id)  // nothing was captured, so nothing can be lost
         }
