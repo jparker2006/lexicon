@@ -126,6 +126,24 @@ import LexiconDomain
     #expect(throws: Never.self) { try CAFFile.read(caf) }
 }
 
+@Test func whenTheFileCannotBeWrittenTheAudioStaysInRAM() async throws {
+    let dir = try scratchDirectory()
+    let source = syntheticSamples(count: 16_000)
+    let wav = try writeWAV(source, rate: 16_000, in: dir)
+    let blocker = dir.appending(path: "audio")
+    try Data().write(to: blocker)  // a plain file where the audio folder should be
+
+    let recorder = Recorder()
+    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: blocker.appending(path: "x.caf"))
+    let problems = capture.signals.problems
+    let ended = try #require(await capture.signals.inputEnded())
+    let take = await capture.stop(.released(at: ended))
+
+    #expect(take.clip.samples == source)
+    #expect(take.summary.storage == .ramOnly)
+    #expect(await problems.first { _ in true } == .diskTrouble)
+}
+
 @Test func anUnreadableFileFailsToStart() async throws {
     let dir = try scratchDirectory()
     let junk = dir.appending(path: "junk.wav")
