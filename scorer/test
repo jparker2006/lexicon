@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run the scorer's tests with its pinned Python and packages, from any directory.
+dir="$(cd "$(dirname "$0")" && pwd)"
+cd "$dir" && exec uv run --quiet --locked python -m unittest discover -s tests -t . "$@"
