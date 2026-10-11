@@ -1,4 +1,5 @@
 import Foundation
+import os
 import LexiconDomain
 import KeyInput
 import AudioCapture
@@ -33,11 +34,8 @@ extension Conductor {
         } catch {
             // Give up the capture slot, or every later fn-down finds it taken and is dropped. A discard,
             // not a cancel: a cancel sends `stopped`, and the pill would play a stop sound for a mic that never started.
-            // Only this run's own capture: a later fn press may already own the slot and the gesture.
-            if capturingID == id {
-                endCapture(.discard)
-                keyboard?.endDictation()
-            }
+            // The press's own release, still to come, names this id and so ends nothing.
+            endCapture(id, .discard)
             emit(.notice(.microphoneUnavailable(String(describing: error))))
             return .nothing(id)  // nothing was captured, so nothing can be lost
         }
@@ -67,8 +65,8 @@ extension Conductor {
         let signals = capture.signals
         Task { if await signals.firstAudio() != nil { self.emit(.listening(id)) } }
 
-        // Wait for fn-up (or Esc, a stray tap, end of file). The 20-minute cap and the
-        // 19-minute warning chime live in FnGesture, which emits a normal stop (#18).
+        // Wait for fn-up (or Esc, a stray tap, sleep, end of file). The 20-minute cap and
+        // the 19-minute warning chime are M1's (#58), as a normal stop from FnGesture.
         switch await nextEnd(ends, signals: signals) {
         case .discard:
             _ = await capture.stop(.immediately)
@@ -118,6 +116,7 @@ extension Conductor {
             // Keep the audio and show "waiting"; Jake is never asked to redo it. A
             // waiting Dictation gives up its turn, so later Dictations still insert.
             history.record(.waiting(id, reason: String(describing: reason)))
+            log.notice("Dictation \(id, privacy: .public) waiting: \(String(describing: reason), privacy: .private)")
             if reason.waitsForNetwork { emit(.notice(.waitingForNetwork(id))) }
             releaseInsertTurn(id)
             run.hold?.end()
@@ -129,6 +128,7 @@ extension Conductor {
 
         case .unavailable(let reason):
             history.record(.failed(id, reason: String(describing: reason)))
+            log.notice("Dictation \(id, privacy: .public) failed: \(String(describing: reason), privacy: .private)")
             emit(.finished(id, .failed))
             return DictationResult(id: id, status: .failed, versions: nil, cleanup: nil, model: nil, lag: nil,
                                    attempts: [])
@@ -169,6 +169,12 @@ extension Conductor {
                 _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)
             }
             let status = DictationStatus.landed(delivery, origin: run.origin, previous: run.previous)
+            // `lag` is the spec's number: fn-up to the target app reading the paste (scripts/lag-report.sh).
+            let lagText = lag.map { "lag \($0.milliseconds) ms, " } ?? ""
+            log.notice("""
+                Dictation \(id, privacy: .public) \(status.rawValue, privacy: .public): \(lagText, privacy: .public)\
+                engine \(heard.model.id, privacy: .public), speech \(heard.finalizeToText.milliseconds, privacy: .public) ms
+                """)
             emit(.finished(id, status))
             return DictationResult(id: id, status: status, versions: cleaned.versions, cleanup: cleaned.outcome,
                                    model: heard.model, lag: lag, attempts: heard.attempts)
@@ -236,4 +242,9 @@ extension Conductor {
 private enum AccessChange: Sendable {
     case settings(Preferences)
     case focus(AppContext)
+}
+
+extension Duration {
+    /// Whole milliseconds, for the log.
+    var milliseconds: Int64 { Int64((self / .milliseconds(1)).rounded()) }
 }

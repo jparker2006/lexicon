@@ -178,6 +178,70 @@ import LexiconDomain
     #expect(await order.names == ["first", "live", "background"])
 }
 
+@Test(.timeLimit(.minutes(1))) func theModelLoadsAtLaunchAndUnloadsAfterTenIdleMinutes() async throws {
+    let model = FakeModel()
+    let clock = TestClock()
+    let engine = SpeechEngine(local: model, clock: clock)
+
+    await engine.warmUp(tenMinuteLinger)
+
+    #expect(await model.loads == 1)
+    #expect(await model.isResident)
+    await clock.waitForSleepers(1)
+    await clock.advance(by: .seconds(600))
+    await model.waitUntilUnloaded()
+    #expect(await model.isResident == false)
+}
+
+@Test(.timeLimit(.minutes(1))) func aModelStillLoadingTwoSecondsAfterFnUpLeavesTheDictationWaiting() async throws {
+    // The first load of a new build compiles for the Neural Engine for about 25 s.
+    // Jake never waits that out at the cursor: the Dictation waits instead.
+    let model = SlowModel()
+    let clock = TestClock()
+    let engine = SpeechEngine(local: model, clock: clock)
+    let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
+
+    let finishing = Task { await engine.begin(feed: finishedFeed(), plan: plan).finish(AudioClip(samples: [1, 2, 3])) }
+    await clock.waitForSleepers(1)
+    await clock.advance(by: .milliseconds(1_999))
+    #expect(clock.sleepers == 1)
+    await clock.advance(by: .milliseconds(1))
+    let outcome = await finishing.value
+
+    guard case .unavailable(let reason) = outcome, case .localModelLoading = reason else {
+        Issue.record("expected localModelLoading, got \(outcome)")
+        return
+    }
+    #expect(reason.waits)
+    #expect(reason.waitsForNetwork == false)
+    #expect(await model.transcribed == 0)
+
+    // The load finishes in the background and the model then unloads on its idle timer as usual.
+    await model.finishLoading()
+    await clock.waitForSleepers(1)
+    await clock.advance(by: .seconds(600))
+    await model.waitUntilUnloaded()
+}
+
+@Test(.timeLimit(.minutes(1))) func aModelThatLoadsInTimeTranscribesWithNoWaitingTimerLeft() async throws {
+    let model = SlowModel()
+    let clock = TestClock()
+    let engine = SpeechEngine(local: model, clock: clock)
+    let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
+
+    let finishing = Task { await engine.begin(feed: finishedFeed(), plan: plan).finish(AudioClip(samples: [1, 2, 3])) }
+    await clock.waitForSleepers(1)
+    await model.finishLoading()
+    let outcome = await finishing.value
+
+    guard case .text(let heard) = outcome else {
+        Issue.record("expected text, got \(outcome)")
+        return
+    }
+    #expect(heard.text == "Hello.")
+    await clock.waitForSleepers(1)  // only the idle unload: the load limit was cancelled
+}
+
 // MARK: Helpers
 
 private struct ModelBroke: Error {}
@@ -228,6 +292,43 @@ private actor FakeModel: LocalTranscriber {
 
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
         if let failure { throw failure }
+        transcribed += 1
+        return "Hello."
+    }
+
+    func waitUntilUnloaded() async {
+        guard isResident else { return }
+        await withCheckedContinuation { unloadWaiters.append($0) }
+    }
+}
+
+/// A local model whose load runs until the test calls `finishLoading`.
+private actor SlowModel: LocalTranscriber {
+    nonisolated let model = LocalModel.parakeetUnified
+    private(set) var isResident = false
+    private(set) var transcribed = 0
+    private var loading: [CheckedContinuation<Void, Never>] = []
+    private var unloadWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func load() async {
+        guard !isResident else { return }
+        await withCheckedContinuation { loading.append($0) }
+    }
+
+    func finishLoading() async {
+        while loading.isEmpty { await Task.yield() }
+        isResident = true
+        for waiter in loading { waiter.resume() }
+        loading = []
+    }
+
+    func unload() {
+        isResident = false
+        for waiter in unloadWaiters { waiter.resume() }
+        unloadWaiters = []
+    }
+
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String {
         transcribed += 1
         return "Hello."
     }

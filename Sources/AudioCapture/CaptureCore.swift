@@ -26,6 +26,8 @@ final class CaptureCore: @unchecked Sendable {
     private let fileURL: URL
     /// fn-down, for the start gap.
     private let startedAt: HostTime
+    /// One level per emitted chunk, for the recording indicator.
+    private let onLevel: @Sendable (AudioLevel) -> Void
 
     private var segment: Segment
     private var resampler: Resampler
@@ -46,7 +48,8 @@ final class CaptureCore: @unchecked Sendable {
     /// after `stop` returned, which orders it after the write.
     private(set) var tailLength: Duration?
 
-    init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, startedAt: HostTime) {
+    init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, startedAt: HostTime,
+          onLevel: @escaping @Sendable (AudioLevel) -> Void) {
         segment = source.firstSegment
         guard let resampler = Self.resampler(for: segment.rate, policy: policy) else { return nil }
         self.resampler = resampler
@@ -54,6 +57,7 @@ final class CaptureCore: @unchecked Sendable {
         self.queue = queue
         self.policy = policy
         self.startedAt = startedAt
+        self.onLevel = onLevel
         fileURL = file
         (feed, feedContinuation) = AudioFeed.makeStream()
         let (problemStream, problems) = AsyncStream<CaptureProblem>.makeStream()
@@ -224,6 +228,7 @@ final class CaptureCore: @unchecked Sendable {
     private func emit(_ converted: UnsafeBufferPointer<Int16>) {
         let chunk = UnsafeBufferPointer(rebasing: converted[0..<tail.keep(converted)])
         guard !chunk.isEmpty else { return }
+        onLevel(AudioLevel(rms: Self.rms(of: chunk)))
         samples.append(contentsOf: chunk)
         if let writer {
             do {
@@ -255,6 +260,17 @@ final class CaptureCore: @unchecked Sendable {
         guard storage != .ramOnly else { return }
         storage = .ramOnly
         problems.yield(.diskTrouble)
+    }
+
+    /// Full-scale RMS (0...1) of one chunk. Runs here on the writer queue, never on
+    /// the audio thread, and is one pass over the samples with no allocation.
+    private static func rms(of chunk: UnsafeBufferPointer<Int16>) -> Float {
+        var energy: Float = 0
+        for sample in chunk {
+            let scaled = Float(sample) / 32_768
+            energy += scaled * scaled
+        }
+        return (energy / Float(chunk.count)).squareRoot()
     }
 
     private static func resampler(for rate: Double, policy: FlushPolicy) -> Resampler? {

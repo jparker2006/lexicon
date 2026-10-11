@@ -46,6 +46,7 @@ public struct AudioLevel: Sendable { public let rms: Float }
 public final class Recorder: Sendable {
     /// The one serial writer queue: drains, converts, writes, syncs, closes.
     private let writerQueue = DispatchQueue(label: "lexicon.audio.writer", qos: .userInitiated)
+    private let broadcaster = LevelBroadcaster()
     let microphone: Microphone
     let policy: FlushPolicy
 
@@ -85,7 +86,8 @@ public final class Recorder: Sendable {
             source = try FileSource(url: url, pace: pace)
             if pace == .asFastAsPossible { policy.drainEvery = .milliseconds(5) }
         }
-        guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue, startedAt: keyDown) else {
+        guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue, startedAt: keyDown,
+                                     onLevel: broadcaster.send) else {
             source.stop()
             throw .engineFailed("no converter from \(source.firstSegment.rate) Hz to 16 kHz")
         }
@@ -99,8 +101,10 @@ public final class Recorder: Sendable {
         await withCheckedContinuation { continuation in writerQueue.async { continuation.resume() } }
     }
 
-    /// Levels of whatever is recording, for the indicator. Any number of observers.
-    public var levels: AsyncStream<AudioLevel> { fatalError("not implemented") }
+    /// Levels of whatever is recording, one per chunk, for the indicator. Each call
+    /// is a new stream (any number of observers) that keeps only the newest level,
+    /// so a slow observer never backs up the writer.
+    public var levels: AsyncStream<AudioLevel> { broadcaster.subscribe() }
 }
 
 /// How a LiveCapture ends.

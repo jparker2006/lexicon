@@ -116,7 +116,7 @@ func aMicThatFailsToStartLeavesTheNextFnPressWorking() async throws {
 
     var unavailable = 0
     for _ in 1...2 {
-        await conductor.handle(.dictationBegan(at: .now()))
+        await conductor.handle(.dictationBegan(DictationID(), at: .now()))
         while let event = await events.next() {
             if case .notice(.microphoneUnavailable) = event {
                 unavailable += 1

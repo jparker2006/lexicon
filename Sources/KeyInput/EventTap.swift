@@ -57,6 +57,7 @@ final class EventTapThread: @unchecked Sendable {
             let runLoop = CFRunLoopGetCurrent()
             self.runLoop = runLoop
             CFRunLoopAddSource(runLoop, CFMachPortCreateRunLoopSource(nil, self.tap, 0), .commonModes)
+            CFRunLoopAddTimer(runLoop, self.watchdog(), .commonModes)
             ready.signal()
             CFRunLoopRun()
         }
@@ -64,6 +65,28 @@ final class EventTapThread: @unchecked Sendable {
         thread.qualityOfService = .userInteractive
         thread.start()
         ready.wait()
+    }
+
+    /// Every 2 s: turns the tap back on if macOS turned it off without the
+    /// disabled event the callback handles, which leaves fn dead with nothing in
+    /// the log. Seen live once, right after a fresh install's first paste.
+    private func watchdog() -> CFRunLoopTimer {
+        let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + 2, 2, 0, 0) { [self] _ in
+            guard let tap, !CGEvent.tapIsEnabled(tap: tap) else { return }
+            reenable(because: "no notice")
+        }!
+        CFRunLoopTimerSetTolerance(timer, 0.5)
+        return timer
+    }
+
+    private func reenable(because reason: StaticString) {
+        if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+        log.error("fn tap was disabled (\(String(describing: reason), privacy: .public)); re-enabled")
+        input.tick()  // Jake may have typed while it was off: late text must not assume he didn't
+        // An fn-up lost while the tap was off would leave the mic recording until the next press.
+        if gesture.isRecording, !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
+            feed(.fnUp(.now()))
+        }
     }
 
     /// Posted onto the tap thread's run loop, never run inline.
@@ -76,13 +99,7 @@ final class EventTapThread: @unchecked Sendable {
     fileprivate func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         let pass = Unmanaged.passUnretained(event)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            log.error("fn tap was disabled (\(type == .tapDisabledByTimeout ? "timeout" : "user input", privacy: .public)); re-enabled")
-            input.tick()  // Jake may have typed while it was off: late text must not assume he didn't
-            // An fn-up lost while the tap was off would leave the mic recording until the next press.
-            if gesture.isRecording, !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
-                feed(.fnUp(.now()))
-            }
+            reenable(because: type == .tapDisabledByTimeout ? "timeout" : "user input")
             return pass
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
@@ -90,7 +107,7 @@ final class EventTapThread: @unchecked Sendable {
         guard let key = KeyInput(event, secureInput: { IsSecureEventInputEnabled() }, now: .now()) else { return pass }
         feed(key)
         switch key {
-        case .fnDown(let at, _): logDelivery("down", at: at)
+        case .fnDown(let at, _, _): logDelivery("down", at: at)
         case .fnUp(let at): logDelivery("up", at: at)
         default: break
         }
@@ -148,7 +165,8 @@ extension KeyInput {
         case .flagsChanged:
             guard event.getIntegerValueField(.keyboardEventKeycode) == Self.fnKeyCode else { return nil }
             let at = HostTime(eventTimestamp: event.timestamp, now: now)
-            self = event.flags.contains(.maskSecondaryFn) ? .fnDown(at, secureInput: secureInput()) : .fnUp(at)
+            self = event.flags.contains(.maskSecondaryFn)
+                ? .fnDown(at, secureInput: secureInput(), id: DictationID()) : .fnUp(at)
         case .keyDown:
             self = .otherKey(HostTime(eventTimestamp: event.timestamp, now: now))
         default:

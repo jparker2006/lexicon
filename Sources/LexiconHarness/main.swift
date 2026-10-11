@@ -130,7 +130,7 @@ func pasteCheck() async throws {
         guard insertion.outcome == "inserted" else { throw HarnessError("Lexicon did not insert: \(insertion.outcome)") }
     case .failed(let reason):
         throw HarnessError(reason)
-    case .status, .capture, .done, .soundPlayed:
+    case .status, .capture, .done, .soundPlayed, .dictated:
         throw HarnessError("unexpected reply to insert: \(reply)")
     }
 
@@ -164,6 +164,8 @@ func hook(_ arguments: [String]) async throws {
     if case .capture(let seconds, let idle, _, _) = command { timeout += .seconds(seconds + (idle ?? 0)) }
     // The app waits `delay` seconds for a click into the field before it pastes.
     if case .insert(_, let delay) = command { timeout += .seconds(delay) }
+    // A WAV plays at the speed of speech, then lands.
+    if case .dictate = command { timeout += .seconds(60) }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     switch try await DevApp.hooks.send(command, timeout: timeout) {
@@ -177,6 +179,8 @@ func hook(_ arguments: [String]) async throws {
         print(String(decoding: try encoder.encode(measurement), as: UTF8.self))
     case .inserted(let insertion):
         print(String(decoding: try encoder.encode(insertion), as: UTF8.self))
+    case .dictated(let dictation):
+        print(String(decoding: try encoder.encode(dictation), as: UTF8.self))
     case .failed(let reason):
         fail("FAIL  \(reason)")
     }

@@ -5,6 +5,15 @@ public enum AccessibilityID {
     public static let historyWindow = "lexicon.history"
     public static let historyTable = "lexicon.history.table"
     public static let historySearch = "lexicon.history.search"
+    /// The Lexicon page: its window, list, search field, Add new and Import
+    /// buttons, the Add sheet's field, and each row's delete button.
+    public static let lexiconWindow = "lexicon.page"
+    public static let lexiconTable = "lexicon.page.table"
+    public static let lexiconSearch = "lexicon.page.search"
+    public static let lexiconAdd = "lexicon.page.add"
+    public static let lexiconImport = "lexicon.page.import"
+    public static let lexiconAddField = "lexicon.page.addField"
+    public static let lexiconDelete = "lexicon.page.delete"
     /// The menu bar icon's button.
     public static let statusItem = "lexicon.statusItem"
     /// The recording pill's panel.
