@@ -63,11 +63,11 @@ Builds and grows Jake's private Test set from his Wispr history (#50): weekly un
 Everything lives under `~/Library/Application Support/Lexicon/test-set/`, owner-only, never in a git work tree:
 
 - `manifest.jsonl`: the Test set, NeMo-style: `id`, `audio_filepath` (relative to the folder), `duration`, `text` (gold), `gold`, `terms`, `speech_end` (Wispr's logged speech duration), `context` (the app's bundle ID), `session`, `split`.
-- `gold` is `agreed` where local Parakeet's text and Wispr's raw text agree: the same words after the normalizer, the same Lexicon words written the same way, no Rule's heard side and no Term in another case or spacing in either. Then `text` is Parakeet's text. Otherwise it is `review` and `text` is only a placeholder until Jake reviews it (#51): don't score on `review` entries.
+- `gold` is `agreed` where local Parakeet's text and Wispr's raw text agree: the same words after the normalizer, the same Lexicon words written the same way, no Rule's heard side and no Term in another case or spacing in either. Then `text` is Parakeet's text. Otherwise it is `review` and `text` is only a placeholder until Jake reviews it (#51): the scorer refuses to score a `review` entry, so the Test set scores only once review is done. Review sets the entry's `text`, `terms` (recomputed from the new text) and a `gold` other than `review`.
 - `terms`: the Lexicon's written forms (its Terms and the written side of its Rules, from `starter-lexicon.txt`) found in `text`.
 - `session`: a run of Dictations at most 30 minutes apart. `split`: `held-back` (100 clips in whole sessions, drawn once with a fixed seed, never the latest session; milestone checks only) or `everyday`. Later clips join their session's split, or `everyday`.
 - `wispr-run.jsonl`: Wispr's run from its own logs (raw speech text, the text it pasted, its logged lag), the input for its baseline.
 - `disagreements.jsonl`: the `review` entries with both texts, what Wispr pasted, Jake's own edit as a hint, and why they disagree.
 - `parakeet.jsonl`: Parakeet's text for each clip, so a clip is heard once.
 
-It prints counts and paths only. Its tests (`tests/test_testset*.py`) use a synthetic Wispr database.
+One run at a time (`.lock`). It prints counts and paths only. Its tests (`tests/test_testset*.py`) use a synthetic Wispr database.

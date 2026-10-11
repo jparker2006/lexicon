@@ -26,6 +26,7 @@ or app names: its output may be read by an agent.
 import argparse
 import contextlib
 import datetime
+import fcntl
 import json
 import os
 import random
@@ -525,6 +526,20 @@ def update(root: Path, wispr_db: Path, lexicon_file: Path, lexicon_eval: Path,
     if _in_git_work_tree(root):
         raise TestSetError(f"{root} is inside a git work tree; the Test set never goes in a repo")
     _private_dir(root)
+    # One run at a time: a second would delete the first's work folder, and
+    # both would append the same clips.
+    lock = os.open(root / ".lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise TestSetError("another test-set run is in progress") from None
+        _update(root, wispr_db, lexicon_file, lexicon_eval, today, say)
+    finally:
+        os.close(lock)
+
+
+def _update(root: Path, wispr_db: Path, lexicon_file: Path, lexicon_eval: Path, today: datetime.date, say) -> None:
     # Without the Lexicon, a clip where both models misheard a Term would be
     # agreed gold for good, since lines are never rewritten.
     if not lexicon_file.exists():

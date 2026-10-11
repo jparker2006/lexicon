@@ -212,7 +212,15 @@ class UpdateTest(unittest.TestCase):
         self.lexicon.unlink()
         with self.assertRaises(TestSetError):
             self.run_update(11)
-        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), [".lock"])
+
+    def test_one_run_at_a_time(self):
+        import fcntl
+        with open(self.root / ".lock", "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            with self.assertRaises(TestSetError):
+                self.run_update(11)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), [".lock"])
 
     def test_never_writes_inside_a_git_work_tree(self):
         (self.tmp / ".git").mkdir()
