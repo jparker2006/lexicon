@@ -39,6 +39,7 @@ public enum DictationEvent: Sendable {
     /// Inserts the fix row and updates final text, in one transaction.
     case fixRecorded(Fix)
     case fixVerdict(FixID, FixVerdict)
+    /// Test set pin. Pinning keeps the audio, so only a Dictation with its whole audio on disk takes it; unpinning always applies.
     case pinned(DictationID, Bool)
     /// Delete one Dictation: text and audio. Ignored while `status.isInFlight`.
     case deleted(DictationID)
@@ -56,7 +57,7 @@ public enum DictationEvent: Sendable {
 /// `@unchecked Sendable`: the only mutable state is `db`, touched only on `queue`
 /// after init returns; everything else is immutable or itself Sendable.
 public final class HistoryStore: @unchecked Sendable {
-    let audioFolder: URL
+    private let paths: AppPaths
     /// Rows and files from before this are an earlier run's: launch recovery's to finish.
     let openedAt = Date()
     private let queue = DispatchQueue(label: "lexicon.history.writer", qos: .userInitiated)
@@ -67,8 +68,8 @@ public final class HistoryStore: @unchecked Sendable {
 
     /// Opens `<root>/history.sqlite` and `<root>/audio/` (this module names both).
     public init(paths: AppPaths) throws {
-        audioFolder = paths.root.appending(path: "audio", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: audioFolder, withIntermediateDirectories: true)
+        self.paths = paths
+        try FileManager.default.createDirectory(at: Self.audioFolder(in: paths), withIntermediateDirectories: true)
         db = try Database(at: paths.root.appending(path: "history.sqlite"), mode: .readWrite,
                           migrations: HistorySchema.migrations)
         try db.transaction { try HistorySchema.syncDerivedIndexes(in: $0) }
@@ -78,9 +79,20 @@ public final class HistoryStore: @unchecked Sendable {
 
     deinit { changed.finish() }
 
-    /// `audio/<id>.caf`. The only code that names audio files.
+    /// `<root>/audio/`, where every Dictation's audio lives.
+    static func audioFolder(in paths: AppPaths) -> URL {
+        paths.root.appending(path: "audio", directoryHint: .isDirectory)
+    }
+
+    /// `audio/<id>.caf`. The only code that names audio files. HistoryReader calls it too.
+    static func audioURL(for id: DictationID, in paths: AppPaths) -> URL {
+        audioFolder(in: paths).appending(path: "\(id).caf", directoryHint: .notDirectory)
+    }
+
+    var audioFolder: URL { Self.audioFolder(in: paths) }
+
     public func audioURL(for id: DictationID) -> URL {
-        audioFolder.appending(path: "\(id).caf", directoryHint: .notDirectory)
+        Self.audioURL(for: id, in: paths)
     }
 
     /// Non-blocking, ordered, idempotent. An event is lost if the app dies before
@@ -130,8 +142,16 @@ public final class HistoryStore: @unchecked Sendable {
         Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
     }
 
-    /// RAM copy of a Dictation's audio, for retry. nil once retention removed it.
-    public func clip(_ id: DictationID) async -> AudioClip? { fatalError("not implemented") }
+    /// Whole audio of a Dictation, for Retry. nil unless all of it is on disk (aged out, deleted, or a RAM-only capture's partial file).
+    public func clip(_ id: DictationID) async -> AudioClip? {
+        let storage = try? await read { db in
+            try db.query("SELECT audio_storage FROM dictation WHERE id = ?", [.text(id.description)]).first?.text(0)
+        }
+        guard storage == AudioStorage.onDisk.rawValue else { return nil }
+        // The CAF read is slow for a long Dictation, so it runs off the writer queue.
+        let url = audioURL(for: id)
+        return await Task.detached { try? CAFFile.read(url) }.value
+    }
 
     /// Paste-last: newest Dictation whose status has text, and its final text.
     public func newestText() async -> (DictationID, String)? { fatalError("not implemented") }
@@ -235,7 +255,7 @@ extension HistoryStore {
     /// textReady -> afterTextReady(typing:, origin: stored origin, previous: stored);
     /// delivered -> .inserted; notInserted -> .notInserted; waiting -> .waiting;
     /// failed -> .failed. Not status-moving: attempted,
-    /// fixRecorded, fixVerdict, pinned; deleted is refused while `isInFlight`;
+    /// fixRecorded, fixVerdict, pinned (true only with the audio on disk); deleted is refused while `isInFlight`;
     /// discarded only while `.recording`.
     ///
     /// A same-state move keeps the status and rewrites the event's fields, so a
@@ -358,7 +378,13 @@ extension HistoryStore {
             if wroteChild { try Self.materializeFinalText(id, in: db) }
 
         case .pinned(_, let pinned):
-            try db.execute("UPDATE dictation SET pinned = ? WHERE id = ?", [.int(pinned ? 1 : 0), key])
+            // Pinning keeps audio for the Test set, so a row whose audio is partial or gone stays unpinned.
+            if pinned {
+                try db.execute("UPDATE dictation SET pinned = 1 WHERE id = ? AND audio_storage = ?",
+                               [key, .text(AudioStorage.onDisk.rawValue)])
+            } else {
+                try db.execute("UPDATE dictation SET pinned = 0 WHERE id = ?", [key])
+            }
         }
 
         let after = try db.query("SELECT * FROM dictation WHERE id = ?", [key])
