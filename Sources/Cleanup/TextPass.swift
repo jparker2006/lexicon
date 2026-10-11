@@ -17,8 +17,13 @@ public import LexiconDomain
 public enum TextPass {
     public static func run(_ modelText: String, rules: RuleSet) -> String {
         let ruled = rules.isEmpty ? modelText : rules.apply(to: modelText)
+        var dictationStart = true
         return ruled.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-            .map(Fillers.clean)
+            .map { line in
+                let cleaned = Fillers.clean(line, dictationStart: dictationStart)
+                if !cleaned.isEmpty { dictationStart = false }
+                return cleaned
+            }
             .joined(separator: "\n")
     }
 }
@@ -34,7 +39,7 @@ public enum TextPass {
 ///     start of a sentence before, a comma after. "like" stays before a
 ///     comparison or an estimate ("like, the primary color", "like, ten seconds").
 ///   - "so", "okay", "well", "basically" and "I mean" only at the start of the
-///     line, before anything is kept. Later in a Dictation they can carry
+///     Dictation, before anything is kept. Later in a Dictation they can carry
 ///     meaning: a result ("So we can see it"), a self-correction ("Delete it.
 ///     I mean, rename it"). "so" stays when it starts a phrase ("so that",
 ///     "so far"); "okay", "well" and "I mean" need a comma after ("okay" may
@@ -89,8 +94,9 @@ enum Fillers {
         "vol", "fig",
     ]
 
-    /// The filler pass over one line. A line always starts a sentence.
-    static func clean(_ line: Substring) -> String {
+    /// The filler pass over one line. A line always starts a sentence;
+    /// `dictationStart`: no earlier line kept anything.
+    static func clean(_ line: Substring, dictationStart: Bool) -> String {
         let tokens = line.split(whereSeparator: \.isWhitespace).map(Token.init)
         var kept: [String] = []
         var keptWords: [String] = []
@@ -114,7 +120,7 @@ enum Fillers {
             }
 
             let drop = dropCount(token, next: next, after: i + 2 < tokens.count ? tokens[i + 2] : nil,
-                                 lineStart: kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
+                                 dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
                                  previous: sentenceKept > 0 ? (kept.last!, keptWords.last!, sentenceKept == 1) : nil)
             if drop > 0 {
                 let last = tokens[i + drop - 1]
@@ -152,15 +158,15 @@ enum Fillers {
 
     /// How many tokens from `token` on are fillers to delete: 0, 1 or 2.
     /// `previous`: the last kept token in this sentence, its word, and whether it opened the sentence.
-    /// `lineStart`: nothing kept on this line yet. `afterOpener`: a filler already went from this sentence's start.
-    private static func dropCount(_ token: Token, next: Token?, after: Token?, lineStart: Bool, afterOpener: Bool,
+    /// `dictationStart`: nothing kept yet in the Dictation. `afterOpener`: a filler already went from this sentence's start.
+    private static func dropCount(_ token: Token, next: Token?, after: Token?, dictationStart: Bool, afterOpener: Bool,
                                   setOffBefore: Bool, previous: (text: String, word: String, opensSentence: Bool)?)
         -> Int {
         let word = token.word
         if protected.contains(word) || token.isQuoted { return 0 }
         if hard.contains(word), !token.isAcronym { return 1 }
 
-        if lineStart, let next, !token.endsSentence {
+        if dictationStart, let next, !token.endsSentence {
             let comma = token.trailing.hasPrefix(",")
             switch word {
             case "so": if !soPhrases.contains(next.word) { return 1 }

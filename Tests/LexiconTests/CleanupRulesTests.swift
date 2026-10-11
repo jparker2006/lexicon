@@ -172,6 +172,7 @@ let hardFillerCases: [Case] = [
     Case("It's due at 5 p.m. um, we ship.", "It's due at 5 p.m. we ship."),
     Case("I was going to... um, we ship.", "I was going to... we ship."),
     Case("Make it 5 mm wider.", "Make it 5 mm wider."),
+    Case("Mhm, ship it.", "Mhm, ship it."),
     Case("Hum the thumb drum, uhh.", "Hum the thumb drum."),
     Case("Send them to the ER, then home.", "Send them to the ER, then home."),
     Case("Uh, um, hmm.", ""),
@@ -187,6 +188,11 @@ func hardFillersGoAnywhere(_ c: Case) {
 @Test func tidiesSpacingAndPunctuation() {
     #expect(clean("Fix  the build ,  then   push .") == "Fix the build, then push.")
     #expect(clean("Fix it,, then push.") == "Fix it, then push.")
+}
+
+@Test func openersGoOnlyAtTheStartOfTheDictation() {
+    #expect(clean("Um, so, first line.\nSo, make it pass.") == "First line.\nSo, make it pass.")
+    #expect(clean("\nOkay, ship it.") == "\nShip it.")
 }
 
 @Test func keepsLineBreaks() {
@@ -210,7 +216,8 @@ let protectedWords = [
     "not", "no", "never", "don't", "doesn't", "didn't", "won't", "can't", "cannot", "isn't", "aren't", "wasn't",
     "shouldn't", "wouldn't", "nothing", "none", "nor", "without", "only", "just", "except", "unless", "but",
     "think", "maybe", "probably", "perhaps", "might", "guess", "kind", "sort", "actually", "really", "always",
-    "must", "should", "all", "every", "exactly", "at", "least", "most",
+    "must", "should", "all", "every", "exactly", "at", "least", "most", "kinda", "sorta", "almost", "barely",
+    "if", "until", "instead", "any", "ever",
 ]
 
 /// Dictations built to tempt every deletion rule next to a protected word.
@@ -229,13 +236,15 @@ let protectedSentences: [String] = [
     "Um, so so actually, uh, nothing changed, perhaps none of it.",
     "Uh, I don't think so, so don't, um, ship it.",
     "Cannot, uh, cannot touch it, nor, like, the docs, sort of.",
+    "Um, it's kinda kinda broken, sorta, until, like, it barely barely builds.",
+    "So, if if it fails, uh, don't ever ever retry, instead, you know, almost any fix.",
 ]
 
 private func protectedCounts(_ text: String) -> [String: Int] {
     var counts: [String: Int] = [:]
     for raw in text.split(whereSeparator: \.isWhitespace) {
         let word = raw.trimmingCharacters(in: .punctuationCharacters).lowercased()
-        if protectedWords.contains(word) || Fillers.protected.contains(word) { counts[word, default: 0] += 1 }
+        if protectedWords.contains(word) { counts[word, default: 0] += 1 }
     }
     return counts
 }
