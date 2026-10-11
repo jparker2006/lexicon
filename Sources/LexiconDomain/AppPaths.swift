@@ -16,10 +16,25 @@ public struct AppPaths: Sendable, Hashable {
     public let root: URL
     public init(root: URL) { self.root = root }
 
-    /// "Lexicon" for the daily bundle id, "Lexicon Dev" for the dev bundle id (#14).
-    public static func forBundle(id bundleID: String) -> AppPaths {
-        // TODO: map known bundle ids to root names; unknown ids get their own folder named by id.
-        fatalError("not implemented")
+    /// Jake's daily copy, installed by `scripts/install.sh`.
+    public static let dailyBundleID = "dev.jparker.lexicon"
+    /// Every builder's build, installed by `scripts/dev-run.sh`.
+    public static let devBundleID = "dev.jparker.lexicon.dev"
+
+    /// "Lexicon" for the daily bundle id, "Lexicon Dev" for the dev bundle id.
+    /// Any other id gets a folder named by the id, never the daily one.
+    public static func forBundle(
+        id bundleID: String,
+        in applicationSupport: URL = URL.applicationSupportDirectory
+    ) -> AppPaths {
+        // Reverse-DNS only, so an unknown id can never be named "Lexicon".
+        precondition(bundleID.contains(".") && !bundleID.contains("/"), "not a bundle id: \(bundleID)")
+        let name = switch bundleID {
+        case dailyBundleID: "Lexicon"
+        case devBundleID: "Lexicon Dev"
+        default: bundleID
+        }
+        return AppPaths(root: applicationSupport.appending(path: name, directoryHint: .isDirectory))
     }
 
     /// A throwaway root for tests and `lexicon-eval` runs.
