@@ -1,3 +1,4 @@
+#if DEBUG
 import Foundation
 import Synchronization
 import Testing
@@ -61,6 +62,7 @@ private let status = TestHookStatus(bundleID: AppPaths.devBundleID, version: "0.
     let server = try TestHookServer(channel: channel) { _ in .status(status) }
     let reply = channel.replies.appending(path: request.lastPathComponent)
     #expect(try JSONDecoder().decode(TestHookReply.self, from: Data(contentsOf: reply)) == .failed("not a test hook command"))
+    #expect(requestCount(channel) == 0)
     withExtendedLifetime(server) {}
 }
 
@@ -95,3 +97,4 @@ private final class Handled: Sendable {
     func append(_ command: TestHookCommand) { list.withLock { $0.append(command) } }
     var commands: [TestHookCommand] { list.withLock { $0 } }
 }
+#endif

@@ -11,8 +11,9 @@ public import LexiconDomain
 // the harness writes `test-hooks/requests/<id>.json` (atomically), the app
 // handles it, deletes it and writes `test-hooks/replies/<id>.json`. Not the
 // inbox itself: the inbox is one-way and at most once, and a harness needs an
-// answer. Files rather than a socket: no listener thread, and file permissions
-// are the whole security story.
+// answer. Files rather than a socket: no listener thread, and the boundary is
+// the user's own data folder: any process running as Jake can drive the dev
+// app while it runs with `--test-hooks`, which is why hooks never ship.
 
 /// Everything a harness can ask. The app's handler is an exhaustive switch over it.
 public enum TestHookCommand: Codable, Sendable, Equatable {

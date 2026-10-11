@@ -46,7 +46,8 @@ struct DevApp {
     /// The menu bar icon, found by its identifier among the app's menu bar extras.
     /// The status item can lag the hook server by a moment at launch.
     func statusItem() async throws -> AXUIElement {
-        for _ in 0..<50 {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
             if let extras = AX.element(element, "AXExtrasMenuBar"),
                let item = AX.find(AccessibilityID.statusItem, in: [extras]) {
                 return item

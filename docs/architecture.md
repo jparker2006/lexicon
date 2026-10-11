@@ -6,7 +6,7 @@ Decided in [App architecture and stack](https://github.com/jparker2006/lexicon/i
 
 | Question | Decision |
 |---|---|
-| Processes | One AppKit menu bar app (`LSUIElement`, `SMAppService.mainApp` login item). Plus dev-only `lexicon-eval` (the scorer's headless pipeline). No XPC, no helper agent. A `lexicon` hook CLI in the bundle is built only if the after-M1 grill wants hooks. |
+| Processes | One AppKit menu bar app (`LSUIElement`, `SMAppService.mainApp` login item). Plus dev-only `lexicon-eval` (the scorer's headless pipeline) and `lexicon-harness` (live-app checks; it runs a target text field as its own child process). No XPC, no helper agent. A `lexicon` hook CLI in the bundle is built only if the after-M1 grill wants hooks. |
 | UI | AppKit for every surface. SwiftUI is never imported. |
 | Toolchain | Command Line Tools 26.6, SwiftPM only, `scripts/bundle.sh` assembles and signs `Lexicon.app` with the self-signed "Lexicon Dev" certificate. No Xcode, no XcodeGen. |
 | Platform | macOS 26 and up. Swift 6 language mode, strict concurrency. |
@@ -65,7 +65,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 
 | Module | Owns | May import |
 |---|---|---|
-| `LexiconDomain` | Shared values only: `DictationID`, `DictationStatus` (with `canMove`, `isInFlight`, `needsAudio`), `TextVersions`, `SpeechSegment`, `InsertionReceipt`, `Term`/`Rule`/`RuleSet`, `Preferences`, `CloudAccess`, `AppPaths` (root only) | Foundation |
+| `LexiconDomain` | Shared values only: `DictationID`, `DictationStatus` (with `canMove`, `isInFlight`, `needsAudio`), `TextVersions`, `SpeechSegment`, `InsertionReceipt`, `Term`/`Rule`/`RuleSet`, `Preferences`, `CloudAccess`, `AppPaths` (root only), `AccessibilityID` (identifiers the harness finds the UI by) | Foundation |
 | `SQLiteKit` | One connection to system SQLite, WAL, migrations | SQLite3 |
 | `KeyInput` | Event tap thread, `FnGesture`, hotkeys, `InputClock` (single writer) | Domain |
 | `AudioCapture` | Engine, sink node, ring, converter, CAF writer, `F_FULLFSYNC` every 1 s and at stop, device rebuild, adaptive tail | Domain |

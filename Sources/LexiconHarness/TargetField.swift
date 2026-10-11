@@ -13,12 +13,10 @@ final class TargetField {
     static let identifier = "lexicon.harness.targetField"
 
     let process: Process
-    let app: AXUIElement
     let field: AXUIElement
 
-    private init(process: Process, app: AXUIElement, field: AXUIElement) {
+    private init(process: Process, field: AXUIElement) {
         self.process = process
-        self.app = app
         self.field = field
     }
 
@@ -29,9 +27,10 @@ final class TargetField {
         process.arguments = [mode, text]
         try process.run()
         let app = AX.app(process.processIdentifier)
-        for _ in 0..<100 {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
             if let field = AX.find(identifier, in: AX.elements(app, kAXWindowsAttribute)) {
-                return TargetField(process: process, app: app, field: field)
+                return TargetField(process: process, field: field)
             }
             try await Task.sleep(for: .milliseconds(50))
         }
@@ -57,11 +56,15 @@ final class TargetField {
     /// The child: show the window and run until terminated, or until the
     /// harness that started it exits, so a crashed harness leaves nothing behind.
     static func serve(text: String) -> Never {
-        let app = NSApplication.shared
-        app.setActivationPolicy(.prohibited)  // see the type comment: never activate
-        let parentGone = DispatchSource.makeProcessSource(identifier: getppid(), eventMask: .exit, queue: .main)
+        let parent = getppid()
+        let parentGone = DispatchSource.makeProcessSource(identifier: parent, eventMask: .exit, queue: .main)
         parentGone.setEventHandler { exit(0) }
         parentGone.resume()
+        // Gone before the watch started: it would never fire.
+        if parent == 1 || kill(parent, 0) != 0 { exit(0) }
+
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)  // see the type comment: never activate
 
         let scroll = NSTextView.scrollableTextView()
         let textView = scroll.documentView as! NSTextView
