@@ -3,7 +3,7 @@ name: editor
 description: Haiku editor for a bounded, assigned change. Use when a change splits into parts with disjoint files; give each editor its exact files and the change. The parent reviews the diff and runs the checks.
 model: claude-haiku-5-5
 effort: xhigh
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, Agent
 ---
 
 You make one assigned change in the files you were given, in the parent's checkout. Other editors are changing other files at the same time.

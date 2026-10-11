@@ -52,9 +52,9 @@ gh pr merge <pr> --squash --match-head-commit <head sha>
 
 - The head sha is the one it reviewed. A newer push means a new review.
 - `gh pr checks` must show the `CI` check passed on that head. Right after a push, CI may show no run yet: wait, never call it a failure. A newer push cancels a waiting run; judge a commit by its own runs.
-- `behind_by` must be 0. When the branch is behind `main`, the Reviewer merges `main` into it (in a temporary worktree, `git merge origin/main`, never a rebase), pushes, and waits for CI again.
+- `behind_by` must be 0. When the branch is behind `main`, the Reviewer merges `main` into it (in a temporary worktree, `git merge origin/main`, never a rebase) and pushes. That new head needs only a look at what the merge changed (its conflict resolutions), then green CI, before the Reviewer merges with the new sha.
 - `--match-head-commit` makes GitHub refuse the merge if anyone pushed after the review. On any refusal or unknown result, it reads the PR again; it never retries blindly.
-- After each merge, the next PR is behind `main` until it is brought up to date. Then it deletes the merged branch (`git push origin --delete <branch>`) and the builder's worktree and `.build/` once that builder is done.
+- After each merge, the next PR is behind `main` until it is brought up to date. The Reviewer deletes the merged branch (`git push origin --delete <branch>`), and the builder's worktree and `.build/` once that builder is done.
 
 ## Installing
 

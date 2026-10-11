@@ -43,7 +43,7 @@ Check: <the one thing Jake should try once it is installed>
 ## Lexicon additions
 
 - **`Refs #N`** alone on the first line. It links the PR to its issue, and words after the number make it prose.
-- **Scores.** A change to speech, Cleanup, the Lexicon or insertion puts its quick `lexicon-eval` scores in Evidence (words heard right, Terms right, lag). Any score that got worse goes on the line after `Refs #N`, before Summary: `Score worse: <which score, before and after>`.
+- **Scores.** A change to speech, Cleanup or the Lexicon puts its quick `lexicon-eval` scores in Evidence (words heard right, Terms right, lag). Any score that got worse goes on the line after `Refs #N`, before Summary: `Score worse: <which score, before and after>`.
 - **`## Install`** after Merge Danger, listing every step installing it needs (a new permission, a data migration, a model download), or "Code only."
 - **`Check:`** as the last line, with the one thing Jake should try once it is installed. A footer your tool adds may follow it.
 - Keep it under about 750 words, every whitespace-separated token counted, so a long tree counts too.

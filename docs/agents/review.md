@@ -14,15 +14,15 @@ A review ends in one verdict: **merge**, **merge with notes**, or **don't merge*
 
 - Audio is on disk within the first 100 ms of a Dictation, and what was captured survives a crash mid-Dictation.
 - A capture is stopped, and a speech attempt finished, at most once. Check every path that could stop it twice or never: fn-up, Esc, the 20-minute cap, a device change, an engine error.
-- Every Dictation gets a History row before anything can fail, and every status move is one the status list allows. A replayed or racing event is a no-op, never a second row or a skipped state.
+- Every Dictation's History row is written at fn-down, when recording starts, and every status move is one the status list allows. A replayed or racing event is a no-op, never a second row or a skipped state.
 - Text is queued for History (status ready) before it's typed. Nothing on the fn-up path waits on SQLite, Jev or Fix watching.
 - A row left mid-paste after a crash becomes "not inserted" at launch and is never retyped. Recovered or retried text can't be typed; it waits for paste-last.
 - When no engine can produce text, the Dictation is marked waiting and retried; Jake is never asked to redo it.
-- Nothing in History or the audio folder is deleted except by retention or Jake's own delete.
+- Nothing in History or the audio folder is deleted except by retention, Jake's own delete, or a lone tap removing its own row and audio.
 
 ## Inserting text
 
-- `InsertGuard.decide` runs on every insert. Late text, or text whose target is gone or changed, waits for paste-last instead of landing in the wrong place. No grace window.
+- `InsertGuard.decide` runs on every insert. Late text, or text whose target is gone or changed, waits for paste-last instead of landing in the wrong place. No grace window, except the spec's fallback where an app's field can't be detected (same app and under 5 s).
 - The clipboard is restored after paste, and a restore never overwrites something Jake copied in between.
 - Insertion works in the four apps that matter: Claude desktop, ChatGPT (Codex), a native text field, a terminal. A change here says which it checked in the live-app lane.
 
@@ -32,21 +32,21 @@ A review ends in one verdict: **merge**, **merge with notes**, or **don't merge*
 - Every text-sending call passes the Secret guard first. Every Jev call has a local fallback.
 - Requests carry zero retention where the spec says (`zdr: true` on OpenRouter), and audio goes only to services Lexicon itself uses.
 - Keys come from the Keychain (`lexicon-eval` reads environment variables). No key in code, a log, a test, a fixture, a PR, a comment or a commit.
-- Jake's Wispr export, the Test set and its gold text, the starter Lexicon and his History are referred to only by path under `~/Library/Application Support/Lexicon/`. Nothing from them is committed, quoted or pasted into GitHub or a model prompt. Test fixtures are synthesized or recorded for the test.
+- Jake's Wispr export, the Test set and its gold text, the starter Lexicon and his History are referred to only by path under `~/Library/Application Support/Lexicon/`. Nothing from them is committed, quoted or pasted into GitHub, and no agent or chatbot reads them. Only eval runs send Test set audio and text, and only to the providers Lexicon itself uses, with zero retention. Test fixtures are synthesized or recorded for the test.
 - No raw error text, file paths with Jake's data or private records reach the UI or a log that leaves the Mac.
 
 ## Shape and budgets
 
 - Module boundaries hold: a target imports only what its dependency list allows, and the import check passes. SwiftUI and Combine are never imported.
-- FluidAudio is the only third-party package and only `LocalParakeet` imports it. A new package needs Jake's yes, named at the top of the review.
+- FluidAudio is the only third-party package in the app, and only `LocalParakeet` imports it. A new package needs Jake's yes, named at the top of the review.
 - Copied code comes only from MIT, Apache or BSD projects, with their copyright lines kept. GPL code (VoiceInk, FluidVoice) is never copied.
-- The change stays within budget, or the PR says by how much it moves: app binary 4 MB or less without FluidAudio, bundle 12 MB or less, idle memory 30 MB or less, launch to fn working 150 ms or less, fn-down to first audio 60 ms or less, Lexicon's own fn-up to Cmd-V work 10 ms or less.
+- The change stays within budget, or the PR says by how much it moves: app binary 4 MB or less without FluidAudio, bundle 12 MB or less with it, idle memory 30 MB or less with the model unloaded, launch to fn working 150 ms or less, fn-down to first audio 60 ms or less, Lexicon's own fn-up to Cmd-V work 10 ms or less.
 - One owner per thing, as `docs/architecture.md` says. A new piece of shared mutable state, a lock, or a second writer to History is a blocker unless the PR argues it.
 - When the PR contradicts an ADR, it says so and why.
 
 ## Scores
 
-- A change to speech, Cleanup, the Lexicon or insertion runs a quick `lexicon-eval` and puts the scores in the PR (words heard right, Terms right, lag). **Any score that got worse is flagged at the top of the PR**, and a silent regression is a blocker.
+- A change to speech, Cleanup or the Lexicon runs a quick `lexicon-eval` and puts the scores in the PR (words heard right, Terms right, lag). **Any score that got worse is flagged at the top of the PR**, and a silent regression is a blocker.
 - Agents never tune on the 100 held-back clips. The full held-back run is per milestone.
 
 ## Combining with main

@@ -39,7 +39,7 @@ Command Line Tools 26.6 only (Swift 6.3, macOS 26 SDK), SwiftPM, no Xcode ([ADR 
 
 ## Private data
 
-Jake's Wispr export, the Test set and its gold text, the starter Lexicon, his History and his keys never enter git, a PR, an issue, a log or a prompt to any model or chatbot. They live under `~/Library/Application Support/Lexicon/` (keys also in the login Keychain and `~/code/lexicon/.env`). Refer to them by path only; never read them into the repo, quote them or print a key. Audio goes only to the services the spec allows, with zero retention. Test fixtures are synthesized or recorded for the test, never Jake's recordings.
+Jake's Wispr export, the Test set and its gold text, the starter Lexicon, his History and his keys never enter git, a PR, an issue, a log, or any agent's or chatbot's context. They live under `~/Library/Application Support/Lexicon/` (keys also in the login Keychain and `~/code/lexicon/.env`). Agents never open them; scripts such as `lexicon-eval` read them on the Mac. Refer to them by path only, and never print a key. Eval runs may send Test set audio and text only to the providers Lexicon itself uses, with zero retention. Test fixtures are synthesized or recorded for the test, never Jake's recordings.
 
 ## Doing the work
 
@@ -69,7 +69,7 @@ A builder builds its ticket with the implement-ticket skill (`.claude/skills/imp
 
 - Choose the simplest implementation that fully meets the issue. No speculative options, layers or config.
 - When something is replaced, delete the old path. No compatibility shims.
-- AppKit only; SwiftUI and Combine are never imported. FluidAudio is the only third-party package; any other needs Jake's yes.
+- AppKit only; SwiftUI and Combine are never imported. FluidAudio is the only third-party package in the app; any other needs Jake's yes.
 - Code may be copied from MIT, Apache or BSD projects with their copyright lines kept. GPL projects (VoiceInk, FluidVoice): ideas only, never code.
 - Comments say why the code is the way it is. History (bugs, tickets, incidents) goes in commit messages.
 

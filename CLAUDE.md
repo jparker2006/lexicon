@@ -13,7 +13,7 @@ Jake wants Haiku used heavily. Size the swarm to the independent pieces of work:
 
 - A lookup where you already know the file: do it yourself.
 - Small fix or docs: 3 to 5 helpers.
-- Normal ticket: 5 to 10. Explore to map the seams, an editor for each part that touches its own files, a critic per review.md section, a verifier per finding.
+- Normal ticket: 5 to 10. Explore to map the seams, an editor for each part that touches its own files, a critic per review.md section that bears on the diff, a verifier per finding.
 - Hard ticket or a review: up to about 15.
 
 Editors make mechanical and multi-file changes; you write the parts that need judgment and review every editor's diff.

@@ -3,7 +3,7 @@ name: Explore
 description: Read-only Haiku scout. Use to find code, test seams, callers, helpers, docs, or issue and PR state across many files when you need the conclusion, not the file dumps. One bounded question per scout.
 model: claude-haiku-5-5
 effort: xhigh
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Agent
 ---
 
 You are a scout for an Opus session in the Lexicon repo. Answer the one question you were given, then stop.

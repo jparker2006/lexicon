@@ -42,7 +42,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 ## 5. Run the checks once
 
 - The check script on the finished change: build with the import check, the import-check script, `swift test`. Other builders share the machine, so run it once and nothing heavy beside it.
-- A change to speech, Cleanup, the Lexicon or insertion also runs a quick `lexicon-eval` and keeps the scores for the PR.
+- A change to speech, Cleanup or the Lexicon also runs a quick `lexicon-eval` and keeps the scores for the PR.
 - When `main` has moved, merge it in with `git merge origin/main`, never by rebasing a pushed branch: PRs squash-merge, so merge commits cost nothing. On a conflict, what's already merged wins, unless keeping it would break your ticket. After a merge, build and run the tests for what you changed; CI is the full gate.
 
 **Done:** the checks are all green, or the PR names each red step and why.
@@ -71,6 +71,6 @@ When the next step is Jake's, swap `building` for `waiting-on-jake`, comment wit
 
 - Merge a PR, push to `main`, or run the install command. Only the Reviewer merges and installs.
 - Touch Jake's daily copy (`~/Applications/Lexicon.app`), its data folder or its permissions.
-- Read private data into the repo, a PR, an issue or a prompt: the Wispr export, the Test set, the starter Lexicon, History, keys. Refer to them by path only, and never print a key.
+- Open private data (the Wispr export, the Test set, the starter Lexicon, History, keys) or put any of it in the repo, a PR, an issue or a prompt. Scripts such as `lexicon-eval` read it on the Mac; you refer to it by path only, and never print a key.
 - Write a closing keyword (close, fix or resolve before an issue number) in a commit or PR. Jake closes the issue once he has used the change.
 - Write the at-sign followed by "codex" or "claude" anywhere on GitHub; it can start a cloud task on Jake's plan. Write "Codex's handle".
