@@ -26,8 +26,9 @@ public actor Lexicon {
     }
 
     /// fn-down: this Dictation's words, a snapshot that later changes never touch.
-    /// Under 1 ms. `terms` stays empty until per-Dictation selection lands (#73).
+    /// Under 1 ms.
     public func forDictation(in context: AppContext) -> DictationWords {
+        // TODO(#73): select up to `Preferences.cleanupTerms` Terms for the models.
         DictationWords(terms: [], rules: compiled)
     }
 

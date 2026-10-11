@@ -15,14 +15,16 @@ import Foundation
 enum EnglishWords {
     static let systemList = URL(filePath: "/usr/share/dict/words")
 
-    /// Everyday words newer than the list. Jargon stays out ("repo", "auth"):
-    /// it is rarely plain English, and counting it would stop folds like
-    /// "auth zero" to Auth0.
+    /// Everyday words newer than the list, and developer words said as plain
+    /// words: with "auth" missing, a Term "useAuth" would turn "use auth tokens"
+    /// into code. The cost is a fold: "auth zero" needs a Rule to become Auth0.
     static let modern: Set<String> = [
-        "app", "backend", "blog", "chatbot", "database", "debug", "demo", "download", "email", "emoji", "frontend",
-        "hashtag", "homepage", "inbox", "info", "internet", "laptop", "livestream", "logout", "offline", "ok",
-        "okay", "online", "podcast", "selfie", "signup", "smartphone", "startup", "username", "website", "wifi",
-        "workflow",
+        "app", "arg", "async", "auth", "backend", "blog", "boolean", "chatbot", "checkbox", "codebase", "config",
+        "database", "dataset", "debug", "demo", "diff", "download", "dropdown", "email", "emoji", "endpoint", "enum",
+        "env", "frontend", "hashtag", "homepage", "inbox", "info", "init", "internet", "laptop", "lib", "livestream",
+        "localhost", "logout", "offline", "ok", "okay", "online", "param", "plugin", "podcast", "popup", "refactor",
+        "regex", "repo", "runtime", "selfie", "signup", "smartphone", "startup", "timestamp", "toolbar", "username",
+        "util", "webhook", "website", "wifi", "workflow",
     ]
 
     /// The words of `candidates` (lowercased) that are plain English. Reads the

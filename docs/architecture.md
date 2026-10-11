@@ -65,7 +65,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 
 | Module | Owns | May import |
 |---|---|---|
-| `LexiconDomain` | Shared values only: `DictationID`, `DictationStatus` (with `canMove`, `isInFlight`, `needsAudio`), `TextVersions`, `SpeechSegment`, `InsertionReceipt`, `Term`/`Rule`/`RuleSet`, `Preferences`, `CloudAccess`, `AppPaths` (root only), `AccessibilityID` (identifiers the harness finds the UI by) | Foundation |
+| `LexiconDomain` | Shared values only (plus `RuleSet` matching, which WordStore compiles and Cleanup runs): `DictationID`, `DictationStatus` (with `canMove`, `isInFlight`, `needsAudio`), `TextVersions`, `SpeechSegment`, `InsertionReceipt`, `Term`/`Rule`/`RuleSet`, `Preferences`, `CloudAccess`, `AppPaths` (root only), `AccessibilityID` (identifiers the harness finds the UI by) | Foundation |
 | `SQLiteKit` | One connection to system SQLite, WAL, migrations | SQLite3 |
 | `KeyInput` | Event tap thread, `FnGesture`, hotkeys, `InputClock` (single writer) | Domain |
 | `AudioCapture` | Engine, sink node, ring, converter, CAF writer, `F_FULLFSYNC` every 1 s and at stop, device rebuild, adaptive tail | Domain |

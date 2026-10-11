@@ -86,7 +86,9 @@ public struct RuleSet: Sendable {
         self.terms = keyed
         self.prefixes = prefixes
         self.english = english
-        self.written = Set(terms.map(\.text) + rules.map(\.written))
+        // A written side's first word too: "npm run" keeps "npm" lowercase at a sentence start.
+        let writtenForms = terms.map(\.text) + rules.map(\.written)
+        self.written = Set(writtenForms + writtenForms.compactMap { $0.split(separator: " ").first.map(String.init) })
     }
 
     public var isEmpty: Bool { rules.isEmpty && terms.isEmpty }
@@ -208,7 +210,9 @@ public struct RuleSet: Sendable {
             if !words.isEmpty {
                 words[words.count - 1].joinsNext = startJoins && lastCoreEndsPiece && lower == start && upper > lower
             }
-            words.append(Word(core: lower..<upper, lower: text[lower..<upper].lowercased()))
+            // A curly apostrophe matches a straight one: "don\u{2019}t" is "don't".
+            let folded = text[lower..<upper].lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
+            words.append(Word(core: lower..<upper, lower: folded))
             lastCoreEndsPiece = upper == end
         }
 

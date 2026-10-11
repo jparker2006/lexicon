@@ -48,6 +48,9 @@ private func apply(_ text: String, _ store: Lexicon) async -> String {
         #expect(await apply(text, store) == text, "\(text)")
     }
     #expect(await apply("Open the worktree", store) == "Open the WorkTree")
+    // A developer word said as a plain word counts as English too.
+    let hook = try await lexicon(terms: ["useAuth"], rules: [])
+    #expect(await apply("We can use auth tokens", hook) == "We can use auth tokens")
 }
 
 @Test func aRuleAppliesExactly() async throws {
@@ -59,6 +62,8 @@ private func apply(_ text: String, _ store: Lexicon) async -> String {
     #expect(await apply("Wire auth into super-base", store) == "Wire auth into Supabase")
     #expect(await apply("Run slash review now", store) == "Run /review now")
     #expect(await apply("Check super base\u{2019}s logs", store) == "Check Supabase\u{2019}s logs")
+    let contraction = try await lexicon(terms: [], rules: [("don't", "do not")])
+    #expect(await apply("I don\u{2019}t know", contraction) == "I do not know")
     // Whole words only: "codecsx" is a different word, and so is "super, base".
     #expect(await apply("The codecsx file and super, base stay", store) == "The codecsx file and super, base stay")
 }
@@ -115,12 +120,16 @@ private func apply(_ text: String, _ store: Lexicon) async -> String {
     let rules = await store.forDictation(in: .unknown).rules
     #expect(TextPass.run("Um, gstack is ready.", rules: rules) == "gstack is ready.")
     #expect(TextPass.run("Um, G stack is ready.", rules: rules) == "gstack is ready.")
+    let twoWords = try await lexicon(terms: ["npm run"], rules: [])
+    #expect(TextPass.run("Um, npm run tests.", rules: await twoWords.forDictation(in: .unknown).rules)
+        == "npm run tests.")
 }
 
-@Test(arguments: [true, false])
-func rulesAndFoldingRunInEveryMode(privateMode: Bool) async throws {
+@Test(arguments: ["default", "private", "AI cleanup off"])
+func rulesAndFoldingRunInEveryMode(mode: String) async throws {
     var prefs = Preferences.defaults
-    if privateMode { prefs.privacy = .private } else { prefs.aiCleanup = false }
+    if mode == "private" { prefs.privacy = .private }
+    if mode == "AI cleanup off" { prefs.aiCleanup = false }
     let paths = AppPaths.temporary()
     let seeded = try Lexicon(paths: paths)
     try await seeded.add(Term(text: "gstack"))
