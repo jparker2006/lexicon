@@ -33,6 +33,7 @@ private struct Race {
     let history: HistoryStore
     let cloud: ScriptedCloud
     let clock: TestClock
+    let preferences = PreferencesStore(fixed: withCloud)
 
     init(_ script: [Reply], connectError: (any Error)? = nil, networkUp: Bool = true,
          secrets: Secrets = fakeKey) throws {
@@ -44,7 +45,7 @@ private struct Race {
             recorder: Recorder(),
             speech: SpeechEngine(local: ScriptedTranscriber(text: localHeard), cloud: cloud.link, clock: clock),
             cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: history,
-            destination: HeadlessDestination(), preferences: PreferencesStore(fixed: withCloud), secrets: secrets,
+            destination: HeadlessDestination(), preferences: preferences, secrets: secrets,
             keyboard: nil, fixes: nil, jev: nil)
     }
 
@@ -153,4 +154,18 @@ private struct Race {
     #expect(model == .local(.parakeetUnified))
     #expect(attempts[.cloud(.museVoice)] == .failed)
     #expect(race.clock.now.offset == .zero)
+}
+
+@Test(.timeLimit(.minutes(1))) func privateModeTurnedOnMidDictationCutsTheStreamAndLocalFinishes() async throws {
+    let race = try Race(Reply.finalText(cloudHeard, after: .milliseconds(200)))
+    let running = try race.dictate()
+
+    await race.cloud.wait { $0.connects == 1 }
+    race.preferences.update { $0.privacy = .private }
+    await race.cloud.wait { $0.closed }
+    let (model, attempts) = try await race.landed(running)
+
+    #expect(model == .local(.parakeetUnified))
+    #expect(attempts[.cloud(.museVoice)] == .failed)
+    #expect(race.clock.now.offset == .zero)  // local was used at once, not after the deadline
 }
