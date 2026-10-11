@@ -137,21 +137,41 @@ public struct TestHookChannel: Sendable {
         return name
     }
 
+    /// Waits for the reply to request `name`, woken by the replies folder
+    /// changing rather than a poll, and on no reply takes the request back. The
+    /// deadline is a Dispatch timer, not this task waking: under load the task can
+    /// wake late, and a reply that landed in time must still count.
     func reply(to name: String, timeout: Duration) async throws -> TestHookReply {
         let files = FileManager.default
-        let request = requests.appending(path: name)
+        try files.createDirectory(at: replies, withIntermediateDirectories: true)
         let reply = replies.appending(path: name)
-        let clock = ContinuousClock()
-        let deadline = clock.now + timeout
-        while clock.now < deadline {
-            if let data = try? Data(contentsOf: reply) {
-                try? files.removeItem(at: reply)
-                return try JSONDecoder().decode(TestHookReply.self, from: data)
+        let folder = open(replies.path, O_EVTONLY)
+        guard folder >= 0 else { throw CocoaError(.fileReadNoPermission) }
+        let queue = DispatchQueue(label: "dev.jparker.lexicon.test-hooks.reply")
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: folder, eventMask: .write, queue: queue)
+        source.setCancelHandler { close(folder) }
+        let data: Data? = await withCheckedContinuation { continuation in
+            // Runs on `queue` only, so `isCancelled` says the wait already ended.
+            @Sendable func check(atDeadline: Bool) {
+                guard !source.isCancelled else { return }
+                let data = try? Data(contentsOf: reply)
+                guard data != nil || atDeadline else { return }
+                source.cancel()
+                continuation.resume(returning: data)
             }
-            try await Task.sleep(for: .milliseconds(10))
+            source.setEventHandler { check(atDeadline: false) }
+            source.resume()
+            // The source registers on `queue` as it resumes, so this check runs with
+            // the watch live: a reply is either here now or raises an event.
+            queue.async { check(atDeadline: false) }
+            queue.asyncAfter(deadline: .now() + timeout / .seconds(1)) { check(atDeadline: true) }
         }
-        try? files.removeItem(at: request)
-        throw TestHookError.noReply
+        guard let data else {
+            try? files.removeItem(at: requests.appending(path: name))
+            throw TestHookError.noReply
+        }
+        try? files.removeItem(at: reply)
+        return try JSONDecoder().decode(TestHookReply.self, from: data)
     }
 }
 
@@ -178,7 +198,9 @@ public final class TestHookServer {
         source.setEventHandler { Self.drain(channel, handle) }
         source.setCancelHandler { close(folder) }
         source.resume()
-        // Requests written before the watch started raise no event.
+        // Requests written before the watch started raise no event. The source
+        // registers on `queue` as it resumes, so this drain runs with the watch
+        // live: once init returns, no request is missed, whenever it was written.
         queue.sync { Self.drain(channel, handle) }
     }
 

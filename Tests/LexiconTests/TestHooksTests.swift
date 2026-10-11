@@ -11,14 +11,40 @@ import LexiconDomain
 private let status = TestHookStatus(bundleID: AppPaths.devBundleID, version: "0.1 (1, abc)", pid: 42,
                                     accessibility: true, microphone: "granted")
 
+/// How long a test waits for a reply that takes milliseconds. Generous on
+/// purpose: the server answers from a task, and a loaded CI runner can leave
+/// tasks waiting for a thread for 15 s or more. The wait ends on the reply,
+/// not on this limit, so a pass never costs it.
+private let replyLimit = Duration.seconds(120)
+
 @Test func aCommandSentToTheRunningServerGetsItsReply() async throws {
     let channel = TestHookChannel(paths: AppPaths.temporary())
     let server = try TestHookServer(channel: channel) { command in
         command == .status ? .status(status) : .failed("unexpected \(command)")
     }
-    let reply = try await channel.send(.status, timeout: .seconds(10))
+    let reply = try await channel.send(.status, timeout: replyLimit)
     #expect(reply == .status(status))
-    #expect(try leftovers(channel).isEmpty)
+    #expect(leftovers(channel).isEmpty)
+    withExtendedLifetime(server) {}
+}
+
+@Test func manyRequestsAtOnceEachGetTheirOwnReply() async throws {
+    let channel = TestHookChannel(paths: AppPaths.temporary())
+    // Echoes each request's text, so a reply can be matched to its request.
+    let server = try TestHookServer(channel: channel) { command in
+        guard case .insert(let text, _) = command else { return .failed("unexpected \(command)") }
+        return .failed(text)
+    }
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        for n in 0..<50 {
+            group.addTask {
+                let reply = try await channel.send(.insert(text: "\(n)", delay: 0), timeout: replyLimit)
+                #expect(reply == .failed("\(n)"))
+            }
+        }
+        try await group.waitForAll()
+    }
+    #expect(leftovers(channel).isEmpty)
     withExtendedLifetime(server) {}
 }
 
@@ -27,15 +53,25 @@ private let status = TestHookStatus(bundleID: AppPaths.devBundleID, version: "0.
     await #expect(throws: TestHookError.noReply) {
         try await channel.send(.status, timeout: .milliseconds(50))
     }
-    #expect(try leftovers(channel).isEmpty)
+    #expect(leftovers(channel).isEmpty)
+}
+
+@Test func aReplyThatLandedInTimeIsReadHoweverLateTheSenderWakes() async throws {
+    // Under load the sender's wait can end after its deadline; a reply already
+    // written still counts. A zero timeout is the latest a sender can wake.
+    let channel = TestHookChannel(paths: AppPaths.temporary())
+    let name = try channel.post(.status)
+    try answer(name, with: .status(status), on: channel)
+    #expect(try await channel.reply(to: name, timeout: .zero) == .status(status))
+    #expect(leftovers(channel).isEmpty)
 }
 
 @Test func aRequestWaitingFromBeforeLaunchIsAnsweredWhenTheServerStarts() async throws {
     let channel = TestHookChannel(paths: AppPaths.temporary())
-    let sent = Task { try await channel.send(.status, timeout: .seconds(10)) }
-    try await waitUntil { requestCount(channel) == 1 }
+    let name = try channel.post(.status)
     let server = try TestHookServer(channel: channel) { _ in .status(status) }
-    #expect(try await sent.value == .status(status))
+    #expect(try await channel.reply(to: name, timeout: replyLimit) == .status(status))
+    #expect(leftovers(channel).isEmpty)
     withExtendedLifetime(server) {}
 }
 
@@ -49,10 +85,12 @@ private let status = TestHookStatus(bundleID: AppPaths.devBundleID, version: "0.
         handled.append(command)
         return .status(status)
     }
-    // A handler for the stale request would have been queued before this one.
-    #expect(try await channel.send(.status, timeout: .seconds(10)) == .status(status))
+    // The server looks at waiting requests before its init returns.
+    #expect(leftovers(channel).isEmpty)
+    // A handler for the stale request would have been started before this one.
+    #expect(try await channel.send(.status, timeout: replyLimit) == .status(status))
     #expect(handled.commands == [.status])
-    #expect(try leftovers(channel).isEmpty)
+    #expect(leftovers(channel).isEmpty)
     withExtendedLifetime(server) {}
 }
 
@@ -75,21 +113,23 @@ private func post(_ data: Data, to channel: TestHookChannel) throws -> URL {
     return url
 }
 
+/// What the server does for one request: takes it and writes its reply.
+private func answer(_ name: String, with reply: TestHookReply, on channel: TestHookChannel) throws {
+    try FileManager.default.removeItem(at: channel.requests.appending(path: name))
+    try FileManager.default.createDirectory(at: channel.replies, withIntermediateDirectories: true)
+    try JSONEncoder().encode(reply).write(to: channel.replies.appending(path: name), options: .atomic)
+}
+
 private func requestCount(_ channel: TestHookChannel) -> Int {
     let names = (try? FileManager.default.contentsOfDirectory(atPath: channel.requests.path)) ?? []
     return names.filter { $0.hasSuffix(".json") }.count
 }
 
 /// Every file left in either folder.
-private func leftovers(_ channel: TestHookChannel) throws -> [String] {
-    try [channel.requests, channel.replies].flatMap { folder in
+private func leftovers(_ channel: TestHookChannel) -> [String] {
+    [channel.requests, channel.replies].flatMap { folder in
         (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
     }
-}
-
-private func waitUntil(_ condition: () throws -> Bool) async throws {
-    for _ in 0..<2_000 where try !condition() { try await Task.sleep(for: .milliseconds(5)) }
-    try #require(try condition())
 }
 
 private final class Handled: Sendable {
