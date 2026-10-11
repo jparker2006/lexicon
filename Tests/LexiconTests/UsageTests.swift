@@ -34,7 +34,7 @@ import LexiconCore
     #expect(second == [.transcribe(id, wasWaiting: false)])
 }
 
-@Test(.disabled("lands with #70")) func cleanupAppliesRulesAndDropsFillers() {
+@Test func cleanupAppliesRulesAndDropsFillers() {
     let out = TextPass.run("um so wire the auth callback into super base", rules: RuleSet([Rule(heard: "super base", written: "Supabase")]))
     #expect(out == "Wire the auth callback into Supabase")
 }
