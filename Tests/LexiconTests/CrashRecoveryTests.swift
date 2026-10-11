@@ -86,6 +86,35 @@ private let cleaned = "the crash test passes now"  // nothing for rules-only Cle
     #expect(await relaunch.conductor.destination.delivered.isEmpty)
 }
 
+@Test(.timeLimit(.minutes(1))) func recoveryLeavesADictationThisRunIsRecordingAlone() async throws {
+    // fn can come before launch recovery runs: its open file and its row are this run's, not a crash's.
+    let source = syntheticSamples(count: 16_000)  // 1 s
+    let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+                                         local: ScriptedTranscriber(text: crashHeard))
+    let events = await system.conductor.events()
+    let dictation = Task { await system.conductor.dictate(file: wav, pace: .realtime) }
+    var listening: DictationID?
+    for await event in events {
+        if case .listening(let id) = event { listening = id; break }
+    }
+    let id = try #require(listening)
+    // Its header is written with the first drain, up to 100 ms after first audio.
+    while CAFFile.state(of: system.history.audioURL(for: id)) != .open { try await Task.sleep(for: .milliseconds(5)) }
+    await system.history.flush()
+
+    #expect(await system.history.recover().isEmpty)
+    await system.conductor.recover()
+    let result = await dictation.value
+
+    #expect(result.id == id)
+    #expect(result.status == .inserted)
+    let row = try #require(await system.history.dictation(id))
+    #expect(row.origin == .file)
+    #expect(row.status == .inserted)
+    #expect(try CAFFile.read(system.history.audioURL(for: id)).samples == source)
+}
+
 /// The acceptance run: 200 Dictations back to back at the speed of speech, each
 /// child relaunching on the last one's data folder and SIGKILLed at a random
 /// moment (launch, recovery, recording, transcribing, mid-paste). Four lanes of

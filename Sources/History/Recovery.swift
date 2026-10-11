@@ -22,14 +22,14 @@ extension HistoryStore {
     /// missing as failed, moves rows left in `.ready` (crashed mid-paste) to
     /// `.notInserted(.interrupted)` so they are never typed twice, sets
     /// `origin = recovered` on every row it hands back (so `.textReady` lands them
-    /// as `.recovered`, never typed), then returns what still needs text, oldest first.
+    /// as `.recovered`, never typed), then returns what still needs text.
     ///
     /// Only what an earlier run left: a row or file from after this store opened
     /// belongs to a Dictation this run is recording or finishing, so it is never
     /// touched, even if Jake pressed fn before recovery ran.
     ///
-    /// Idempotent: running it twice returns the same list and changes nothing the
-    /// second time. See RecoveryPlan.
+    /// Idempotent: running it twice returns the same Dictations and changes nothing
+    /// the second time. See RecoveryPlan.
     public func recover() async -> [UnfinishedDictation] {
         do {
             return try await read { [self] db in try recover(in: db) }
