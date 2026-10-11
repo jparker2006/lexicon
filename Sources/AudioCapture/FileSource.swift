@@ -10,10 +10,12 @@ import LexiconDomain
 ///
 /// `@unchecked Sendable`: `file` is read only by the reader thread once `start`
 /// runs; every other stored property is immutable, atomic or a semaphore.
-final class FileSource: @unchecked Sendable {
+final class FileSource: CaptureSource, @unchecked Sendable {
     static let blockFrames: AVAudioFrameCount = 512
 
-    let sampleRate: Double
+    let firstSegment: Segment
+    var deviceName: String? { nil }
+    var gaps: [Duration] { [] }
     private let file: AVAudioFile
     private let pace: FilePace
     private let stopRequested = Atomic<Bool>(false)
@@ -28,17 +30,17 @@ final class FileSource: @unchecked Sendable {
         else { throw .unreadableFile(url) }
         self.file = file
         self.pace = pace
-        sampleRate = file.processingFormat.sampleRate
+        firstSegment = Segment(rate: file.processingFormat.sampleRate)
     }
 
-    /// `firstAudio` runs once, when the first block enters the ring. `ended`
-    /// runs once when the thread exits: the time the last sample was read, or
-    /// nil if stopped before the end of the file.
-    func start(into ring: SPSCRing, firstAudio: @escaping @Sendable (HostTime) -> Void,
-               ended: @escaping @Sendable (HostTime?) -> Void) {
+    private var sampleRate: Double { firstSegment.rate }
+
+    /// `ended` runs once when the thread exits: the time the last sample was
+    /// read, or nil if stopped before the end of the file. A file never switches segment.
+    func start(_ events: SourceEvents) {
         started.store(true, ordering: .relaxed)
         let thread = Thread { [self] in
-            ended(run(into: ring, firstAudio: firstAudio))
+            events.ended(run(into: firstSegment.ring, firstAudio: events.firstAudio))
             exited.signal()
         }
         thread.qualityOfService = .userInitiated
@@ -49,10 +51,9 @@ final class FileSource: @unchecked Sendable {
     /// Waits for the reader thread to exit, so nothing writes the ring after.
     /// The thread checks for stop at every 512-frame block, so this is one block
     /// read at most; the deadline only guards against a file read that hangs.
-    /// Call at most once.
+    /// Idempotent: only the first call waits.
     func stop() {
-        guard started.load(ordering: .relaxed) else { return }
-        stopRequested.store(true, ordering: .relaxed)
+        guard started.load(ordering: .relaxed), !stopRequested.exchange(true, ordering: .relaxed) else { return }
         wake.signal()
         _ = exited.wait(timeout: .now() + .seconds(1))
     }

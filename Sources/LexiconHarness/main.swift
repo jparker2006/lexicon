@@ -13,10 +13,16 @@ import TestHooks
 let usage = """
     usage: lexicon-harness check
            lexicon-harness hook status | dictate <wav> | indicator <state>
+           lexicon-harness hook capture <seconds> [prepared[=<idle s>]] [change] [device=<uid>]
 
       check   launch Lexicon Dev with test hooks, find its status item by identifier,
               list its windows, open the target field, read it and clear it
       hook    send one test hook to the running Lexicon Dev and print the reply
+              capture: record from the mic and measure the start gap, tail, file
+              and mic release; `prepared` prepares the engine first and waits
+              0.3 s (or the idle seconds given) before fn-down, else it is built
+              cold on fn-down; `change` rebuilds the engine halfway as a device
+              change would
     """
 
 func ok(_ line: String) { print("ok    \(line)") }
@@ -52,16 +58,39 @@ func hook(_ arguments: [String]) async throws {
     case ("status", _, 1): .status
     case ("dictate", let wav?, 2): .dictate(wav: URL(filePath: wav).standardizedFileURL.path)
     case ("indicator", let state?, 2): .indicator(state: state)
+    case ("capture", let seconds?, _): capture(seconds: seconds, options: arguments.dropFirst(2))
     default: fail(usage, code: 64)
     }
-    switch try await DevApp.hooks.send(command, timeout: .seconds(10)) {
+    var timeout = Duration.seconds(10)
+    if case .capture(let seconds, let idle, _, _) = command { timeout += .seconds(seconds + (idle ?? 0)) }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    switch try await DevApp.hooks.send(command, timeout: timeout) {
     case .status(let status):
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         print(String(decoding: try encoder.encode(status), as: UTF8.self))
+    case .capture(let measurement):
+        print(String(decoding: try encoder.encode(measurement), as: UTF8.self))
     case .failed(let reason):
         fail("FAIL  \(reason)")
     }
+}
+
+func capture(seconds: String, options: ArraySlice<String>) -> TestHookCommand {
+    guard let seconds = Double(seconds), seconds > 0 else { fail(usage, code: 64) }
+    var change = false
+    var prepared, device: String?
+    for option in options {
+        switch option {
+        case "prepared": prepared = "0.3"
+        case _ where option.hasPrefix("prepared="): prepared = String(option.dropFirst("prepared=".count))
+        case "change": change = true
+        case _ where option.hasPrefix("device="): device = String(option.dropFirst("device=".count))
+        default: fail(usage, code: 64)
+        }
+    }
+    let idle = prepared.map { Double($0) }
+    if idle == .some(nil) { fail(usage, code: 64) }
+    return .capture(seconds: seconds, preparedIdle: idle ?? nil, deviceChange: change, deviceUID: device)
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
