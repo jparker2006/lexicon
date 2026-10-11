@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: StatusItemController?
     var indicator: DictationIndicator?
     var keyboard: Keyboard?
+    /// Why fn is off, shown as a menu line rather than leaving a dead key.
+    var fnOff: KeyboardError?
     var history: HistoryWindowPresenter?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     #if DEBUG
@@ -48,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let history = HistoryWindowPresenter(paths: paths)
         self.history = history
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
-            [history.menuItem()] + Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
+            [history.menuItem()] + Permissions.fnOffItems(self?.fnOff) + Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
         }
         let indicator = DictationIndicator(statusItem: statusItem, preferences: preferences)
         self.statusItem = statusItem
@@ -93,19 +95,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The fn tap. Until #56 wires the Conductor, its commands go only to the
     /// tap's own log (`log stream --predicate 'subsystem == "Lexicon" && category == "fn"'`).
-    static func startKeyboard() -> Keyboard? {
+    func startKeyboard() {
         let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "launch")
         let started = HostTime.now()
         do {
             let keyboard = try Keyboard.start(KeyboardConfig(), input: InputClock())
             Task { for await _ in keyboard.commands {} }
+            self.keyboard = keyboard
             let ms = LaunchClock.sinceProcessStart().map { Int(($0 * 1000).rounded()) } ?? -1
             let own = HostTime.now().duration(since: started) / .microseconds(1)
             log.notice("fn tap up \(ms, privacy: .public) ms after process start (tap start \(Int(own), privacy: .public) µs)")
-            return keyboard
         } catch {
-            log.error("no fn tap: Accessibility is not granted")
-            return nil
+            fnOff = error
+            log.error("""
+                fn is off: \(String(describing: error), privacy: .public), \
+                accessibility=\(Permissions.accessibility, privacy: .public)
+                """)
         }
     }
 

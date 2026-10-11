@@ -181,3 +181,11 @@ private func feed(_ event: CGEvent, at now: HostTime, into gesture: inout FnGest
     #expect(clock.hasInput(since: mark))
     #expect(!clock.hasInput(since: clock.mark()))
 }
+
+@Test func noListenAccessStartsNoTapAndSaysWhy() {
+    // The daily app's grants can differ from Lexicon Dev's: without listen access
+    // the tap is never created (so no Input Monitoring prompt), and the error says why.
+    #expect(throws: KeyboardError.noListenAccess) {
+        try Keyboard.start(KeyboardConfig(), input: InputClock(), listenAccess: false)
+    }
+}

@@ -25,6 +25,15 @@ enum Permissions {
     /// For the launch log line, read by the grant check in the PR evidence.
     static var summary: String { "accessibility=\(accessibility) microphone=\(microphoneName)" }
 
+    /// One line while the fn tap could not start, so fn is never silently dead.
+    /// First-run setup (#57) replaces it with the full flow.
+    static func fnOffItems(_ error: KeyboardError?) -> [NSMenuItem] {
+        guard error != nil else { return [] }
+        return [status(accessibility
+            ? "fn is off: macOS isn't sending Lexicon key events. Quit and reopen Lexicon."
+            : "fn is off: allow Accessibility, then quit and reopen Lexicon.")]
+    }
+
     static func menuItems() -> [NSMenuItem] {
         [
             microphone == .granted

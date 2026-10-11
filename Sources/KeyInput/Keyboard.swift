@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 public import LexiconDomain
 
@@ -54,6 +55,9 @@ public struct Hotkey: Sendable, Hashable, Codable {
 public enum KeyboardError: Error, Sendable {
     /// No Accessibility grant. Onboarding polls `AXIsProcessTrusted()` and offers a relaunch.
     case notTrusted
+    /// macOS reports no access to listen to key events, which normally comes
+    /// with Accessibility. The tap is not created, so no Input Monitoring prompt.
+    case noListenAccess
 }
 
 /// The fn key and every other key Lexicon listens to.
@@ -72,10 +76,14 @@ public final class Keyboard: Sendable {
 
     /// Creates the tap thread and starts listening. Throws if Accessibility is missing.
     public static func start(_ config: KeyboardConfig, input: InputClock) throws(KeyboardError) -> Keyboard {
+        try start(config, input: input, listenAccess: CGPreflightListenEventAccess())
+    }
+
+    static func start(_ config: KeyboardConfig, input: InputClock, listenAccess: Bool) throws(KeyboardError) -> Keyboard {
         let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
         let tap = EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
                                  continuation: continuation)
-        try tap.start()
+        try tap.start(listenAccess: listenAccess)
         return Keyboard(commands: commands, tap: tap)
     }
 

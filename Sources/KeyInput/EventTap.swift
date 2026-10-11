@@ -40,9 +40,10 @@ final class EventTapThread: @unchecked Sendable {
     /// Creates the tap (session level, listen-only, mask: flagsChanged, keyDown
     /// and the three mouse-downs), then spawns the thread that runs it.
     /// Throws `.notTrusted` without Accessibility: the tap is the permission check.
-    /// Checked first, so creating the tap can never raise an Input Monitoring prompt.
-    func start() throws(KeyboardError) {
-        guard CGPreflightListenEventAccess() else { throw .notTrusted }
+    /// Listen access is checked first, so creating the tap can never raise an
+    /// Input Monitoring prompt.
+    func start(listenAccess: Bool) throws(KeyboardError) {
+        guard listenAccess else { throw .noListenAccess }
         let types: [CGEventType] = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         // Unretained is safe: the thread below captures self and its run loop never exits.
