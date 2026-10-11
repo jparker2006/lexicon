@@ -9,7 +9,7 @@ const LABEL = { parakeet: "A", wispr: "B", typed: "fixed" };
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const TOUR = [
   "Each clip plays when it opens. Space plays or pauses it, and D plays the part where A and B differ.",
-  "Pick the version with the words you actually said, word for word: not what you wanted typed. " +
+  "Pick the words you actually said, word for word, not what you meant to write. " +
     "Punctuation and capitals don't matter. Press A or B.",
   "Neither right? Press N, fix the highlighted word and press Enter. " +
     "Every answer saves itself, so you can stop any time.",
@@ -209,7 +209,7 @@ function neither() {
   edit(fix.text, fix.start, fix.end);
 }
 
-// The tour: three steps on the first clip of the first visit, then never again.
+// The tour: three steps on the first clip, until Jake finishes or skips it once.
 
 function tour(step) {
   if (step >= TOUR.length) {
@@ -453,10 +453,10 @@ document.addEventListener("click", (event) => {
   }
   const button = event.target.closest("button[id]");
   if (button && BUTTONS[button.id] && !busy) {
-    // Neither while its box is open would throw away what is typed.
-    if (mode === "edit" && button.id === "neither") return;
-    if (mode === "edit") mode = "normal";
-    run(BUTTONS[button.id]);
+    // Neither while its box is open would throw away what is typed. Play and D
+    // keep the box open, so Jake can listen again while he types.
+    if (mode !== "edit" || button.id !== "neither") run(BUTTONS[button.id]);
+    if (mode === "edit") $("typed").focus();
     return;
   }
   // Words are marked only in mark mode, so a stray click never marks one.

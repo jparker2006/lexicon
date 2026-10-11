@@ -304,7 +304,8 @@ class PageTest(unittest.TestCase):
     def run_page(self, expression: str):
         script = (review.PAGE / "review_logic.js").read_text(encoding="utf-8") + f"\nJSON.stringify({expression})"
         done = subprocess.run(["osascript", "-l", "JavaScript", "-e", script],
-                              capture_output=True, text=True, timeout=30, check=True)
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout)
 
     def neither(self, parakeet: str, wispr: str) -> list:
