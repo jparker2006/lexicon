@@ -23,13 +23,14 @@ public actor CodeTerms {
     private let code: URL
     private let home: URL
     private let lexicon: Lexicon
+    private let source: any FileEventSource
     private let changed: AsyncStream<String?>.Continuation
     /// Real paths (symlinks resolved), as FSEvents reports them.
     private var codeRoot: String?
     private var homeFolders: [String] = []
     private var index = CodeIndex()
     private var published: (repo: String?, terms: [Term])?
-    private var events: FileEvents?
+    private var watch: FileWatch?
     private var reader: Task<Void, Never>?
     private var replay: CheckedContinuation<Void, Never>?
     private var replayed = false
@@ -49,18 +50,19 @@ public actor CodeTerms {
         var readsFiles: Bool { !repos.isEmpty || user || everything }
     }
 
-    /// How far back launch looks for the most recent file change: a weekend away
-    /// still finds the repo Jake left. A week of `~/code` replays in about 1 s.
-    static let history: TimeInterval = 7 * 24 * 3600
-    /// FSEvents coalescing: a touched file makes its repo current well within a second.
-    static let latency: TimeInterval = 0.2
     /// Launch never waits longer than this for the replay; later events still count.
     static let replayDeadline: Duration = .seconds(5)
 
     public init(code: URL, home: URL, lexicon: Lexicon) {
+        self.init(code: code, home: home, lexicon: lexicon, source: FSEventsSource())
+    }
+
+    /// Tests pass a scripted `source`, so how fast FSEvents is under load decides no result.
+    init(code: URL, home: URL, lexicon: Lexicon, source: any FileEventSource) {
         self.code = code
         self.home = home
         self.lexicon = lexicon
+        self.source = source
         (changes, changed) = AsyncStream.makeStream(of: String?.self, bufferingPolicy: .bufferingNewest(1))
     }
 
@@ -79,22 +81,20 @@ public actor CodeTerms {
         guard !stopped else { return }
 
         let paths = [codeRoot].compactMap { $0 } + homeFolders
-        let since = codeRoot.map { FileEvents.lastEvent(on: $0, before: Self.history) }
-            ?? FSEventStreamEventId(kFSEventStreamEventIdSinceNow)
         let (batches, deliver) = AsyncStream.makeStream(of: [FileEvent].self)
         let root = codeRoot
         let ignoring: @Sendable (String) -> Bool = { path in
             guard let root, let below = Self.components(of: path, below: root) else { return false }
             return CodeScan.isDerived(below.dropFirst())
         }
-        guard !paths.isEmpty, let events = FileEvents(paths: paths, since: since, latency: Self.latency,
-                                                      ignoring: ignoring, deliver: deliver) else { return }
-        self.events = events
+        guard !paths.isEmpty, let watch = source.watch(paths, historyOn: codeRoot, ignoring: ignoring,
+                                                       deliver: deliver) else { return }
+        self.watch = watch
         reader = Task { [weak self] in
             for await batch in batches { await self?.handle(batch) }
         }
         // With no history to replay, every batch applies as it comes.
-        guard since != FSEventStreamEventId(kFSEventStreamEventIdSinceNow) else { return endReplay() }
+        guard watch.replays else { return endReplay() }
         guard !replayed else { return }
         Task { [weak self] in
             try? await Task.sleep(for: Self.replayDeadline)
@@ -106,7 +106,7 @@ public actor CodeTerms {
     /// Stops watching for good, and ends `changes`.
     public func stop() {
         stopped = true
-        events = nil
+        watch = nil
         reader?.cancel()
         reader = nil
         endReplay()
@@ -216,6 +216,42 @@ public actor CodeTerms {
     }
 }
 
+/// Where `CodeTerms` hears about file changes: FSEvents in the app, a scripted
+/// source in tests.
+protocol FileEventSource: Sendable {
+    /// Starts delivering batches of events on `paths` (real paths) to `deliver`, in
+    /// order, until the returned watch is released. With `historyOn`, recent events
+    /// on that path's volume come first, ending with a HistoryDone event. Drops the
+    /// events `FileEvent.isKept` doesn't keep. Nil when watching can't start.
+    func watch(_ paths: [String], historyOn volume: String?, ignoring: @escaping @Sendable (String) -> Bool,
+               deliver: AsyncStream<[FileEvent]>.Continuation) -> FileWatch?
+}
+
+/// A running watch: it stops when released.
+struct FileWatch {
+    /// True when recent history comes first, ending with a HistoryDone event.
+    let replays: Bool
+    let running: AnyObject
+}
+
+/// The app's source: FSEvents.
+struct FSEventsSource: FileEventSource {
+    /// How far back launch looks for the most recent file change: a weekend away
+    /// still finds the repo Jake left. A week of `~/code` replays in about 1 s.
+    static let history: TimeInterval = 7 * 24 * 3600
+    /// FSEvents coalescing: a touched file makes its repo current well within a second.
+    static let latency: TimeInterval = 0.2
+
+    func watch(_ paths: [String], historyOn volume: String?, ignoring: @escaping @Sendable (String) -> Bool,
+               deliver: AsyncStream<[FileEvent]>.Continuation) -> FileWatch? {
+        let now = FSEventStreamEventId(kFSEventStreamEventIdSinceNow)
+        let since = volume.map { FileEvents.lastEvent(on: $0, before: Self.history) } ?? now
+        guard let events = FileEvents(paths: paths, since: since, latency: Self.latency, ignoring: ignoring,
+                                      deliver: deliver) else { return nil }
+        return FileWatch(replays: since != now, running: events)
+    }
+}
+
 /// One FSEvents change: a real path and what happened to it.
 struct FileEvent: Sendable {
     let path: String
@@ -232,6 +268,10 @@ struct FileEvent: Sendable {
             || has(kFSEventStreamEventFlagItemRenamed) || has(kFSEventStreamEventFlagItemModified)
             || has(kFSEventStreamEventFlagItemInodeMetaMod)
     }
+
+    /// Whether a source hands this event on: not on a path `ignoring` accepts,
+    /// though HistoryDone and rescans always count.
+    func isKept(ignoring: (String) -> Bool) -> Bool { isHistoryDone || mustRescan || !ignoring(path) }
 
     private func has(_ flag: Int) -> Bool { flags & FSEventStreamEventFlags(flag) != 0 }
 }
@@ -276,7 +316,7 @@ final class FileEvents {
             let sink = Unmanaged<Sink>.fromOpaque(info).takeUnretainedValue()
             guard let paths = unsafeBitCast(paths, to: NSArray.self) as? [String] else { return }
             let events = (0..<count).map { FileEvent(path: paths[$0], flags: flags[$0]) }
-                .filter { $0.isHistoryDone || $0.mustRescan || !sink.ignoring($0.path) }
+                .filter { $0.isKept(ignoring: sink.ignoring) }
             if !events.isEmpty { sink.deliver.yield(events) }
         }
         let flags = kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents
