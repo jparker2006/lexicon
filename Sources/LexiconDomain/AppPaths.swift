@@ -11,6 +11,7 @@ public import Foundation
 ///         audio/<id>.caf        History owns the lifecycle; AudioCapture writes bytes while recording
 ///         lexicon.sqlite        WordStore
 ///         inbox/*.json          Inbox (read and deleted by the app)
+///         test-hooks/           TestHooks: harness requests and app replies (dev builds only)
 ///         models/               LocalParakeet (586 MB of weights, never in the bundle)
 public struct AppPaths: Sendable, Hashable {
     public let root: URL
