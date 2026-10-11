@@ -284,6 +284,59 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     #expect(days(reader).map(\.count) == [2])
 }
 
+// MARK: - Detail and audio
+
+@MainActor @Test func aDetailShowsEveryVersionAndEveryEnginesRun() async throws {
+    let (store, paths) = try makeStore()
+    let id = DictationID()
+    let model = "wire the auth callback into super base"
+    let cleaned = "Wire the auth callback into Supabase."
+    let cloud = AttemptRecord(model: .cloud(.museVoice), result: .timedOut, text: nil, latency: .milliseconds(1_500), error: "deadline")
+    let won = AttemptRecord(model: parakeet, result: .won, text: model, latency: .milliseconds(90), error: nil)
+    store.record(.began(id, origin: .live, purpose: .type, at: at(10, 11, 9), app: app))
+    store.record(.attempted(id, cloud))
+    store.record(.attempted(id, won))
+    store.record(.audioEnded(id, audio))
+    store.record(.textReady(id, TextVersions(model: model, cleaned: cleaned), cleanup: .rulesOnly(.off), model: parakeet, typing: true))
+    store.record(.delivered(id, InsertionReceipt(appBundleID: app.bundleID, fieldFingerprint: nil, caretAfter: nil,
+                                                 contextBefore: "", contextAfter: "", insertedAt: at(10, 11, 9)),
+                            lag: .milliseconds(420)))
+    await store.flush()
+
+    let reader = HistoryReader(paths: paths, calendar: pacific)
+    let detail = try #require(reader.detail(id))
+    #expect(detail.row.id == id)
+    #expect(detail.row.finalText == cleaned)
+    #expect(detail.versions == TextVersions(model: model, cleaned: cleaned))
+    #expect(detail.attempts == [cloud, won])
+}
+
+@MainActor @Test func aDeletedDictationHasNoDetail() async throws {
+    let (store, paths) = try makeStore()
+    let gone = dictate(store, "Delete this one.", at: at(10, 11, 10))
+    store.record(.deleted(gone))
+    await store.flush()
+
+    let reader = HistoryReader(paths: paths, calendar: pacific)
+    #expect(reader.detail(gone) == nil)
+    #expect(reader.detail(DictationID()) == nil)
+}
+
+@MainActor @Test func thePlayButtonGetsTheAudioUntilRetentionTakesIt() async throws {
+    let (store, paths) = try makeStore()
+    let dictated = at(10, 11, 9)
+    let id = dictate(store, "Play this one.", at: dictated)
+    try Data([0, 1]).write(to: store.audioURL(for: id))
+    await store.flush()
+
+    let reader = HistoryReader(paths: paths, calendar: pacific)
+    #expect(reader.audioURL(id) == store.audioURL(for: id))
+    #expect(reader.audioURL(DictationID()) == nil)
+
+    await store.sweepAudio(now: dictated.addingTimeInterval(15 * 86_400))
+    #expect(reader.audioURL(id) == nil)
+}
+
 // MARK: - Search
 
 @MainActor @Test func searchIsAPlainCaseInsensitiveMatchOnFinalText() async throws {

@@ -144,12 +144,6 @@ public actor Conductor<Destination: TextDestination> {
         }
     }
 
-    /// History's ⋯ > Retry. Never typed: Jake is in the History window.
-    /// `model` nil = the normal plan; otherwise the picker's choice.
-    public func retry(_ id: DictationID, with model: SpeechModel?) async -> DictationResult {
-        fatalError("not implemented")
-    }
-
     /// The dev app's "dictate this WAV" test hook and `lexicon-eval`:
     /// the same run as a live Dictation, audio from a file, stop at end of file.
     /// In the dev app the text is typed into the focused field; headless it is recorded.
@@ -323,7 +317,7 @@ struct RunStart: Sendable {
 /// What a finished run reports (eval prints it as one JSON line per clip).
 public struct DictationResult: Sendable {
     public let id: DictationID
-    /// nil: discarded, or capture never started (nothing was recorded, nothing lost).
+    /// nil: discarded (a stray tap; nothing was recorded, nothing lost).
     public let status: DictationStatus?
     public let versions: TextVersions?
     /// AI cleanup accepted, or why the rules-only text was used.
