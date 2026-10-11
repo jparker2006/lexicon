@@ -16,6 +16,7 @@ import AppKit
 
     /// Reads Jake's clipboard ahead of the paste (fn-up).
     func prefetch() {
+        guard keeper.canSave else { return }
         keeper.prefetch()
         schedule()
     }
@@ -26,6 +27,8 @@ import AppKit
 
     func paste(_ text: String) -> PasteAttempt {
         if let unread = latest, !keeper.isReleased(unread) { return .busy }
+        // A clipboard Lexicon can't read, it could never put back: Jake's call is no paste.
+        guard keeper.canSave else { return .denied }
         guard let code = PasteKey.current(), let chord = PasteKey.Chord(code) else { return .failed }
         let id = keeper.put(text)
         latest = id

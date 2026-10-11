@@ -130,6 +130,9 @@ public enum NotInsertedReason: String, Sendable, Codable, CaseIterable {
     case typedSince
     case noField
     case pasteFailed
+    /// Jake set "Paste from Other Apps" to deny Lexicon: it can't save his
+    /// clipboard, so it never replaces it.
+    case clipboardDenied
     /// Lexicon stopped mid-paste (crash, quit). The text may or may not have landed,
     /// so it is never typed again; paste-last still reaches it.
     case interrupted

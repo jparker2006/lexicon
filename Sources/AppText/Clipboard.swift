@@ -16,6 +16,8 @@ struct PasteboardContents: Sendable, Equatable {
     var changeCount: Int { get }
     /// Reading another app's data. On macOS 26 this is the read that can ask Jake first.
     func contents() -> PasteboardContents
+    /// False when Jake denied Lexicon "Paste from Other Apps": `contents` can't see his clipboard.
+    var readable: Bool { get }
     /// Clears the pasteboard and promises `text`. `onRead` runs each time a
     /// reader asks for the text. Returns the change count after the write.
     func promise(_ text: String, onRead: @escaping @MainActor () -> Void) -> Int
@@ -28,11 +30,12 @@ struct PasteboardContents: Sendable, Equatable {
 /// reads have been quiet for 200 ms, at most 8 s after the write, and only if
 /// nobody wrote the pasteboard since (`changeCount`), so a restore never
 /// overwrites something Jake copied in between. No read within 1 s is reported
-/// as not inserted, but the text stays up until the cap (or 200 ms after a late
-/// read): an app that gets to a queued Cmd-V late pastes the Dictation, never
-/// Jake's previous clipboard, which can be a password. Until a paste was read
-/// or has settled, no new text goes up (`released`), so a queued Cmd-V can't
-/// paste the wrong Dictation either.
+/// as not inserted; the text then stays up until 2 s after the write (or 200 ms
+/// after a late read). That hold is the one exception to "never on the
+/// clipboard behind Jake's back" (spec story 26, Jake's call): restoring at
+/// once would let a still-queued Cmd-V paste his previous clipboard, which can
+/// be a password. Until a paste was read or has settled, no new text goes up
+/// (`released`), so a queued Cmd-V can't paste the wrong Dictation either.
 ///
 /// Time comes in as arguments, so the rules are tested with explicit instants;
 /// `TargetApp` drives `expire` from a real timer.
@@ -42,6 +45,8 @@ struct PasteboardContents: Sendable, Equatable {
     static let quiet: Duration = .milliseconds(200)
     static let cap: Duration = .seconds(8)
     static let receiptWait: Duration = .seconds(1)
+    /// How long a missed paste stays up; see the type comment.
+    static let missedHold: Duration = .seconds(2)
     /// A read-ahead copy no paste used (Esc, nowhere to type) is dropped after
     /// this, so a big copied image does not stay in Lexicon's memory.
     static let readAheadKept: Duration = .seconds(30)
@@ -49,7 +54,7 @@ struct PasteboardContents: Sendable, Equatable {
     struct PasteID: Hashable, Sendable { let value: Int }
 
     enum Expiry: Equatable {
-        /// No read in time: reported as not inserted. The text stays up until the cap.
+        /// No read in time: reported as not inserted. The text stays up until `missedHold`.
         case missed(PasteID)
         /// Reads went quiet (or the cap passed): the clipboard is back, unless Jake copied since.
         case settled(PasteID)
@@ -112,11 +117,14 @@ struct PasteboardContents: Sendable, Equatable {
         return id
     }
 
+    /// Lexicon can put Jake's clipboard back only if it can read it first.
+    var canSave: Bool { pasteboard.readable }
+
     /// When `expire` next has something to do.
     var deadline: Instant? {
         guard let current else { return saved.map { $0.readAt + Self.readAheadKept } }
         guard let lastRead = current.lastRead else {
-            return current.putAt + (current.missed ? Self.cap : Self.receiptWait)
+            return current.putAt + (current.missed ? Self.missedHold : Self.receiptWait)
         }
         return min(lastRead + Self.quiet, current.putAt + Self.cap)
     }
@@ -208,6 +216,7 @@ struct PasteboardContents: Sendable, Equatable {
     var types: [String] { board.types?.map(\.rawValue) ?? [] }
 
     var changeCount: Int { board.changeCount }
+    var readable: Bool { board.accessBehavior != .alwaysDeny }
 
     func contents() -> PasteboardContents {
         PasteboardContents(items: (board.pasteboardItems ?? []).map { item in

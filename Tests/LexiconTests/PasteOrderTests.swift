@@ -61,3 +61,18 @@ private actor Desk {
     guard case .sent = result else { Issue.record("not sent: \(result)"); return }
     #expect(await lane.pasted == ["dictated"])
 }
+
+/// A lane on a Mac where Jake denied Lexicon "Paste from Other Apps".
+private struct DeniedLane: PasteLane {
+    func idle() async {}
+    func paste(_ text: String) -> PasteAttempt { .denied }
+}
+
+@Test func withClipboardAccessDeniedNothingIsPastedAndTheDictationWaitsForPasteLast() async {
+    let desk = Desk()
+    let fnUp = await desk.focus
+    let result = await PasteOrder.run("dictated", lane: DeniedLane()) {
+        (InsertGuard.decide(target: fnUp, focusNow: fnUp, inputSinceMark: false), ())
+    }
+    guard case .held(.clipboardDenied) = result else { Issue.record("not held: \(result)"); return }
+}

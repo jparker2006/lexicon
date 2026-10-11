@@ -9,6 +9,7 @@ import Testing
     private(set) var items: [[PasteboardContents.Entry]] = []
     private var promised: (text: String, onRead: @MainActor () -> Void)?
     private(set) var contentsReads = 0
+    var readable = true
 
     func contents() -> PasteboardContents {
         contentsReads += 1
@@ -106,7 +107,7 @@ import Testing
     #expect(board.targetReads() == "Jake's")
 }
 
-@MainActor @Test func noReadWithin1sIsAMissButTheTextStaysUpUntilTheCap() async {
+@MainActor @Test func noReadWithin1sIsAMissAndJakesClipboardIsBackAt2s() async {
     let board = FakePasteboard(), clock = FakeClock()
     board.jakeCopies("Jake's password")
     let keeper = keeper(board, clock)
@@ -116,10 +117,10 @@ import Testing
     #expect(keeper.expire(at: clock.at(999)) == nil)
     #expect(keeper.expire(at: clock.at(1_000)) == .missed(paste))
     #expect(await receipt.value == false)
-    // A target that gets to its Cmd-V late pastes the Dictation, never Jake's clipboard.
+    // A target that gets to its Cmd-V a little late pastes the Dictation, never Jake's clipboard.
     #expect(board.showing == "dictated")
-    #expect(keeper.expire(at: clock.at(7_999)) == nil)
-    #expect(keeper.expire(at: clock.at(8_000)) == .settled(paste))
+    #expect(keeper.expire(at: clock.at(1_999)) == nil)
+    #expect(keeper.expire(at: clock.at(2_000)) == .settled(paste))
     #expect(board.showing == "Jake's password")
     #expect(await keeper.receipt(paste) == false)
 }
@@ -159,9 +160,17 @@ import Testing
     #expect(keeper.expire(at: clock.at(1_000)) == .missed(paste))
     #expect(!keeper.isReleased(paste))  // its Cmd-V may still be queued
     let released = Task { await keeper.released(paste) }
-    #expect(keeper.expire(at: clock.at(8_000)) == .settled(paste))
+    #expect(keeper.expire(at: clock.at(2_000)) == .settled(paste))
     await released.value
     #expect(keeper.isReleased(paste))
+}
+
+@MainActor @Test func aClipboardLexiconMayNotReadIsOneItCannotSave() {
+    let board = FakePasteboard(), clock = FakeClock()
+    let keeper = keeper(board, clock)
+    #expect(keeper.canSave)
+    board.readable = false  // Jake denied "Paste from Other Apps"
+    #expect(!keeper.canSave)
 }
 
 @MainActor @Test func aReadAheadNoPasteUsedIsDroppedAfter30s() {

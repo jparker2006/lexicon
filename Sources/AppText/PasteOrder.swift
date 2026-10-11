@@ -15,6 +15,8 @@ enum PasteAttempt: Equatable {
     case busy
     /// No Cmd-V key or event could be made.
     case failed
+    /// Lexicon may not read the clipboard, so it could never put Jake's back.
+    case denied
 }
 
 enum PasteOrder {
@@ -25,7 +27,7 @@ enum PasteOrder {
         case failed
     }
 
-    /// Waits out an earlier unread paste first (up to its 8 s cap), and only
+    /// Waits out an earlier unread paste first (up to 2 s after it missed), and only
     /// then runs the late-text `check`: a check made before that wait would be
     /// stale by the time Cmd-V goes out, and Jake may have moved to another app.
     /// Nothing waits between the check and the key; another paste that went
@@ -41,6 +43,7 @@ enum PasteOrder {
             case .sent(let id): return .sent(id, checkedAt: checkedAt, seen: seen)
             case .busy: continue
             case .failed: return .failed
+            case .denied: return .held(.clipboardDenied)
             }
         }
     }
