@@ -1,4 +1,4 @@
-import AppKit
+public import AppKit
 import os
 public import LexiconDomain
 import History
