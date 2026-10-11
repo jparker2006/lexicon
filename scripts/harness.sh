@@ -5,6 +5,7 @@
 #   scripts/dev-run.sh -- --test-hooks     install and launch the dev app with hooks on
 #   scripts/harness.sh check               status item, windows, the target field
 #   scripts/harness.sh hook status         one test hook, reply printed as JSON
+#   scripts/harness.sh history [word]      History window: open time, copy, search, close
 #
 # The live-app lane: one builder at a time. The harness reads other apps, so it
 # needs Accessibility, which it inherits from the terminal or agent app that runs
