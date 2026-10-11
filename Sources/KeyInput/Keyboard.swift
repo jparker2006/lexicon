@@ -54,31 +54,37 @@ public struct Hotkey: Sendable, Hashable, Codable {
 public enum KeyboardError: Error, Sendable {
     /// No Accessibility grant. Onboarding polls `AXIsProcessTrusted()` and offers a relaunch.
     case notTrusted
-    case tapCreationFailed
 }
 
 /// The fn key and every other key Lexicon listens to.
 ///
 /// Hides: the active session-level CGEventTap on its own thread (#6), the
-/// gesture state machine and its timers, swallowing Esc only while
-/// recording, re-enabling the tap after `tapDisabledByTimeout`, ignoring events
+/// gesture state machine and its timer, passing every key on (Esc while
+/// recording is swallowed from M1), re-enabling the tap after the system disables it, ignoring events
 /// Lexicon itself posted (its own Cmd-V), and stamping `InputClock`.
 ///
 /// Gesture state has exactly one owner: the recognizer on the tap thread. Other
 /// code asks it to change state (`endDictation()`); nothing else writes it.
 public final class Keyboard: Sendable {
+    /// Ordered commands from the tap thread. Single consumer: `LexiconSystem`.
+    public let commands: AsyncStream<KeyCommand>
+    let tap: EventTapThread
+
     /// Creates the tap thread and starts listening. Throws if Accessibility is missing.
     public static func start(_ config: KeyboardConfig, input: InputClock) throws(KeyboardError) -> Keyboard {
-        fatalError("not implemented")
+        let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
+        let tap = EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
+                                 continuation: continuation)
+        try tap.start()
+        return Keyboard(commands: commands, tap: tap)
     }
 
-    /// Ordered commands from the tap thread. Single consumer: `LexiconSystem`.
-    public var commands: AsyncStream<KeyCommand> { fatalError("not implemented") }
+    init(commands: AsyncStream<KeyCommand>, tap: EventTapThread) {
+        self.commands = commands
+        self.tap = tap
+    }
 
-    /// The Dictation ended without a key (mic failure, sleep, file test hook
-    /// finished): leave the recording phase so Esc is no longer swallowed.
-    public func endDictation() { fatalError("not implemented") }
-
-    public func updateConfig(_ config: KeyboardConfig) { fatalError("not implemented") }
-    public func stop() { fatalError("not implemented") }
+    /// The Dictation ended without a key (mic failure, sleep): leave the
+    /// recording phase, so the release that follows does nothing.
+    public func endDictation() { tap.perform(.externalEnd) }
 }
