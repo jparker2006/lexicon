@@ -44,10 +44,11 @@ mkdir -p "$APP/Contents/MacOS"
 cp "$BIN" "$APP/Contents/MacOS/Lexicon"
 [ "$CONFIG" = release ] && strip -x "$APP/Contents/MacOS/Lexicon"
 
-# Test hooks let any local process drive the app, so they exist only in debug
-# builds (#if DEBUG) and never in the daily app. Their type names survive
-# stripping in Swift's metadata, so a release binary that mentions one still has them.
-if [ "$CONFIG" = release ] && grep -q -a TestHook "$APP/Contents/MacOS/Lexicon"; then
+# Test hooks let any local process drive the app (the mic probe records from
+# the mic), so they exist only in debug builds (#if DEBUG) and never in the
+# daily app. Their type names survive stripping in Swift's metadata, so a
+# release binary that mentions one still has them.
+if [ "$CONFIG" = release ] && grep -q -a -e TestHook -e MicProbe "$APP/Contents/MacOS/Lexicon"; then
     echo "bundle: the release binary contains test hooks; they must be compiled out (#if DEBUG)" >&2
     exit 1
 fi

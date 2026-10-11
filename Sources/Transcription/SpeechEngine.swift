@@ -14,9 +14,13 @@ public import LexiconDomain
 /// followed by `finish`. Retry, recovery and eval cannot drift from live.
 public actor SpeechEngine {
     let local: (any LocalTranscriber)?
+    let residency: LocalResidency?
 
-    public init(local: (any LocalTranscriber)?, session: URLSession = .shared) {
+    /// `clock` times the local model's idle unload; tests pass a fake one.
+    public init(local: (any LocalTranscriber)?, session: URLSession = .shared,
+                clock: any Clock<Duration> = ContinuousClock()) {
         self.local = local
+        residency = local.map { LocalResidency(transcriber: $0, clock: clock) }
     }
 
     /// fn-down. Starts streaming `feed` to the cloud model (when the plan has
@@ -24,7 +28,7 @@ public actor SpeechEngine {
     /// is warm by fn-up (warm load 0.4-0.6 s overlaps the speech). Local work for
     /// this attempt runs at `LocalPriority.live`.
     public func begin(feed: AudioFeed, plan: SpeechPlan) -> SpeechAttempt {
-        SpeechAttempt(core: AttemptCore(feed: feed, plan: plan, local: local, priority: .live))
+        SpeechAttempt(core: AttemptCore(feed: feed, plan: plan, local: local, residency: residency, priority: .live))
     }
 
     /// Whole-clip transcription with the same race: retry, recovery, eval, and a
@@ -39,7 +43,9 @@ public actor SpeechEngine {
     /// Private mode toggled or settings changed. With reachability (NWPathMonitor,
     /// owned here) this feeds `ResidencyPolicy`: entering Private mode or losing
     /// the network loads the local model now, so the next fn-down never waits on it.
-    public func preferencesChanged(_ preferences: Preferences) { fatalError("not implemented") }
+    public func preferencesChanged(_ preferences: Preferences) async {
+        await residency?.policyChanged(ResidencyPolicy(preferences))
+    }
 
     /// Returns when the network path is satisfied (NWPathMonitor). Used by the
     /// Conductor's "waiting" Dictations (#4, M1).
@@ -53,6 +59,7 @@ public struct SpeechPlan: Sendable {
     let local: LocalModel?
     let terms: [Term]
     let race: RacePolicy
+    let residency: ResidencyPolicy
 
     /// - `forcing`: the Retry model picker. A cloud model in Private mode yields
     ///   a plan with no engine, which finishes as `.unavailable(.privateMode)`.
@@ -67,7 +74,8 @@ public struct SpeechPlan: Sendable {
         case .cloud?: nil
         }
         return SpeechPlan(cloud: nil, local: local, terms: Array(terms.prefix(preferences.speechTerms)),
-                          race: RacePolicy(deadline: preferences.raceDeadline))
+                          race: RacePolicy(deadline: preferences.raceDeadline),
+                          residency: ResidencyPolicy(preferences))
     }
 }
 
@@ -106,7 +114,11 @@ public enum SpeechOutcome: Sendable {
 public enum SpeechUnavailable: Sendable, Hashable {
     /// Cloud failed twice and there is no local model: the Dictation waits for the network.
     case offline
+    /// The cloud provider failed: the Dictation waits for the network.
     case providerError(String)
+    /// The local model is installed but failed to load or transcribe. The
+    /// Dictation keeps its audio and waits for a working model, not the network.
+    case localModelFailed(String)
     /// Private mode and no local model.
     case privateMode
     /// No cloud model in the plan and no local model installed: the Dictation
@@ -117,8 +129,17 @@ public enum SpeechUnavailable: Sendable, Hashable {
     /// The Dictation keeps its audio and waits for an engine, instead of failing.
     public var waits: Bool {
         switch self {
-        case .offline, .providerError, .noModel: true
+        case .offline, .providerError, .noModel, .localModelFailed: true
         case .privateMode, .silence: false
+        }
+    }
+
+    /// Waiting on the network, so the notice says so. A missing or broken local
+    /// model waits for a model instead, and the network would not help it.
+    public var waitsForNetwork: Bool {
+        switch self {
+        case .offline, .providerError: true
+        case .noModel, .localModelFailed, .privateMode, .silence: false
         }
     }
 }
@@ -139,8 +160,9 @@ public struct SpeechText: Sendable {
 public protocol LocalTranscriber: Sendable {
     var model: LocalModel { get }
     var isResident: Bool { get async }
-    /// Warm load 0.4-0.6 s. The one-time CoreML compile (~27 s) happens at model
-    /// install, never here.
+    /// Warm load 0.2-0.6 s. The first load in a new executable or after a macOS
+    /// update also compiles for the Neural Engine (about 25 s), so the app must
+    /// warm the model at launch, not on a Dictation.
     func load() async throws
     func unload() async
     /// ~80 ms for a clip of 6 s or less. `terms` may be ignored: FluidAudio
@@ -150,6 +172,13 @@ public protocol LocalTranscriber: Sendable {
     /// queued `.background` call (recovery, Retry), so a live Dictation never
     /// waits behind them; a running background job is not aborted (~80 ms).
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String
+}
+
+/// Thrown by a `LocalTranscriber` whose weights are not on disk: the Dictation
+/// waits for a model (`.noModel`) instead of failing.
+public struct LocalModelNotInstalled: Error, Sendable {
+    public let model: LocalModel
+    public init(_ model: LocalModel) { self.model = model }
 }
 
 /// Who is waiting on a local transcription. See `LocalTranscriber.transcribe`.
@@ -163,7 +192,9 @@ public enum LocalPriority: Sendable, Hashable {
 /// One attempt's work, shared by the non-copyable `SpeechAttempt` and its tasks.
 final class AttemptCore: Sendable {
     let plan: SpeechPlan
+    /// The engine's transcriber, only when it runs the model the plan asks for.
     let local: (any LocalTranscriber)?
+    let residency: LocalResidency?
     let priority: LocalPriority
     /// Empty until a cloud plan exists: local transcribes the whole clip at
     /// `finish`, so there is no text while Jake talks.
@@ -174,24 +205,29 @@ final class AttemptCore: Sendable {
     /// same chunks is read and dropped so a long Dictation holds its audio once.
     let drain: Task<Void, Never>
 
-    init(feed: AudioFeed, plan: SpeechPlan, local: (any LocalTranscriber)?, priority: LocalPriority) {
+    init(feed: AudioFeed, plan: SpeechPlan, local: (any LocalTranscriber)?, residency: LocalResidency?,
+         priority: LocalPriority) {
         self.plan = plan
-        self.local = plan.local == nil ? nil : local
+        let local = local.flatMap { $0.model == plan.local ? $0 : nil }
+        self.local = local
+        self.residency = local == nil ? nil : residency
         self.priority = priority
         let (segments, ended) = AsyncStream<SpeechSegment>.makeStream()
         ended.finish()
         self.segments = segments
-        let model = self.local
-        warmUp = Task {
-            guard let model, !(await model.isResident) else { return }
-            try? await model.load()  // a failed load shows up as a failed transcription
-        }
+        warmUp = Task { [residency = self.residency] in await residency?.dictationBegan(plan.residency) }
         drain = Task { for await _ in feed {} }
     }
 
     func finish(_ clip: AudioClip) async -> SpeechOutcome {
         guard let local else { return .unavailable(.noModel) }
         await warmUp.value
+        let outcome = await transcribe(clip, with: local)
+        await residency?.dictationEnded()
+        return outcome
+    }
+
+    private func transcribe(_ clip: AudioClip, with local: any LocalTranscriber) async -> SpeechOutcome {
         let model = SpeechModel.local(local.model)
         let started = ContinuousClock.now
         do {
@@ -200,12 +236,19 @@ final class AttemptCore: Sendable {
             guard text.contains(where: { !$0.isWhitespace }) else { return .unavailable(.silence) }
             let won = AttemptRecord(model: model, result: .won, text: text, latency: latency, error: nil)
             return .text(SpeechText(text: text, model: model, finalizeToText: latency, attempts: [won]))
+        } catch is LocalModelNotInstalled {
+            return .unavailable(.noModel)
         } catch {
-            return .unavailable(.providerError(String(describing: error)))
+            return .unavailable(.localModelFailed(String(describing: error)))
         }
     }
 
     func cancel() {
         drain.cancel()
+        // Ends this attempt's hold on the model once its fn-down load is done.
+        Task { [warmUp, residency] in
+            await warmUp.value
+            await residency?.dictationEnded()
+        }
     }
 }
