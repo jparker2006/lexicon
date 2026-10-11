@@ -3,16 +3,17 @@ import Synchronization
 import Testing
 @testable import LexiconCore
 import LexiconDomain
-import Transcription
+@testable import Transcription
 
 // The local model's residency and failure handling (#47), through the headless
 // pipeline with a fake model and a fake clock: no Neural Engine, no waiting on
-// the wall clock.
+// the wall clock. Each test waits on a signal, so a time limit turns a missing
+// signal into a failure instead of a hang.
 
-@Test func theModelLoadsOnFnDownAndUnloadsAfterTenIdleMinutes() async throws {
+@Test(.timeLimit(.minutes(1))) func theModelLoadsOnFnDownAndUnloadsAfterTenIdleMinutes() async throws {
     let model = FakeModel()
     let clock = TestClock()
-    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: tenMinuteLinger,
                                          local: model, clock: clock)
 
     let result = await system.conductor.dictate(file: try shortWAV(), pace: .asFastAsPossible)
@@ -31,10 +32,10 @@ import Transcription
     #expect(await model.isResident == false)
 }
 
-@Test func aDictationWithinTheLingerKeepsTheModelLoaded() async throws {
+@Test(.timeLimit(.minutes(1))) func aDictationWithinTheLingerKeepsTheModelLoaded() async throws {
     let model = FakeModel()
     let clock = TestClock()
-    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: tenMinuteLinger,
                                          local: model, clock: clock)
 
     _ = await system.conductor.dictate(file: try shortWAV(), pace: .asFastAsPossible)
@@ -53,10 +54,10 @@ import Transcription
     #expect(await model.isResident == false)
 }
 
-@Test func privateModeKeepsTheModelLoaded() async throws {
+@Test(.timeLimit(.minutes(1))) func privateModeKeepsTheModelLoaded() async throws {
     let model = FakeModel()
     let clock = TestClock()
-    var preferences = Preferences.defaults
+    var preferences = tenMinuteLinger
     preferences.privacy = .private
     let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: preferences,
                                          local: model, clock: clock)
@@ -65,10 +66,13 @@ import Transcription
 
     #expect(result.status == .inserted)
     #expect(clock.sleepers == 0)  // no unload is ever scheduled
+    await clock.advance(by: .seconds(3_600))
+    _ = await system.conductor.dictate(file: try shortWAV(), pace: .asFastAsPossible)
+    #expect(await model.loads == 1)  // never unloaded, so never loaded again
     #expect(await model.isResident)
 }
 
-@Test func aBrokenLocalModelIsItsOwnReasonNotTheNetwork() async throws {
+@Test(.timeLimit(.minutes(1))) func aBrokenLocalModelIsItsOwnReasonNotTheNetwork() async throws {
     let engine = SpeechEngine(local: FakeModel(failure: ModelBroke()))
     let plan = SpeechPlan.make(preferences: .defaults, access: nil, terms: [])
 
@@ -82,7 +86,7 @@ import Transcription
     #expect(reason.waitsForNetwork == false)
 }
 
-@Test func aMissingLocalModelWaitsForAModel() async throws {
+@Test(.timeLimit(.minutes(1))) func aMissingLocalModelWaitsForAModel() async throws {
     let engine = SpeechEngine(local: FakeModel(failure: LocalModelNotInstalled(.parakeetUnified)))
     let plan = SpeechPlan.make(preferences: .defaults, access: nil, terms: [])
 
@@ -94,7 +98,7 @@ import Transcription
     }
 }
 
-@Test func aBrokenLocalModelKeepsTheAudioWithoutAWaitingForNetworkNotice() async throws {
+@Test(.timeLimit(.minutes(1))) func aBrokenLocalModelKeepsTheAudioWithoutAWaitingForNetworkNotice() async throws {
     let source = syntheticSamples(count: 8_000)
     let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
     let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
@@ -116,7 +120,7 @@ import Transcription
     #expect(row.audio == .onDisk)
 }
 
-@Test func withNoLocalModelInThePlanTheEnginesModelIsNotUsed() async throws {
+@Test(.timeLimit(.minutes(1))) func withNoLocalModelInThePlanTheEnginesModelIsNotUsed() async throws {
     let model = FakeModel()
     var preferences = Preferences.defaults
     preferences.localModel = nil
@@ -130,7 +134,7 @@ import Transcription
     #expect(await model.transcribed == 0)
 }
 
-@Test func liveWorkGoesAheadOfQueuedBackgroundWork() async throws {
+@Test(.timeLimit(.minutes(1))) func liveWorkGoesAheadOfQueuedBackgroundWork() async throws {
     let queue = LocalJobQueue()
     let order = Order()
     let (release, releasing) = AsyncStream<Void>.makeStream()
@@ -160,6 +164,12 @@ import Transcription
 // MARK: Helpers
 
 private struct ModelBroke: Error {}
+
+private let tenMinuteLinger: Preferences = {
+    var preferences = Preferences.defaults
+    preferences.localModelLinger = .seconds(600)
+    return preferences
+}()
 
 private actor Order {
     private(set) var names: [String] = []

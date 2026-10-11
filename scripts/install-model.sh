@@ -8,11 +8,10 @@
 # The weights live in the daily copy's data folder, "Lexicon/models/", and the
 # dev folder's "models" is a symlink to it, so the two never hold two copies.
 # A builder only ever runs `dev`, which never writes into the daily folder:
-# - dev, daily models present: link "Lexicon Dev/models" to them (nothing
-#   downloads once the daily install is complete).
-# - dev, no daily models: download into "Lexicon Dev/models" itself.
-# - daily (Jake or the Reviewer): adopt the dev download if there is one (a
-#   rename, no second download), then link the dev folder to it.
+# - dev, daily install complete: link "Lexicon Dev/models" to it and stop.
+# - dev otherwise: download into "Lexicon Dev/models" itself.
+# - daily (Jake or the Reviewer): adopt a complete dev download if the daily
+#   folder has none (a rename, no second download), then link the dev folder.
 # Never in the repo or the app bundle. Safe to re-run: present files are kept.
 set -eu
 cd "$(dirname "$0")/.."
@@ -22,21 +21,36 @@ flavor "${1:-dev}"
 SUPPORT="$HOME/Library/Application Support"
 DAILY="$SUPPORT/Lexicon/models"
 DEV="$SUPPORT/Lexicon Dev/models"
+# FluidAudio's folder for Parakeet Unified, and the files ParakeetTranscriber
+# needs in it (`requiredFiles` in Sources/LocalParakeet/ParakeetTranscriber.swift).
+MODEL=parakeet-unified-en-0.6b
+complete() {
+    for file in parakeet_unified_encoder_int8.mlmodelc parakeet_unified_decoder.mlmodelc \
+        parakeet_unified_joint_decision_single_step.mlmodelc vocab.json; do
+        [ -e "$1/$MODEL/$file" ] || return 1
+    done
+}
 mkdir -p "$SUPPORT/Lexicon Dev"
 
 if [ "$FLAVOR" = daily ]; then
-    mkdir -p "$SUPPORT/Lexicon"
-    if [ -d "$DEV" ] && [ ! -L "$DEV" ] && [ ! -e "$DAILY" ]; then
-        mv "$DEV" "$DAILY"
-    fi
     mkdir -p "$DAILY"
-    if [ -e "$DEV" ] && [ ! -L "$DEV" ]; then
-        echo "install-model: $DEV is a folder, not a link; remove it to share $DAILY" >&2
-    else
-        ln -sfn "$DAILY" "$DEV"
+    if [ ! -L "$DEV" ] && complete "$DEV" && [ ! -e "$DAILY/$MODEL" ]; then
+        mv "$DEV/$MODEL" "$DAILY/$MODEL"
     fi
-elif [ -d "$DAILY" ] && [ ! -e "$DEV" ]; then
-    ln -s "$DAILY" "$DEV"
+    rmdir "$DEV" 2>/dev/null || true
+    if [ ! -e "$DEV" ]; then
+        ln -s "$DAILY" "$DEV"
+    elif [ ! -L "$DEV" ]; then
+        echo "install-model: $DEV is a folder, not a link; remove it to share $DAILY" >&2
+    fi
+elif complete "$DAILY"; then
+    [ -e "$DEV" ] || ln -s "$DAILY" "$DEV"
+    echo "install-model: Lexicon Dev uses the daily copy's model"
+    exit 0
+elif [ -L "$DEV" ]; then
+    # Linked to an incomplete daily install: download into a dev folder of its
+    # own rather than through the link into the daily one.
+    rm "$DEV"
 fi
 
 . scripts/lib/swift-flags.sh

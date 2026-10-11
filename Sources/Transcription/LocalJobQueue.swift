@@ -10,7 +10,7 @@ public actor LocalJobQueue {
     public init() {}
 
     /// Jobs waiting for their turn, not counting the one running.
-    public var waiting: Int { live.count + background.count }
+    var waiting: Int { live.count + background.count }
 
     /// Runs `job` when it is this caller's turn.
     public func run<T: Sendable>(_ priority: LocalPriority,

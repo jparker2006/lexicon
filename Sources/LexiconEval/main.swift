@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 import LexiconDomain
 import LexiconCore
 import LocalParakeet
@@ -158,15 +157,8 @@ let parakeet = PinnedModel(parakeet: ParakeetTranscriber(paths: .forBundle(id: A
 func installModel(into folder: URL) async -> Int32 {
     guard let access = CloudAccess.granted(by: .defaults, app: .unknown, keys: { _ in nil }) else { return 1 }
     do {
-        let shown = Mutex(-1)
         try await ParakeetTranscriber.install(paths: AppPaths(root: folder), access: access) { fraction in
-            let percent = Int(fraction * 100)
-            let changed = shown.withLock { last in
-                defer { last = percent }
-                return last != percent
-            }
-            guard changed else { return }
-            FileHandle.standardError.write(Data("\rinstalling: \(percent)%".utf8))
+            FileHandle.standardError.write(Data("\rinstalling: \(Int(fraction * 100))%".utf8))
         }
         FileHandle.standardError.write(Data("\ninstalled\n".utf8))
         return 0
