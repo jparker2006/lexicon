@@ -1,6 +1,8 @@
 import Foundation
 import LexiconDomain
 import LexiconCore
+import LocalParakeet
+import Transcription
 
 // `lexicon-eval`: dev tool, never shipped. Runs the real Conductor headless, at
 // the speed of speech, on one WAV or on every entry of a manifest.
@@ -12,11 +14,16 @@ import LexiconCore
 //       [--baseline <run.jsonl>] [--out <run.jsonl>] [--scripted-gold]
 //       the report from `scorer/score report` (see scorer/README.md)
 //
+//   swift run lexicon-eval --install-model <data folder>
+//       downloads the local model into `<data folder>/models/`
+//       (`scripts/install-model.sh` runs it until onboarding exists)
+//
 // `lag_ms` is end of audio to text typed (the recording destination's "paste").
 // `--scripted` stands in a fake engine that hears <text>, and `--scripted-gold`
 // one that hears each entry's gold text, to check the pipeline on a Mac with no
-// model. Without them the local model runs; until it is wired in (#47) there is
-// none, so every Dictation waits and scores as no text.
+// model. Without them local Parakeet runs from Lexicon Dev's `models/` (a
+// symlink to the daily copy's once that is installed); with no model there,
+// every Dictation waits and scores as no text.
 //
 // A manifest run writes one run line per entry (`--out` keeps the file; it is
 // what a later run's `--baseline` reads), then passes it to the scorer and exits
@@ -45,13 +52,17 @@ func runEval(arguments: [String]) async -> Int32 {
     while let argument = rest.popFirst() {
         switch argument {
         case "--scripted-gold": scriptedGold = true
-        case "--scripted", "--manifest", "--split", "--baseline", "--out":
+        case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model":
             guard let value = rest.popFirst(), options[argument] == nil else { return usage() }
             options[argument] = value
         default:
             guard !argument.hasPrefix("--") else { return usage() }
             files.append(argument)
         }
+    }
+    if let folder = options["--install-model"] {
+        guard options.count == 1, files.isEmpty, !scriptedGold else { return usage() }
+        return await installModel(into: URL(filePath: folder, directoryHint: .isDirectory))
     }
     if let manifest = options["--manifest"] {
         guard files.isEmpty, options["--scripted"] == nil else { return usage() }
@@ -69,7 +80,7 @@ func evalFile(_ wav: URL, scripted: String?) async -> Int32 {
     let system: HeadlessSystem
     do {
         system = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
-                                         local: scripted.map(ScriptedTranscriber.init(text:)))
+                                         local: scripted.map(ScriptedTranscriber.init(text:)) ?? parakeet)
     } catch {
         return fail("\(error)")
     }
@@ -95,7 +106,7 @@ func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, sc
     let lines: [RunLine]
     do {
         lines = try await runManifest(manifest, split: split, pace: .realtime) { entry in
-            scriptedGold ? ScriptedTranscriber(text: entry.text) : nil
+            scriptedGold ? ScriptedTranscriber(text: entry.text) as any LocalTranscriber : parakeet
         } progress: { done, total in
             FileHandle.standardError.write(Data("lexicon-eval: \(done)/\(total)\r".utf8))
         }
@@ -127,6 +138,35 @@ func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, sc
     return scorer.terminationStatus
 }
 
+/// Local Parakeet, loaded once and kept for the whole run. Every Dictation here
+/// builds its own SpeechEngine, and a finished one's idle timer would otherwise
+/// unload the shared model under a later Dictation and add a reload to its lag.
+struct PinnedModel: LocalTranscriber {
+    let parakeet: ParakeetTranscriber
+    var model: LocalModel { parakeet.model }
+    var isResident: Bool { get async { await parakeet.isResident } }
+    func load() async throws { try await parakeet.load() }
+    func unload() async {}
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String {
+        try await parakeet.transcribe(clip, terms: terms, priority: priority)
+    }
+}
+
+let parakeet = PinnedModel(parakeet: ParakeetTranscriber(paths: .forBundle(id: AppPaths.devBundleID)))
+
+func installModel(into folder: URL) async -> Int32 {
+    guard let access = CloudAccess.granted(by: .defaults, app: .unknown, keys: { _ in nil }) else { return 1 }
+    do {
+        try await ParakeetTranscriber.install(paths: AppPaths(root: folder), access: access) { fraction in
+            FileHandle.standardError.write(Data("\rinstalling: \(Int(fraction * 100))%".utf8))
+        }
+        FileHandle.standardError.write(Data("\ninstalled\n".utf8))
+        return 0
+    } catch {
+        return fail("install failed: \(error)")
+    }
+}
+
 func fail(_ message: String) -> Int32 {
     FileHandle.standardError.write(Data("lexicon-eval: \(message)\n".utf8))
     return 1
@@ -137,6 +177,7 @@ func usage() -> Int32 {
         usage: lexicon-eval <wav> [--scripted <text>]
                lexicon-eval --manifest <manifest.jsonl> [--split <name>] [--baseline <run.jsonl>]
                             [--out <run.jsonl>] [--scripted-gold]
+               lexicon-eval --install-model <data folder>
 
         """.utf8))
     return 2
