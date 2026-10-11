@@ -110,7 +110,7 @@ let package = Package(
             name: "LexiconTests",
             dependencies: [
                 "LexiconDomain", "KeyInput", "AudioCapture", "Transcription", "Cleanup", "WordStore", "History",
-                "AppText", "LexiconCore", "TestHooks",
+                "AppText", "LexiconCore", "LexiconUI", "TestHooks",
             ]
         ),
     ],

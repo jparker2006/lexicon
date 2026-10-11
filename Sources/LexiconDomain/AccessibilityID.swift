@@ -3,4 +3,6 @@
 public enum AccessibilityID {
     /// The menu bar icon's button.
     public static let statusItem = "lexicon.statusItem"
+    /// The recording pill's panel.
+    public static let indicator = "lexicon.indicator"
 }
