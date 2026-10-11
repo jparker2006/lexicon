@@ -73,6 +73,8 @@ public actor TargetApp: TextDestination {
         let field: FieldRef?
         /// What the receipt stores (`Focus.durableFingerprint`).
         let fingerprint: String?
+        /// Where the paste will start: the caret, or the selection it replaces.
+        let pasteStart: Int?
     }
 
     public func context() -> AppContext {
@@ -93,7 +95,8 @@ public actor TargetApp: TextDestination {
         let fingerprint = focus.durableFingerprint(bundleID: bundleID)
         await Paster.shared.prefetch()  // Jake's clipboard, read now, off the text-ready-to-Cmd-V path
         return Target(focus: focus.snapshot(durable: fingerprint), bundleID: bundleID, mark: mark,
-                      capturedAt: .now(), field: focus.field.map(FieldRef.init), fingerprint: fingerprint)
+                      capturedAt: .now(), field: focus.field.map(FieldRef.init), fingerprint: fingerprint,
+                      pasteStart: focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute)?.location })
     }
 
     public func insert(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
@@ -114,7 +117,20 @@ public actor TargetApp: TextDestination {
         lastPasteWork = ContinuousClock.now - start
         // A paste with no read is not reported as typed: the text waits for paste-last.
         guard await Paster.shared.receipt(paste), let now else { return .notInserted(.pasteFailed) }
+        await caretPassed(target.pasteStart.map { $0 + text.utf16.count }, in: now.field)
         return .inserted(now.receipt(inserted: text, bundleID: target.bundleID, fingerprint: target.fingerprint))
+    }
+
+    /// Electron apps update the field a frame or more after they read the
+    /// pasteboard, so a caret read at once is from before the paste. Waits, up
+    /// to 100 ms, for the caret to reach the end of the new text.
+    private func caretPassed(_ end: Int?, in field: AXUIElement?) async {
+        guard let end, let field else { return }
+        let deadline = ContinuousClock.now + .milliseconds(100)
+        while let caret = AX.range(field, kAXSelectedTextRangeAttribute)?.location, caret < end,
+              ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     private static func same(_ a: AXUIElement?, _ b: AXUIElement?) -> Bool {
