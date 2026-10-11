@@ -9,7 +9,7 @@ public import LexiconDomain
 /// Order, fixed here and nowhere else:
 ///   1. Rules and Term folding (`RuleSet.apply`)
 ///   2. the filler pass, one line at a time (`Fillers.clean`), which never
-///      changes the case of a Term or a Rule's written side
+///      deletes a Term or a Rule's written side, or changes its case
 ///
 /// The speech model already supplies punctuation and capitals. The pass only
 /// deletes listed fillers and accidental repeats, then tidies the spacing,
@@ -120,7 +120,8 @@ enum Fillers {
                 continue
             }
 
-            let drop = dropCount(token, next: next, after: i + 2 < tokens.count ? tokens[i + 2] : nil,
+            // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
+            let drop = rules.isWritten(token.text) ? 0 : dropCount(token, next: next, after: i + 2 < tokens.count ? tokens[i + 2] : nil,
                                  dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
                                  previous: sentenceKept > 0 ? (kept.last!, keptWords.last!, sentenceKept == 1) : nil)
             if drop > 0 {

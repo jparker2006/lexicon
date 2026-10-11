@@ -120,6 +120,8 @@ private func apply(_ text: String, _ store: Lexicon) async -> String {
     let rules = await store.forDictation(in: .unknown).rules
     #expect(TextPass.run("Um, gstack is ready.", rules: rules) == "gstack is ready.")
     #expect(TextPass.run("Um, G stack is ready.", rules: rules) == "gstack is ready.")
+    let okay = try await lexicon(terms: [], rules: [("okey", "OK")])
+    #expect(TextPass.run("okey, add a test", rules: await okay.forDictation(in: .unknown).rules) == "OK, add a test")
     let twoWords = try await lexicon(terms: ["npm run"], rules: [])
     #expect(TextPass.run("Um, npm run tests.", rules: await twoWords.forDictation(in: .unknown).rules)
         == "npm run tests.")
