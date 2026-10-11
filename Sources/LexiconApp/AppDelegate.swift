@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: StatusItemController?
     var indicator: DictationIndicator?
     var keyboard: Keyboard?
+    var history: HistoryWindowPresenter?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     #if DEBUG
     var testHooks: TestHookServer?
@@ -48,8 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lexicon"
         // TODO(#56): the system's store, once `LexiconSystem.live` builds one.
         let preferences = PreferencesStore()
+        let history = HistoryWindowPresenter(paths: paths)
+        self.history = history
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
-            Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
+            [history.menuItem()] + Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
         }
         let indicator = DictationIndicator(statusItem: statusItem, preferences: preferences)
         self.statusItem = statusItem
@@ -72,9 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Reopened from Spotlight or Finder: open History (#63). Nothing to show yet.
+    /// Reopened from Spotlight or Finder: open History.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        false
+        history?.show()
+        return false
     }
 
     /// `scripts/install.sh` and `scripts/dev-run.sh` quit the old copy with SIGTERM

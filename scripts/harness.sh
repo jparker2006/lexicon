@@ -9,6 +9,7 @@
 #   scripts/harness.sh hook indicator <state> [message]   show one pill state
 #   scripts/harness.sh hook sound <cue>      play one sound, reply with its latency
 #   scripts/harness.sh pill [--shots <dir>]  every pill state checked, sounds timed
+#   scripts/harness.sh history [word]        History window: open time, copy, search, close
 #
 # The live-app lane: one builder at a time. The harness reads other apps, so it
 # needs Accessibility, which it inherits from the terminal or agent app that runs
