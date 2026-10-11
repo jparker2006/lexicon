@@ -1,10 +1,11 @@
 import ServiceManagement
 
 /// Start at login: `SMAppService.mainApp`, the app itself as the login item
-/// (no helper). macOS owns the truth: Jake can turn it off in System Settings >
-/// General > Login Items, which leaves it `requiresApproval`, and Lexicon never
-/// registers over that. `Preferences.startAtLogin` is what Jake chose in
-/// Lexicon's own menu.
+/// (no helper). macOS owns the truth and the menu shows it. Lexicon registers
+/// itself once, on first run (`Preferences.startAtLoginOffered`); after that a
+/// login item Jake removed in System Settings > General > Login Items (macOS 26
+/// reports `notRegistered`) or switched off there (`requiresApproval`) stays
+/// that way, and only Lexicon's menu turns it back on.
 @MainActor
 enum LoginItem {
     enum Status: Sendable, Hashable {
@@ -21,12 +22,12 @@ enum LoginItem {
         case openSystemSettings
     }
 
-    /// At launch: register once when Jake wants it and it was never registered;
-    /// unregister when he turned it off in Lexicon's menu. `requiresApproval` is
-    /// Jake's call in System Settings, left alone.
-    nonisolated static func launchAction(wanted: Bool, status: Status) -> Action? {
+    /// At launch: register when Jake wants it and Lexicon never offered it
+    /// before; unregister when he turned it off in Lexicon's menu. Anything else
+    /// is Jake's call in System Settings, left alone.
+    nonisolated static func launchAction(wanted: Bool, offered: Bool, status: Status) -> Action? {
         switch (wanted, status) {
-        case (true, .notRegistered): .register
+        case (true, .notRegistered): offered ? nil : .register
         case (false, .enabled), (false, .requiresApproval): .unregister
         default: nil
         }

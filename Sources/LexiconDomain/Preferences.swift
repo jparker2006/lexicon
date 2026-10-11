@@ -44,14 +44,18 @@ public struct Preferences: Sendable, Hashable, Codable {
     /// first `cleanupTerms`. Private mode sends no list.
     public var speechTerms: Int
     public var cleanupTerms: Int
+    /// Jake's choice in Lexicon's menu. On by default (#57).
     public var startAtLogin: Bool
+    /// Lexicon has registered itself at login once. After that only Jake adds
+    /// or removes the login item: one he removed in System Settings stays removed.
+    public var startAtLoginOffered: Bool
     /// The "Sounds on" toggle (#55): the start, stop, warning and error blips. On by default.
     public var soundsOn: Bool
 
     public init(privacy: PrivacyMode, alwaysPrivateApps: Set<String>, cloudModel: CloudModel?, localModel: LocalModel?, microphoneUID: String?,
                 raceDeadline: Duration, localModelLinger: Duration, aiCleanup: Bool,
                 cleanupModel: CloudCleanupModel, cleanupDeadline: Duration, speechTerms: Int, cleanupTerms: Int,
-                startAtLogin: Bool, soundsOn: Bool) {
+                startAtLogin: Bool, startAtLoginOffered: Bool, soundsOn: Bool) {
         self.privacy = privacy
         self.alwaysPrivateApps = alwaysPrivateApps
         self.cloudModel = cloudModel
@@ -65,6 +69,7 @@ public struct Preferences: Sendable, Hashable, Codable {
         self.speechTerms = speechTerms
         self.cleanupTerms = cleanupTerms
         self.startAtLogin = startAtLogin
+        self.startAtLoginOffered = startAtLoginOffered
         self.soundsOn = soundsOn
     }
 
@@ -72,7 +77,7 @@ public struct Preferences: Sendable, Hashable, Codable {
         privacy: .standard, alwaysPrivateApps: [], cloudModel: nil, localModel: .parakeetUnified, microphoneUID: nil,
         raceDeadline: .milliseconds(300), localModelLinger: .seconds(600), aiCleanup: true,
         cleanupModel: .openRouterFast, cleanupDeadline: .milliseconds(450), speechTerms: 50, cleanupTerms: 200,
-        startAtLogin: true, soundsOn: true
+        startAtLogin: true, startAtLoginOffered: false, soundsOn: true
     )
 }
 

@@ -68,14 +68,18 @@ private func facts(microphone: MicrophoneAccess = .granted, accessibility: Bool 
 }
 
 @Test func startAtLoginRegistersOnceAndLeavesJakesSystemSettingsChoiceAlone() {
-    #expect(LoginItem.launchAction(wanted: true, status: .notRegistered) == .register)
-    #expect(LoginItem.launchAction(wanted: true, status: .enabled) == nil)
-    // Turned off in System Settings: never registered over.
-    #expect(LoginItem.launchAction(wanted: true, status: .requiresApproval) == nil)
+    // First run.
+    #expect(LoginItem.launchAction(wanted: true, offered: false, status: .notRegistered) == .register)
+    #expect(LoginItem.launchAction(wanted: true, offered: true, status: .enabled) == nil)
+    // Removed in System Settings after the first run (macOS 26 then reports notRegistered):
+    // it stays removed.
+    #expect(LoginItem.launchAction(wanted: true, offered: true, status: .notRegistered) == nil)
+    // Switched off in System Settings: never registered over.
+    #expect(LoginItem.launchAction(wanted: true, offered: true, status: .requiresApproval) == nil)
     // Turned off in Lexicon's menu.
-    #expect(LoginItem.launchAction(wanted: false, status: .enabled) == .unregister)
-    #expect(LoginItem.launchAction(wanted: false, status: .requiresApproval) == .unregister)
-    #expect(LoginItem.launchAction(wanted: false, status: .notRegistered) == nil)
+    #expect(LoginItem.launchAction(wanted: false, offered: true, status: .enabled) == .unregister)
+    #expect(LoginItem.launchAction(wanted: false, offered: true, status: .requiresApproval) == .unregister)
+    #expect(LoginItem.launchAction(wanted: false, offered: true, status: .notRegistered) == nil)
 }
 
 @Test func theMenuToggleFlipsStartAtLogin() {

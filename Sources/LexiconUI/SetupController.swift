@@ -304,26 +304,33 @@ public final class Setup: NSObject {
     // MARK: - Start at login
 
     private func applyLoginItemAtLaunch() {
-        guard let action = LoginItem.launchAction(wanted: preferences.snapshot().startAtLogin, status: LoginItem.status),
+        let settings = preferences.snapshot(), status = LoginItem.status
+        guard let action = LoginItem.launchAction(wanted: settings.startAtLogin, offered: settings.startAtLoginOffered,
+                                                  status: status),
               action != .register || registersAtLogin else { return }
-        perform(action)
+        if perform(action), action == .register { preferences.update { $0.startAtLoginOffered = true } }
     }
 
     @objc private func toggleStartAtLogin() {
         let action = LoginItem.toggleAction(status: LoginItem.status)
+        // Jake chose in the menu, so first run's offer is spent either way.
         switch action {
-        case .register, .openSystemSettings: preferences.update { $0.startAtLogin = true }
-        case .unregister: preferences.update { $0.startAtLogin = false }
+        case .register, .openSystemSettings: preferences.update { $0.startAtLogin = true; $0.startAtLoginOffered = true }
+        case .unregister: preferences.update { $0.startAtLogin = false; $0.startAtLoginOffered = true }
         }
         perform(action)
     }
 
-    private func perform(_ action: LoginItem.Action) {
+    /// True when it worked. Errors only reach the log: the menu line shows the status that resulted.
+    @discardableResult
+    private func perform(_ action: LoginItem.Action) -> Bool {
         do {
             try LoginItem.perform(action)
             log.notice("start at login: \(String(describing: action), privacy: .public), now \(String(describing: LoginItem.status), privacy: .public)")
+            return true
         } catch {
             log.error("start at login \(String(describing: action), privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 

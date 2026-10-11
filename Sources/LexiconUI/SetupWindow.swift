@@ -112,6 +112,9 @@ final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextF
             window?.center()
         }
         showWindow(nil)
+        // Activation can be refused while another app is in front (the dot's click
+        // left it behind System Settings in the live check), so order it front anyway.
+        window?.orderFrontRegardless()
         if step == .tryFn { window?.makeFirstResponder(tryField) }
     }
 
@@ -212,7 +215,9 @@ private final class SetupRowView: NSStackView {
         column.orientation = .vertical
         column.alignment = .width
         column.spacing = 6
-        column.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // A fixed width: left to the stack, rows with only labels came out right-aligned
+        // (live check), while the Try it row's field stretched its column.
+        column.widthAnchor.constraint(equalToConstant: SetupLayout.textWidth).isActive = true
         column.addArrangedSubview(header)
         column.addArrangedSubview(detail)
         column.addArrangedSubview(progress)
