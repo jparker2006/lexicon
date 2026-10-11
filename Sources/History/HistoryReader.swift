@@ -19,6 +19,7 @@ import os
 @MainActor
 public final class HistoryReader {
     private let file: URL
+    private let paths: AppPaths
     private let calendar: Calendar
     /// nil until `history.sqlite` exists: before the first Dictation, History is empty.
     private var opened: Database?
@@ -27,6 +28,7 @@ public final class HistoryReader {
     /// `calendar` decides the day buckets; tests pass a fixed time zone.
     public init(paths: AppPaths, calendar: Calendar = .current) {
         file = paths.root.appending(path: "history.sqlite")
+        self.paths = paths
         self.calendar = calendar
     }
 
@@ -90,19 +92,43 @@ public final class HistoryReader {
         guard let db, !offsets.isEmpty else { return [] }
         let filter = Filter(section.query)
         let rows = (try? db.query("""
-            SELECT id, started_at, final_text, status, cleanup, model, lag_ms, pinned, audio_storage
-            FROM dictation WHERE started_at BETWEEN ? AND ? AND \(filter.sql)
+            SELECT \(HistoryRow.columns) FROM dictation WHERE started_at BETWEEN ? AND ? AND \(filter.sql)
             ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?
             """, [.int(section.oldestMs), .int(section.newestMs)] + filter.bindings
                 + [.int(Int64(offsets.count)), .int(Int64(offsets.lowerBound))])) ?? []
         return rows.compactMap(HistoryRow.init(row:))
     }
 
-    /// "Show versions": model, cleaned, final, plus every Fix and attempt.
-    public func detail(_ id: DictationID) -> HistoryDetail? { fatalError("not implemented") }
+    /// "Show versions": model, cleaned, final, plus every engine's run.
+    public func detail(_ id: DictationID) -> HistoryDetail? {
+        guard let db else { return nil }
+        // The list's rule: a row mid-delete, or a status this build cannot draw, is not shown.
+        let found = try? db.query("""
+            SELECT \(HistoryRow.columns), model_text, cleaned_text FROM dictation WHERE id = ? AND \(Filter(nil).sql)
+            """, [.text(id.description)])
+        guard let row = found?.first, let shown = HistoryRow(row: row) else { return nil }
+        var versions: TextVersions?
+        if let model = row.text(9), let cleaned = row.text(10) { versions = TextVersions(model: model, cleaned: cleaned) }
+        let runs = (try? db.query("""
+            SELECT model, result, text, latency_ms, error FROM attempt WHERE dictation_id = ? ORDER BY id
+            """, [.text(id.description)])) ?? []
+        let attempts = runs.compactMap { run -> AttemptRecord? in
+            guard let model = run.text(0).flatMap(SpeechModel.init(id:)),
+                  let result = run.text(1).flatMap(AttemptRecord.Result.init(rawValue:)) else { return nil }
+            return AttemptRecord(model: model, result: result, text: run.text(2),
+                                 latency: run.int(3).map { .milliseconds($0) }, error: run.text(4))
+        }
+        return HistoryDetail(row: shown, versions: versions, attempts: attempts)
+    }
 
-    /// For the play button (AVAudioPlayer). nil when audio was removed.
-    public func audioURL(_ id: DictationID) -> URL? { fatalError("not implemented") }
+    /// For the play button (AVAudioPlayer). nil once the audio aged out or was deleted.
+    public func audioURL(_ id: DictationID) -> URL? {
+        guard let db else { return nil }
+        let storage = try? db.query("SELECT audio_storage FROM dictation WHERE id = ?", [.text(id.description)]).first?.text(0)
+        guard storage == AudioStorage.onDisk.rawValue else { return nil }
+        let url = HistoryStore.audioURL(for: id, in: paths)
+        return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
+    }
 }
 
 /// The WHERE clause both reads share, so a day's count and its pages always agree.
@@ -157,6 +183,9 @@ public struct HistoryRow: Sendable, Hashable {
 }
 
 extension HistoryRow {
+    /// The columns `init?(row:)` reads, in order. The list and the detail read the same ones.
+    static let columns = "id, started_at, final_text, status, cleanup, model, lag_ms, pinned, audio_storage"
+
     init?(row: Row) {
         guard let id = row.text(0).flatMap(DictationID.init(column:)),
               let status = row.text(3).flatMap(DictationStatus.init(rawValue:)) else { return nil }
@@ -171,7 +200,6 @@ public struct HistoryDetail: Sendable {
     public let row: HistoryRow
     /// Model and cleaned text. Final text is `row.finalText` (History materializes it).
     public let versions: TextVersions?
-    public let insertion: InsertionReceipt?
-    public let fixes: [Fix]
+    /// Every engine's run, oldest first: the winner and the losers.
     public let attempts: [AttemptRecord]
 }

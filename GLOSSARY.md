@@ -48,6 +48,14 @@ _Avoid_: Offline mode, local mode
 The saved record of every Dictation, its text versions and audio, shown in the History window.
 _Avoid_: Log, archive, transcripts
 
+**Retry**:
+Hearing a saved Dictation's audio again from History, with a model picked from a list, to replace its text. Retried text is never typed.
+_Avoid_: Re-run, re-transcribe, redo
+
+**Test set pin**:
+A flag on a Dictation in History that adds it to the Test set and keeps its audio forever.
+_Avoid_: Star, favorite, bookmark
+
 **Secret guard**:
 A check on the Mac that keeps keys, tokens and passwords out of every text call and cuts the speech stream once one is heard. Audio already streamed can't be recalled.
 _Avoid_: Redaction, filter

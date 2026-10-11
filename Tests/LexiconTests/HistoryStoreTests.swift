@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import History
+import AudioCapture
 import LexiconDomain
 
 // History through its write API on a throwaway data folder: no mic, no app.
@@ -303,4 +304,109 @@ func deleteIsRefusedWhileInFlight(stored: DictationStatus) async throws {
     store.record(.textReady(id, text, cleanup: .rulesOnly(.off), model: parakeet, typing: true))
     await store.flush()
     #expect(await store.dictation(id)?.status == .recovered)
+}
+
+/// A Dictation inserted with a real CAF of `samples`, written the way capture writes it.
+private func captured(_ store: HistoryStore, _ samples: [Int16], storage: AudioStorage = .onDisk) async throws -> DictationID {
+    let id = DictationID()
+    let wav = try writeWAV(samples, rate: 16_000, in: try scratchDirectory())
+    let recorder = Recorder()
+    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: store.audioURL(for: id))
+    let ended = try #require(await capture.signals.inputEnded())
+    _ = await capture.stop(.released(at: ended))
+    await recorder.settle()
+    store.record(.began(id, origin: .live, purpose: .type, at: start, app: app))
+    store.record(.audioEnded(id, AudioSummary(duration: .milliseconds(1_200), startGap: nil, deviceName: "Mic", storage: storage, gaps: [])))
+    store.record(.textReady(id, text, cleanup: .rulesOnly(.off), model: parakeet, typing: true))
+    store.record(.delivered(id, receipt, lag: .milliseconds(420)))
+    await store.flush()
+    return id
+}
+
+// MARK: - Retry audio
+
+@Test func aDictationsWholeAudioComesBackForRetry() async throws {
+    let (store, _) = try makeStore()
+    let source = syntheticSamples(count: 16_000)
+    let id = try await captured(store, source)
+
+    #expect(try #require(await store.clip(id)).samples == source)
+}
+
+@Test func aClipIsGoneOnceRetentionTakesTheAudio() async throws {
+    let (store, _) = try makeStore()
+    let id = try await captured(store, syntheticSamples(count: 16_000))
+    await store.sweepAudio(now: start.addingTimeInterval(15 * 86_400))
+
+    #expect(await store.dictation(id)?.audio == .expired)
+    #expect(await store.clip(id) == nil)
+}
+
+@Test func aDeletedDictationHasNoClip() async throws {
+    let (store, _) = try makeStore()
+    let id = try await captured(store, syntheticSamples(count: 16_000))
+    store.record(.deleted(id))
+    await store.flush()
+
+    #expect(await store.clip(id) == nil)
+}
+
+@Test func aRamOnlyCapturesPartialFileIsNoClip() async throws {
+    // The file reads fine; it is still only part of the Dictation, so Retry must not use it.
+    let (store, _) = try makeStore()
+    let id = try await captured(store, syntheticSamples(count: 16_000), storage: .ramOnly)
+    #expect((try? CAFFile.read(store.audioURL(for: id))) != nil)
+
+    #expect(await store.clip(id) == nil)
+}
+
+@Test func anUnknownDictationHasNoClip() async throws {
+    let (store, _) = try makeStore()
+    #expect(await store.clip(DictationID()) == nil)
+}
+
+// MARK: - Pinning
+
+@Test func aPinNeedsTheWholeAudioOnDisk() async throws {
+    // The Test set needs the audio: a Dictation whose audio aged out, or whose capture is partial, cannot be pinned.
+    let (store, _) = try makeStore()
+    let aged = try begin(store)
+    for event in path(to: .inserted, aged) { store.record(event) }
+    await store.sweepAudio(now: start.addingTimeInterval(15 * 86_400))
+    let partial = try begin(store)
+    store.record(.audioEnded(partial, AudioSummary(duration: .milliseconds(1_200), startGap: nil, deviceName: "Mic",
+                                                   storage: .ramOnly, gaps: [])))
+    store.record(.pinned(aged, true))
+    store.record(.pinned(partial, true))
+    await store.flush()
+
+    #expect(await store.dictation(aged)?.audio == .expired)
+    #expect(await store.dictation(aged)?.pinned == false)
+    #expect(await store.dictation(partial)?.pinned == false)
+}
+
+@Test func aPinNeedsTheAudioFileNotJustTheColumn() async throws {
+    // A crash can lose a file whose row still says onDisk; recovery marks it failed, audio missing.
+    let (store, _) = try makeStore()
+    let id = try begin(store)
+    try FileManager.default.removeItem(at: store.audioURL(for: id))
+    store.record(.failed(id, reason: "audio missing"))
+    store.record(.pinned(id, true))
+    await store.flush()
+
+    #expect(await store.dictation(id)?.audio == .onDisk)
+    #expect(await store.dictation(id)?.pinned == false)
+}
+
+@Test func aPinComesOff() async throws {
+    let (store, _) = try makeStore()
+    let id = try begin(store)
+    for event in path(to: .inserted, id) { store.record(event) }
+    store.record(.pinned(id, true))
+    await store.flush()
+    #expect(await store.dictation(id)?.pinned == true)
+
+    store.record(.pinned(id, false))
+    await store.flush()
+    #expect(await store.dictation(id)?.pinned == false)
 }

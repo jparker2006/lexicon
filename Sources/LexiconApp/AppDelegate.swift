@@ -71,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let paths = AppPaths.forBundle(id: bundleID)
 
         let appName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lexicon"
-        let history = HistoryWindowPresenter(paths: paths)
+        let history = HistoryWindowPresenter(paths: paths, system: system)
         self.history = history
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
             [history.menuItem()] + (self?.lexiconPage.map { [$0.menuItem()] } ?? [])

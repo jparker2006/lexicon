@@ -127,6 +127,24 @@ func aMicThatFailsToStartLeavesTheNextFnPressWorking() async throws {
     #expect(unavailable == 2)  // the second fn press tried the mic again instead of being dropped
 }
 
+@Test(.timeLimit(.minutes(1)))
+func aFileThatCannotBeReadLeavesNoRowAndReportsNothing() async throws {
+    let paths = AppPaths.temporary()
+    let history = try HistoryStore(paths: paths)
+    let conductor = Conductor(
+        recorder: Recorder(hardware: .noMic), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)),
+        cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: history,
+        destination: HeadlessDestination(), preferences: PreferencesStore(fixed: .defaults),
+        secrets: Secrets(.environment), keyboard: nil, fixes: nil, jev: nil)
+
+    let missing = try scratchDirectory().appending(path: "missing.wav")
+    let result = await conductor.dictate(file: missing, pace: .asFastAsPossible)
+    await history.flush()
+
+    #expect(result.status == nil)  // lexicon-eval prints "nothing" and exits 1
+    #expect(await history.dictation(result.id) == nil)
+}
+
 @Test(.timeLimit(.minutes(1))) func insertTargetsCannotBeMadeOutsideTheirModules() async throws {
     let imports = "import AppText\nimport KeyInput\nimport LexiconCore\nimport LexiconDomain\n"
     let fetched = try await compile(imports + """
