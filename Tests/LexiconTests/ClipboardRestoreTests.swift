@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import Testing
 @testable import AppText
 
@@ -237,24 +237,22 @@ import Testing
 /// answers with the text and is the receipt, the markers are there, and every
 /// type of every item comes back.
 @MainActor @Test func theSystemPasteboardPromisesTheTextAndPutsEveryTypeBack() async {
-    let board = NSPasteboard(name: .init("lexicon.test.\(UUID().uuidString)"))
-    defer { board.releaseGlobally() }
-    board.clearContents()
-    let rich = NSPasteboardItem()
-    rich.setString("Jake's note", forType: .string)
-    rich.setData(Data("{\\rtf1 Jake's note}".utf8), forType: .rtf)
-    let image = NSPasteboardItem()
-    image.setData(Data([0x89, 0x50, 0x4E, 0x47]), forType: .png)
-    board.writeObjects([rich, image])
-    let before = SystemPasteboard(board).contents()
+    let board = SystemPasteboard.scratch()
+    board.write(PasteboardContents(items: [
+        [.init(type: "public.utf8-plain-text", data: Data("Jake's note".utf8)),
+         .init(type: "public.rtf", data: Data("{\\rtf1 Jake's note}".utf8))],
+        [.init(type: "public.png", data: Data([0x89, 0x50, 0x4E, 0x47]))],
+    ]))
+    let before = board.contents()  // macOS adds types derived from the plain text
+    #expect(before.items.count == 2)
 
-    let keeper = ClipboardKeeper(pasteboard: SystemPasteboard(board))
+    let keeper = ClipboardKeeper(pasteboard: board)
     let paste = keeper.put("dictated text")
-    #expect(Set(board.types ?? []).isSuperset(of: SystemPasteboard.markers))
-    #expect(board.string(forType: .string) == "dictated text")
+    #expect(Set(board.types).isSuperset(of: SystemPasteboard.markers))
+    #expect(board.string == "dictated text")
     #expect(await keeper.receipt(paste))
 
     #expect(keeper.expire(at: .now + .seconds(9)) == .settled(paste))
-    #expect(SystemPasteboard(board).contents() == before)
-    #expect(board.string(forType: .string) == "Jake's note")
+    #expect(board.contents() == before)
+    #expect(board.string == "Jake's note")
 }
