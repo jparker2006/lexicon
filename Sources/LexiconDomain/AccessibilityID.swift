@@ -3,4 +3,8 @@
 public enum AccessibilityID {
     /// The menu bar icon's button.
     public static let statusItem = "lexicon.statusItem"
+    /// The History window, its table of Dictations and its search field.
+    public static let historyWindow = "lexicon.history"
+    public static let historyTable = "lexicon.history.table"
+    public static let historySearch = "lexicon.history.search"
 }

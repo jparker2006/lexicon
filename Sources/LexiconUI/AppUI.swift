@@ -18,11 +18,6 @@ public final class AppUI {
     /// Status item and the (hidden) indicator panel. Subscribes to conductor events.
     public func start() { fatalError("not implemented") }
 
-    /// Menu bar click, and reopen from Spotlight/Finder. Under 100 ms to first
-    /// rows. Creates the window each time; closing releases it and its
-    /// History connection (closed, not hidden: #4).
-    public func showHistory() { fatalError("not implemented") }
-
     public func showSettings() { fatalError("not implemented") }
 }
 
