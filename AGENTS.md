@@ -33,10 +33,10 @@ Command Line Tools 26.6 only (Swift 6.3, macOS 26 SDK), SwiftPM, no Xcode ([ADR 
 
 ## Dev builds and the live app
 
-- Builders build and run **Lexicon Dev**: its own bundle ID, its own data folder (`~/Library/Application Support/Lexicon Dev/`), signed with the self-signed "Lexicon Dev" certificate, installed at `~/Applications/Lexicon Dev.app` and launched with `open`, never by running the binary from a shell (the fn tap refuses that, [ADR 0001](docs/adr/0001-one-process.md)).
+- The Live checks session builds and runs **Lexicon Dev**: its own bundle ID, its own data folder (`~/Library/Application Support/Lexicon Dev/`), signed with the self-signed "Lexicon Dev" certificate, installed at `~/Applications/Lexicon Dev.app` and launched with `open`, never by running the binary from a shell (the fn tap refuses that, [ADR 0001](docs/adr/0001-one-process.md)).
 - Jake's daily copy, **Lexicon** at `~/Applications/Lexicon.app`, is his. Builders never install over it, quit it, or reset or touch its permissions. `tccutil reset` only ever names the Lexicon Dev bundle ID.
-- **One live-app lane.** Only one builder at a time drives the live app (fn, the mic, paste, Accessibility). Everything else runs headless: the real pipeline on a WAV file, with no mic, keys or network.
-- The live-app lane drives Lexicon Dev with `scripts/dev-run.sh -- --test-hooks`, then `scripts/harness.sh` (`check`, or `hook status`): test hooks plus Accessibility reads of the status item, windows and a target text field.
+- **One live-app lane, held by the Live checks session.** Only it drives the live app (fn, the mic, paste, Accessibility). `scripts/dev-run.sh` and `scripts/harness.sh` refuse any session that doesn't hold the lane lock (`scripts/live-lane.sh`). Builders run headless: the real pipeline on a WAV file, with no mic, keys or network, and send the Live checks session a checklist for what needs the live app ([workflow.md](docs/agents/workflow.md#live-checks)).
+- The Live checks session drives Lexicon Dev with `scripts/dev-run.sh -- --test-hooks`, then `scripts/harness.sh` (`check`, or `hook status`): test hooks plus Accessibility reads of the status item, windows and a target text field.
 
 ## Private data
 
@@ -56,7 +56,7 @@ A builder builds its ticket with the implement-ticket skill (`.claude/skills/imp
 
 ## Done means verified
 
-- Check the thing Jake will actually use, not just that it builds. For behavior, run the headless pipeline on a WAV. For UI, insertion or fn, use the live-app lane.
+- Check the thing Jake will actually use, not just that it builds. For behavior, run the headless pipeline on a WAV. For UI, insertion or fn, send the Live checks session a checklist.
 - A change to speech or Cleanup runs a quick `lexicon-eval` and puts the scores in the PR; a score that got worse is flagged there.
 - Say what you could not check.
 - A plan, a passing build or a list of findings is progress, not done.
