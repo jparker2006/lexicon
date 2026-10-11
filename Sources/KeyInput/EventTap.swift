@@ -77,8 +77,8 @@ final class EventTapThread: @unchecked Sendable {
         guard let key = KeyInput(event, secureInput: { IsSecureEventInputEnabled() }, now: .now()) else { return pass }
         feed(key)
         switch key {
-        case .fnDown(let at, _): logDelivery("down", at: at)
-        case .fnUp(let at): logDelivery("up", at: at)
+        case .fnDown(let at, _): logDelivery("down", at: at, stamp: event.timestamp)
+        case .fnUp(let at): logDelivery("up", at: at, stamp: event.timestamp)
         default: break
         }
         return pass
@@ -107,9 +107,14 @@ final class EventTapThread: @unchecked Sendable {
     }
 
     /// fn delivery latency through the tap: the key event's own time to now.
-    private func logDelivery(_ edge: StaticString, at: HostTime) {
-        let micros = Int(HostTime.now().duration(since: at) / .microseconds(1))
-        log.notice("fn \(String(describing: edge), privacy: .public) delivered \(micros, privacy: .public) µs after the key")
+    private func logDelivery(_ edge: StaticString, at: HostTime, stamp: CGEventTimestamp) {
+        let now = HostTime.now()
+        let micros = Int(now.duration(since: at) / .microseconds(1))
+        // TODO(#53 live check): the raw stamp and now settle which timestamp reading is right; then drop them.
+        log.notice("""
+            fn \(String(describing: edge), privacy: .public) delivered \(micros, privacy: .public) µs after the key \
+            (stamp \(stamp, privacy: .public), now \(now.nanoseconds, privacy: .public) ns)
+            """)
     }
 }
 
