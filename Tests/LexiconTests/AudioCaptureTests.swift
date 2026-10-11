@@ -196,7 +196,7 @@ import LexiconDomain
     #expect(out.withUnsafeMutableBufferPointer { ring.read(into: $0) } == 0)
 }
 
-@Test func stoppingACaptureTwiceIsACompileError() async throws {
+@Test(.timeLimit(.minutes(1))) func stoppingACaptureTwiceIsACompileError() async throws {
     let once = try await compile("""
         func run(_ capture: consuming LiveCapture) async { _ = await capture.stop(.immediately) }
         """)
@@ -273,11 +273,8 @@ func report(_ line: String) {
 
 /// Compiles `source` against the AudioCapture module this test run built, as
 /// far as SIL: ownership ("consumed more than once") is checked there, after type checking.
-/// Waits for swiftc on a GCD thread, never the cooperative pool: blocking a pool
+/// `runChild` blocks no thread while swiftc runs: blocking a cooperative-pool
 /// thread for its 6 to 10 s starves the realtime audio tests on a 3-core runner.
-/// The exit comes from `terminationHandler`, not `waitUntilExit`: that sleeps in
-/// the waiting thread's run loop until something wakes it, and on a GCD thread
-/// nothing may (it hung `scripts/check.sh` with swiftc long gone).
 func compile(_ source: String) async throws -> (status: Int32, output: String) {
     var image = Dl_info()
     try #require(dladdr(#dsohandle, &image) != 0)
@@ -294,22 +291,7 @@ func compile(_ source: String) async throws -> (status: Int32, output: String) {
     #else
     let target = "x86_64-apple-macos26.0"
     #endif
-    let process = Process()
-    process.executableURL = URL(filePath: "/usr/bin/xcrun")
-    process.arguments = ["swiftc", "-emit-sil", "-o", "/dev/null", "-swift-version", "6", "-target", target,
-                         "-I", modules.path, file.path]
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = pipe
-    let exited = DispatchGroup()
-    exited.enter()
-    process.terminationHandler = { _ in exited.leave() }
-    try process.run()
-    return await withCheckedContinuation { continuation in
-        // Read while it runs, so a long output can't fill the pipe and stall swiftc.
-        DispatchQueue.global().async {
-            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            exited.notify(queue: .global()) { continuation.resume(returning: (process.terminationStatus, output)) }
-        }
-    }
+    return try await runChild(URL(filePath: "/usr/bin/xcrun"), [
+        "swiftc", "-emit-sil", "-o", "/dev/null", "-swift-version", "6", "-target", target, "-I", modules.path, file.path,
+    ])
 }
