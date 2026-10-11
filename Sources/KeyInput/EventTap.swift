@@ -7,11 +7,15 @@ import LexiconDomain
 /// The tap thread. Owns the CGEventTap, its run loop, the gesture recognizer and
 /// its deadline timer. Internal: nothing outside KeyInput can reach a CGEvent.
 ///
-/// Callback budget: a few microseconds. It (1) re-enables the tap if the system
-/// disabled it, (2) drops events Lexicon itself posted (its own Cmd-V), (3) ticks
-/// the InputClock on key-down / mouse-down, (4) feeds fn and every other key-down
-/// to `FnGesture` and yields its commands, (5) passes every event on: nothing is
-/// swallowed in M0.
+/// Listen-only: macOS hands the tap a copy and delivers every key at once. An
+/// active tap holds each key until Lexicon's callback returns, which measured
+/// 26 to 74 ms on every keystroke against 4 to 10 ms with Lexicon quit, and M0
+/// swallows nothing (Esc while recording comes in M1).
+///
+/// The callback (1) re-enables the tap if the system disabled it, (2) drops
+/// events Lexicon itself posted (its own Cmd-V), (3) ticks the InputClock on
+/// key-down / mouse-down, (4) feeds fn and every other key-down to `FnGesture`
+/// and yields its commands.
 ///
 /// `@unchecked Sendable` is safe because `gesture` and `deadline` are touched
 /// only on the tap thread (the callback, the timer and `perform`'s blocks all
@@ -33,14 +37,16 @@ final class EventTapThread: @unchecked Sendable {
         self.continuation = continuation
     }
 
-    /// Creates the tap (session level, active, mask: flagsChanged, keyDown
+    /// Creates the tap (session level, listen-only, mask: flagsChanged, keyDown
     /// and the three mouse-downs), then spawns the thread that runs it.
     /// Throws `.notTrusted` without Accessibility: the tap is the permission check.
+    /// Checked first, so creating the tap can never raise an Input Monitoring prompt.
     func start() throws(KeyboardError) {
+        guard CGPreflightListenEventAccess() else { throw .notTrusted }
         let types: [CGEventType] = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         // Unretained is safe: the thread below captures self and its run loop never exits.
-        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
                                           eventsOfInterest: mask, callback: tapCallback,
                                           userInfo: Unmanaged.passUnretained(self).toOpaque())
         else { throw .notTrusted }

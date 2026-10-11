@@ -58,7 +58,7 @@ public enum KeyboardError: Error, Sendable {
 
 /// The fn key and every other key Lexicon listens to.
 ///
-/// Hides: the active session-level CGEventTap on its own thread (#6), the
+/// Hides: the listen-only session-level CGEventTap on its own thread (#6), the
 /// gesture state machine and its timer, passing every key on (Esc while
 /// recording is swallowed from M1), re-enabling the tap after the system disables it, ignoring events
 /// Lexicon itself posted (its own Cmd-V), and stamping `InputClock`.
