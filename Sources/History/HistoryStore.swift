@@ -14,7 +14,8 @@ import os
 /// replayed or racing event is a no-op by construction. Rows are inserted with
 /// INSERT OR IGNORE by id; deletes tolerate absence.
 public enum DictationEvent: Sendable {
-    /// Capture started (first audio). Row created as `.recording`; file already exists.
+    /// fn-down, recorded while the mic starts. Row created as `.recording`; the file
+    /// follows once capture runs, and never comes when the mic can't start.
     case began(DictationID, origin: DictationOrigin, purpose: DictationPurpose, at: Date, app: AppContext)
     /// Moves `.recording` -> `.transcribing`.
     case audioEnded(DictationID, AudioSummary)

@@ -26,27 +26,23 @@ extension Conductor {
             hold.end()  // idempotent: usually already ended in `land`
         }
 
-        // fn-down. Capture starts first; nothing network-bound runs in front of it.
-        async let contextValue = destination.context()
+        // fn-down. Capture starts first; nothing network-bound runs in front of it. The row
+        // doesn't wait on the mic: a start that fails or never returns still leaves a trace.
+        async let began = beginRow(start)
         let capture: LiveCapture
         do {
             capture = try await recorder.start(start.input, writingTo: history.audioURL(for: id), since: start.began)
         } catch {
-            // Give up the capture slot, or every later fn-down finds it taken and is dropped. A discard,
-            // not a cancel: a cancel sends `stopped`, and the pill would play a stop sound for a mic that never started.
-            // The press's own release, still to come, names this id and so ends nothing.
-            endCapture(id, .discard)
-            emit(.notice(.microphoneUnavailable(String(describing: error))))
-            return .nothing(id)  // nothing was captured, so nothing can be lost
+            _ = await began  // the row exists before its outcome is recorded
+            return await startFailed(start, error, ends: ends)
         }
-        let context = await contextValue
+        let context = await began
         // Granted once the app is known: an always-private app gets no access (#5).
         let access = CloudAccess.granted(by: start.preferences, for: .app(context), keys: secrets.lookup)
         // Private mode turned on, or focus moving into an always-private app, cuts the stream at once;
         // local finishes (#5).
         let privacyWatch = access.map { revokeWhenDenied($0, in: context, followingFocus: true) }
         defer { privacyWatch?.cancel() }
-        history.record(.began(id, origin: start.origin, purpose: start.purpose, at: Date(), app: context))
         emit(.started(id))
 
         // Words for this Dictation (sub-ms, in memory), then open the stream.
@@ -104,6 +100,47 @@ extension Conductor {
                                    previous: nil, hold: hold)
             return await land(outcome, run)
         }
+    }
+
+    /// The Dictation's History row, at fn-down. Off the actor, in parallel with
+    /// the mic start. Returns the app it began in.
+    nonisolated func beginRow(_ start: RunStart) async -> AppContext {
+        let context = await destination.context()
+        history.record(.began(start.id, origin: start.origin, purpose: start.purpose, at: Date(), app: context))
+        return context
+    }
+
+    /// Capture didn't start: no mic permission, no device, Core Audio stuck past
+    /// the start limit (#142), or a file that can't be read. Nothing was captured,
+    /// so nothing can be lost; a live row says what happened, unless the press was a stray tap.
+    func startFailed(_ start: RunStart, _ error: RecorderError, ends: AsyncStream<RunEnd>) async -> DictationResult {
+        let id = start.id
+        let discarded: Bool
+        if start.origin != .live {
+            // A file that can't be read was never a Dictation: no row, and eval reports "nothing".
+            discarded = true
+        } else if id == capturingID {
+            // Give up the capture slot, or every later fn-down finds it taken and is dropped.
+            // A stop, not a discard: with fn still down the pill plays the stop sound and leaves
+            // "recording", or it would never show the notice (a press it never confirmed, it
+            // ignores). The press's own release, still to come, names this id and so ends nothing.
+            endCapture(id, .stop(at: .now()))
+            discarded = false
+        } else {
+            // Released before the mic answered: its end is already in `ends`.
+            discarded = await ends.first { _ in true }.map { !$0.isStop } ?? false
+        }
+        if discarded {
+            history.record(.discarded(id))
+        } else {
+            history.record(.failed(id, reason: "microphone: \(error)"))
+        }
+        if start.origin == .live {  // a file's error names its path, which may be the Test set's
+            log.error("Dictation \(id, privacy: .public) has no mic: \(String(describing: error), privacy: .public)")
+        }
+        emit(.notice(.microphoneUnavailable(String(describing: error))))
+        return discarded ? .nothing(id) : DictationResult(id: id, status: .failed, versions: nil, cleanup: nil,
+                                                          model: nil, lag: nil, attempts: [])
     }
 
     /// Text (or no text) -> cleanup -> History -> the cursor. Shared by live,
