@@ -108,7 +108,7 @@ func onAFullDiskTheTextIsStillTypedAndJakeIsTold() async throws {
 func aMicThatFailsToStartLeavesTheNextFnPressWorking() async throws {
     let paths = AppPaths.temporary()
     let conductor = Conductor(
-        recorder: Recorder(findDevice: { _ in nil }), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)),
+        recorder: Recorder(hardware: .noMic), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)),
         cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: try HistoryStore(paths: paths),
         destination: HeadlessDestination(), preferences: PreferencesStore(fixed: .defaults),
         secrets: Secrets(.environment), keyboard: nil, fixes: nil, jev: nil)

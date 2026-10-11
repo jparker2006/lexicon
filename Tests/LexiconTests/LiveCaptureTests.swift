@@ -1,4 +1,7 @@
+import AVFAudio
+import CoreAudio
 import Foundation
+import Synchronization
 import Testing
 @testable import AudioCapture
 import LexiconDomain
@@ -129,3 +132,96 @@ func tone(_ count: Int, dBFS: Double = -20) -> [Int16] {
 }
 
 func silence(_ count: Int) -> [Int16] { Array(repeating: 0, count: count) }
+
+// MARK: Device changes
+
+@Test(.timeLimit(.minutes(1)))
+func aSecondDeviceChangeRightAfterARebuildStillKeepsRecording() async throws {
+    // The rebuilt engine stops itself again before it is watched, as a
+    // Bluetooth switch that posts several changes can make it.
+    let mic = FakeMic(diesAtStart: [1])
+    let recorder = Recorder(hardware: mic.hardware)
+    let capture = try await recorder.start(.microphone(deviceUID: nil),
+                                           writingTo: try scratchDirectory().appending(path: "change.caf"))
+    var engines = mic.made.makeAsyncIterator()
+    var feed = capture.feed.makeAsyncIterator()
+
+    var heard = 0
+    while heard < FakeEngine.frames { heard += try #require(await feed.next()).samples.count }
+    try #require(await engines.next()).hardwareChanged()
+    // Only an engine built after the second change can bring the rest.
+    while heard < 2 * FakeEngine.frames { heard += try #require(await feed.next()).samples.count }
+    let take = await capture.stop(.immediately)
+    await recorder.settle()
+
+    #expect(take.clip.samples.count == 2 * FakeEngine.frames)
+    #expect(take.summary.gaps.count == 1)
+}
+
+/// Mic hardware with no mic: every engine is a `FakeEngine` the test drives.
+final class FakeMic: Sendable {
+    let made: AsyncStream<FakeEngine>
+    private let continuation: AsyncStream<FakeEngine>.Continuation
+    private let count = Mutex(0)
+    /// Engines, by the order they are made, that stop themselves the moment they start.
+    private let diesAtStart: Set<Int>
+
+    init(diesAtStart: Set<Int> = []) {
+        (made, continuation) = AsyncStream.makeStream()
+        self.diesAtStart = diesAtStart
+    }
+
+    var hardware: MicHardware {
+        MicHardware(findDevice: { _ in 1 }, makeEngine: { [self] _ throws(RecorderError) in
+            let index = count.withLock { count in
+                defer { count += 1 }
+                return count
+            }
+            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index))
+            continuation.yield(engine)
+            return engine
+        }, permission: { .granted })
+    }
+}
+
+/// An engine that, once started, has captured `frames` of a tone, and stops
+/// itself on a hardware change as AVAudioEngine does.
+final class FakeEngine: InputEngine, Sendable {
+    static let frames = 1_600
+
+    let device: AudioDeviceID = 1
+    let segment = Segment(rate: Double(PCM16k.sampleRate))
+    var changes: AnyObject { self }
+    var isCurrent: Bool { false }
+    var isRunning: Bool { running.load(ordering: .relaxed) }
+    var firstAudio: HostTime? { stamp.withLock { $0 } }
+
+    private let diesAtStart: Bool
+    private let running = Atomic(false)
+    private let stamp = Mutex<HostTime?>(nil)
+
+    init(diesAtStart: Bool) { self.diesAtStart = diesAtStart }
+
+    func start() throws(RecorderError) {
+        guard !diesAtStart else { return }
+        running.store(true, ordering: .relaxed)
+        let tone = (0..<Self.frames).map { Float(sin(2 * Double.pi * 440 * Double($0) / 16_000)) / 4 }
+        _ = tone.withUnsafeBufferPointer { segment.ring.write($0) }
+        stamp.withLock { $0 = .now() }
+    }
+
+    func stop() { running.store(false, ordering: .relaxed) }
+
+    func hardwareChanged() {
+        stop()
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: self)
+    }
+}
+
+extension MicHardware {
+    /// No input device at all: every start throws.
+    static var noMic: MicHardware {
+        MicHardware(findDevice: { _ in nil }, makeEngine: { _ throws(RecorderError) in throw .noInputDevice },
+                    permission: { .granted })
+    }
+}

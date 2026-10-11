@@ -1,6 +1,5 @@
 public import Foundation
 public import LexiconDomain
-import CoreAudio
 
 /// Where a LiveCapture's audio comes from: the audio-source seam (#14). An enum,
 /// not a public protocol, so no real-time types leak out of this module. Both
@@ -51,13 +50,12 @@ public final class Recorder: Sendable {
     let policy: FlushPolicy
 
     public convenience init() {
-        self.init(findDevice: InputDevices.find(uid:), policy: FlushPolicy())
+        self.init(hardware: .system, policy: FlushPolicy())
     }
 
-    /// Tests swap in a device lookup (no mic) or a flush policy (a full disk).
-    init(findDevice: @escaping @Sendable (String?) -> AudioDeviceID? = InputDevices.find(uid:),
-         policy: FlushPolicy = FlushPolicy()) {
-        microphone = Microphone(findDevice: findDevice)
+    /// Tests swap in fake mic hardware (no mic) or a flush policy (a full disk).
+    init(hardware: MicHardware = .system, policy: FlushPolicy = FlushPolicy()) {
+        microphone = Microphone(hardware: hardware)
         self.policy = policy
     }
 

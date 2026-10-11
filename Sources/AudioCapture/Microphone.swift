@@ -10,6 +10,34 @@ import Synchronization
 import os
 import LexiconDomain
 
+/// Everything the mic takes from the machine. Tests swap in fakes, so a device
+/// change can be driven without a mic.
+struct MicHardware: Sendable {
+    var findDevice: @Sendable (String?) -> AudioDeviceID?
+    var makeEngine: @Sendable (AudioDeviceID) throws(RecorderError) -> any InputEngine
+    var permission: @Sendable () -> AVAudioApplication.recordPermission
+
+    static let system = MicHardware(
+        findDevice: InputDevices.find(uid:),
+        makeEngine: { device throws(RecorderError) in try MicEngine(device: device) },
+        permission: { AVAudioApplication.shared.recordPermission })
+}
+
+/// One engine on one input device, started once and stopped once: `MicEngine`,
+/// or a test's fake.
+protocol InputEngine: AnyObject, Sendable {
+    var device: AudioDeviceID { get }
+    var segment: Segment { get }
+    /// The object that posts this engine's `AVAudioEngineConfigurationChange`.
+    var changes: AnyObject { get }
+    var isRunning: Bool { get }
+    /// Still the device's current shape, so a prepared engine can be used.
+    var isCurrent: Bool { get }
+    var firstAudio: HostTime? { get }
+    func start() throws(RecorderError)
+    func stop()
+}
+
 /// The one microphone. Builds, prepares, starts and drops engines, one
 /// Dictation at a time. Its state and every AVAudioEngine call run on `queue`:
 /// never the writer queue (an F_FULLFSYNC there must not delay fn-down), never
@@ -18,15 +46,15 @@ import LexiconDomain
 /// `@unchecked Sendable`: every `var` is touched only on `queue`.
 final class Microphone: @unchecked Sendable {
     let queue = DispatchQueue(label: "lexicon.audio.engine", qos: .userInteractive)
-    let findDevice: @Sendable (String?) -> AudioDeviceID?
+    let hardware: MicHardware
 
     /// Built and prepared while idle, so fn-down only starts hardware.
-    private var prepared: MicEngine?
+    private var prepared: (any InputEngine)?
     /// The capture using the mic, until it stops or is cut off.
     private weak var active: MicSource?
 
-    init(findDevice: @escaping @Sendable (String?) -> AudioDeviceID?) {
-        self.findDevice = findDevice
+    init(hardware: MicHardware) {
+        self.hardware = hardware
     }
 
     /// At launch and after every stop. Only once Jake has allowed the mic:
@@ -60,21 +88,21 @@ final class Microphone: @unchecked Sendable {
     #endif
 
     private func begin(deviceUID: String?, keyDown: HostTime) throws(RecorderError) -> MicSource {
-        guard let device = findDevice(deviceUID) else { throw .noInputDevice }
+        guard let device = hardware.findDevice(deviceUID) else { throw .noInputDevice }
         // Without permission the mic gives silence, not an error (#4).
-        guard AVAudioApplication.shared.recordPermission != .denied else { throw .micPermissionDenied }
+        guard hardware.permission() != .denied else { throw .micPermissionDenied }
         // fn never waits (#18): a capture still in its tail ends now.
         active?.cutOff()
 
         let ready = prepared.flatMap { $0.device == device && $0.isCurrent ? $0 : nil }
         prepared = nil
-        let engine: MicEngine
+        let engine: any InputEngine
         let warm: Bool
         if let ready, (try? ready.start()) != nil {
             (engine, warm) = (ready, true)
         } else {
             // Nothing prepared, or it went stale (the device changed since): build one now.
-            (engine, warm) = (try MicEngine(device: device), false)
+            (engine, warm) = (try hardware.makeEngine(device), false)
             try engine.start()
         }
         let source = MicSource(microphone: self, engine: engine, deviceUID: deviceUID, keyDown: keyDown, warm: warm)
@@ -83,10 +111,10 @@ final class Microphone: @unchecked Sendable {
     }
 
     private func prepareNow(deviceUID: String?) {
-        guard active == nil, AVAudioApplication.shared.recordPermission == .granted,
-              let device = findDevice(deviceUID) else { return }
+        guard active == nil, hardware.permission() == .granted,
+              let device = hardware.findDevice(deviceUID) else { return }
         if let prepared, prepared.device == device, prepared.isCurrent { return }
-        prepared = try? MicEngine(device: device)
+        prepared = try? hardware.makeEngine(device)
     }
 }
 
@@ -106,7 +134,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     private let keyDown: HostTime
     private let info: Mutex<(name: String?, gaps: [Duration])>
     /// nil once released: a stopped engine still holds the device, so it is dropped.
-    private var engine: MicEngine?
+    private var engine: (any InputEngine)?
     private var events: SourceEvents?
     private var stopped = false
     private var observer: (any NSObjectProtocol)?
@@ -115,7 +143,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     var deviceName: String? { info.withLock { $0.name } }
     var gaps: [Duration] { info.withLock { $0.gaps } }
 
-    init(microphone: Microphone, engine: MicEngine, deviceUID: String?, keyDown: HostTime, warm: Bool) {
+    init(microphone: Microphone, engine: any InputEngine, deviceUID: String?, keyDown: HostTime, warm: Bool) {
         self.microphone = microphone
         self.engine = engine
         self.deviceUID = deviceUID
@@ -165,9 +193,9 @@ final class MicSource: CaptureSource, @unchecked Sendable {
         microphone.released(self, prepareNext: prepareNext)
     }
 
-    private func watch(_ engine: MicEngine) {
+    private func watch(_ engine: any InputEngine) {
         observer = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine.engine, queue: nil
+            forName: .AVAudioEngineConfigurationChange, object: engine.changes, queue: nil
         ) { [weak self] _ in
             guard let self else { return }
             let lostAt = HostTime.now()
@@ -184,18 +212,24 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     /// the engine stopped itself. A fresh engine is the only reliable fix (#4);
     /// the capture keeps writing the same file from its new ring.
     private func rebuild(lostAt: HostTime, attempt: Int) {
-        // A change that left the engine running needs nothing.
-        guard !stopped, attempt > 1 || engine?.isRunning != true else { return }
+        // A change that left the engine running needs nothing. Within one retry
+        // chain the engine is nil, so a second chain can't tear down a working one.
+        guard !stopped, engine?.isRunning != true else { return }
         unwatch()
         engine?.stop()
         engine = nil
         do {
             // The pinned device, or the fixed fallback when it is gone.
-            guard let device = microphone.findDevice(deviceUID) else { throw RecorderError.noInputDevice }
-            let next = try MicEngine(device: device)
+            guard let device = microphone.hardware.findDevice(deviceUID) else { throw RecorderError.noInputDevice }
+            let next = try microphone.hardware.makeEngine(device)
             try next.start()
             engine = next
             watch(next)
+            // Another change between the start and the watch went unseen (Bluetooth
+            // switches post several): the engine stopped itself, so go again.
+            guard next.isRunning else {
+                return microphone.queue.async { self.rebuild(lostAt: lostAt, attempt: attempt + 1) }
+            }
             events?.switched(next.segment)
             info.withLock { $0.name = InputDevices.name(device) }
             let events = events
@@ -220,7 +254,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     /// Polls `engine`'s first-buffer stamp every 2 ms. The real-time block
     /// can't signal anyone (no locks, no dispatch), so "listening" is at most
     /// 2 ms behind the first buffer; the stamp itself is exact.
-    private func whenFirstAudio(of engine: MicEngine, _ then: @escaping @Sendable (HostTime) -> Void) {
+    private func whenFirstAudio(of engine: any InputEngine, _ then: @escaping @Sendable (HostTime) -> Void) {
         poll?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: microphone.queue)
         timer.schedule(deadline: .now(), repeating: .milliseconds(2), leeway: .milliseconds(1))
@@ -238,7 +272,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     fileprivate func simulateDeviceChange() {
         guard !stopped, let engine else { return }
         engine.stop()
-        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine.engine)
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine.changes)
     }
     #endif
 
@@ -255,7 +289,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
 ///
 /// `@unchecked Sendable`: built, started and stopped only on the microphone's
 /// queue. The sink block touches only `segment.ring` and `stamp`.
-final class MicEngine: @unchecked Sendable {
+final class MicEngine: InputEngine, @unchecked Sendable {
     let engine = AVAudioEngine()
     let device: AudioDeviceID
     let segment: Segment
@@ -298,6 +332,7 @@ final class MicEngine: @unchecked Sendable {
         InputDevices.isAlive(device) && InputDevices.nominalRate(device) == segment.rate
     }
 
+    var changes: AnyObject { engine }
     var isRunning: Bool { engine.isRunning }
     var firstAudio: HostTime? { stamp.value }
 
