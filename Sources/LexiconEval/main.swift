@@ -21,7 +21,7 @@ import WordStore
 //   swift run lexicon-eval --install-model <bundle id>
 //       downloads the local model into that app's `<data folder>/models/`,
 //       unless Private mode is on in that app's settings
-//       (`scripts/install-model.sh` runs it until onboarding exists)
+//       (`scripts/install-model.sh` runs it; first-run setup installs it in the app)
 //
 //   swift run lexicon-eval --import-lexicon <file> --into <data folder>
 //       imports a Lexicon file into `<data folder>/lexicon.sqlite`, as the

@@ -69,8 +69,8 @@ enum AppTestHooks {
         let settings = preferences.snapshot()
         return TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
                               version: AppDelegate.version(of: .main), pid: getpid(),
-                              accessibility: Permissions.accessibility,
-                              microphone: Permissions.microphoneName,
+                              accessibility: AXIsProcessTrusted(),
+                              microphone: Setup.microphoneName,
                               privacy: settings.privacy, alwaysPrivateApps: settings.alwaysPrivateApps.sorted())
     }
 

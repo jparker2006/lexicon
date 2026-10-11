@@ -101,4 +101,10 @@ public final class LexiconSystem: Sendable {
             group.addTask { for await changed in changes { await self.speech.preferencesChanged(changed) } }
         }
     }
+
+    /// After first-run setup installs the model: load it now, as at launch, so
+    /// the setup window's first fn press doesn't wait on the load.
+    public func loadModel() async {
+        await speech.warmUp(preferences.snapshot())
+    }
 }

@@ -26,7 +26,11 @@ public actor ParakeetTranscriber: LocalTranscriber {
     /// are missing, `load()` throws `LocalModelNotInstalled` and the Dictation
     /// waits for a model.
     public init(paths: AppPaths) {
-        folder = Self.modelsFolder(paths).appending(path: Repo.parakeetUnified.folderName, directoryHint: .isDirectory)
+        folder = Self.folder(paths)
+    }
+
+    static func folder(_ paths: AppPaths) -> URL {
+        modelsFolder(paths).appending(path: Repo.parakeetUnified.folderName, directoryHint: .isDirectory)
     }
 
     static func modelsFolder(_ paths: AppPaths) -> URL {
@@ -42,6 +46,25 @@ public actor ParakeetTranscriber: LocalTranscriber {
     ]
 
     public var isResident: Bool { manager != nil }
+
+    /// Every required file is whole. FluidAudio streams each file into
+    /// `<name>.partial` inside its final `.mlmodelc` folder and renames it once
+    /// complete, so an interrupted download leaves folders that exist but are
+    /// not whole: the same test FluidAudio uses (a compiled model's
+    /// `coremldata.bin`, no `.partial` left) tells them apart.
+    public static func isInstalled(paths: AppPaths) -> Bool { isComplete(folder(paths)) }
+
+    static func isComplete(_ folder: URL) -> Bool {
+        let files = FileManager.default
+        let whole = requiredFiles.allSatisfy { name in
+            let file = folder.appending(path: name)
+            return name.hasSuffix(".mlmodelc")
+                ? files.fileExists(atPath: file.appending(path: "coremldata.bin").path)
+                : files.fileExists(atPath: file.path)
+        }
+        guard whole, let all = files.enumerator(at: folder, includingPropertiesForKeys: nil) else { return false }
+        return !all.contains { ($0 as? URL)?.pathExtension == "partial" }
+    }
 
     public func load() async throws {
         _ = try await loaded()
@@ -64,8 +87,7 @@ public actor ParakeetTranscriber: LocalTranscriber {
         if let manager { return manager }
         if let loading { return try await loading.value }
         let folder = folder
-        guard Self.requiredFiles.allSatisfy({ FileManager.default.fileExists(atPath: folder.appending(path: $0).path) })
-        else { throw LocalModelNotInstalled(model) }
+        guard Self.isComplete(folder) else { throw LocalModelNotInstalled(model) }
         let task = Task {
             let manager = UnifiedAsrManager(encoderPrecision: .int8)
             try await manager.loadModels(from: folder)
@@ -94,10 +116,15 @@ public actor ParakeetTranscriber: LocalTranscriber {
         return floats
     }
 
-    /// Model install (onboarding or `scripts/install-model.sh` until it exists):
-    /// downloads the offline int8 tier into `<root>/models/` and loads it once.
-    /// Never on the Dictation path. Takes a `CloudAccess` like every network
-    /// use: Private mode blocks downloads too (#5).
+    /// Model install (first-run setup, or `scripts/install-model.sh`): downloads
+    /// the offline int8 tier (about 614 MB) into `<root>/models/` and loads it
+    /// once. Never on the Dictation path. Takes a `CloudAccess` like every
+    /// network use: Private mode blocks downloads too, and a revoke mid-download
+    /// (Private mode turned on) cancels it, which FluidAudio's downloader honors.
+    ///
+    /// A `models` link to another data folder whose install is not whole (the
+    /// dev folder links to the daily one's) is replaced by a folder of its own
+    /// first, so a dev build never downloads into the daily copy's folder.
     ///
     /// The Neural Engine compile that first load does (about 25 s) is cached
     /// per executable and per macOS build, under
@@ -105,9 +132,17 @@ public actor ParakeetTranscriber: LocalTranscriber {
     /// here does not warm another process: the app compiles on its own first load.
     public static func install(paths: AppPaths, access: CloudAccess,
                                progress: @escaping @Sendable (Double) -> Void) async throws {
-        guard access.revoked == nil else { throw CancellationError() }
-        let manager = UnifiedAsrManager(encoderPrecision: .int8)
-        try await manager.loadModels(to: modelsFolder(paths), progressHandler: { progress($0.fractionCompleted) })
-        await manager.cleanup()
+        // Whole already: nothing to fetch, and FluidAudio's repair never runs through a link into the daily folder.
+        guard !isInstalled(paths: paths) else { return }
+        let models = modelsFolder(paths)
+        try await access.untilRevoked {
+            if (try? FileManager.default.destinationOfSymbolicLink(atPath: models.path)) != nil {
+                // Removes the link only, never what it points at.
+                try FileManager.default.removeItem(at: models)
+            }
+            let manager = UnifiedAsrManager(encoderPrecision: .int8)
+            try await manager.loadModels(to: models, progressHandler: { progress($0.fractionCompleted) })
+            await manager.cleanup()
+        }
     }
 }
