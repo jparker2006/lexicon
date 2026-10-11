@@ -42,7 +42,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case .ready: "pasting"
         case .notInserted: "not inserted"
         case .recovered: "recovered"
-        case .cancelled: "cancelled"
         case .failed: "failed"
         }
     }

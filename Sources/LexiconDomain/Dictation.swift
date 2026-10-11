@@ -13,7 +13,7 @@ public struct DictationID: Hashable, Sendable, Codable, CustomStringConvertible 
 
 /// Where the audio came from. Decides whether text may ever be typed.
 public enum DictationOrigin: String, Sendable, Codable, CaseIterable {
-    /// Jake pressed fn (or the fallback hotkey). The only origin that can type.
+    /// Jake pressed fn. The only origin that can type.
     case live
     /// Found on launch after a crash. Transcribed, never typed (#4).
     case recovered
@@ -51,8 +51,6 @@ public enum DictationStatus: String, Sendable, Codable, CaseIterable {
     case notInserted
     /// Found after a crash; text ready; never typed.
     case recovered
-    /// Jake cancelled (Esc, or another key while fn held after confirmation). Audio kept.
-    case cancelled
     /// No text could be produced (audio missing, silent input).
     case failed
 
@@ -60,14 +58,14 @@ public enum DictationStatus: String, Sendable, Codable, CaseIterable {
     public var isInFlight: Bool {
         switch self {
         case .recording, .transcribing, .ready: true
-        case .waiting, .inserted, .notInserted, .recovered, .cancelled, .failed: false
+        case .waiting, .inserted, .notInserted, .recovered, .failed: false
         }
     }
 
     public var hasText: Bool {
         switch self {
         case .ready, .inserted, .notInserted, .recovered: true
-        case .recording, .transcribing, .waiting, .cancelled, .failed: false
+        case .recording, .transcribing, .waiting, .failed: false
         }
     }
 
@@ -76,7 +74,7 @@ public enum DictationStatus: String, Sendable, Codable, CaseIterable {
     /// GENERATES its partial index from this property (no hand-listed statuses).
     public var isTerminal: Bool {
         switch self {
-        case .inserted, .notInserted, .recovered, .cancelled, .failed: true
+        case .inserted, .notInserted, .recovered, .failed: true
         case .recording, .transcribing, .waiting, .ready: false
         }
     }
@@ -86,7 +84,7 @@ public enum DictationStatus: String, Sendable, Codable, CaseIterable {
     public var needsAudio: Bool {
         switch self {
         case .recording, .transcribing, .waiting, .failed: true
-        case .ready, .inserted, .notInserted, .recovered, .cancelled: false
+        case .ready, .inserted, .notInserted, .recovered: false
         }
     }
 
@@ -95,14 +93,14 @@ public enum DictationStatus: String, Sendable, Codable, CaseIterable {
     /// construction. Same-state moves are allowed and change nothing (replays).
     public func canMove(to next: DictationStatus) -> Bool {
         // TODO: self == next -> true; otherwise:
-        //   recording    -> transcribing | waiting | cancelled | failed | notInserted | recovered
+        //   recording    -> transcribing | waiting | failed | notInserted | recovered
         //                   (the last two only via recovery, which re-marks origin first)
-        //   transcribing -> ready | waiting | cancelled | failed | notInserted | recovered
+        //   transcribing -> ready | waiting | failed | notInserted | recovered
         //   waiting      -> ready | failed | notInserted | recovered   (late text, #4)
         //   ready        -> inserted | notInserted   (the paste's real outcome; recovery: notInserted)
         //   notInserted  -> inserted          (paste-last)
         //   recovered    -> inserted          (paste-last)
-        //   cancelled, failed -> notInserted | recovered   (manual Retry produced text)
+        //   failed       -> notInserted | recovered   (manual Retry produced text)
         //   inserted     -> (nothing else)
         // Write it as an exhaustive switch over `self`, so a new case fails the build here.
         fatalError("not implemented")

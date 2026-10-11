@@ -7,7 +7,7 @@ import LexiconDomain
 ///
 /// Callback budget: a few microseconds. It (1) drops events whose
 /// `kCGEventSourceUnixProcessID` is our own pid (our Cmd-V), (2) ticks the
-/// InputClock on key-down / mouse-down, (3) feeds fn / Esc / Space / hotkeys to
+/// InputClock on key-down / mouse-down, (3) feeds fn and every other key-down to
 /// `FnGesture`, (4) yields commands to the AsyncStream continuation, (5) returns
 /// nil to swallow only what the recognizer said to swallow. Synthetic fn from
 /// other processes is accepted on purpose: the head-to-head harness posts it (#15).

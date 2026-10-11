@@ -21,6 +21,7 @@ extension Conductor {
         let id = start.id
         defer {
             inFlight[id] = nil
+            releaseInsertTurn(id)  // every exit gives up its place in the insert order
             hold.end()  // idempotent: usually already ended in `land`
         }
 
@@ -58,7 +59,8 @@ extension Conductor {
         let signals = capture.signals
         Task { if await signals.firstAudio() != nil { self.emit(.listening(id)) } }
 
-        // Wait for fn-up (or Esc, a stray tap, end of file).
+        // Wait for fn-up (or Esc, a stray tap, end of file). The 20-minute cap and the
+        // 19-minute warning chime live in FnGesture, which emits a normal stop (#18).
         switch await nextEnd(ends, signals: signals) {
         case .discard:
             _ = await capture.stop(.immediately)
@@ -68,14 +70,17 @@ extension Conductor {
             return .nothing(id)
 
         case .cancel:
+            // Esc (#18): stop now, still transcribe and save, never type (no target).
+            // It lands as notInserted with text, and paste-last gets it back.
             let take = await capture.stop(.immediately)
-            attempt.cancel()
-            await cleaning.cancel()
             history.record(.audioEnded(id, take.summary))
-            history.record(.cancelled(id))
-            emit(.finished(id, .cancelled))
-            return DictationResult(id: id, status: .cancelled, versions: nil, cleanup: nil, model: nil, lag: nil,
-                                   attempts: [])
+            emit(.transcribing(id))
+            let outcome = await attempt.finish(take.clip)
+            let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
+                                   clip: take.clip, speechPlan: speechPlan, cleanupPlan: cleanupPlan,
+                                   cleaning: cleaning, cleanupDeadline: start.preferences.cleanupBudget,
+                                   access: access, target: nil, releasedAt: nil, previous: nil, hold: hold)
+            return await land(outcome, run)
 
         case .stop(let releasedAt):
             // fn-up. Where the text goes is captured now, in parallel with the tail.
@@ -130,6 +135,7 @@ extension Conductor {
             var delivery = Delivery.historyOnly
             var lag: Duration?
             if typing, let target = run.target {
+                await insertTurn(id)  // Dictations insert in the order they were spoken (#18)
                 delivery = await destination.insert(cleaned.versions.cleaned, for: id, at: target)  // text at the cursor
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
             }
@@ -145,7 +151,8 @@ extension Conductor {
                 history.record(.notInserted(id, reason))
                 emit(.notice(.readyToPaste(id)))
             case .historyOnly:
-                break
+                // Esc'd live Dictation: say it's waiting in paste-last (#18 indicator state).
+                if run.origin == .live, run.purpose == .type { emit(.notice(.readyToPaste(id))) }
             }
             if case .respeak(let fixing) = run.purpose {
                 _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)

@@ -45,6 +45,11 @@ public actor Conductor<Destination: TextDestination> {
     var capturingID: DictationID?
     /// Dictations past stop that still need text (transcribing, waiting).
     var inFlight: [DictationID: Task<DictationResult, Never>] = [:]
+    /// Live Dictations in fn-down order. A Dictation inserts only when every
+    /// earlier one has inserted, been held, or gone waiting (#18: they insert in
+    /// the order they were spoken). A waiting Dictation gives up its turn, so a
+    /// network outage never blocks later text; its late insert passes InsertGuard.
+    var insertOrder: [DictationID] = []
     var subscribers: [UUID: AsyncStream<ConductorEvent>.Continuation] = [:]
 
     public init(recorder: Recorder, speech: SpeechEngine, cleanup: Cleanup, lexicon: Lexicon, history: HistoryStore,
@@ -69,8 +74,11 @@ public actor Conductor<Destination: TextDestination> {
     public func handle(_ command: KeyCommand) {
         switch command {
         case .dictationBegan(let at):
-            guard captureEnd == nil else { return }  // recognizer guarantees one at a time
+            // fn never waits (#18): an earlier Dictation still finishing is fine; one
+            // still in its 200 ms tail has its tail cut by `recorder.start`.
+            guard captureEnd == nil else { return }  // recognizer guarantees one recording at a time
             let id = DictationID()
+            insertOrder.append(id)
             let (ends, continuation) = AsyncStream<RunEnd>.makeStream()
             captureEnd = continuation
             capturingID = id
@@ -141,6 +149,18 @@ public actor Conductor<Destination: TextDestination> {
     }
 
     // MARK: Internals
+
+    /// Suspends until `id` is first in `insertOrder`.
+    func insertTurn(_ id: DictationID) async {
+        // TODO: store a continuation per waiting id; resume the head when it changes.
+        fatalError("not implemented")
+    }
+
+    /// Removes `id` from `insertOrder` (idempotent) and wakes the next in line.
+    func releaseInsertTurn(_ id: DictationID) {
+        // TODO: remove; if the head changed, resume its waiting continuation.
+        fatalError("not implemented")
+    }
 
     func endCapture(_ end: RunEnd) {
         captureEnd?.yield(end)

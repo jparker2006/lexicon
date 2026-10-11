@@ -54,6 +54,8 @@ public final class Recorder: @unchecked Sendable {
     ///
     /// Ownership handoff: while the LiveCapture is open, this module is the only
     /// writer of `file`. After `stop`, the file belongs to History (#4).
+    /// fn never waits (#18): if the previous LiveCapture is still in its tail, its
+    /// tail ends now and the new capture starts at once.
     public func start(_ input: AudioInput, writingTo file: URL) async throws(RecorderError) -> LiveCapture {
         fatalError("not implemented")
     }

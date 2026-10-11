@@ -33,7 +33,6 @@ public enum DictationEvent: Sendable {
     case notInserted(DictationID, NotInsertedReason)
     case waiting(DictationID, reason: String)
     case failed(DictationID, reason: String)
-    case cancelled(DictationID)
     /// A stray tap: never a Dictation. Removes row and file (only while `.recording`).
     case discarded(DictationID)
     /// Inserts the fix row and updates final text, in one transaction.
@@ -134,7 +133,7 @@ extension HistoryStore {
     /// Targets: began -> .recording (INSERT OR IGNORE); audioEnded -> .transcribing;
     /// textReady -> afterTextReady(typing:, origin: stored origin, previous: stored);
     /// delivered -> .inserted; notInserted -> .notInserted; waiting -> .waiting;
-    /// failed -> .failed; cancelled -> .cancelled. Not status-moving: attempted,
+    /// failed -> .failed. Not status-moving: attempted,
     /// fixRecorded, fixVerdict, pinned; deleted is refused while `isInFlight`;
     /// discarded only while `.recording`.
     func apply(_ event: DictationEvent, in db: Database) throws {

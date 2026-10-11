@@ -13,7 +13,7 @@ import LexiconCore
 // (Compiled with `swift build --build-tests`; bodies call sketch stubs.)
 
 @Test func holdPastThresholdIsPushToTalk() {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300), doubleTapWindow: .milliseconds(500))
+    var gesture = FnGesture(holdThreshold: .milliseconds(300), doubleTapWindow: .milliseconds(250))
     let t0 = HostTime(nanoseconds: 1_000_000_000)
     let down = gesture.handle(.fnDown(t0))
     #expect(down.commands == [.dictationBegan(at: t0)])
