@@ -150,6 +150,11 @@ final class PillView: NSView {
         self.reduceMotion = reduceMotion
         let h = Self.height
         var x = Self.padding
+        // A new state replaces the old one at once: implicit layer animations
+        // would fade the old dots out from under the new icon.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         stopAnimations()
         dot.isHidden = true
         bars.forEach { $0.isHidden = true }
