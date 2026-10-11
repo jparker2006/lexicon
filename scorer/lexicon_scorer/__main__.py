@@ -9,7 +9,8 @@ Gold: JSONL, one entry per line: {"id", "text", "session", "terms"?, "split"?, .
 not "next dot js"). `terms` lists the Terms said in it; each must be found in
 `text` as a whole token, or the scorer stops, so a typo cannot hide a miss.
 `session` (a string) is needed by `compare` and `report`. With --split, only gold entries
-whose `split` field matches are scored. Other fields (NeMo's audio_filepath,
+whose `split` field matches are scored. An entry whose `gold` is "review" is
+a draft (scorer/testset) and stops the run. Other fields (NeMo's audio_filepath,
 duration; Lexicon's speech_end, context) are ignored.
 Run: JSONL, one Dictation per line: {"id", "speech_text", "inserted_text"}.
 A run must cover every gold entry scored, no more and no fewer: a Dictation
@@ -73,6 +74,12 @@ def _score_run(gold: dict, run: dict[str, dict], run_path: str, lexicon: list[st
     unknown = sorted(set(run) - set(gold))
     if unknown:
         raise SystemExit(f"{run_path}: ids not in the gold scored (check --split): {', '.join(unknown[:5])}")
+    # The Test set's draft gold (scorer/testset): where the two speech models
+    # disagreed, `text` is a placeholder until Jake reviews it (#51), and
+    # scoring it would favor the model it came from.
+    pending = sum(g.get("gold") == "review" for g in gold.values())
+    if pending:
+        raise SystemExit(f"{pending} gold entries still await review; their text is only a draft")
     missing = sorted(set(gold) - set(run))
     if missing:
         raise SystemExit(f"{run_path}: {len(missing)} gold entries have no result: {', '.join(missing[:5])}")
