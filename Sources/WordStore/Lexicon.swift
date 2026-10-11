@@ -37,8 +37,7 @@ public actor Lexicon {
 
     /// The same text again, in any case, replaces the Term's spelling: still one Term.
     public func add(_ term: Term) throws {
-        let text = term.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard let text = Self.stored(term) else { return }
         try database.execute("INSERT INTO term (text) VALUES (?) ON CONFLICT (text) DO UPDATE SET text = excluded.text",
                              [.text(text)])
         try reload()
@@ -51,9 +50,7 @@ public actor Lexicon {
 
     /// The same `heard` again, in any case, replaces the Rule: still one Rule.
     public func add(_ rule: Rule) throws {
-        let heard = rule.heard.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        let written = rule.written.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !heard.isEmpty, !written.isEmpty else { return }
+        guard let (heard, written) = Self.stored(rule) else { return }
         try database.execute("""
             INSERT INTO rule (heard, written, source) VALUES (?, ?, ?)
             ON CONFLICT (heard) DO UPDATE SET heard = excluded.heard, written = excluded.written, source = excluded.source
@@ -63,9 +60,34 @@ public actor Lexicon {
 
     /// Removes the Rule for `rule.heard`, whatever it writes.
     public func remove(_ rule: Rule) throws {
-        let heard = rule.heard.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        try database.execute("DELETE FROM rule WHERE heard = ?", [.text(heard)])
+        try database.execute("DELETE FROM rule WHERE heard = ?", [.text(Self.heard(of: rule))])
         try reload()
+    }
+
+    /// Import: every entry the Lexicon doesn't have yet, in one transaction and
+    /// one recompile, so the word list is read once for the whole file. An entry
+    /// it already has, in any case, stays as it is: importing a file twice, or
+    /// over Jake's own edits, changes nothing. (Add, above, replaces instead:
+    /// typing a spelling means Jake wants that spelling.)
+    public func add(_ entries: [LexiconEntry]) throws -> ImportCounts {
+        var counts = ImportCounts()
+        try database.transaction { database in
+            for entry in entries {
+                switch entry {
+                case .term(let term):
+                    guard let text = Self.stored(term) else { continue }
+                    try database.execute("INSERT INTO term (text) VALUES (?) ON CONFLICT (text) DO NOTHING", [.text(text)])
+                    if database.changes > 0 { counts.terms += 1 } else { counts.duplicates += 1 }
+                case .rule(let rule):
+                    guard let (heard, written) = Self.stored(rule) else { continue }
+                    try database.execute("INSERT INTO rule (heard, written, source) VALUES (?, ?, ?) ON CONFLICT (heard) DO NOTHING",
+                                         [.text(heard), .text(written), .text(rule.source.rawValue)])
+                    if database.changes > 0 { counts.rules += 1 } else { counts.duplicates += 1 }
+                }
+            }
+        }
+        try reload()
+        return counts
     }
 
     /// Spans of `text` that sound like a Lexicon term with no Rule covering them.
@@ -82,6 +104,24 @@ public actor Lexicon {
         if terms != self.terms { english = EnglishWords.among(RuleSet.wordsInside(terms)) }
         (self.terms, self.rules) = (terms, rules)
         compiled = RuleSet(rules: rules, terms: terms, english: english)
+    }
+
+    /// A Term as stored: trimmed, nil when nothing is left.
+    private static func stored(_ term: Term) -> String? {
+        let text = term.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    /// A Rule as stored: `heard` with its spaces collapsed, `written` trimmed;
+    /// nil when either is empty.
+    private static func stored(_ rule: Rule) -> (heard: String, written: String)? {
+        let heard = heard(of: rule)
+        let written = rule.written.trimmingCharacters(in: .whitespacesAndNewlines)
+        return heard.isEmpty || written.isEmpty ? nil : (heard, written)
+    }
+
+    private static func heard(of rule: Rule) -> String {
+        rule.heard.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     private static func load(_ database: Database) throws -> ([Term], [Rule]) {
