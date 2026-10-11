@@ -129,9 +129,12 @@ public final class HistoryStore: @unchecked Sendable {
                     try Retention.expire(in: db, now: now, bytes: { Self.bytes(at: audioURL(for: $0)) })
                 }
                 for id in expired {
+                    // One file that won't go must not strand the rest; launch recovery unlinks it later.
                     do {
-                        try FileManager.default.removeItem(at: audioURL(for: id))
-                    } catch CocoaError.fileNoSuchFile {}
+                        try removeAudioFile(id)
+                    } catch {
+                        log.error("Retention left an audio file: \(String(describing: error), privacy: .private)")
+                    }
                     changed.yield(id)
                 }
             }
@@ -196,13 +199,18 @@ public final class HistoryStore: @unchecked Sendable {
     /// so a crash from here on leaves a file recovery deletes (`deleteGarbage`),
     /// never an orphan it would adopt and transcribe again.
     private func dropAudio(_ id: DictationID) throws {
-        do {
-            try FileManager.default.removeItem(at: audioURL(for: id))
-        } catch CocoaError.fileNoSuchFile {}
+        try removeAudioFile(id)
         try db.transaction {
             try $0.execute("DELETE FROM dictation WHERE id = ? AND audio_storage = ?",
                            [.text(id.description), .text(AudioStorage.deleted.rawValue)])
         }
+    }
+
+    /// Already gone is fine: every caller has committed the row's mark first.
+    private func removeAudioFile(_ id: DictationID) throws {
+        do {
+            try FileManager.default.removeItem(at: audioURL(for: id))
+        } catch CocoaError.fileNoSuchFile {}
     }
 }
 

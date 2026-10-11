@@ -124,7 +124,8 @@ enum RecoveryPlan {
         // TODO:
         // - for each file: no row -> [finalize if open, adoptOrphan, transcribe]
         // - row.audio == .deleted && file exists -> deleteGarbage
-        // - row.audio == .expired && file exists -> unlink the file only: the row keeps its text (retention)
+        // - row.audio == .expired (retention; the row keeps its text): file exists -> unlink the file only;
+        //   its missing audio is never a reason to markFailed (a .ready row still becomes notInserted)
         // - row whose status is not terminal (!status.isTerminal):
         //     file open -> finalize + transcribe; closed -> transcribe; missing/unreadable -> markFailed
         fatalError("not implemented")
@@ -142,13 +143,14 @@ enum Retention {
     static var skippedStatuses: String { HistorySchema.sqlList(\.needsAudio, is: true) }
 
     /// Marks the audio that goes as `.expired` and returns its ids, oldest first.
+    /// A `.ramOnly` row counts too: its capture left a partial file on disk.
     /// The caller unlinks the files once this commits.
     static func expire(in db: Database, now: Date, bytes: (DictationID) -> Int64) throws -> [DictationID] {
         let candidates = try db.query("""
             SELECT id, started_at FROM dictation
-            WHERE audio_storage = ? AND pinned = 0 AND status NOT IN (\(skippedStatuses))
+            WHERE audio_storage IN (?, ?) AND pinned = 0 AND status NOT IN (\(skippedStatuses))
             ORDER BY started_at, id
-            """, [.text(AudioStorage.onDisk.rawValue)]).compactMap { row -> (id: DictationID, startedAt: Int64, bytes: Int64)? in
+            """, [.text(AudioStorage.onDisk.rawValue), .text(AudioStorage.ramOnly.rawValue)]).compactMap { row -> (id: DictationID, startedAt: Int64, bytes: Int64)? in
             guard let id = row.text(0).flatMap(DictationID.init(column:)) else { return nil }
             return (id, row.int(1) ?? 0, bytes(id))
         }

@@ -13,7 +13,7 @@ private let parakeet = SpeechModel.local(.parakeetUnified)
 
 /// A Dictation started `daysAgo` before `now`, driven to `status`, with an audio file of `megabytes`.
 private func dictate(_ store: HistoryStore, daysAgo: Double, status: DictationStatus = .inserted,
-                     pinned: Bool = false, megabytes: UInt64 = 1) throws -> DictationID {
+                     pinned: Bool = false, megabytes: UInt64 = 1, storage: AudioStorage = .onDisk) throws -> DictationID {
     let id = DictationID()
     let file = store.audioURL(for: id)
     #expect(FileManager.default.createFile(atPath: file.path, contents: nil))
@@ -21,7 +21,7 @@ private func dictate(_ store: HistoryStore, daysAgo: Double, status: DictationSt
 
     let origin: DictationOrigin = status == .recovered ? .recovered : .live
     store.record(.began(id, origin: origin, purpose: .type, at: now.addingTimeInterval(-daysAgo * 86_400), app: .unknown))
-    let ended = AudioSummary(duration: .seconds(3), startGap: nil, deviceName: nil, storage: .onDisk, gaps: [])
+    let ended = AudioSummary(duration: .seconds(3), startGap: nil, deviceName: nil, storage: storage, gaps: [])
     let landed = DictationEvent.textReady(id, text, cleanup: .rulesOnly(.off), model: parakeet, typing: status == .ready)
     let events: [DictationEvent] = switch status {
     case .recording: []
@@ -49,6 +49,7 @@ private func hasAudio(_ store: HistoryStore, _ id: DictationID) async -> Bool {
 @Test func audioOlderThan14DaysIsRemovedAndTheTextKept() async throws {
     let store = try HistoryStore(paths: .temporary())
     let old = try dictate(store, daysAgo: 15)
+    let edge = try dictate(store, daysAgo: 14)
     let recent = try dictate(store, daysAgo: 13)
     await store.flush()
     let before = try #require(await store.dictation(old))
@@ -56,6 +57,7 @@ private func hasAudio(_ store: HistoryStore, _ id: DictationID) async -> Bool {
     await store.sweepAudio(now: now)
 
     #expect(await !hasAudio(store, old))
+    #expect(await hasAudio(store, edge))
     #expect(await hasAudio(store, recent))
     let after = try #require(await store.dictation(old))
     #expect(after.audio == .expired)
@@ -82,6 +84,31 @@ private func hasAudio(_ store: HistoryStore, _ id: DictationID) async -> Bool {
     #expect(await store.dictation(oldest)?.finalText == text.cleaned)
 }
 
+@Test func audioAgedOutNoLongerCountsAgainstTheCap() async throws {
+    let store = try HistoryStore(paths: .temporary())
+    let old = try dictate(store, daysAgo: 15, megabytes: 600)
+    let recent = try dictate(store, daysAgo: 13, megabytes: 600)
+    await store.flush()
+
+    await store.sweepAudio(now: now)
+
+    #expect(await !hasAudio(store, old))
+    #expect(await hasAudio(store, recent))
+}
+
+/// A capture that hit disk trouble keeps going in RAM and leaves a partial file behind.
+@Test func aPartialFileLeftByRamOnlyCaptureAgesOutToo() async throws {
+    let store = try HistoryStore(paths: .temporary())
+    let id = try dictate(store, daysAgo: 15, storage: .ramOnly)
+    await store.flush()
+
+    await store.sweepAudio(now: now)
+
+    #expect(await store.dictation(id)?.audio == .expired)
+    #expect(!FileManager.default.fileExists(atPath: store.audioURL(for: id).path))
+    #expect(await store.dictation(id)?.finalText == text.cleaned)
+}
+
 @Test func exactlyOneGigabyteIsNotOverTheCap() async throws {
     let store = try HistoryStore(paths: .temporary())
     let ids = try [600, 400].enumerated().map { try dictate(store, daysAgo: Double(5 - $0.offset), megabytes: UInt64($0.element)) }
@@ -102,7 +129,9 @@ func waitingFailedAndPinnedDictationsKeepTheirAudio(status: DictationStatus) asy
 
     await store.sweepAudio(now: now)
 
-    #expect(await hasAudio(store, plain) == status.needsAudio)
+    // Listed by hand, not read from `needsAudio`, so a change to that list fails here.
+    let waitsForText = [DictationStatus.recording, .transcribing, .waiting, .failed].contains(status)
+    #expect(await hasAudio(store, plain) == waitsForText)
     #expect(await hasAudio(store, pinned))
 }
 
