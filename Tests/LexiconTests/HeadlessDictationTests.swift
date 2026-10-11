@@ -127,7 +127,7 @@ func aMicThatFailsToStartLeavesTheNextFnPressWorking() async throws {
     #expect(unavailable == 2)  // the second fn press tried the mic again instead of being dropped
 }
 
-@Test func insertTargetsCannotBeMadeOutsideTheirModules() async throws {
+@Test(.timeLimit(.minutes(1))) func insertTargetsCannotBeMadeOutsideTheirModules() async throws {
     let imports = "import AppText\nimport KeyInput\nimport LexiconCore\nimport LexiconDomain\n"
     let fetched = try await compile(imports + """
         func live(_ app: TargetApp) async -> TargetApp.Target? { await app.target() }
@@ -155,7 +155,7 @@ func aMicThatFailsToStartLeavesTheNextFnPressWorking() async throws {
     #expect(headless.output.contains("inaccessible"), "\(headless.output)")
 }
 
-@Test func finishingASpeechAttemptTwiceIsACompileError() async throws {
+@Test(.timeLimit(.minutes(1))) func finishingASpeechAttemptTwiceIsACompileError() async throws {
     let imports = "import LexiconDomain\nimport Transcription\n"
     let once = try await compile(imports + """
         func run(_ attempt: consuming SpeechAttempt, _ clip: AudioClip) async { _ = await attempt.finish(clip) }
