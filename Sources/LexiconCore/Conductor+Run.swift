@@ -26,20 +26,17 @@ extension Conductor {
             hold.end()  // idempotent: usually already ended in `land`
         }
 
-        // fn-down. Capture starts first; nothing network-bound runs in front of it.
-        async let contextValue = destination.context()
+        // fn-down. Capture starts first; nothing network-bound runs in front of it. The row
+        // doesn't wait on the mic: a start that fails or never returns still leaves a trace.
+        async let began = beginRow(start)
         let capture: LiveCapture
         do {
             capture = try await recorder.start(start.input, writingTo: history.audioURL(for: id), since: start.began)
         } catch {
-            // Give up the capture slot, or every later fn-down finds it taken and is dropped. A discard,
-            // not a cancel: a cancel sends `stopped`, and the pill would play a stop sound for a mic that never started.
-            // The press's own release, still to come, names this id and so ends nothing.
-            endCapture(id, .discard)
-            emit(.notice(.microphoneUnavailable(String(describing: error))))
-            return .nothing(id)  // nothing was captured, so nothing can be lost
+            _ = await began  // the row exists before its outcome is recorded
+            return await micFailed(start, error, ends: ends)
         }
-        let context = await contextValue
+        let context = await began
         // Granted once the app is known: an always-private app gets no access (#5).
         // TODO(#68): focus moving into an always-private app -> access?.revoke(.alwaysPrivateApp).
         let access = CloudAccess.granted(by: start.preferences, app: context, keys: secrets.lookup)
@@ -54,7 +51,6 @@ extension Conductor {
             }
         }
         defer { privacyWatch?.cancel() }
-        history.record(.began(id, origin: start.origin, purpose: start.purpose, at: Date(), app: context))
         emit(.started(id))
 
         // Words for this Dictation (sub-ms, in memory), then open the stream.
@@ -112,6 +108,42 @@ extension Conductor {
                                    previous: nil, hold: hold)
             return await land(outcome, run)
         }
+    }
+
+    /// The Dictation's History row, at fn-down. Off the actor, in parallel with
+    /// the mic start. Returns the app it began in.
+    nonisolated func beginRow(_ start: RunStart) async -> AppContext {
+        let context = await destination.context()
+        history.record(.began(start.id, origin: start.origin, purpose: start.purpose, at: Date(), app: context))
+        return context
+    }
+
+    /// The mic didn't start: no permission, no device, or Core Audio stuck past
+    /// the start limit (#142). Nothing was captured, so nothing can be lost; the
+    /// row says what happened, unless the press was a stray tap.
+    func micFailed(_ start: RunStart, _ error: RecorderError, ends: AsyncStream<RunEnd>) async -> DictationResult {
+        let id = start.id
+        // Give up the capture slot, or every later fn-down finds it taken and is dropped.
+        // With fn still down this is the stop: the pill leaves "recording" and can show the
+        // notice (it ignores a press it never confirmed). The press's own release, still
+        // to come, names this id and so ends nothing.
+        var discarded = false
+        if id == capturingID {
+            endCapture(id, .stop(at: .now()))
+        } else if start.origin == .live {
+            // Released before the mic answered: its end is already in `ends`. (A file's
+            // `ends` stays open until the run returns, so only a live run reads it.)
+            discarded = await ends.first { _ in true }.map { !$0.isStop } ?? false
+        }
+        if discarded {
+            history.record(.discarded(id))
+        } else {
+            history.record(.failed(id, reason: "microphone: \(error)"))
+        }
+        log.error("Dictation \(id, privacy: .public) has no mic: \(String(describing: error), privacy: .public)")
+        emit(.notice(.microphoneUnavailable(String(describing: error))))
+        return discarded ? .nothing(id) : DictationResult(id: id, status: .failed, versions: nil, cleanup: nil,
+                                                          model: nil, lag: nil, attempts: [])
     }
 
     /// Text (or no text) -> cleanup -> History -> the cursor. Shared by live,

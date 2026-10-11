@@ -165,10 +165,16 @@ final class FakeMic: Sendable {
     private let count = Mutex(0)
     /// Engines, by the order they are made, that stop themselves the moment they start.
     private let diesAtStart: Set<Int>
+    /// Engines, by the order they are made, whose start blocks its thread until `unwedge`.
+    private let wedgesAtStart: Set<Int>
+    private let gate = DispatchSemaphore(value: 0)
+    private let clock: any Clock<Duration>
 
-    init(diesAtStart: Set<Int> = []) {
+    init(diesAtStart: Set<Int> = [], wedgesAtStart: Set<Int> = [], clock: any Clock<Duration> = ContinuousClock()) {
         (made, continuation) = AsyncStream.makeStream()
         self.diesAtStart = diesAtStart
+        self.wedgesAtStart = wedgesAtStart
+        self.clock = clock
     }
 
     var hardware: MicHardware {
@@ -177,10 +183,16 @@ final class FakeMic: Sendable {
                 defer { count += 1 }
                 return count
             }
-            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index))
+            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index),
+                                    wedge: wedgesAtStart.contains(index) ? gate : nil)
             continuation.yield(engine)
             return engine
-        }, permission: { .granted })
+        }, permission: { .granted }, clock: clock)
+    }
+
+    /// Lets every wedged start return, as a Core Audio call that was stuck finally does.
+    func unwedge() {
+        for _ in wedgesAtStart { gate.signal() }
     }
 }
 
@@ -195,14 +207,27 @@ final class FakeEngine: InputEngine, Sendable {
     var isCurrent: Bool { false }
     var isRunning: Bool { running.load(ordering: .relaxed) }
     var firstAudio: HostTime? { stamp.withLock { $0 } }
+    /// One element per `start` entered and per `stop`, so a test can wait on either.
+    let started: AsyncStream<Void>
+    let stopped: AsyncStream<Void>
 
     private let diesAtStart: Bool
+    private let wedge: DispatchSemaphore?
     private let running = Atomic(false)
     private let stamp = Mutex<HostTime?>(nil)
+    private let starts: AsyncStream<Void>.Continuation
+    private let stops: AsyncStream<Void>.Continuation
 
-    init(diesAtStart: Bool) { self.diesAtStart = diesAtStart }
+    init(diesAtStart: Bool, wedge: DispatchSemaphore? = nil) {
+        self.diesAtStart = diesAtStart
+        self.wedge = wedge
+        (started, starts) = AsyncStream.makeStream()
+        (stopped, stops) = AsyncStream.makeStream()
+    }
 
     func start() throws(RecorderError) {
+        starts.yield()
+        wedge?.wait()
         guard !diesAtStart else { return }
         running.store(true, ordering: .relaxed)
         let tone = (0..<Self.frames).map { Float(sin(2 * Double.pi * 440 * Double($0) / 16_000)) / 4 }
@@ -210,7 +235,10 @@ final class FakeEngine: InputEngine, Sendable {
         stamp.withLock { $0 = .now() }
     }
 
-    func stop() { running.store(false, ordering: .relaxed) }
+    func stop() {
+        running.store(false, ordering: .relaxed)
+        stops.yield()
+    }
 
     func hardwareChanged() {
         stop()

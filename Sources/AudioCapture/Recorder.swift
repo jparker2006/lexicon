@@ -24,6 +24,8 @@ public enum RecorderError: Error, Sendable {
     case noInputDevice
     case alreadyRecording
     case engineFailed(String)
+    /// Core Audio did not start the engine within `Microphone.startLimit`.
+    case startTimedOut
     case unreadableFile(URL)
 }
 

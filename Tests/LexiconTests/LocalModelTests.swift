@@ -386,9 +386,9 @@ final class TestClock: Clock, Sendable {
     }
 
     /// Returns once exactly `count` sleeps are pending: a timer task reaches
-    /// its sleep some time after it is started.
+    /// its sleep some time after it is started. A test's time limit cancels the wait.
     func waitForSleepers(_ count: Int) async {
-        while sleepers != count { await Task.yield() }
+        while sleepers != count, !Task.isCancelled { await Task.yield() }
     }
 
     /// Returns once a sleep due exactly `offset` after the clock's start is

@@ -202,6 +202,106 @@ func quitDoesNotWaitForeverOnADictationStuckInTheModel() async throws {
     await model.releaseFirst()
 }
 
+@Test(.timeLimit(.minutes(1)))
+func aMicStartThatNeverReturnsEndsTheDictationAndTheNextOneRecords() async throws {
+    // After a Microphone permission change, building or starting an engine can
+    // block the mic's queue for good (#142). The first engine's start does.
+    let clock = TestClock()
+    let mic = FakeMic(wedgesAtStart: [0], clock: clock)
+    let rig = try FnRig(hardware: mic.hardware)
+    var events = await rig.conductor.events().makeAsyncIterator()
+    var engines = mic.made.makeAsyncIterator()
+    let stuck = DictationID(), next = DictationID()
+
+    await rig.conductor.handle(.dictationBegan(stuck, at: fnAt(0)))
+    await rig.conductor.handle(.dictationConfirmed(stuck, .hold))
+    let wedged = try #require(await engines.next())
+    var entered = wedged.started.makeAsyncIterator()
+    await entered.next()
+    // The row is there before the mic answers.
+    await rig.history.flush()
+    #expect(await rig.history.dictation(stuck)?.status == .recording)
+
+    await clock.waitForSleepers(1)
+    await clock.advance(by: Microphone.startLimit)
+    var seen: [ConductorEvent] = []
+    while let event = await events.next() {
+        seen.append(event)
+        if case .notice(.microphoneUnavailable) = event { break }
+    }
+    // fn is still down: the pill leaves "recording" before it says why.
+    #expect(seen.contains(where: { event in
+        if case .stopped(let who) = event { who == stuck } else { false }
+    }))
+    await rig.conductor.handle(.dictationStopped(stuck, at: fnAt(500)))  // its fn-up, after the limit: nothing to end
+
+    // The next fn-down gets a fresh engine, though the first is still stuck.
+    for command: KeyCommand in [.dictationBegan(next, at: fnAt(700)), .dictationConfirmed(next, .hold),
+                                .dictationStopped(next, at: fnAt(1_300))] {
+        await rig.conductor.handle(command)
+    }
+    let landed = await eventsUntilFinished(&events)
+    #expect(landed.contains(where: { event in
+        if case .finished(let who, .inserted) = event { who == next } else { false }
+    }))
+    // Quit with the first engine still stuck.
+    await rig.conductor.idle()
+
+    #expect(await rig.history.dictation(stuck)?.status == .failed)
+    #expect(await rig.history.dictation(next)?.status == .inserted)
+    #expect(try CAFFile.read(rig.history.audioURL(for: next)).samples.count > 0)
+
+    // When the stuck start finally returns, its engine is stopped, not left holding the mic.
+    var stops = wedged.stopped.makeAsyncIterator()
+    mic.unwedge()
+    await stops.next()
+    #expect(!wedged.isRunning)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aStrayTapOnAStuckMicLeavesNoRowButSaysTheMicIsStuck() async throws {
+    let clock = TestClock()
+    let mic = FakeMic(wedgesAtStart: [0], clock: clock)
+    let rig = try FnRig(hardware: mic.hardware)
+    var events = await rig.conductor.events().makeAsyncIterator()
+    let tap = DictationID()
+
+    await rig.conductor.handle(.dictationBegan(tap, at: fnAt(0)))
+    await rig.conductor.handle(.dictationDiscarded(tap))
+    await clock.waitForSleepers(1)
+    await clock.advance(by: Microphone.startLimit)
+    var noticed = false
+    while let event = await events.next() {
+        if case .notice(.microphoneUnavailable) = event {
+            noticed = true
+            break
+        }
+    }
+    await settleFn(rig)
+
+    #expect(noticed)
+    #expect(await rig.history.dictation(tap) == nil)
+    mic.unwedge()
+}
+
+@Test(.timeLimit(.minutes(1)))
+func quitWithFnDownOnAStuckMicReturnsAtTheStartLimit() async throws {
+    let clock = TestClock()
+    let mic = FakeMic(wedgesAtStart: [0], clock: clock)
+    let rig = try FnRig(hardware: mic.hardware)
+    let id = DictationID()
+
+    await rig.conductor.handle(.dictationBegan(id, at: fnAt(0)))
+    await rig.conductor.handle(.dictationConfirmed(id, .hold))
+    let quitting = Task { await rig.conductor.idle() }
+    await clock.waitForSleepers(1)
+    await clock.advance(by: Microphone.startLimit)
+    await quitting.value  // fn never came up
+
+    #expect(await rig.history.dictation(id)?.status == .failed)
+    mic.unwedge()
+}
+
 /// The real recognizer behind a `Keyboard`, fed by the test instead of the fn tap.
 private final class ScriptedKeys: Sendable {
     let keyboard: Keyboard
@@ -234,9 +334,10 @@ private struct FnRig {
     let destination: HeadlessDestination
     let conductor: Conductor<HeadlessDestination>
 
-    init(keyboard: Keyboard? = nil, local: any LocalTranscriber = ScriptedTranscriber(text: "Ship it")) throws {
+    init(keyboard: Keyboard? = nil, local: any LocalTranscriber = ScriptedTranscriber(text: "Ship it"),
+         hardware: MicHardware = FakeMic().hardware) throws {
         let paths = AppPaths.temporary()
-        let recorder = Recorder(hardware: FakeMic().hardware)
+        let recorder = Recorder(hardware: hardware)
         let history = try HistoryStore(paths: paths)
         let destination = HeadlessDestination()
         self.recorder = recorder
