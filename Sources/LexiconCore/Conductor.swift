@@ -48,6 +48,8 @@ public actor Conductor<Destination: TextDestination> {
     var inFlight: [DictationID: Task<DictationResult, Never>] = [:]
     /// The `inFlight` entries that are launch recovery, not a live or file Dictation.
     var recovering: Set<DictationID> = []
+    /// `idle` waiting for the recording Dictation's capture to end.
+    var captureEndWaiters: [CheckedContinuation<Void, Never>] = []
     /// Waiting Dictations, each trying again until it has text (`retryWhenReady`).
     var waiting: [DictationID: Task<Void, Never>] = [:]
     /// Live Dictations in fn-down order. A Dictation inserts only when every
@@ -166,18 +168,21 @@ public actor Conductor<Destination: TextDestination> {
 
     /// Quit: returns once no Dictation is recording or finishing, and History and
     /// the audio files have everything. A recording Dictation ends the normal way,
-    /// at fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
+    /// at its fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
     /// Dictations past fn-up get `limit` to land: one stuck in the model must not
-    /// hold Quit forever, and its audio is on disk for launch recovery. Launch
-    /// recovery and waiting Dictations are not waited for: their text is never
-    /// typed, and the next launch picks them up again.
+    /// hold Quit forever, and its row stays for launch recovery. Launch recovery
+    /// and waiting Dictations are not waited for: their text is never typed, and
+    /// the next launch picks them up again.
     public func idle(finishingWithin limit: Duration = .seconds(30)) async {
-        repeat {
-            while let id = capturingID, let run = inFlight[id] { _ = await run.value }
-            let finishing = inFlight.filter { !recovering.contains($0.key) }.map(\.value)
+        while true {
+            if capturingID != nil {
+                await withCheckedContinuation { captureEndWaiters.append($0) }
+                continue
+            }
+            let finishing = inFlight.filter { !recovering.contains($0.key) }
             let (landed, land) = AsyncStream<Void>.makeStream()
             let waiting = Task {
-                for run in finishing { _ = await run.value }
+                for run in finishing.values { _ = await run.value }
                 land.finish()
             }
             let deadline = Task {
@@ -189,7 +194,10 @@ public actor Conductor<Destination: TextDestination> {
             deadline.cancel()
             await history.flush()
             await recorder.settle()
-        } while capturingID != nil  // fn went down while this waited: that one ends at its fn-up too
+            // Done unless fn went down meanwhile: that Dictation gets the same wait.
+            let started = inFlight.keys.filter { !recovering.contains($0) && finishing[$0] == nil }
+            if capturingID == nil, started.isEmpty { return }
+        }
     }
 
     /// UI, logs. Each call returns a new stream (any number of observers).
@@ -223,6 +231,8 @@ public actor Conductor<Destination: TextDestination> {
         captureEnd?.finish()
         captureEnd = nil
         capturingID = nil
+        for waiter in captureEndWaiters { waiter.resume() }
+        captureEndWaiters = []
     }
 
     func emit(_ event: ConductorEvent) {

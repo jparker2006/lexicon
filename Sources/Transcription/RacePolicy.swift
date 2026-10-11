@@ -91,10 +91,11 @@ actor LocalResidency {
         }
     }
 
-    /// Launch: load now if not resident, then follow `policy` (the idle unload).
+    /// Launch: load now if not resident, then follow `policy` (the idle unload),
+    /// or a newer one fed while the load ran (a first load takes about 25 s).
     func warm(_ policy: ResidencyPolicy) async {
         if !(await transcriber.isResident) { try? await transcriber.load() }
-        await policyChanged(policy)
+        await policyChanged(fed ?? policy)
     }
 
     /// The Dictation has its text (or was cancelled): start the idle timer.
