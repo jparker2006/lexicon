@@ -221,7 +221,7 @@ func readLexicon(_ url: URL?) throws -> [LexiconEntry] {
     let file = try LexiconFile(contentsOf: url)
     let terms = file.entries.count(where: { if case .term = $0 { true } else { false } })
     var report = "lexicon-eval: Lexicon: \(terms) Terms, \(file.entries.count - terms) Rules"
-    if file.unreadable > 0 { report += ", \(file.unreadable) lines not read" }
+    if file.unreadable > 0 { report += ", \(file.unreadable) \(file.unreadable == 1 ? "line" : "lines") not read" }
     FileHandle.standardError.write(Data((report + "\n").utf8))
     return file.entries
 }
