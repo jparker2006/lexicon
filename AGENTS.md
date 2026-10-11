@@ -27,7 +27,7 @@ Two things are always true. Judge every change against them:
 
 Command Line Tools 26.6 only (Swift 6.3, macOS 26 SDK), SwiftPM, no Xcode ([ADR 0003](docs/adr/0003-command-line-tools-only.md)).
 
-- The check script from #38 runs `swift build` with the import check, the import-check script and `swift test`. Run it once on the finished change.
+- The check script (`scripts/check.sh`) runs `swift build` with the import check, the import-check script, `swift test`, the scorer's tests and `lexicon-eval` on the public fixture manifest (the scorer needs `uv`). Run it once on the finished change.
 - CI runs the same check script on macOS for every push and PR and reports one check, named `CI`. A red run means the change isn't done.
 - Worktrees share SwiftPM's one dependency cache (the default; never pass `--disable-dependency-cache`). Each worktree has its own `.build/`, deleted with the worktree once its ticket merges.
 
