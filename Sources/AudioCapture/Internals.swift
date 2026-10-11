@@ -123,6 +123,31 @@ final class OneShot<Value: Sendable>: Sendable {
     }
 }
 
+/// Fans each chunk's level out to every `Recorder.levels` observer. Observers
+/// stay subscribed across captures until their stream goes away.
+final class LevelBroadcaster: Sendable {
+    private let subscribers = Mutex<[UUID: AsyncStream<AudioLevel>.Continuation]>([:])
+
+    /// Newest only: the meter wants the latest level, and a slow observer must not
+    /// hold up the writer queue.
+    func subscribe() -> AsyncStream<AudioLevel> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<AudioLevel>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        // Weak: a stream that is never cancelled must not keep the broadcaster alive.
+        continuation.onTermination = { [weak self] _ in
+            self?.subscribers.withLock { $0[id] = nil }
+        }
+        subscribers.withLock { $0[id] = continuation }
+        return stream
+    }
+
+    func send(_ level: AudioLevel) {
+        subscribers.withLock { observers in
+            for continuation in observers.values { continuation.yield(level) }
+        }
+    }
+}
+
 /// Where the tail after fn-up ends: at the first 40 ms of quiet, never past
 /// 200 ms after fn-up. Pure: fed the 16 kHz samples in capture order, before
 /// and after the release, so it can be tested without a mic or a clock.

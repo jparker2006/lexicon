@@ -3,15 +3,16 @@ import LexiconDomain
 /// What the tap thread feeds the recognizer. Built from CGEvents in EventTap.swift.
 enum KeyInput: Sendable, Hashable {
     /// `secureInput`: macOS secure event input was on (a password field has focus).
-    case fnDown(HostTime, secureInput: Bool)
+    /// `id`: the Dictation this press starts, if it starts one.
+    case fnDown(HostTime, secureInput: Bool, id: DictationID)
     case fnUp(HostTime)
     /// Any other key-down. Modifiers (Shift included) are flag changes, never key-downs,
     /// so they never get here: Shift with fn never cancels (it is the Re-speak trigger in M4).
     case otherKey(HostTime)
     /// A timer the recognizer asked for has fired.
     case deadline(HostTime)
-    /// The core ended the Dictation (see `Keyboard.endDictation`).
-    case externalEnd
+    /// The Mac is going to sleep (see `Keyboard.systemWillSleep`).
+    case sleep(HostTime)
 }
 
 /// The fn gesture state machine (#53, M0: hold only). Pure: no clocks, no
@@ -24,6 +25,9 @@ enum KeyInput: Sendable, Hashable {
 ///     pressed --otherKey before threshold--> idle  emits .dictationDiscarded (a shortcut like fn+arrow)
 ///     holding --otherKey--> holding             passed through; recording continues
 ///     holding --fnUp--> idle                    emits .dictationStopped
+///     pressed or holding --sleep--> idle        as fnUp at that time
+///
+/// The id on fn-down names the Dictation; every command for that press carries it.
 ///
 /// Every input carries the event's own time, and the threshold is judged on it,
 /// not on when a timer happened to fire: fn-up or a key at 0.31 s still counts
@@ -34,8 +38,8 @@ enum KeyInput: Sendable, Hashable {
 struct FnGesture: Sendable {
     enum Phase: Sendable, Hashable {
         case idle
-        case pressed(since: HostTime)
-        case holding
+        case pressed(DictationID, since: HostTime)
+        case holding(DictationID)
     }
 
     struct Output: Sendable, Hashable {
@@ -55,37 +59,42 @@ struct FnGesture: Sendable {
 
     mutating func handle(_ input: KeyInput) -> Output {
         switch (phase, input) {
-        case (.idle, .fnDown(let at, secureInput: false)):
-            phase = .pressed(since: at)
-            return Output(commands: [.dictationBegan(at: at)], wakeAt: at.advanced(by: holdThreshold))
+        case (.idle, .fnDown(let at, secureInput: false, let id)):
+            phase = .pressed(id, since: at)
+            return Output(commands: [.dictationBegan(id, at: at)], wakeAt: at.advanced(by: holdThreshold))
 
-        case (.pressed(let since), .deadline(let now)):
+        case (.pressed(let id, let since), .deadline(let now)):
             // A timer that fires a hair early asks again rather than leaving the hold unconfirmed.
             guard isHeld(since, at: now) else { return Output(wakeAt: since.advanced(by: holdThreshold)) }
-            phase = .holding
-            return Output(commands: [.dictationConfirmed(.hold)])
+            phase = .holding(id)
+            return Output(commands: [.dictationConfirmed(id, .hold)])
 
-        case (.pressed(let since), .fnUp(let at)):
+        case (.pressed(let id, let since), .fnUp(let at)):
             phase = .idle
             return isHeld(since, at: at)
-                ? Output(commands: [.dictationConfirmed(.hold), .dictationStopped(at: at)])
-                : Output(commands: [.dictationDiscarded])
+                ? Output(commands: [.dictationConfirmed(id, .hold), .dictationStopped(id, at: at)])
+                : Output(commands: [.dictationDiscarded(id)])
 
-        case (.pressed(let since), .otherKey(let at)):
+        case (.pressed(let id, let since), .otherKey(let at)):
             if isHeld(since, at: at) {
-                phase = .holding
-                return Output(commands: [.dictationConfirmed(.hold)])
+                phase = .holding(id)
+                return Output(commands: [.dictationConfirmed(id, .hold)])
             }
             phase = .idle
-            return Output(commands: [.dictationDiscarded])
+            return Output(commands: [.dictationDiscarded(id)])
 
-        case (.holding, .fnUp(let at)):
+        case (.holding(let id), .fnUp(let at)):
             phase = .idle
-            return Output(commands: [.dictationStopped(at: at)])
+            return Output(commands: [.dictationStopped(id, at: at)])
 
-        case (_, .externalEnd):
-            phase = .idle
+        case (.idle, .sleep):
             return Output()
+
+        case (_, .sleep(let at)):
+            // Lid close or sleep ends a press the way letting go of fn would. The stop
+            // goes out on the same stream as the press's other commands, so it can
+            // never land on a Dictation that started after it.
+            return handle(.fnUp(at))
 
         default:
             // fn-down while already recording (its fn-up was lost), a stale
