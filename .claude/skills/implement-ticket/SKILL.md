@@ -11,7 +11,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 
 - The issue and every comment, then its parent spec (and the spec's first comment, its supersessions) and whatever it links, `GLOSSARY.md`, the ADRs that touch your modules, and the Roles section of `docs/agents/workflow.md`.
 - Each issue under `## Blocked by` is closed or has its work merged on `main`. If one isn't, stop and say which.
-- Note what your builder prompt says other builders own right now, and whether you hold the live-app lane.
+- Note what your builder prompt says other builders own right now, and which acceptance criteria need the live app.
 
 **Done:** you can name the seam the issue tests at and list its acceptance criteria.
 
@@ -27,10 +27,10 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 - `git fetch origin`, then branch from `origin/main` as `claude/issue-N`, in your own worktree. A continuation fetches its branch and carries on from it.
 - Red before green, at the seam the issue names; that seam is the agreed one. Test through the highest public seam (the headless pipeline on a WAV, then the pure seams), never by reading source. A bug fix starts with a test that fails before the fix. One vertical slice at a time; use the `tdd` skill when you have it. Docs-only work needs no test.
 - Fan the work out to Haiku helpers as `CLAUDE.md` sizes it. When the work splits into parallel pieces, fan out with `/pstack:swarm`. Run every commit, push, GitHub write and heavy command (the check script, `lexicon-eval`, the bundle script) yourself, once.
-- Live-app work (fn, the mic, paste, Accessibility, the indicator) only if your prompt gives you the lane: build Lexicon Dev, launch it with `open`, and never touch the daily copy or its permissions.
+- You never drive the live app (fn, the mic, paste, Accessibility, the indicator); `scripts/dev-run.sh` and `scripts/harness.sh` refuse to run for you. For each criterion that needs it, push your branch and send the Live checks session a request (`SendMessage` to the session named `Live checks`): issue, branch, PR, head sha, and a numbered checklist with pass bars (see Live checks in `docs/agents/workflow.md`). Wait for its reply; its `Live checks:` comment on your issue is your evidence. On a failure, fix it and send a new request.
 - Commit small, only your own files, with explicit paths: `type(scope): what changed (#N)`, with `Refs #N` in the body.
 
-**Done:** every acceptance criterion has a passing test or a check you ran, except one the issue says is checked after merge.
+**Done:** every acceptance criterion has a passing test, a check you ran, or a pass in a `Live checks:` comment on your issue, except one the issue says is checked after merge.
 
 ## 4. Review your diff
 
@@ -70,6 +70,7 @@ When the next step is Jake's, swap `building` for `waiting-on-jake`, comment wit
 ## Never
 
 - Merge a PR, push to `main`, or run the install command. Only the Reviewer merges and installs.
+- Launch or drive Lexicon Dev, or take or clear the live-app lane lock. Only the Live checks session does.
 - Touch Jake's daily copy (`~/Applications/Lexicon.app`), its data folder or its permissions.
 - Open private data (the Wispr export, the Test set, the starter Lexicon, History, keys) or put any of it in the repo, a PR, an issue or a prompt. Scripts such as `lexicon-eval` read it on the Mac; you refer to it by path only, and never print a key.
 - Write a closing keyword (close, fix or resolve before an issue number) in a commit or PR. Jake closes the issue once he has used the change.

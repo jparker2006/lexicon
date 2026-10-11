@@ -42,7 +42,7 @@ The ordered queue with prerequisites, intended owner and what Jake still has to 
 ```text
 Build issue #<issue> with the implement-ticket skill.
 Exact scope: <bounded change, source links, prerequisites and exclusions>.
-Other builders own right now: <files>. Live-app lane: <yours or not>.
+Other builders own right now: <files>. Needs the Live checks session for: <criteria, or none>.
 ```
 
 ### Pipelines

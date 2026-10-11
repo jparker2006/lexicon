@@ -17,7 +17,7 @@ Decided in [App architecture and stack](https://github.com/jparker2006/lexicon/i
 | Cleanup | Rules-only until M3. Then AI cleanup with a structural check and a deadline of about 450 ms after the speech final, falling back to rules-only text. Private mode and offline are rules only. |
 | Current repo | The repo under `~/code` with the most recent file change (not counting `.git`), from FSEvents; at launch, a week of FSEvents history picks it. No hooks. |
 | Inbox | The app watches `<data>/inbox/` for JSON messages (hook prompts, only if hooks come back). Prompts older than 60 s are dropped. |
-| Test hooks | Debug builds only (`#if DEBUG`; `scripts/bundle.sh` fails a release binary that has them), on for the dev bundle ID launched with `--test-hooks`. `lexicon-harness` writes a request under `<data>/test-hooks/requests/` and reads the reply from `replies/`, and reads the app's status item, windows and a target text field through Accessibility. One builder at a time. |
+| Test hooks | Debug builds only (`#if DEBUG`; `scripts/bundle.sh` fails a release binary that has them), on for the dev bundle ID launched with `--test-hooks`. `lexicon-harness` writes a request under `<data>/test-hooks/requests/` and reads the reply from `replies/`, and reads the app's status item, windows and a target text field through Accessibility. Only the live-app lane's holder, the Live checks session, runs it (`scripts/live-lane.sh`). |
 | Local model | Loaded on fn-down when not resident, unloaded after 10 idle minutes; always loaded while Private mode is on or the network is down. |
 | Lifecycle owner | One `Conductor` actor decides what happens to every Dictation. Each piece of state has one other owner. |
 
