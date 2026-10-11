@@ -195,6 +195,15 @@ func hardFillersGoAnywhere(_ c: Case) {
     #expect(clean("Um, first.\r\nUh, second.") == "First.\nSecond.")
 }
 
+// The stage M0 to M2 type through: rules only, whatever the toggle says, until #75.
+
+@Test func theCleanupStageTypesRulesOnlyText() async {
+    let plan = CleanupPlan.make(preferences: .defaults, access: nil, terms: [], rules: .empty, app: .unknown)
+    let cleaned = await Cleanup().clean("Um, so ship it, uh, today.", plan: plan, deadline: .milliseconds(450))
+    #expect(cleaned.versions == TextVersions(model: "Um, so ship it, uh, today.", cleaned: "Ship it, today."))
+    #expect(cleaned.outcome == .rulesOnly(.off))
+}
+
 // Never remove a hedge, negation or constraint (story 56).
 
 let protectedWords = [
@@ -241,9 +250,11 @@ func researchCasesKeepEveryProtectedWord(_ c: Case) {
     #expect(protectedCounts(clean(c.raw)) == protectedCounts(c.raw))
 }
 
-// Speed: under 1 ms on a 100-word Dictation.
+// Speed: under 1 ms on a 100-word Dictation. Off in CI, since tests never depend
+// on machine speed; run it with `LEXICON_TIMING=1 swift test --filter runsUnder`.
 
-@Test func runsUnderOneMillisecondOnAHundredWords() {
+@Test(.enabled(if: ProcessInfo.processInfo.environment["LEXICON_TIMING"] != nil))
+func runsUnderOneMillisecondOnAHundredWords() {
     let dictation = Array(repeating: "Um, so I need you to, uh, look at the the payments webhook, you know, it's double charging.",
                           count: 7).joined(separator: " ")
     #expect(dictation.split(separator: " ").count >= 100)
