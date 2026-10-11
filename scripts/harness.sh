@@ -18,6 +18,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 scripts/live-lane.sh check
+if [ "${1:-}" = check ]; then
+    . scripts/lib/fn-listeners.sh
+    warn_fn_listeners
+fi
 
 # The same debug flags as scripts/check.sh and scripts/bundle.sh, so this reuses
 # their build products. Sourced inside a function: it replaces "$@".

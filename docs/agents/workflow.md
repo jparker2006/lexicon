@@ -68,6 +68,8 @@ A builder whose ticket needs the live app sends the Live checks session one requ
 
 The Live checks session takes requests in arrival order (the orchestrator's critical path first). For each, it checks out that sha detached in its own worktree, launches it with `scripts/dev-run.sh -- --test-hooks`, runs each item with the harness, and posts one comment on the builder's issue headed `Live checks: <branch> @ <sha>`: pass or fail per item, the numbers, and screenshot paths. A failure comes with the evidence, not a fix; the builder fixes it and sends a new request. The PR cites that comment as its live-app evidence.
 
+For any check where Jake presses fn into a field, he quits his daily Lexicon first (and Lexicon Indicator or RespeakProto, if running) and reopens it after; only Jake quits them. Each answers fn too, so it dictates every press as well, and its paste makes Lexicon Dev hold its own text as typedSince ([#141](https://github.com/jparker2006/lexicon/issues/141)). `scripts/dev-run.sh` and `scripts/harness.sh check` warn while one is running.
+
 ## The loop
 
 1. **Issue.** Every real change starts as a GitHub issue, labeled and commented as [triage-labels.md](triage-labels.md) says. The first line of every comment states the status.
