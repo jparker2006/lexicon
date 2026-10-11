@@ -33,7 +33,11 @@ extension Conductor {
               let clip = await history.clip(id) else { return .nothing(id) }
         let preferences = preferences.snapshot()
         // Today's settings and today's access for the app it was dictated into.
-        let access = CloudAccess.granted(by: preferences, app: record.app, keys: secrets.lookup)
+        let access = CloudAccess.granted(by: preferences, for: .app(record.app), keys: secrets.lookup)
+        // Watched like the waiting loop's try, through its cleanup: Private mode turned on
+        // meanwhile cuts the cloud at once.
+        let privacyWatch = access.map { revokeWhenDenied($0, in: record.app, followingFocus: false) }
+        defer { privacyWatch?.cancel() }
         let words = await lexicon.forDictation(in: record.app)
         let speechPlan = SpeechPlan.make(preferences: preferences, access: access, terms: words.terms, forcing: model)
         // Background: a retry never goes ahead of the Dictation Jake is making now.
