@@ -138,3 +138,44 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
     for usage in [1, 2, 3] { #expect(GlobeKey.hasSystemAction(usageType: usage)) }
     #expect(GlobeKey.hasSystemAction(usageType: nil))  // unset: the macOS default shows the emoji viewer
 }
+
+@Test func everyPressEndsBeforeTheNextBeginsWhateverTheInputs() {
+    // The Conductor keeps one recording at a time, so a press's stop or discard
+    // must reach it before the next press's begin, for any order of inputs.
+    var seed: UInt64 = 0x5EED
+    func next(_ bound: Int) -> Int {
+        seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return Int((seed >> 33) % UInt64(bound))
+    }
+    for _ in 0..<2_000 {
+        var gesture = FnGesture(holdThreshold: .milliseconds(300))
+        var time = 0
+        var open: DictationID?
+        for _ in 0..<40 {
+            time += next(400)
+            let input: KeyInput = switch next(6) {
+            case 0: .fnDown(at(time), secureInput: next(5) == 0, id: DictationID())
+            case 1: .fnUp(at(time))
+            case 2: .otherKey(at(time))
+            case 3: .deadline(at(time))
+            case 4: .sleep(at(time))
+            default: .fnDown(at(time), secureInput: false, id: DictationID())
+            }
+            for command in gesture.handle(input).commands {
+                switch command {
+                case .dictationBegan(let id, _):
+                    #expect(open == nil)
+                    open = id
+                case .dictationConfirmed(let id, _):
+                    #expect(open == id)
+                case .dictationStopped(let id, _), .dictationCancelled(let id), .dictationDiscarded(let id):
+                    #expect(open == id)
+                    open = nil
+                case .pasteLast, .justFixed:
+                    break
+                }
+            }
+            #expect(gesture.isRecording == (open != nil))
+        }
+    }
+}
