@@ -91,6 +91,12 @@ actor LocalResidency {
         }
     }
 
+    /// Launch: load now if not resident, then follow `policy` (the idle unload).
+    func warm(_ policy: ResidencyPolicy) async {
+        if !(await transcriber.isResident) { try? await transcriber.load() }
+        await policyChanged(policy)
+    }
+
     /// The Dictation has its text (or was cancelled): start the idle timer.
     func dictationEnded() {
         dictating -= 1

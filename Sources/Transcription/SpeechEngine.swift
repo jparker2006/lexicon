@@ -1,4 +1,5 @@
 public import Foundation
+import Synchronization
 public import LexiconDomain
 
 /// Audio in, text out, for every model, every origin.
@@ -38,6 +39,14 @@ public actor SpeechEngine {
     public func transcribe(_ clip: AudioClip, plan: SpeechPlan, priority: LocalPriority = .background) async -> SpeechOutcome {
         // TODO: same body as begin(feed: clip.replay(), plan: plan) with local work at `priority`; then finish(clip)
         fatalError("not implemented")
+    }
+
+    /// Launch: load the local model now, in the background, then apply the
+    /// residency rules (the idle unload). The first load of a new build compiles
+    /// for the Neural Engine for about 25 s, cached per executable, so it belongs
+    /// here and never on Jake's first fn-down.
+    public func warmUp(_ preferences: Preferences) async {
+        await residency?.warm(ResidencyPolicy(preferences))
     }
 
     /// Private mode toggled or settings changed. With reachability (NWPathMonitor,
@@ -119,6 +128,9 @@ public enum SpeechUnavailable: Sendable, Hashable {
     /// The local model is installed but failed to load or transcribe. The
     /// Dictation keeps its audio and waits for a working model, not the network.
     case localModelFailed(String)
+    /// The local model was still loading `AttemptCore.loadLimit` after fn-up (a
+    /// first load compiling): the Dictation keeps its audio and waits for it.
+    case localModelLoading
     /// Private mode and no local model.
     case privateMode
     /// No cloud model in the plan and no local model installed: the Dictation
@@ -129,7 +141,7 @@ public enum SpeechUnavailable: Sendable, Hashable {
     /// The Dictation keeps its audio and waits for an engine, instead of failing.
     public var waits: Bool {
         switch self {
-        case .offline, .providerError, .noModel, .localModelFailed: true
+        case .offline, .providerError, .noModel, .localModelFailed, .localModelLoading: true
         case .privateMode, .silence: false
         }
     }
@@ -139,7 +151,7 @@ public enum SpeechUnavailable: Sendable, Hashable {
     public var waitsForNetwork: Bool {
         switch self {
         case .offline, .providerError: true
-        case .noModel, .localModelFailed, .privateMode, .silence: false
+        case .noModel, .localModelFailed, .localModelLoading, .privateMode, .silence: false
         }
     }
 }
@@ -201,6 +213,8 @@ final class AttemptCore: Sendable {
     let segments: AsyncStream<SpeechSegment>
     /// Loads the local model while Jake talks, so fn-up never waits on the load.
     let warmUp: Task<Void, Never>
+    /// Set when `warmUp` is done, so a warm model costs fn-up no timer.
+    let warm = Latch()
     /// The clip is the RAM copy local transcribes; the feed's own buffer of the
     /// same chunks is read and dropped so a long Dictation holds its audio once.
     let drain: Task<Void, Never>
@@ -215,16 +229,53 @@ final class AttemptCore: Sendable {
         let (segments, ended) = AsyncStream<SpeechSegment>.makeStream()
         ended.finish()
         self.segments = segments
-        warmUp = Task { [residency = self.residency] in await residency?.dictationBegan(plan.residency) }
+        warmUp = Task { [residency = self.residency, warm] in
+            await residency?.dictationBegan(plan.residency)
+            _ = warm.set()
+        }
         drain = Task { for await _ in feed {} }
     }
 
+    /// How long fn-up waits for a model load still running from fn-down. A warm
+    /// load is 0.4 to 0.6 s and started at fn-down, so it is done or nearly done;
+    /// only a first load compiling for the Neural Engine (about 25 s) runs past this.
+    static let loadLimit: Duration = .seconds(2)
+
     func finish(_ clip: AudioClip) async -> SpeechOutcome {
-        guard let local else { return .unavailable(.noModel) }
-        await warmUp.value
+        guard let local, let residency else { return .unavailable(.noModel) }
+        guard await loaded(within: Self.loadLimit, on: residency.clock) else {
+            // Jake never waits out a compile at the cursor: the Dictation waits instead,
+            // and this attempt lets go of the model once its load is done.
+            Task { [warmUp] in
+                await warmUp.value
+                await residency.dictationEnded()
+            }
+            return .unavailable(.localModelLoading)
+        }
         let outcome = await transcribe(clip, with: local)
-        await residency?.dictationEnded()
+        await residency.dictationEnded()
         return outcome
+    }
+
+    /// True once fn-down's load is done; false if it is still running at `limit`.
+    /// Never waits past `limit`, and leaves no timer behind once the load is done.
+    private func loaded(within limit: Duration, on clock: any Clock<Duration>) async -> Bool {
+        if warm.isSet { return true }
+        let answered = Latch()
+        return await withCheckedContinuation { result in
+            let answer = { @Sendable (loaded: Bool) in
+                if answered.set() { result.resume(returning: loaded) }
+            }
+            let timer = Task {
+                do { try await clock.sleep(for: limit) } catch { return }
+                answer(false)
+            }
+            Task { [warmUp] in
+                await warmUp.value
+                timer.cancel()
+                answer(true)
+            }
+        }
     }
 
     private func transcribe(_ clip: AudioClip, with local: any LocalTranscriber) async -> SpeechOutcome {
@@ -249,6 +300,19 @@ final class AttemptCore: Sendable {
         Task { [warmUp, residency] in
             await warmUp.value
             await residency?.dictationEnded()
+        }
+    }
+}
+
+/// A flag that is set once, read from any thread.
+final class Latch: Sendable {
+    private let state = Mutex(false)
+    var isSet: Bool { state.withLock { $0 } }
+    /// Sets the flag. True only for the call that set it.
+    func set() -> Bool {
+        state.withLock { isSet in
+            defer { isSet = true }
+            return !isSet
         }
     }
 }
