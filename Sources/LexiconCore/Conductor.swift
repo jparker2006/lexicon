@@ -1,4 +1,5 @@
 public import Foundation
+import os
 import Synchronization
 public import LexiconDomain
 public import KeyInput
@@ -45,6 +46,10 @@ public actor Conductor<Destination: TextDestination> {
     var capturingID: DictationID?
     /// Dictations past stop that still need text (transcribing), and recovered ones being transcribed.
     var inFlight: [DictationID: Task<DictationResult, Never>] = [:]
+    /// The `inFlight` entries that are launch recovery, not a live or file Dictation.
+    var recovering: Set<DictationID> = []
+    /// `idle` waiting for the recording Dictation's capture to end.
+    var captureEndWaiters: [CheckedContinuation<Void, Never>] = []
     /// Waiting Dictations, each trying again until it has text (`retryWhenReady`).
     var waiting: [DictationID: Task<Void, Never>] = [:]
     /// Live Dictations in fn-down order. A Dictation inserts only when every
@@ -55,6 +60,9 @@ public actor Conductor<Destination: TextDestination> {
     /// A Dictation whose text is ready while an earlier one still holds the turn.
     var turnWaiters: [DictationID: CheckedContinuation<Void, Never>] = [:]
     var subscribers: [UUID: AsyncStream<ConductorEvent>.Continuation] = [:]
+    /// One line per Dictation (lag, engine, first audio) and anything dropped:
+    /// `log stream --predicate 'subsystem == "Lexicon" && category == "dictation"'`.
+    let log = Logger(subsystem: "Lexicon", category: "dictation")
 
     public init(recorder: Recorder, speech: SpeechEngine, cleanup: Cleanup, lexicon: Lexicon, history: HistoryStore,
                 destination: Destination, preferences: PreferencesStore, secrets: Secrets,
@@ -84,11 +92,15 @@ public actor Conductor<Destination: TextDestination> {
     /// Every key command, one exhaustive switch.
     public func handle(_ command: KeyCommand) {
         switch command {
-        case .dictationBegan(let at):
+        case .dictationBegan(let id, let at):
             // fn never waits (#18): an earlier Dictation still finishing is fine; one
             // still in its 200 ms tail has its tail cut by `recorder.start`.
-            guard captureEnd == nil else { return }  // recognizer guarantees one recording at a time
-            let id = DictationID()
+            // The recognizer sends a press's stop or discard before the next press's
+            // begin, so this never happens. If it ever does, the newer press is
+            // dropped, never the recording one, and it leaves a line in the log.
+            guard captureEnd == nil else {
+                return log.error("fn-down \(id, privacy: .public) dropped: \(self.capturingID?.description ?? "?", privacy: .public) is still recording")
+            }
             insertOrder.append(id)
             let (ends, continuation) = AsyncStream<RunEnd>.makeStream()
             captureEnd = continuation
@@ -99,14 +111,14 @@ public actor Conductor<Destination: TextDestination> {
             // App Nap off from fn-down until the text lands (ended in `land`, or by `run` on any exit).
             let hold = LatencyHold(reason: "Dictation \(id)")
             inFlight[id] = Task { await self.run(start, ends: ends, hold: hold) }
-        case .dictationConfirmed(let mode):
-            if let id = capturingID { emit(.confirmed(id, mode)) }
-        case .dictationStopped(let at):
-            endCapture(.stop(at: at))
-        case .dictationCancelled:
-            endCapture(.cancel)
-        case .dictationDiscarded:
-            endCapture(.discard)
+        case .dictationConfirmed(let id, let mode):
+            if id == capturingID { emit(.confirmed(id, mode)) }
+        case .dictationStopped(let id, let at):
+            endCapture(id, .stop(at: at))
+        case .dictationCancelled(let id):
+            endCapture(id, .cancel)
+        case .dictationDiscarded(let id):
+            endCapture(id, .discard)
         case .pasteLast:
             Task { await self.pasteLast() }
         case .justFixed:
@@ -141,10 +153,45 @@ public actor Conductor<Destination: TextDestination> {
         return await run(start, ends: ends, hold: LatencyHold(reason: "Dictation \(id) from file"))
     }
 
-    /// Lid close or sleep is a normal stop (#4).
+    /// Lid close or sleep is a normal stop (#4). A key-owned recording is stopped
+    /// by its own press, through the key stream, behind any command already there.
     public func systemWillSleep() {
-        endCapture(.stop(at: .now()))
-        keyboard?.endDictation()  // or a hold through sleep would ignore the next fn press
+        if let keyboard { return keyboard.systemWillSleep() }
+        if let id = capturingID { endCapture(id, .stop(at: .now())) }
+    }
+
+    /// Quit: returns once no Dictation is recording or finishing, and History and
+    /// the audio files have everything. A recording Dictation ends the normal way,
+    /// at its fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
+    /// Dictations past fn-up get `limit` to land: one stuck in the model must not
+    /// hold Quit forever, and its row stays for launch recovery. Launch recovery
+    /// and waiting Dictations are not waited for: their text is never typed, and
+    /// the next launch picks them up again.
+    public func idle(finishingWithin limit: Duration = .seconds(30)) async {
+        while true {
+            if capturingID != nil {
+                await withCheckedContinuation { captureEndWaiters.append($0) }
+                continue
+            }
+            let finishing = inFlight.filter { !recovering.contains($0.key) }
+            let (landed, land) = AsyncStream<Void>.makeStream()
+            let waiting = Task {
+                for run in finishing.values { _ = await run.value }
+                land.finish()
+            }
+            let deadline = Task {
+                try? await Task.sleep(for: limit)
+                land.finish()
+            }
+            for await _ in landed {}
+            waiting.cancel()
+            deadline.cancel()
+            await history.flush()
+            await recorder.settle()
+            // Done unless fn went down meanwhile: that Dictation gets the same wait.
+            let started = inFlight.keys.filter { !recovering.contains($0) && finishing[$0] == nil }
+            if capturingID == nil, started.isEmpty { return }
+        }
     }
 
     /// UI, logs. Each call returns a new stream (any number of observers).
@@ -168,13 +215,18 @@ public actor Conductor<Destination: TextDestination> {
         if let head = insertOrder.first { turnWaiters.removeValue(forKey: head)?.resume() }
     }
 
-    func endCapture(_ end: RunEnd) {
+    /// Ends `id`'s capture. A command for any other Dictation (one whose capture
+    /// already ended, or that never started) changes nothing.
+    func endCapture(_ id: DictationID, _ end: RunEnd) {
+        guard id == capturingID else { return }
         // The stop sound marks fn-up itself, not the end of the adaptive tail after it.
-        if let id = capturingID, end.isStop { emit(.stopped(id)) }
+        if end.isStop { emit(.stopped(id)) }
         captureEnd?.yield(end)
         captureEnd?.finish()
         captureEnd = nil
         capturingID = nil
+        for waiter in captureEndWaiters { waiter.resume() }
+        captureEndWaiters = []
     }
 
     func emit(_ event: ConductorEvent) {

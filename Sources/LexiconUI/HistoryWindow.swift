@@ -33,9 +33,7 @@ public final class HistoryWindowPresenter: NSObject {
     }
 
     @objc public func show() {
-        // An accessory app shows no menu bar, but key equivalents (Cmd-W, Cmd-V in
-        // the search field) still route through the main menu.
-        if NSApp.mainMenu == nil { NSApp.mainMenu = Self.keyEquivalents() }
+        KeyEquivalents.install()
         NSApp.activate()
         if let controller {
             controller.showWindow(nil)
@@ -67,23 +65,6 @@ public final class HistoryWindowPresenter: NSObject {
             controller?.refresh()
             controller?.cell(for: id)?.flash(result.versions == nil ? "No text" : "Retried")
         }
-    }
-
-    private static func keyEquivalents() -> NSMenu {
-        let edit = NSMenu(title: "Edit")
-        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
-        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        let window = NSMenu(title: "Window")
-        window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        let menu = NSMenu()
-        for submenu in [edit, window] {
-            menu.addItem(withTitle: submenu.title, action: nil, keyEquivalent: "").submenu = submenu
-        }
-        return menu
     }
 }
 

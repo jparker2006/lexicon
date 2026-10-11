@@ -1,15 +1,25 @@
-// Gold review page (#51). Talks only to the server that served it
-// (scorer/lexicon_scorer/review.py); its Content-Security-Policy refuses anything else.
+// Gold review page. Talks only to the server that served it
+// (scorer/lexicon_scorer/review.py); its Content-Security-Policy refuses anything
+// else. The pure parts (differing, prefill, differenceTimes, command, timeLeft)
+// are in review_logic.js, loaded first.
 "use strict";
 
 const MODELS = ["parakeet", "wispr"];
-const LABEL = { parakeet: "A chosen", wispr: "B chosen", typed: "typed" };
+const LABEL = { parakeet: "A", wispr: "B", typed: "fixed" };
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
+const TOUR = [
+  "Each clip plays when it opens. Space plays or pauses it, and D plays the part where A and B differ.",
+  "Pick the words you actually said, word for word, not what you meant to write. " +
+    "Punctuation and capitals don't matter. Press A or B.",
+  "Neither right? Press N, fix the highlighted word and press Enter. " +
+    "Every answer saves itself, so you can stop any time.",
+];
 
 let clips = [];
 let answers = {};
 let at = 0;
-let mode = "normal"; // normal | edit | mark
+let mode = "normal"; // normal | edit | mark | tour
+let tourStep = 0;
 let cursor = { model: "parakeet", word: 0 };
 let rate = 1;
 let error = "";
@@ -19,6 +29,10 @@ let busy = false;
 let moves = Promise.resolve();
 let clearing = null; // the clip whose answer one Backspace asked to clear
 let difference = -1; // which difference D last jumped to, on this clip
+// Seconds each answer took this session, for the time left; a long break
+// counts as two minutes.
+const paces = [];
+let since = Date.now();
 const audio = new Audio();
 const blobs = new Map(); // clip id -> Promise of an object URL
 
@@ -56,30 +70,6 @@ async function save(path, body) {
   }
 }
 
-// Words
-
-const key = (word) => word.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "");
-
-// Which words of a and b are not in their longest common subsequence: where the two texts differ.
-function differing(a, b) {
-  const ka = a.map(key), kb = b.map(key);
-  const n = a.length, m = b.length;
-  const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
-  for (let i = n - 1; i >= 0; i--)
-    for (let j = m - 1; j >= 0; j--)
-      lcs[i][j] = ka[i] === kb[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-  const da = new Set(), db = new Set();
-  let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (ka[i] === kb[j]) { i++; j++; }
-    else if (lcs[i + 1][j] >= lcs[i][j + 1]) da.add(i++);
-    else db.add(j++);
-  }
-  while (i < n) da.add(i++);
-  while (j < m) db.add(j++);
-  return { parakeet: da, wispr: db };
-}
-
 // Audio
 
 function blob(clip) {
@@ -107,6 +97,15 @@ function prefetch() {
   for (const id of keep) blob(clips.find((c) => c.id === id)).catch(() => {});
 }
 
+// Before the first key press or click the browser may refuse to play; the
+// Play button then says to press Space.
+function play() {
+  audio.play().then(() => $("play").classList.remove("nudge"), () => {
+    $("play").classList.add("nudge");
+    $("play-label").textContent = "Press Space to play";
+  });
+}
+
 async function load() {
   const clip = clips[at];
   audio.pause();
@@ -118,7 +117,7 @@ async function load() {
     if (clips[at] !== clip) return;
     audio.src = url;
     audio.playbackRate = rate;
-    audio.play().catch(() => {}); // before the first key press the browser may refuse to autoplay
+    if (mode !== "tour") play();
   } catch {
     blobs.delete(clip.id);
     fail("Could not load this clip's audio.");
@@ -134,7 +133,8 @@ audio.addEventListener("loadedmetadata", renderTime);
 function renderTime() {
   const d = Number.isFinite(audio.duration) ? audio.duration : 0;
   $("time").textContent = `${audio.currentTime.toFixed(1)} / ${d.toFixed(1)} s`;
-  $("play").textContent = audio.paused ? "Play" : "Pause";
+  if (!audio.paused) $("play").classList.remove("nudge");
+  if (!$("play").classList.contains("nudge")) $("play-label").textContent = audio.paused ? "Play" : "Pause";
 }
 
 // Moving
@@ -169,6 +169,10 @@ async function answer(choice, text) {
   busy = false;
   if (!result) return;
   answers[clip.id] = result;
+  if (choice !== null) {
+    paces.push(Math.min(120, (Date.now() - since) / 1000));
+    since = Date.now();
+  }
   if (clips[at] !== clip) return render();
   mode = "normal";
   // A Term in another case or spacing stays on screen until it is fixed or skipped.
@@ -191,13 +195,33 @@ async function toggleMark(model, word) {
   render();
 }
 
-function edit(text) {
+function edit(text, start = text.length, end = start) {
   mode = "edit";
   render();
   const box = $("typed");
   box.value = text;
   box.focus();
-  box.setSelectionRange(text.length, text.length);
+  box.setSelectionRange(start, end);
+}
+
+function neither() {
+  const fix = prefill(clips[at]);
+  edit(fix.text, fix.start, fix.end);
+}
+
+// The tour: three steps on the first clip, until Jake finishes or skips it once.
+
+function tour(step) {
+  if (step >= TOUR.length) {
+    mode = "normal";
+    call("/api/toured", {}).catch(() => {}); // at worst it shows again next time
+    render();
+    since = Date.now();
+    play();
+    return;
+  }
+  tourStep = step;
+  render();
 }
 
 // Drawing
@@ -222,10 +246,6 @@ function words(element, model, list, diff, marks) {
   });
 }
 
-function hints(element, list) {
-  element.textContent = list.length ? "Lexicon: " + list.map((s) => `${s.found} → ${s.written}`).join(", ") : "";
-}
-
 function render() {
   const e = $("error");
   e.hidden = !error;
@@ -237,47 +257,58 @@ function render() {
   }
   const done = clips.filter((c) => answers[c.id] && answers[c.id].text != null).length;
   const mine = answers[clip.id] || { choice: null, text: null, marks: { parakeet: [], wispr: [] } };
-  $("where").textContent = `Clip ${at + 1} of ${clips.length} · ${done} answered`;
+  $("where").textContent = `Clip ${at + 1}`;
+  $("progress").textContent = `${done}/${clips.length} answered`;
+  $("left").textContent = timeLeft(clips.length - done, paces);
   $("done").style.width = `${(100 * done) / clips.length}%`;
-  $("split").textContent = clip.split;
-  $("split").classList.toggle("held", clip.split === "held-back");
-  $("reasons").textContent = clip.reasons.join(", ");
-  $("rate").textContent = `${rate.toFixed(2)}x`;
+  $("rate").textContent = rate === 1 ? "" : `${rate.toFixed(2)}x`;
   document.body.classList.toggle("marking", mode === "mark");
+  $("marking").hidden = mode !== "mark";
 
   const diff = differing(clip.words.parakeet, clip.words.wispr);
   for (const model of MODELS) {
     const row = $(`row-${model}`);
     words(row.querySelector(".words"), model, clip.words[model], diff[model], mine.marks[model] || []);
-    hints(row.querySelector(".hints"), clip.suggestions[model]);
     row.classList.toggle("picked", mine.choice === model);
     row.classList.toggle("cursor", mode === "mark" && cursor.model === model);
+    $(`pick-${model}`).classList.toggle("chosen", mine.choice === model);
   }
+  $("neither").classList.toggle("chosen", mine.choice === "typed");
+  $("same").hidden = diff.first >= 0;
 
   $("wispr-final").textContent = clip.wispr_final || "(nothing)";
   const fixed = clip.jake_edit != null && clip.jake_edit.trim() !== "" && clip.jake_edit !== clip.wispr_final;
   $("edit-line").hidden = !fixed;
   $("jake-edit").textContent = fixed ? clip.jake_edit : "";
+  const spellings = MODELS.flatMap((m) => clip.suggestions[m]).map((s) => `${s.found} → ${s.written}`);
+  $("lexicon-line").hidden = spellings.length === 0;
+  $("lexicon").textContent = [...new Set(spellings)].join(", ");
 
+  $("answer").hidden = mine.text == null || mode === "edit";
   $("choice").textContent = mine.choice ? LABEL[mine.choice] : "";
   const gold = $("gold-text");
-  gold.className = mine.text == null || mine.text === "" ? "empty" : "";
-  gold.textContent = mine.text == null ? "Not answered yet" : mine.text === "" ? "(nothing said)" : mine.text;
+  gold.className = mine.text === "" ? "empty" : "";
+  gold.textContent = mine.text === "" ? "(nothing said)" : mine.text || "";
 
   const warn = $("warning");
   const suggest = mine.text != null && mine.suggestions && mine.suggestions.length > 0;
   warn.hidden = !suggest || mode === "edit";
   warn.textContent = suggest
-    ? `Gold writes ${mine.suggestions.map((s) => `“${s.found}” where the Lexicon writes “${s.written}”`).join(", ")}. ` +
-      "F fixes it, J moves on as it is."
+    ? `Your answer has ${mine.suggestions.map((s) => `“${s.found}” where the Lexicon writes “${s.written}”`).join(", ")}. ` +
+      "Press F to use the Lexicon's spelling, or J to keep yours and go on."
     : "";
-
   if (clearing === clip.id) {
     warn.hidden = false;
     warn.textContent = "Press Backspace again to clear this answer.";
   }
 
   $("editor").hidden = mode !== "edit";
+  $("tour").hidden = mode !== "tour";
+  if (mode === "tour") {
+    $("tour-step").textContent = `${tourStep + 1} of ${TOUR.length}`;
+    $("tour-text").textContent = TOUR[tourStep];
+    $("tour-next-label").textContent = tourStep + 1 < TOUR.length ? "Next" : "Start";
+  }
   const pointed = document.querySelector(".words span.at");
   if (pointed) pointed.scrollIntoView({ block: "nearest" });
 }
@@ -288,20 +319,16 @@ function seek(seconds) {
   audio.currentTime = Math.max(0, Math.min((audio.duration || 0), audio.currentTime + seconds));
 }
 
-// Plays from just before the next place A and B differ. There are no word
-// timings, so the place is estimated from the word's share of the text: a long
-// clip need not be heard whole.
+// Plays from just before the next place A and B differ, so a long clip need not be heard whole.
 function nextDifference() {
-  const clip = clips[at];
-  const diff = differing(clip.words.parakeet, clip.words.wispr);
-  const model = diff.parakeet.size ? "parakeet" : "wispr";
-  const list = [...diff[model]].sort((a, b) => a - b);
-  const starts = list.filter((i, k) => k === 0 || list[k - 1] !== i - 1);
-  if (starts.length === 0 || !Number.isFinite(audio.duration)) return;
-  difference = (difference + 1) % starts.length;
-  audio.currentTime = Math.max(0, (starts[difference] / clip.words[model].length) * audio.duration - 1.5);
-  audio.play().catch(() => {});
-  const word = $(`row-${model}`).querySelector(`[data-word="${starts[difference]}"]`);
+  if (!Number.isFinite(audio.duration)) return;
+  const places = differenceTimes(clips[at], audio.duration);
+  if (places.length === 0) return;
+  difference = (difference + 1) % places.length;
+  const place = places[difference];
+  audio.currentTime = place.time;
+  play();
+  const word = $(`row-${place.model}`).querySelector(`[data-word="${place.word}"]`);
   if (word) word.scrollIntoView({ block: "nearest" });
 }
 
@@ -313,17 +340,15 @@ function setRate(step) {
 }
 
 function togglePlay() {
-  if (audio.paused) audio.play().catch(() => {});
+  if (audio.paused) play();
   else audio.pause();
 }
-
-// Letters work with Caps Lock or Shift on too.
-const letter = (event) => (event.key.length === 1 ? event.key.toLowerCase() : event.key);
 
 function markKeys(event) {
   const clip = clips[at];
   const size = clip.words[cursor.model].length;
-  switch (letter(event)) {
+  const k = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  switch (k) {
     case "ArrowLeft": cursor.word = Math.max(0, cursor.word - 1); break;
     case "ArrowRight": cursor.word = Math.max(0, Math.min(size - 1, cursor.word + 1)); break;
     case "ArrowUp": case "ArrowDown": {
@@ -334,7 +359,14 @@ function markKeys(event) {
     case "x": case "Enter": if (size > 0) toggleMark(cursor.model, cursor.word); return true;
     case " ": togglePlay(); return true;
     case "Escape": case "m": mode = "normal"; break;
-    default: return false;
+    default: {
+      // Any other key leaves mark mode and does what it does outside it.
+      const name = command(event.key);
+      if (name === null) return false;
+      mode = "normal";
+      run(name);
+      return true;
+    }
   }
   render();
   return true;
@@ -353,47 +385,69 @@ function editKeys(event) {
   return false;
 }
 
-function normalKeys(event) {
+// A page key (A, B, N...) closes the tour and plays the clip, so a key the tour
+// names is never ignored, yet no clip is answered unheard.
+function tourKeys(event) {
+  if (event.key === "Tab") return false;
+  if (event.key === "Escape" || command(event.key) !== null && event.key !== " " && !event.key.startsWith("Arrow"))
+    tour(TOUR.length);
+  else if (event.key === "Enter" || event.key === " " || event.key === "ArrowRight") tour(tourStep + 1);
+  else if (event.key === "ArrowLeft") tour(Math.max(0, tourStep - 1));
+  return true;
+}
+
+function run(name) {
   const clip = clips[at];
   const mine = answers[clip.id];
-  switch (letter(event)) {
-    case " ": togglePlay(); break;
-    case "d": nextDifference(); break;
-    case "r": audio.currentTime = 0; audio.play().catch(() => {}); break;
-    case "ArrowLeft": seek(-2); break;
-    case "ArrowRight": seek(2); break;
-    case "[": setRate(-1); break;
-    case "]": setRate(1); break;
-    case "a": answer("parakeet", null); break;
-    case "b": answer("wispr", null); break;
-    case "1": edit(clip.parakeet); break;
-    case "2": edit(clip.wispr); break;
-    case "3": edit(clip.jake_edit || clip.wispr_final || clip.wispr); break;
-    case "e": edit(mine && mine.text != null ? mine.text : clip.parakeet); break;
-    case "f": if (mine && mine.fixed != null && mine.suggestions.length) answer("typed", mine.fixed); break;
-    case "j": case "n": case "ArrowDown": go(at + 1); break;
-    case "k": case "p": case "ArrowUp": go(at - 1); break;
-    case "u": nextUnanswered(); break;
-    case "m": mode = "mark"; render(); break;
-    case "Backspace": case "Delete": {
+  switch (name) {
+    case "play": togglePlay(); break;
+    case "difference": nextDifference(); break;
+    case "replay": audio.currentTime = 0; play(); break;
+    case "back": seek(-2); break;
+    case "forward": seek(2); break;
+    case "slower": setRate(-1); break;
+    case "faster": setRate(1); break;
+    case "pickA": answer("parakeet", null); break;
+    case "pickB": answer("wispr", null); break;
+    case "neither": neither(); break;
+    case "fixFromA": edit(clip.parakeet); break;
+    case "edit": if (mine && mine.text != null) edit(mine.text); else neither(); break;
+    case "fixTerms": if (mine && mine.fixed != null && mine.suggestions.length) answer("typed", mine.fixed); break;
+    case "next": go(at + 1); break;
+    case "previous": go(at - 1); break;
+    case "unanswered": nextUnanswered(); break;
+    case "mark": mode = "mark"; render(); break;
+    case "clear": {
       if (!mine || mine.text == null) break;
       // Two presses: one stray key never erases typed gold.
       if (clearing === clip.id) answer(null, null);
       else { clearing = clip.id; render(); }
-      return true;
+      break;
     }
-    default: return false;
   }
-  return true;
 }
 
 document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey || clips.length === 0) return;
   if (busy) return event.preventDefault();
-  // A held key would answer clip after clip unheard; only seeking repeats.
-  if (event.repeat && mode !== "edit" && !event.key.startsWith("Arrow")) return event.preventDefault();
+  // A held key would answer or skip clip after clip unheard; only seeking and
+  // the mark cursor repeat.
+  const repeats = mode === "mark" ? event.key.startsWith("Arrow") : event.key === "ArrowLeft" || event.key === "ArrowRight";
+  if (event.repeat && mode !== "edit" && !repeats) return event.preventDefault();
+  // A clicked button or toggle keeps focus, and Space would press it again. Keys
+  // the page doesn't use (Tab, Enter) still reach it.
+  if (mode === "normal" && command(event.key) !== null && document.activeElement !== document.body)
+    document.activeElement.blur();
   const wasClearing = clearing;
-  const handled = mode === "edit" ? editKeys(event) : mode === "mark" ? markKeys(event) : normalKeys(event);
+  let handled;
+  if (mode === "tour") handled = tourKeys(event);
+  else if (mode === "edit") handled = editKeys(event);
+  else if (mode === "mark") handled = markKeys(event);
+  else {
+    const name = command(event.key);
+    if (name) run(name);
+    handled = name !== null;
+  }
   if (clearing === wasClearing && clearing !== null) {
     clearing = null;
     render();
@@ -401,19 +455,39 @@ document.addEventListener("keydown", (event) => {
   if (handled) event.preventDefault();
 });
 
+const BUTTONS = {
+  play: "play", difference: "difference", "pick-parakeet": "pickA", "pick-wispr": "pickB", neither: "neither",
+};
+
 document.addEventListener("click", (event) => {
+  if (clips.length === 0) return;
+  if (mode === "tour") {
+    if (event.target.closest("#tour-next")) tour(tourStep + 1);
+    else if (event.target.closest("#tour-skip")) tour(TOUR.length);
+    return;
+  }
+  const button = event.target.closest("button[id]");
+  if (button && BUTTONS[button.id] && !busy) {
+    // Neither while its box is open would throw away what is typed. Play and D
+    // keep the box open, so Jake can listen again while he types.
+    if (mode !== "edit" || button.id !== "neither") run(BUTTONS[button.id]);
+    if (mode === "edit") $("typed").focus();
+    return;
+  }
+  // Words are marked only in mark mode, so a stray click never marks one.
   const span = event.target.closest(".words span[data-word]");
-  if (span) toggleMark(span.parentElement.dataset.model, Number(span.dataset.word));
-  if (event.target.id === "play") togglePlay();
+  if (span && mode === "mark") toggleMark(span.parentElement.dataset.model, Number(span.dataset.word));
 });
 
 async function start() {
+  let toured = true;
   try {
     const response = await fetch("/api/state", { headers: keyed() });
     if (!response.ok) throw new Error(`${response.status}`);
     const state = await response.json();
     clips = state.clips;
     answers = state.answers;
+    toured = state.toured;
     const resume = clips.findIndex((c) => c.id === state.position);
     const first = clips.findIndex((c) => !answers[c.id] || answers[c.id].text == null);
     at = resume >= 0 ? resume : Math.max(0, first);
@@ -421,6 +495,7 @@ async function start() {
     fail("Could not load the review. Open it with scripts/test-set.sh review, which opens a new page each run.");
     return;
   }
+  if (clips.length && !toured) mode = "tour";
   render();
   if (clips.length) load();
 }

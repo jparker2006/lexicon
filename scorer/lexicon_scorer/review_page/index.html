@@ -6,15 +6,16 @@
 <meta name="referrer" content="no-referrer">
 <title>Gold review</title>
 <link rel="stylesheet" href="/review.css">
+<script src="/review_logic.js" defer></script>
 <script src="/review.js" defer></script>
 </head>
 <body>
 <header>
+  <p class="rule">Listen, then pick the words you actually <em>said</em>, word for word, not what you meant to write. Punctuation doesn't matter. If neither is right, fix one.</p>
   <div class="top">
-    <strong>Gold review</strong>
     <span id="where"></span>
-    <span id="split" class="chip"></span>
-    <span id="reasons"></span>
+    <span id="progress"></span>
+    <span id="left"></span>
     <span id="saved" class="saved"></span>
   </div>
   <div class="bar"><div id="done"></div></div>
@@ -24,53 +25,86 @@
   <div id="error" class="error" hidden></div>
 
   <section class="player">
-    <button id="play" type="button" title="Space">Play</button>
+    <button id="play" type="button"><kbd>Space</kbd> <span id="play-label">Play</span></button>
+    <button id="difference" type="button"><kbd>D</kbd> Play where they differ</button>
     <span id="time">0.0 / 0.0 s</span>
-    <span id="rate">1.00x</span>
+    <span id="rate"></span>
   </section>
 
   <section class="candidate" id="row-parakeet">
-    <div class="label"><kbd>A</kbd> Local Parakeet</div>
+    <div class="label"><span class="letter">A</span> <span class="picked-tag">your answer</span></div>
     <p class="words" data-model="parakeet"></p>
-    <div class="hints"></div>
   </section>
 
   <section class="candidate" id="row-wispr">
-    <div class="label"><kbd>B</kbd> Wispr</div>
+    <div class="label"><span class="letter">B</span> <span class="picked-tag">your answer</span></div>
     <p class="words" data-model="wispr"></p>
-    <div class="hints"></div>
   </section>
 
-  <section class="hint">
+  <div id="same" class="same-note" hidden>Same words in both: only capitals or punctuation differ, which don't matter. Pick either.</div>
+
+  <section class="choices">
+    <button id="pick-parakeet" type="button"><kbd>A</kbd> A is right</button>
+    <button id="pick-wispr" type="button"><kbd>B</kbd> B is right</button>
+    <button id="neither" type="button"><kbd>N</kbd> Neither: fix it</button>
+  </section>
+
+  <div id="marking" class="marking-note" hidden>Marking wrong words: click a word, or move with the arrows and press <kbd>X</kbd>. <kbd>Esc</kbd> stops, and A, B or N answers as usual.</div>
+
+  <section id="editor" class="gold" hidden>
+    <div class="label">Type the words you said</div>
+    <textarea id="typed" rows="3" spellcheck="false" autocomplete="off"></textarea>
+    <div class="small"><kbd>Enter</kbd> saves. <kbd>Esc</kbd> cancels. Write Terms in their written form.</div>
+  </section>
+
+  <section id="answer" class="gold" hidden>
+    <div class="label">Your answer <span id="choice" class="chip"></span></div>
+    <p id="gold-text"></p>
+  </section>
+  <div id="warning" class="warning" hidden></div>
+
+  <details id="hints">
+    <summary>What you wanted typed (not the answer)</summary>
     <div><span class="label">Wispr typed</span> <span id="wispr-final"></span></div>
     <div id="edit-line"><span class="label">You fixed it to</span> <span id="jake-edit"></span></div>
-  </section>
-
-  <section class="gold">
-    <div class="label">Gold <span id="choice" class="chip"></span></div>
-    <p id="gold-text"></p>
-    <div id="warning" class="warning" hidden></div>
-    <div id="editor" hidden>
-      <textarea id="typed" rows="3" spellcheck="false" autocomplete="off"></textarea>
-      <div class="small">Enter saves. Esc cancels. Write Terms in their written form.</div>
-    </div>
-  </section>
+    <div id="lexicon-line"><span class="label">Lexicon spellings</span> <span id="lexicon"></span></div>
+  </details>
 </main>
 
-<footer id="keys">
-  <span><kbd>Space</kbd> play</span>
-  <span><kbd>D</kbd> play the next difference</span>
-  <span><kbd>R</kbd> replay</span>
-  <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> seek 2 s</span>
-  <span><kbd>[</kbd><kbd>]</kbd> speed</span>
-  <span><kbd>A</kbd><kbd>B</kbd> that one is right</span>
-  <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> type, from A, B or your fix</span>
-  <span><kbd>E</kbd> edit gold</span>
-  <span><kbd>F</kbd> write Terms right</span>
-  <span><kbd>J</kbd><kbd>K</kbd> next, previous</span>
-  <span><kbd>U</kbd> next unanswered</span>
-  <span><kbd>M</kbd> mark words (or click them): arrows move, <kbd>X</kbd> marks, <kbd>Esc</kbd> ends</span>
-  <span><kbd>Backspace</kbd> twice: clear answer</span>
+<div id="tour" class="tour" hidden>
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="tour-text">
+    <div class="small" id="tour-step"></div>
+    <p id="tour-text"></p>
+    <div class="tour-buttons">
+      <button id="tour-skip" type="button"><kbd>Esc</kbd> Skip</button>
+      <button id="tour-next" type="button" class="primary"><kbd>Enter</kbd> <span id="tour-next-label">Next</span></button>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="keys">
+    <span><kbd>A</kbd> A is right</span>
+    <span><kbd>B</kbd> B is right</span>
+    <span><kbd>N</kbd> neither: fix it</span>
+    <span><kbd>D</kbd> play where they differ</span>
+    <span><kbd>Space</kbd> play, pause</span>
+  </div>
+  <details id="more-keys">
+    <summary>More keys</summary>
+    <div class="keys">
+      <span><kbd>J</kbd><kbd>K</kbd> next, previous clip</span>
+      <span><kbd>U</kbd> next unanswered</span>
+      <span><kbd>R</kbd> replay</span>
+      <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> seek 2 s</span>
+      <span><kbd>[</kbd><kbd>]</kbd> speed</span>
+      <span><kbd>1</kbd> fix, starting from A</span>
+      <span><kbd>E</kbd> edit your answer</span>
+      <span><kbd>F</kbd> write Terms the Lexicon's way</span>
+      <span><kbd>M</kbd> mark wrong words</span>
+      <span><kbd>Backspace</kbd> twice: clear your answer</span>
+    </div>
+  </details>
 </footer>
 </body>
 </html>

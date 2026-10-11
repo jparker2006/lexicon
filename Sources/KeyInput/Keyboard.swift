@@ -4,19 +4,22 @@ public import LexiconDomain
 
 /// What the keyboard asks Lexicon to do. The ONE list of key-driven actions:
 /// `Conductor.handle` is an exhaustive switch over it.
+///
+/// Each fn press names its Dictation: the id minted at fn-down rides on every
+/// command for that press, so a command can only ever act on its own Dictation.
 public enum KeyCommand: Sendable, Hashable {
     /// fn went down (fn only in v0, no fallback hotkey, #18). Start capturing now, before we know
     /// whether this is a hold, the first half of a double tap, or a stray tap (#6).
-    case dictationBegan(at: HostTime)
+    case dictationBegan(DictationID, at: HostTime)
     /// Held past the hold threshold, or second tap of a double tap.
-    case dictationConfirmed(DictationMode)
-    /// Released after a hold, or the next fn-down in hands-free.
-    case dictationStopped(at: HostTime)
+    case dictationConfirmed(DictationID, DictationMode)
+    /// Released after a hold, the next fn-down in hands-free, or the Mac going to sleep.
+    case dictationStopped(DictationID, at: HostTime)
     /// Esc while recording (#18): nothing is typed, but the Dictation is still
     /// transcribed and saved to History, so paste-last gets it back.
-    case dictationCancelled
+    case dictationCancelled(DictationID)
     /// A stray tap that never became a Dictation. Its row and file are removed.
-    case dictationDiscarded
+    case dictationDiscarded(DictationID)
     /// ⌃⌘V: paste the final text of the newest Dictation that has text.
     case pasteLast
     /// "I just fixed this" (#13 catch-all). Trigger key decided in #24.
@@ -68,11 +71,12 @@ public enum KeyboardError: Error, Sendable {
 /// Lexicon itself posted (its own Cmd-V), and stamping `InputClock`.
 ///
 /// Gesture state has exactly one owner: the recognizer on the tap thread. Other
-/// code asks it to change state (`endDictation()`); nothing else writes it.
+/// code asks it to change state (`systemWillSleep()`); nothing else writes it.
 public final class Keyboard: Sendable {
-    /// Ordered commands from the tap thread. Single consumer: `LexiconSystem`.
+    /// Ordered commands from the tap thread. Single consumer: `Conductor.follow`.
     public let commands: AsyncStream<KeyCommand>
-    let tap: EventTapThread
+    /// Hands an input to the recognizer on its own thread (the tap thread).
+    let feed: @Sendable (KeyInput) -> Void
 
     /// Creates the tap thread and starts listening. Throws if Accessibility is missing.
     public static func start(_ config: KeyboardConfig, input: InputClock) throws(KeyboardError) -> Keyboard {
@@ -84,15 +88,15 @@ public final class Keyboard: Sendable {
         let tap = EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
                                  continuation: continuation)
         try tap.start(listenAccess: listenAccess)
-        return Keyboard(commands: commands, tap: tap)
+        return Keyboard(commands: commands, feed: { tap.perform($0) })
     }
 
-    init(commands: AsyncStream<KeyCommand>, tap: EventTapThread) {
+    init(commands: AsyncStream<KeyCommand>, feed: @escaping @Sendable (KeyInput) -> Void) {
         self.commands = commands
-        self.tap = tap
+        self.feed = feed
     }
 
-    /// The Dictation ended without a key (mic failure, sleep): leave the
-    /// recording phase, so the release that follows does nothing.
-    public func endDictation() { tap.perform(.externalEnd) }
+    /// Lid close or sleep is a normal stop (#4). It goes through the recognizer,
+    /// so the stop joins `commands` behind every command already waiting there.
+    public func systemWillSleep() { feed(.sleep(.now())) }
 }

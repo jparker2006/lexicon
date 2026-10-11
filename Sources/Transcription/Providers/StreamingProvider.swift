@@ -24,20 +24,14 @@ enum ProviderMessage: Sendable {
 }
 
 /// `.partial` and `.final` become `SpeechSegment`s on `SpeechAttempt.segments`
-/// (isFinal false / true); only the provider's last final after `finalize()` is the model text.
+/// (isFinal false / true). The cloud's model text is every final joined in order,
+/// complete once the provider ends the session after `finalize()`: a final is one
+/// finished stretch of speech, never a running total.
 enum ProviderEvent: Sendable, Equatable {
     case partial(String)
     case final(String)
+    /// No more finals will come. Before `finalize()` this means the provider cut the session short.
     case sessionEnded
     case error(String)
     case ignore
-}
-
-/// The shared socket plumbing: URLSessionWebSocketTask, a send loop over the
-/// feed, a receive loop, connect-time buffering of early chunks. Recorded
-/// server messages replace `transport` in tests (no keys, no network).
-final class CloudSession: Sendable {
-    init(provider: any StreamingProvider, access: CloudAccess, model: CloudModel, terms: [Term]) {
-        fatalError("not implemented")
-    }
 }

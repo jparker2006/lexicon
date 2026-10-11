@@ -1,14 +1,17 @@
+import os
 import LexiconDomain
 
 /// Cloud vs local once recording stops (`Preferences.raceDeadline`). Pure, so the
-/// policy is unit-tested with fake timings and no network.
+/// policy is unit-tested with no clock and no network.
 struct RacePolicy: Sendable, Hashable {
     /// After recording stops: wait this long for the cloud final before using local text.
     var deadline: Duration
-    /// Cloud attempt retries once before giving up (#4).
-    var cloudRetries: Int = 1
+    /// With no local text to fall back on, how long the cloud may take before the
+    /// Dictation waits for the network instead. Every wait has a deadline.
+    var giveUp: Duration = .seconds(10)
 
-    enum State: Sendable {
+    /// One engine's state. nil in `decide` means the plan has no such engine.
+    enum State: Sendable, Hashable {
         case pending
         case done(String)
         case failed
@@ -21,10 +24,16 @@ struct RacePolicy: Sendable, Hashable {
         case nothingYet   // both failed: unavailable
     }
 
-    /// Cloud wins whenever it is back before the deadline. After the deadline,
-    /// the first finished engine wins. Local-only plans use local immediately.
-    func decide(cloud: State?, local: State?, sinceFinalize: Duration) -> Decision {
-        fatalError("not implemented")
+    /// The cloud wins whenever its final is back before the deadline, even if
+    /// local finished first. A failed cloud, or the deadline passing, hands the
+    /// Dictation to local the moment local has text. The caller decides again on
+    /// every engine result, so after the deadline whichever engine answers next
+    /// wins, and a slow local load can still be beaten by the cloud.
+    func decide(cloud: State?, local: State?, deadlinePassed: Bool) -> Decision {
+        if case .done? = cloud { return .useCloud }
+        if case .done? = local, cloud != .pending || deadlinePassed { return .useLocal }
+        if cloud != .pending, local != .pending { return .nothingYet }
+        return .wait
     }
 }
 
@@ -39,20 +48,21 @@ struct RacePolicy: Sendable, Hashable {
 /// Pure, so it is tested with no model and no network.
 struct ResidencyPolicy: Sendable, Hashable {
     var privacy: PrivacyMode
-    var networkReachable: Bool
+    /// With no cloud model there is nothing to lose when the network drops, so
+    /// reachability only counts when one is set.
+    var usesCloud: Bool
+    var networkReachable = true
     var linger: Duration
 
-    /// Reachability is not watched until the cloud race lands (#66): with no
-    /// cloud engine there is nothing to lose, so the network counts as up.
-    init(_ preferences: Preferences, networkReachable: Bool = true) {
+    init(_ preferences: Preferences) {
         privacy = preferences.privacy
-        self.networkReachable = networkReachable
+        usesCloud = preferences.cloudModel != nil
         linger = preferences.localModelLinger
     }
 
     /// How long after the last Dictation to unload. nil: stay resident.
     var unloadAfter: Duration? {
-        privacy == .private || !networkReachable ? nil : linger
+        privacy == .private || (usesCloud && !networkReachable) ? nil : linger
     }
 }
 
@@ -62,6 +72,8 @@ struct ResidencyPolicy: Sendable, Hashable {
 /// which returns the process to its idle budget.
 actor LocalResidency {
     let transcriber: any LocalTranscriber
+    /// Loads and unloads, so idle memory can be read against them.
+    private let log = Logger(subsystem: "Lexicon", category: "speech")
     let clock: any Clock<Duration>
     /// Dictations between fn-down and their text. The model never unloads under one.
     private var dictating = 0
@@ -70,7 +82,13 @@ actor LocalResidency {
     private var fed: ResidencyPolicy?
     /// The latest fn-down snapshot: the only policy when nothing feeds changes (headless runs).
     private var snapshot: ResidencyPolicy?
-    private var policy: ResidencyPolicy? { fed ?? snapshot }
+    /// From the engine's network path, which applies to whichever policy is current.
+    private var networkReachable = true
+    private var policy: ResidencyPolicy? {
+        guard var policy = fed ?? snapshot else { return nil }
+        policy.networkReachable = networkReachable
+        return policy
+    }
     private var unloadTimer: Task<Void, Never>?
 
     var unloadScheduled: Bool { unloadTimer != nil }
@@ -91,15 +109,43 @@ actor LocalResidency {
         }
     }
 
+    /// Launch: load now if not resident, then follow `policy` (the idle unload),
+    /// or a newer one fed while the load ran (a first load takes about 25 s).
+    func warm(_ policy: ResidencyPolicy) async {
+        if !(await transcriber.isResident) {
+            let started = ContinuousClock.now
+            do {
+                try await transcriber.load()
+                let ms = (started.duration(to: .now) / .milliseconds(1)).rounded()
+                log.notice("local model loaded at launch in \(Int(ms), privacy: .public) ms")
+            } catch {
+                log.notice("local model not loaded at launch: \(String(describing: error), privacy: .private)")
+            }
+        }
+        await policyChanged(fed ?? policy)
+    }
+
     /// The Dictation has its text (or was cancelled): start the idle timer.
     func dictationEnded() {
         dictating -= 1
         armUnload()
     }
 
-    /// Private mode toggled or reachability changed (SpeechEngine feeds this).
+    /// Private mode toggled or settings changed (SpeechEngine feeds this).
     func policyChanged(_ policy: ResidencyPolicy) async {
         fed = policy
+        await apply()
+    }
+
+    /// The network went down or came back (SpeechEngine feeds this).
+    func networkChanged(reachable: Bool) async {
+        guard reachable != networkReachable else { return }
+        networkReachable = reachable
+        await apply()
+    }
+
+    private func apply() async {
+        guard let policy else { return }
         if policy.unloadAfter == nil {
             unloadTimer?.cancel()
             unloadTimer = nil
@@ -124,5 +170,6 @@ actor LocalResidency {
         guard dictating == 0, !Task.isCancelled else { return }
         unloadTimer = nil
         await transcriber.unload()
+        log.notice("local model unloaded: no Dictation for the linger time")
     }
 }

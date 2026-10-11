@@ -30,7 +30,7 @@ enum Permissions {
     static func fnOffItems(_ error: KeyboardError?) -> [NSMenuItem] {
         guard error != nil else { return [] }
         return [status(accessibility
-            ? "fn is off: macOS isn't sending Lexicon key events. Quit and reopen Lexicon."
+            ? "fn is off: allow Lexicon in Privacy & Security > Input Monitoring, then quit and reopen Lexicon."
             : "fn is off: allow Accessibility, then quit and reopen Lexicon.")]
     }
 
@@ -47,7 +47,7 @@ enum Permissions {
             : [])
     }
 
-    private static func status(_ title: String) -> NSMenuItem {
+    static func status(_ title: String) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
         return item

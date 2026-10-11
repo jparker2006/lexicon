@@ -1,0 +1,19 @@
+# A public sample Lexicon in the import format: made-up words only.
+# One entry per line. A bare line is a Term; heard -> written is a Rule.
+
+Zorblax
+QuuxKit
+flimDB
+snorp-ctl
+Vexmo
+Trellium.md
+
+frob nicate -> Frobnicate
+quux kit -> QuuxKit
+slash zap -> /zap
+cube nector -> kubenector
+
+# Already above in another case: still one Term.
+ZORBLAX
+# An arrow with nothing heard: not read.
+-> Wobbleton
