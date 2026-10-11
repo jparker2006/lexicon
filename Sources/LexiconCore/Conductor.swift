@@ -50,7 +50,7 @@ public actor Conductor<Destination: TextDestination> {
     /// Live Dictations in fn-down order. A Dictation inserts only when every
     /// earlier one has inserted, been held, or gone waiting (#18: they insert in
     /// the order they were spoken). A waiting Dictation gives up its turn, so a
-    /// network outage never blocks later text; its late insert passes InsertGuard.
+    /// network outage never blocks later text; its late text waits for paste-last.
     var insertOrder: [DictationID] = []
     /// A Dictation whose text is ready while an earlier one still holds the turn.
     var turnWaiters: [DictationID: CheckedContinuation<Void, Never>] = [:]
@@ -180,18 +180,17 @@ public actor Conductor<Destination: TextDestination> {
 
 extension Conductor {
     /// Everything `land` needs about one Dictation past fn-up, as one value, so
-    /// live, waiting, retry and recovery hand over the same thing (retry and
-    /// recovery build it with `target: nil`, `releasedAt: nil` and their own
-    /// `cleaning` from `cleanup.begin(plan:)`).
+    /// live, waiting, retry and recovery hand over the same thing (retry,
+    /// recovery and a waiting Dictation's later try land it with `target: nil`
+    /// and their own `cleaning` from `cleanup.begin(plan:)`).
     struct DictationRun: Sendable {
         let id: DictationID
         let origin: DictationOrigin
         let purpose: DictationPurpose
         let context: AppContext
-        /// RAM copy of the audio, for the waiting branch's second transcription.
-        let clip: AudioClip
-        let speechPlan: SpeechPlan
-        let cleanupPlan: CleanupPlan
+        /// RAM copy of the audio, for the waiting branch's next transcription. nil
+        /// once a waiting Dictation's whole audio is on disk: it is read back per try.
+        var clip: AudioClip?
         var cleaning: CleanupSession
         /// Live: `Preferences.cleanupDeadline` (about 450 ms). Retry and recovery: seconds (nobody waits).
         let cleanupDeadline: Duration

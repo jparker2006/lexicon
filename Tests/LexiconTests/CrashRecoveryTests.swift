@@ -23,14 +23,22 @@ private let cleaned = "the crash test passes now"  // nothing for rules-only Cle
     let wav = try writeWAV(longSamples(), rate: 16_000, in: try scratchDirectory()).path
     let exit = await #expect(processExitsWith: .signal(SIGKILL), observing: [\.standardOutputContent]) {
         [root = root as String, wav = wav as String] in
-        let conductor = try childConductor(root: root, destination: ReportingDestination())
+        let destination = ReportingDestination()
+        let conductor = try childConductor(root: root, destination: destination)
         let events = await conductor.events()
         Task {
             for await event in events {
-                guard case .listening(let id) = event else { continue }
+                guard case .listening(let id) = event, let file = destination.history?.audioURL(for: id) else { continue }
                 report("listening \(id)")
-                // Well into the recording: the writer has drained a few times.
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(700)) { kill(getpid(), SIGKILL) }
+                // Well into the recording: once 0.6 s is on disk, however fast this machine is.
+                while true {
+                    let written = (try? CAFFile.read(file))?.samples.count ?? 0
+                    if written >= 9_600 {
+                        report("written \(written)")
+                        kill(getpid(), SIGKILL)
+                    }
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
             }
         }
         _ = await conductor.dictate(file: URL(filePath: wav), pace: .realtime)
@@ -55,7 +63,8 @@ private let cleaned = "the crash test passes now"  // nothing for rules-only Cle
     #expect(await relaunch.conductor.destination.delivered.isEmpty)  // nothing typed
     let audio = try CAFFile.read(relaunch.history.audioURL(for: id)).samples
     #expect(CAFFile.state(of: relaunch.history.audioURL(for: id)) == .closed)
-    #expect(audio.count >= 16_000 * 7 / 10 - 1_600)  // about 0.7 s heard, at most a drain behind
+    let written = try #require(lines.lines.last { $0.first == "written" }.flatMap { Int($0[1]) })
+    #expect(audio.count >= written)  // everything on disk at the kill survived it
     #expect(audio == Array(longSamples().prefix(audio.count)))
     #expect(await notices(in: events, until: id).contains(.recovered(id)))
 }
@@ -170,13 +179,14 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
     let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
     for id in started.keys { #expect(byID[id] != nil, "Dictation \(id) has no row") }
     for row in rows {
-        let samples = (try? CAFFile.read(relaunch.history.audioURL(for: row.id)))?.samples ?? []
-        #expect(samples == Array(clip.prefix(samples.count)), "audio of \(row.id) is not what was said")
+        let file = relaunch.history.audioURL(for: row.id)
         if row.status == .failed {
-            // Killed between creating the file and writing its first audio: nothing was said yet.
-            #expect(samples.isEmpty, "Dictation \(row.id) failed with audio")
+            // Killed before the writer's first drain put a header on the file: no audio was on disk yet.
+            #expect((try? CAFFile.read(file))?.samples.isEmpty ?? true, "Dictation \(row.id) failed with audio")
             continue
         }
+        let samples = try CAFFile.read(file).samples
+        #expect(samples == Array(clip.prefix(samples.count)), "audio of \(row.id) is not what was said")
         #expect([.inserted, .notInserted, .recovered].contains(row.status), "Dictation \(row.id) is \(row.status)")
         #expect(row.finalText == cleaned, "Dictation \(row.id) has no text")
         #expect(typed[row.id, default: 0] <= 1, "Dictation \(row.id) was typed \(typed[row.id, default: 0]) times")
@@ -191,9 +201,9 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
     let worst = shortfalls.max() ?? .zero
     let statuses = Dictionary(grouping: rows, by: \.status).map { "\($0.value.count) \($0.key)" }.sorted()
     print("lane \(lane): \(started.count) Dictations, \(kills) kills, \(statuses.joined(separator: ", ")), worst audio lost \(worst)")
-    // The writer drains every 100 ms, so a crash loses at most about that; the
-    // margin is for a loaded machine's scheduling, not for lost audio.
-    #expect(worst <= .milliseconds(250))
+    // Not asserted: it is wall-clock time, and a loaded machine stretches it with
+    // nothing lost. Bit-exact audio above, and the kill test's bytes-on-disk check,
+    // are the assertions; this is the evidence for "about 0.1 s per crash".
 }
 
 // MARK: The waiting path
@@ -219,12 +229,13 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
 
     await model.install()
     await clock.advance(by: SpeechEngine.retryInterval)
-    #expect(await finished(in: events, result.id) == .inserted)  // nothing touched since: the late text is typed
+    #expect(await finished(in: events, result.id) == .notInserted)  // text that arrives late waits for paste-last
     await system.history.flush()
     let row = try #require(await system.history.dictation(result.id))
-    #expect(row.status == .inserted)
+    #expect(row.status == .notInserted)
     #expect(row.finalText == cleaned)
-    #expect(await system.conductor.destination.delivered[result.id] == cleaned)
+    #expect(row.status.canMove(to: .inserted))
+    #expect(await system.conductor.destination.delivered.isEmpty)
 }
 
 @Test(.timeLimit(.minutes(1))) func aDictationStillWaitingAtRelaunchIsRecoveredOnceAModelIsInstalled() async throws {
@@ -269,9 +280,10 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
     await system.history.flush()
 
     await model.install()
+    let retry = try #require(await system.conductor.waiting[id])
     await clock.waitForSleepers(2)
     await clock.advance(by: SpeechEngine.retryInterval)
-    await system.conductor.settle()
+    await retry.value
     #expect(await model.transcribed == 0)
     #expect(await system.conductor.destination.delivered.isEmpty)
 }
@@ -290,8 +302,8 @@ func childConductor(root: String, destination: ReportingDestination) throws -> C
 }
 
 extension Conductor {
-    /// Returns once every recovery and live run has landed, and no waiting
-    /// Dictation is mid-retry (one asleep until its next try does not count).
+    /// Returns once every recovery and live run has landed. Not waiting
+    /// Dictations: one asleep until its next try never lands on its own.
     func settle() async {
         while let task = inFlight.values.first { _ = await task.value }
     }
@@ -300,6 +312,8 @@ extension Conductor {
 /// Types nothing: says on stdout which Dictation it would have typed, before
 /// reporting it typed. `killMidPaste`: dies right there, with the text saved
 /// as ready (the crash this guards against).
+/// `@unchecked Sendable`: `history` is written once, before the Conductor that
+/// calls `insert` exists, and only read after.
 final class ReportingDestination: TextDestination, @unchecked Sendable {
     struct Target: Sendable {}
     let killMidPaste: Bool

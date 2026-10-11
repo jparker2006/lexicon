@@ -42,7 +42,8 @@ extension HistoryStore {
     private func recover(in db: Database) throws -> [UnfinishedDictation] {
         let opened = openedAt.unixMs
         // Every audio file an earlier run made. Its name is its Dictation's id.
-        let earlier = try FileManager.default.contentsOfDirectory(at: audioFolder, includingPropertiesForKeys: [.creationDateKey])
+        let earlier = try FileManager.default
+            .contentsOfDirectory(at: audioFolder, includingPropertiesForKeys: [.creationDateKey])
             .filter { $0.pathExtension == "caf" }
             .compactMap { url -> (DictationID, Date)? in
                 guard let id = DictationID(column: url.deletingPathExtension().lastPathComponent) else { return nil }
@@ -145,7 +146,7 @@ enum RecoveryPlan {
     enum Action: Sendable, Hashable {
         case finalize(DictationID)                 // CAF still open: write its real size
         case adoptOrphan(DictationID)              // file with no row: insert row, origin recovered
-        case deleteGarbage(DictationID)            // row says deleted (crash between mark and unlink, or unlink and drop)
+        case deleteGarbage(DictationID)            // row says deleted: a crash cut a delete short
         case dropExpiredAudio(DictationID)         // retention marked it expired; the crash beat the unlink
         case markFailed(DictationID, String)       // unfinished row, no readable audio
         case markInterrupted(DictationID)          // crashed mid-paste: notInserted(.interrupted), never retyped
@@ -186,7 +187,8 @@ enum RecoveryPlan {
         for (id, file) in files.sorted(by: { $0.key.description < $1.key.description }) where !known.contains(id) {
             if file == .open { actions.append(.finalize(id)) }
             actions.append(.adoptOrphan(id))
-            actions.append(file == .unreadable ? .markFailed(id, "audio unreadable") : .transcribe(id, wasWaiting: false))
+            actions.append(file == .unreadable ? .markFailed(id, "audio unreadable")
+                                               : .transcribe(id, wasWaiting: false))
         }
         return actions
     }
