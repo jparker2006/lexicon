@@ -12,14 +12,13 @@ import SQLiteKit
 /// calls and Re-speak candidates.
 public actor Lexicon {
     /// Opens `<root>/lexicon.sqlite` (this module names it) and loads the term index.
-    public init(paths: AppPaths) throws { fatalError("not implemented") }
+    /// Until the store lands (#70) it opens nothing: M0 to M2 run with no Terms or Rules.
+    public init(paths: AppPaths) throws {}
 
     /// fn-down: up to `Preferences.cleanupTerms` most relevant Terms for this
     /// context, best first (never the whole Lexicon: #10), plus a compiled
     /// snapshot of every Rule. Speech takes the first `speechTerms`. Under 1 ms.
-    public func forDictation(in context: AppContext) -> DictationWords {
-        fatalError("not implemented")
-    }
+    public func forDictation(in context: AppContext) -> DictationWords { .empty }
 
     /// Spans of `text` that sound like a Lexicon term with no Rule covering them.
     /// Feeds Jev close calls (#10) and Re-speak candidate search (M4).

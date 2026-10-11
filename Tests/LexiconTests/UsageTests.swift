@@ -39,7 +39,7 @@ import LexiconCore
     #expect(out == "Wire the auth callback into Supabase")
 }
 
-@Test(.disabled("lands with #60")) func lateTextIsHeldWhenJakeTypedSinceFnUp() {
+@Test func lateTextIsHeldWhenJakeTypedSinceFnUp() {
     let field = FocusSnapshot(pid: 42, fieldFingerprint: "f1")
     #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false) == .insert)
     #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: true) == .hold(.typedSince))
@@ -50,15 +50,4 @@ import LexiconCore
 @Test func structuralCheckRejectsChangedNumbers() {
     let failure = StructuralCheck.check("Ship it on the 5th", ruled: "ship it on the fourth", terms: [])
     #expect(failure == .numberMismatch)
-}
-
-@Test(.disabled("lands with #46")) func aWavRunsTheWholeLifecycleHeadless() async throws {
-    // 16 kHz mono fixture, ~38 KB for 1.2 s (#14). Real package: a `.copy("Fixtures")` resource.
-    let wav = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "Fixtures/hello-lexicon.wav")
-    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown,
-                                         preferences: .defaults, local: nil)
-    let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
-    #expect(result.status == .inserted)
-    #expect(result.cleanup != nil)
-    await system.history.flush()
 }

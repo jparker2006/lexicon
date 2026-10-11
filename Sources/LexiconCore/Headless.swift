@@ -2,6 +2,7 @@ import Foundation
 public import LexiconDomain
 import AudioCapture
 public import Transcription
+import Cleanup
 import WordStore
 public import History
 public import AppText
@@ -48,8 +49,36 @@ public final class HeadlessSystem: Sendable {
 
     public static func make(paths: AppPaths, context: AppContext, preferences: Preferences,
                             local: (any LocalTranscriber)?) throws -> HeadlessSystem {
-        fatalError("not implemented")
+        let history = try HistoryStore(paths: paths)
+        let conductor = Conductor(
+            recorder: Recorder(), speech: SpeechEngine(local: local), cleanup: Cleanup(),
+            lexicon: try Lexicon(paths: paths), history: history, destination: HeadlessDestination(context: context),
+            preferences: PreferencesStore(fixed: preferences), secrets: Secrets(.environment),
+            keyboard: nil, fixes: nil, jev: nil)
+        return HeadlessSystem(conductor: conductor, history: history)
     }
 
-    init() { fatalError("not implemented") }
+    init(conductor: Conductor<HeadlessDestination>, history: HistoryStore) {
+        self.conductor = conductor
+        self.history = history
+    }
+}
+
+/// A stand-in for the local model that always hears `text`: package tests and
+/// `lexicon-eval --scripted` run the whole pipeline with no model installed.
+public actor ScriptedTranscriber: LocalTranscriber {
+    public nonisolated let model = LocalModel.parakeetUnified
+    let text: String
+    /// Every clip it was asked to transcribe, in order.
+    public private(set) var heard: [AudioClip] = []
+
+    public init(text: String) { self.text = text }
+
+    public var isResident: Bool { true }
+    public func load() {}
+    public func unload() {}
+    public func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String {
+        heard.append(clip)
+        return text
+    }
 }

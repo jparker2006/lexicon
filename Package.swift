@@ -109,8 +109,8 @@ let package = Package(
         .testTarget(
             name: "LexiconTests",
             dependencies: [
-                "LexiconDomain", "KeyInput", "AudioCapture", "Transcription", "Cleanup", "History", "AppText",
-                "LexiconCore", "TestHooks",
+                "LexiconDomain", "KeyInput", "AudioCapture", "Transcription", "Cleanup", "WordStore", "History",
+                "AppText", "LexiconCore", "TestHooks",
             ]
         ),
     ],
