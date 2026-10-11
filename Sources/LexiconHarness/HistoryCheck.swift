@@ -31,7 +31,7 @@ enum HistoryCheck {
 
         let (window, table, _) = try await open(app)
         let open = try footprint(pid)
-        try await copyNewest(table)
+        do { try await copyNewest(table) } catch { print("FAIL  copy: \(error)") }
         try await scrollToTheEnd(window: window, table: table)
         if let word { try await search(word, window: window, table: table) }
         try await close(window, app)
