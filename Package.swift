@@ -85,20 +85,20 @@ let package = Package(
             ]
         ),
 
-        // AppKit surfaces: status item, recording indicator, History window, settings, fix prompt.
-        .target(name: "LexiconUI", dependencies: ["LexiconDomain", "History", "AudioCapture", "Fixes", "LexiconCore"]),
+        // AppKit surfaces: status item, recording indicator, History window, Lexicon page, settings, fix prompt.
+        .target(name: "LexiconUI", dependencies: ["LexiconDomain", "History", "WordStore", "AudioCapture", "Fixes", "LexiconCore"]),
 
         // The app shell. scripts/bundle.sh assembles and signs Lexicon.app from the
         // SwiftPM products (ADR 0003): bundle, Info.plist, entitlements, signing (#14).
         .executableTarget(
             name: "LexiconApp",
-            dependencies: ["LexiconDomain", "KeyInput", "LexiconCore", "LexiconUI", "LocalParakeet", "AudioCapture", "TestHooks", "AppText"]
+            dependencies: ["LexiconDomain", "KeyInput", "WordStore", "LexiconCore", "LexiconUI", "LocalParakeet", "AudioCapture", "TestHooks", "AppText"]
         ),
 
         // `lexicon-eval`: headless pipeline on WAV files for the scorer (#15). Dev only, never shipped.
         .executableTarget(
             name: "LexiconEval",
-            dependencies: ["LexiconDomain", "LexiconCore", "AudioCapture", "Transcription", "History", "LocalParakeet"]
+            dependencies: ["LexiconDomain", "WordStore", "LexiconCore", "AudioCapture", "Transcription", "History", "LocalParakeet"]
         ),
 
         // Test hooks: the request and reply wire between a harness and the running

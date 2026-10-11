@@ -2,6 +2,7 @@ import AppKit
 import os
 import LexiconDomain
 import KeyInput
+import WordStore
 import LexiconCore
 import LexiconUI
 #if DEBUG
@@ -28,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Why fn is off, shown as a menu line rather than leaving a dead key.
     var fnOff: KeyboardError?
     var history: HistoryWindowPresenter?
+    /// Nil until the Lexicon has opened, just after launch; its menu line appears then.
+    var lexiconPage: LexiconWindowPresenter?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     #if DEBUG
     var testHooks: TestHookServer?
@@ -50,9 +53,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let history = HistoryWindowPresenter(paths: paths)
         self.history = history
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
-            [history.menuItem()] + Permissions.fnOffItems(self?.fnOff) + Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
+            [history.menuItem()] + (self?.lexiconPage.map { [$0.menuItem()] } ?? []) + Permissions.fnOffItems(self?.fnOff) + Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
         }
         let indicator = DictationIndicator(statusItem: statusItem, preferences: preferences)
+        // TODO(#56): the system's Lexicon instead, the one every Dictation reads, so
+        // the page's edits reach the next fn-down. Opened off the main thread: with
+        // Terms in it, opening reads the system word list (about 10 ms).
+        Task { [weak self] in
+            do {
+                let lexicon = try await Task.detached(priority: .utility) { try Lexicon(paths: paths) }.value
+                self?.lexiconPage = LexiconWindowPresenter(lexicon: lexicon)
+            } catch {
+                log.error("cannot open the Lexicon: \(String(describing: error), privacy: .private)")
+            }
+        }
         self.statusItem = statusItem
         self.indicator = indicator
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
