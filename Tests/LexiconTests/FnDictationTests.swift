@@ -113,8 +113,8 @@ func aCommandForAnotherPressNeverEndsTheRecording() async throws {
 
 @Test(.timeLimit(.minutes(1)))
 func sleepWithTheNextPressStillQueuedKeepsThatDictation() async throws {
-    // The Reviewer's case on #123: the Mac sleeps while fn-up of one hold and
-    // fn-down of the next sit in the command stream, unread. The next press must
+    // The Mac sleeps while fn-up of one hold and fn-down of the next sit in the
+    // command stream, unread. The next press must
     // still be its own Dictation, and a later lone tap must not delete it.
     let keys = ScriptedKeys()
     let rig = try FnRig(keyboard: keys.keyboard)
@@ -177,6 +177,25 @@ func backToBackDictationsTypeInTheOrderTheyWereSpoken() async throws {
     #expect(await rig.destination.typedOrder == [first, second])
     #expect(await rig.destination.delivered[first] == "First.")
     #expect(await rig.destination.delivered[second] == "Second.")
+}
+
+@Test(.timeLimit(.minutes(1)))
+func quitDoesNotWaitForeverOnADictationStuckInTheModel() async throws {
+    let model = HeldFirstTranscriber()  // never lets go of the first clip
+    let rig = try FnRig(local: model)
+    let id = DictationID()
+
+    for command: KeyCommand in [.dictationBegan(id, at: fnAt(0)), .dictationConfirmed(id, .hold),
+                                .dictationStopped(id, at: fnAt(600))] {
+        await rig.conductor.handle(command)
+    }
+    await model.waitForCalls(1)
+    await rig.conductor.idle(finishingWithin: .milliseconds(100))
+
+    // Not lost: the row and its audio are on disk for launch recovery.
+    #expect(await rig.history.dictation(id)?.status == .transcribing)
+    #expect(try CAFFile.read(rig.history.audioURL(for: id)).samples.count > 0)
+    await model.releaseFirst()
 }
 
 /// The real recognizer behind a `Keyboard`, fed by the test instead of the fn tap.

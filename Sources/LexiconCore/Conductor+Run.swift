@@ -114,7 +114,7 @@ extension Conductor {
             // Keep the audio and show "waiting"; Jake is never asked to redo it. A
             // waiting Dictation gives up its turn, so later Dictations still insert.
             history.record(.waiting(id, reason: String(describing: reason)))
-            log.notice("Dictation \(id, privacy: .public) waiting: \(String(describing: reason), privacy: .public)")
+            log.notice("Dictation \(id, privacy: .public) waiting: \(String(describing: reason), privacy: .private)")
             if reason.waitsForNetwork { emit(.notice(.waitingForNetwork(id))) }
             releaseInsertTurn(id)
             run.hold?.end()
@@ -126,7 +126,7 @@ extension Conductor {
 
         case .unavailable(let reason):
             history.record(.failed(id, reason: String(describing: reason)))
-            log.notice("Dictation \(id, privacy: .public) failed: \(String(describing: reason), privacy: .public)")
+            log.notice("Dictation \(id, privacy: .public) failed: \(String(describing: reason), privacy: .private)")
             emit(.finished(id, .failed))
             return DictationResult(id: id, status: .failed, versions: nil, cleanup: nil, model: nil, lag: nil,
                                    attempts: [])

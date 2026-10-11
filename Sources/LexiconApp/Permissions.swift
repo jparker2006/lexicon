@@ -30,7 +30,7 @@ enum Permissions {
     static func fnOffItems(_ error: KeyboardError?) -> [NSMenuItem] {
         guard error != nil else { return [] }
         return [status(accessibility
-            ? "fn is off: allow Lexicon in Privacy & Security > Input Monitoring, then quit and reopen it."
+            ? "fn is off: allow Lexicon in Privacy & Security > Input Monitoring, then quit and reopen Lexicon."
             : "fn is off: allow Accessibility, then quit and reopen Lexicon.")]
     }
 

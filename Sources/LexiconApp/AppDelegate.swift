@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } catch {
             systemError = "Lexicon can't open its History. Quit and reopen Lexicon."
-            log.error("the system did not open: \(error.localizedDescription, privacy: .public)")
+            log.error("the system did not open: \(error.localizedDescription, privacy: .private)")
         }
     }
 

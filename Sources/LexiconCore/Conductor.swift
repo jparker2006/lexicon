@@ -167,12 +167,29 @@ public actor Conductor<Destination: TextDestination> {
     /// Quit: returns once no Dictation is recording or finishing, and History and
     /// the audio files have everything. A recording Dictation ends the normal way,
     /// at fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
-    /// A waiting Dictation keeps its audio and is picked up at the next launch.
-    public func idle() async {
-        // Launch recovery is not waited for: its text is never typed, and the next launch recovers it again.
-        while let run = inFlight.first(where: { !recovering.contains($0.key) })?.value { _ = await run.value }
-        await history.flush()
-        await recorder.settle()
+    /// Dictations past fn-up get `limit` to land: one stuck in the model must not
+    /// hold Quit forever, and its audio is on disk for launch recovery. Launch
+    /// recovery and waiting Dictations are not waited for: their text is never
+    /// typed, and the next launch picks them up again.
+    public func idle(finishingWithin limit: Duration = .seconds(30)) async {
+        repeat {
+            while let id = capturingID, let run = inFlight[id] { _ = await run.value }
+            let finishing = inFlight.filter { !recovering.contains($0.key) }.map(\.value)
+            let (landed, land) = AsyncStream<Void>.makeStream()
+            let waiting = Task {
+                for run in finishing { _ = await run.value }
+                land.finish()
+            }
+            let deadline = Task {
+                try? await Task.sleep(for: limit)
+                land.finish()
+            }
+            for await _ in landed {}
+            waiting.cancel()
+            deadline.cancel()
+            await history.flush()
+            await recorder.settle()
+        } while capturingID != nil  // fn went down while this waited: that one ends at its fn-up too
     }
 
     /// UI, logs. Each call returns a new stream (any number of observers).

@@ -26,15 +26,20 @@ public final class LexiconSystem: Sendable {
     let keyboard: Keyboard?
     let speech: SpeechEngine
 
-    /// Starts the fn tap first: fn must work within 150 ms of process start, and
-    /// a press before the key loop runs waits in `Keyboard.commands`, in order.
-    /// Without Accessibility the rest still opens, so History and the menu work.
+    /// Opens History and the Lexicon, then starts the fn tap: fn must work within
+    /// 150 ms of process start, and a press before the key loop runs waits in
+    /// `Keyboard.commands`, in order. Without Accessibility the rest still opens,
+    /// so History and the menu work.
     /// Throws only when History or the Lexicon can't open their databases.
     ///
     /// Not wired before their tickets: Fixes and Jev (M4, M5: Jev never runs
     /// during plain dictation), the inbox (no hooks before the after-M1 grill)
     /// and code Terms (no model takes Terms before M2).
     public static func live(paths: AppPaths, bundleID: String, local: (any LocalTranscriber)?) throws -> LexiconSystem {
+        // Opened before the tap, so a failure here leaves no tap behind. The key loop
+        // can't start before this returns anyway, and a press meanwhile waits in order.
+        let history = try HistoryStore(paths: paths)
+        let lexicon = try Lexicon(paths: paths)
         // One clock for the tap and AppText, or the late-text rule never sees typing.
         let input = InputClock()
         let keyboard: Keyboard?
@@ -46,13 +51,12 @@ public final class LexiconSystem: Sendable {
             keyboard = nil
             fnOff = error
         }
-        let history = try HistoryStore(paths: paths)
         let preferences = PreferencesStore()
         let recorder = Recorder()
         let speech = SpeechEngine(local: local)
         let text = TargetApp(input: input)
         let conductor = Conductor(
-            recorder: recorder, speech: speech, cleanup: Cleanup(), lexicon: try Lexicon(paths: paths),
+            recorder: recorder, speech: speech, cleanup: Cleanup(), lexicon: lexicon,
             history: history, destination: text, preferences: preferences,
             secrets: Secrets(.keychain(service: bundleID)), keyboard: keyboard, fixes: nil, jev: nil)
         return LexiconSystem(paths: paths, conductor: conductor, history: history, preferences: preferences,
