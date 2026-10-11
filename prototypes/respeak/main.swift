@@ -163,6 +163,7 @@ func manualAX(_ pid: pid_t) { AXUIElementSetAttributeValue(AXUIElementCreateAppl
 func readField() -> Field? {
     guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
     let pid = front.processIdentifier, appEl = AXUIElementCreateApplication(pid)
+    manualAX(pid)
     AXUIElementSetMessagingTimeout(appEl, 0.25)
     var v: CFTypeRef?, sv: CFTypeRef?, rv: CFTypeRef?
     guard AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &v) == .success, let fv = v else { return nil }
@@ -256,9 +257,9 @@ final class Rec {
     let started = now()
     var released = 0.0
     let engine = AVAudioEngine()
-    let plain = SFSpeechAudioBufferRecognitionRequest(), hinted = SFSpeechAudioBufferRecognitionRequest()
-    var tasks: [SFSpeechRecognitionTask] = []
-    var plainText = "", hintedText = "", plainFinal = false, hintedFinal = false, finished = false
+    let req = SFSpeechAudioBufferRecognitionRequest()
+    var task: SFSpeechRecognitionTask?
+    var text = "", final = false, finished = false
     var onFinal: (() -> Void)?
     init(_ t: Trigger, _ f: Field?) { trigger = t; field = f }
     var isFix: Bool { trigger == .fnShift || trigger == .rightOption }
@@ -351,24 +352,22 @@ final class Proto: NSObject, NSApplicationDelegate {
         choosing = nil
         let r = Rec(t, currentField()); rec = r
         warmJev()
-        r.plain.shouldReportPartialResults = true; r.hinted.shouldReportPartialResults = true
-        r.plain.addsPunctuation = true
+        r.req.shouldReportPartialResults = true
+        r.req.addsPunctuation = !r.isFix
         var hints = techTerms
         if let f = r.field { f.text.enumerateSubstrings(in: NSRange(location: max(0, f.caret - 400), length: f.caret - max(0, f.caret - 400)), options: .byWords) { w, _, _, _ in if let w, w.count > 2 { hints.append(w) } } }
-        r.hinted.contextualStrings = Array(hints.prefix(100))
-        for q in [r.plain, r.hinted] { q.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition }
+        if r.isFix { r.req.contextualStrings = Array(hints.prefix(100)) }  // plain fn gets no hints, so it makes real mistakes
+        r.req.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         let input = r.engine.inputNode
-        input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { b, _ in r.plain.append(b); r.hinted.append(b) }
+        input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { b, _ in r.req.append(b) }
         r.engine.prepare()
         do { try r.engine.start() } catch { log("mic error \(error)"); rec = nil; return }
-        for (q, isPlain) in [(r.plain, true), (r.hinted, false)] {
-            r.tasks.append(recognizer.recognitionTask(with: q) { res, err in DispatchQueue.main.async {
-                if let res { if isPlain { r.plainText = res.bestTranscription.formattedString } else { r.hintedText = res.bestTranscription.formattedString } }
-                if res?.isFinal == true || err != nil { if isPlain { r.plainFinal = true } else { r.hintedFinal = true } }
-                if !r.finished, self.rec === r { self.showListening(r) }
-                r.onFinal?()
-            } })
-        }
+        r.task = recognizer.recognitionTask(with: r.req) { res, err in DispatchQueue.main.async {
+            if let res { r.text = res.bestTranscription.formattedString }
+            if res?.isFinal == true || err != nil { r.final = true }
+            if !r.finished, self.rec === r { self.showListening(r) }
+            r.onFinal?()
+        } }
         play("Tink")
         showListening(r)
         log("begin \(t.rawValue) in \(r.field?.app ?? "?") field=\(r.field == nil ? "none" : (r.field!.synthetic ? "bookkeeping" : "AX")) caret=\(r.field?.caret ?? -1) sel=\(r.field?.selLen ?? 0)")
@@ -377,47 +376,55 @@ final class Proto: NSObject, NSApplicationDelegate {
     func showListening(_ r: Rec) {
         if r.isFix {
             if seeing == .sound { return }
-            let heard = r.hintedText.isEmpty ? "say the right word" : "“\(r.hintedText)”"
+            let heard = r.text.isEmpty ? "say the right word" : "“\(r.text)”"
             pill.show("Fix: \(heard)", near: caretRect(r.field) )
         } else {
-            pill.show("● " + (r.plainText.isEmpty ? "listening" : r.plainText.suffix(60)), near: nil)
+            pill.show("● " + (r.text.isEmpty ? "listening" : r.text.suffix(60)), near: nil)
         }
     }
 
     func stopAudio(_ r: Rec) {
-        r.engine.inputNode.removeTap(onBus: 0); r.engine.stop(); r.plain.endAudio(); r.hinted.endAudio()
+        r.engine.inputNode.removeTap(onBus: 0); r.engine.stop(); r.req.endAudio()
     }
 
     func cancel(_ r: Rec, _ why: String) {
-        r.finished = true; stopAudio(r); r.tasks.forEach { $0.cancel() }; rec = nil; pill.hide(); log("cancel: \(why)")
+        r.finished = true; stopAudio(r); r.task?.cancel(); rec = nil; pill.hide(); log("cancel: \(why)")
     }
 
     func end(_ r: Rec) {
         r.released = now(); r.finished = true; rec = nil
-        if r.isFix && seeing != .sound { pill.show("Fix: “\(r.hintedText)” …", near: caretRect(r.field)) }
+        if r.isFix && seeing != .sound { pill.show("Fix: “\(r.text)” …", near: caretRect(r.field)) }
         after(0.12) { self.stopAudio(r) }
         var fired = false
         let go = {
             if fired { return }; fired = true; r.onFinal = nil
             self.route(r, speechMs: ms(r.released, now()))
         }
-        r.onFinal = { if r.hintedFinal && (r.isFix || r.plainFinal) { go() } }
+        r.onFinal = { if r.final { go() } }
         after(2.0) { go() }
     }
 
     func route(_ r: Rec, speechMs: Int) {
-        let hinted = r.hintedText.trimmingCharacters(in: .whitespaces), plainText = r.plainText.trimmingCharacters(in: .whitespaces)
-        log("heard plain=“\(plainText)” hinted=“\(hinted)” speech=\(speechMs)ms")
-        if r.isFix { return fix(clean(hinted), r.trigger, r.field, r.released, speechMs, autoFallback: nil) }
-        let lower = hinted.lowercased()
+        let plainText = r.text.trimmingCharacters(in: .whitespaces)
+        log("heard “\(plainText)” as \(r.trigger.rawValue) speech=\(speechMs)ms")
+        if r.isFix { return fix(snap(clean(plainText)), r.trigger, r.field, r.released, speechMs, autoFallback: nil) }
+        let lower = plainText.lowercased()
         for cue in ["fix ", "fixed ", "fix: ", "fix, ", "i meant ", "i mean ", "correction "] where lower.hasPrefix(cue) {
-            return fix(clean(String(hinted.dropFirst(cue.count))), .cue, r.field, r.released, speechMs, autoFallback: nil)
+            return fix(snap(clean(String(plainText.dropFirst(cue.count)))), .cue, r.field, r.released, speechMs, autoFallback: nil)
         }
         let words = plainText.split(separator: " ").count
         if autoDetect, words > 0, words <= 3, let li = lastInsert, now() - li.at < 30, r.field != nil {
-            return fix(clean(hinted), .auto, r.field, r.released, speechMs, autoFallback: plainText)
+            return fix(snap(clean(plainText)), .auto, r.field, r.released, speechMs, autoFallback: plainText)
         }
         insert(plainText, r.field)
+    }
+
+    // Stand-in for the Lexicon: a re-spoken word that sounds like a known term becomes that term.
+    func snap(_ s: String) -> String {
+        guard letters(s).count >= 5, s.split(separator: " ").count <= 3 else { return s }
+        let best = techTerms.filter { letters($0).count >= 4 }.map { t in (t, 0.6 * sim(soundKey(t), soundKey(s)) + 0.4 * sim(letters(t), letters(s))) }.max { $0.1 < $1.1 }!
+        if best.1 >= 0.62 { log("snap “\(s)” → “\(best.0)” \(String(format: "%.2f", best.1))"); return best.0 }
+        return s
     }
 
     func clean(_ s: String) -> String { s.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".,!?;:"))) }
@@ -567,6 +574,7 @@ if CommandLine.arguments.contains("--selftest") {
     let cands = candidates(in: text, upTo: text.length, heard: "Supabase")
     for c in cands { print(String(format: "%.2f", c.score), c.text, soundKey(c.text)) }
     print("key:", jevKey == nil ? "missing" : "found")
+    for w in ["Super base", "super Bass", "Super", "Versailles", "callback", "red deployed", "get hub", "post grass", "type script", "hello", "base", "close", "verse", "cool", "react", "review", "codecs", "clawed", "result", "Jeff", "brew", "open", "release", "push"] { print("snap", w, "->", Proto.shared.snap(w)) }
     askJev(app: "Claude", before: text as String, heard: "Supabase", cands: cands, askCorrection: true) { a in
         print("jev:", a.error ?? "\(a.pick) p=\(a.p) isCorrection=\(a.isCorrection ?? -1) \(a.ms) ms"); exit(0)
     }
