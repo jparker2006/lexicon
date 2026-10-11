@@ -1,0 +1,316 @@
+[
+ {
+  "model": "claude-haiku-5.5-anthropic",
+  "runs": 490,
+  "ok": 490,
+  "errors": 0,
+  "error_samples": [],
+  "ttft_p50": 555.7572500547394,
+  "ttft_p95": 765.9180420450866,
+  "total_p50": 849.5968340430409,
+  "total_p95": 1110.540208988823,
+  "total_max": 2451.0416249977425,
+  "short_total_p50": 846.3155829813331,
+  "short_total_p95": 1075.3971250960603,
+  "exact": 419,
+  "exact_rate": 0.8551020408163266,
+  "check_rejects": 0,
+  "reject_reasons": {},
+  "answered": 0,
+  "answered_cases": [],
+  "refused": 0,
+  "empty_outputs": 0,
+  "providers": {
+   "Anthropic": 490
+  },
+  "finish": {
+   "stop": 490
+  },
+  "reasoning_tokens_median": 0,
+  "prompt_tokens_median": 684,
+  "cost_usd": 0.0404,
+  "reconnects": 0,
+  "passes_budget": false,
+  "zero_answered": true
+ },
+ {
+  "model": "gemini-3.5-flash-lite-aistudio",
+  "runs": 490,
+  "ok": 490,
+  "errors": 0,
+  "error_samples": [],
+  "ttft_p50": 473.94208307377994,
+  "ttft_p95": 708.3490829681978,
+  "total_p50": 542.9724580608308,
+  "total_p95": 795.8539579994977,
+  "total_max": 2576.1469170683995,
+  "short_total_p50": 540.1843329891562,
+  "short_total_p95": 782.6093330513686,
+  "exact": 426,
+  "exact_rate": 0.8693877551020408,
+  "check_rejects": 4,
+  "reject_reasons": {
+   "dropped content word": 4
+  },
+  "answered": 0,
+  "answered_cases": [],
+  "refused": 0,
+  "empty_outputs": 0,
+  "providers": {
+   "Google AI Studio": 490
+  },
+  "finish": {
+   "stop": 490
+  },
+  "reasoning_tokens_median": 0,
+  "prompt_tokens_median": 474,
+  "cost_usd": 0.0935,
+  "reconnects": 0,
+  "passes_budget": false,
+  "zero_answered": true
+ },
+ {
+  "model": "gpt-oss-120b-cerebras",
+  "runs": 490,
+  "ok": 490,
+  "errors": 0,
+  "error_samples": [],
+  "ttft_p50": 252.36929208040237,
+  "ttft_p95": 903.7667909869924,
+  "total_p50": 264.9228749796748,
+  "total_p95": 909.144000033848,
+  "total_max": 2639.7678329376504,
+  "short_total_p50": 264.241541037336,
+  "short_total_p95": 909.144000033848,
+  "exact": 370,
+  "exact_rate": 0.7551020408163265,
+  "check_rejects": 40,
+  "reject_reasons": {
+   "dropped content word": 40,
+   "dropped soft filler": 10
+  },
+  "answered": 0,
+  "answered_cases": [],
+  "refused": 0,
+  "empty_outputs": 0,
+  "providers": {
+   "Cerebras": 490
+  },
+  "finish": {
+   "stop": 490
+  },
+  "reasoning_tokens_median": 31,
+  "prompt_tokens_median": 547,
+  "cost_usd": 0.1155,
+  "reconnects": 0,
+  "passes_budget": false,
+  "zero_answered": true
+ },
+ {
+  "model": "gpt-oss-120b-groq",
+  "runs": 490,
+  "ok": 490,
+  "errors": 0,
+  "error_samples": [],
+  "ttft_p50": 244.44825004320592,
+  "ttft_p95": 527.7886670082808,
+  "total_p50": 292.6138329785317,
+  "total_p95": 625.1107499701902,
+  "total_max": 2169.6847919374704,
+  "short_total_p50": 287.04312501940876,
+  "short_total_p95": 611.4856250351295,
+  "exact": 389,
+  "exact_rate": 0.7938775510204081,
+  "check_rejects": 45,
+  "reject_reasons": {
+   "dropped content word": 77,
+   "dropped soft filler": 10,
+   "added word": 3,
+   "dropped negation/hedge": 1,
+   "added negation/hedge": 1
+  },
+  "answered": 3,
+  "answered_cases": [
+   "r01"
+  ],
+  "refused": 0,
+  "empty_outputs": 0,
+  "providers": {
+   "Groq": 490
+  },
+  "finish": {
+   "stop": 490
+  },
+  "reasoning_tokens_median": 27,
+  "prompt_tokens_median": 806,
+  "cost_usd": 0.0582,
+  "reconnects": 0,
+  "passes_budget": false,
+  "zero_answered": false
+ },
+ {
+  "model": "gpt-oss-20b-groq",
+  "runs": 490,
+  "ok": 490,
+  "errors": 0,
+  "error_samples": [],
+  "ttft_p50": 309.69208397436887,
+  "ttft_p95": 739.7452919976786,
+  "total_p50": 345.8679160103202,
+  "total_p95": 789.9146670242772,
+  "total_max": 1662.7142078941688,
+  "short_total_p50": 341.9382079737261,
+  "short_total_p95": 757.6462909346446,
+  "exact": 284,
+  "exact_rate": 0.5795918367346938,
+  "check_rejects": 136,
+  "reject_reasons": {
+   "dropped content word": 358,
+   "empty output": 59,
+   "dropped negation/hedge": 56,
+   "added negation/hedge": 19,
+   "added word": 19,
+   "dropped soft filler": 10
+  },
+  "answered": 0,
+  "answered_cases": [],
+  "refused": 19,
+  "empty_outputs": 59,
+  "providers": {
+   "Groq": 490
+  },
+  "finish": {
+   "stop": 490
+  },
+  "reasoning_tokens_median": 17,
+  "prompt_tokens_median": 547,
+  "cost_usd": 0.0189,
+  "reconnects": 0,
+  "passes_budget": false,
+  "zero_answered": true
+ },
+ {
+  "model": "llama-3.1-8b-groq",
+  "runs": 490,
+  "ok": 490,
+  "errors": 0,
+  "error_samples": [],
+  "ttft_p50": 228.339041932486,
+  "ttft_p95": 348.2367079705,
+  "total_p50": 253.7225829437375,
+  "total_p95": 441.88720907550305,
+  "total_max": 1646.7510830843821,
+  "short_total_p50": 252.95504101086408,
+  "short_total_p95": 427.29008302558213,
+  "exact": 230,
+  "exact_rate": 0.46938775510204084,
+  "check_rejects": 140,
+  "reject_reasons": {
+   "dropped content word": 350,
+   "added word": 140,
+   "dropped negation/hedge": 60,
+   "code-like token": 20,
+   "added negation/hedge": 20
+  },
+  "answered": 50,
+  "answered_cases": [
+   "g01",
+   "q02",
+   "q03",
+   "t07",
+   "t09"
+  ],
+  "refused": 0,
+  "empty_outputs": 0,
+  "providers": {
+   "Groq": 490
+  },
+  "finish": {
+   "stop": 490
+  },
+  "reasoning_tokens_median": 0,
+  "prompt_tokens_median": 507,
+  "cost_usd": 0.0128,
+  "reconnects": 0,
+  "passes_budget": false,
+  "zero_answered": false
+ },
+ {
+  "model": "mercury-2.5-inception-none",
+  "runs": 490,
+  "ok": 490,
+  "errors": 0,
+  "error_samples": [],
+  "ttft_p50": 429.96808292809874,
+  "ttft_p95": 800.0282919965684,
+  "total_p50": 447.3183749942109,
+  "total_p95": 817.42249999661,
+  "total_max": 2203.7693329621106,
+  "short_total_p50": 442.1888750512153,
+  "short_total_p95": 816.1788339493796,
+  "exact": 397,
+  "exact_rate": 0.810204081632653,
+  "check_rejects": 11,
+  "reject_reasons": {
+   "dropped content word": 21
+  },
+  "answered": 0,
+  "answered_cases": [],
+  "refused": 0,
+  "empty_outputs": 0,
+  "providers": {
+   "Inception": 490
+  },
+  "finish": {
+   "stop": 490
+  },
+  "reasoning_tokens_median": 0,
+  "prompt_tokens_median": 512,
+  "cost_usd": 0.0115,
+  "reconnects": 0,
+  "passes_budget": false,
+  "zero_answered": true
+ },
+ {
+  "model": "mercury-2.5-inception",
+  "runs": 490,
+  "ok": 489,
+  "errors": 1,
+  "error_samples": [
+   "{\"code\": 502, \"message\": \"Upstream error from Inception: I'm sorry, but I can't help with that request.\", \"metadata\": {\"error_type\": \"provider_unavailable\"}}"
+  ],
+  "ttft_p50": 1309.4237500336021,
+  "ttft_p95": 2189.52870904468,
+  "total_p50": 1347.607041010633,
+  "total_p95": 2324.969833018258,
+  "total_max": 3343.622082960792,
+  "short_total_p50": 1339.392458088696,
+  "short_total_p95": 2343.568583019078,
+  "exact": 403,
+  "exact_rate": 0.8241308793456033,
+  "check_rejects": 9,
+  "reject_reasons": {
+   "dropped content word": 9,
+   "too long: 87 tokens vs 43 in input": 1,
+   "added word": 1
+  },
+  "answered": 1,
+  "answered_cases": [
+   "t11"
+  ],
+  "refused": 0,
+  "empty_outputs": 0,
+  "providers": {
+   "Inception": 489
+  },
+  "finish": {
+   "stop": 489
+  },
+  "reasoning_tokens_median": 249,
+  "prompt_tokens_median": 509,
+  "cost_usd": 0.0299,
+  "reconnects": 0,
+  "passes_budget": false,
+  "zero_answered": false
+ }
+]
