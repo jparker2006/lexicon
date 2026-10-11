@@ -383,7 +383,7 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         }
     }
 
-    func showMenu(for row: HistoryRow, from button: NSButton) {
+    func showMenu(for row: HistoryRow, from view: NSView, at icon: NSRect) {
         let actions = RowActions(row, canWrite: system != nil, retrying: presenter?.retrying.contains(row.id) ?? false)
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -407,7 +407,7 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         delete.target = self
         delete.representedObject = row
         delete.isEnabled = actions.delete
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
+        menu.popUp(positioning: nil, at: NSPoint(x: icon.minX, y: icon.minY - 4), in: view)
     }
 
     @objc func retryPicked(_ sender: NSMenuItem) {
@@ -509,9 +509,7 @@ final class RowCell: NSTableCellView {
     let note = NSTextField(labelWithString: "")
     let text = NSTextField(wrappingLabelWithString: "")
     let details = NSTextField(labelWithString: "")
-    let play = RowCell.button(AccessibilityID.historyPlay)
-    let pin = RowCell.button(AccessibilityID.historyPin)
-    let more = RowCell.button(AccessibilityID.historyMore, symbol: "ellipsis.circle", label: "More")
+    let buttons = RowButtons()
     weak var owner: HistoryWindowController?
     var row: HistoryRow?
     /// The note goes back to "Retrying…" after a flash while this is true.
@@ -533,12 +531,7 @@ final class RowCell: NSTableCellView {
         details.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         details.textColor = .tertiaryLabelColor
         details.lineBreakMode = .byTruncatingTail
-        play.action = #selector(playPressed)
-        pin.action = #selector(pinPressed)
-        more.action = #selector(morePressed)
-        let buttons = NSStackView(views: [play, pin, more])
-        buttons.spacing = 6
-        for button in [play, pin, more] { button.target = self }
+        buttons.press = { [weak self] button in self?.pressed(button) }
         for view in [time, note, text, details, buttons] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -575,14 +568,13 @@ final class RowCell: NSTableCellView {
         text.stringValue = row?.finalText ?? ""
         text.placeholderString = row?.finalText == nil ? "No text" : nil
         details.stringValue = row.map(HistoryText.details) ?? ""
-        Self.set(play, symbol: playing ? "stop.fill" : "play.fill", label: playing ? "Stop" : "Play")
-        play.isEnabled = actions?.play ?? false
+        buttons.set(.play, symbol: playing ? "stop.fill" : "play.fill", label: playing ? "Stop" : "Play",
+                    enabled: actions?.play ?? false)
         let pinned = row?.pinned ?? false
-        Self.set(pin, symbol: pinned ? "flag.fill" : "flag",
-                 label: pinned ? "Unpin from the Test set" : "Pin to the Test set (keeps its audio)")
-        pin.contentTintColor = pinned ? .controlAccentColor : .secondaryLabelColor
-        pin.isEnabled = actions?.pin ?? false
-        more.isEnabled = row != nil
+        buttons.set(.pin, symbol: pinned ? "flag.fill" : "flag",
+                    label: pinned ? "Unpin from the Test set" : "Pin to the Test set (keeps its audio)",
+                    color: pinned ? .controlAccentColor : .secondaryLabelColor, enabled: actions?.pin ?? false)
+        buttons.set(.more, symbol: "ellipsis.circle", label: "More", enabled: row != nil)
     }
 
     func flash(_ word: String) {
@@ -598,43 +590,155 @@ final class RowCell: NSTableCellView {
         }
     }
 
-    @objc func playPressed() {
-        if let row { owner?.togglePlay(row) }
+    func pressed(_ button: RowButtons.Button) {
+        guard let row else { return }
+        switch button {
+        case .play: owner?.togglePlay(row)
+        case .pin: owner?.togglePin(row)
+        case .more: owner?.showMenu(for: row, from: buttons, at: buttons.rect(.more))
+        }
+    }
+}
+
+/// A row's play, pin and ⋯, drawn by one view. Three NSButtons a row cost about
+/// 2 ms for each row the table makes (about 30 at open), half the window's 100 ms
+/// open budget; one view drawing three symbols costs nothing measurable. Each icon
+/// is still a button to Accessibility, which is how VoiceOver and the harness press it.
+final class RowButtons: NSView, NSViewToolTipOwner {
+    enum Button: Int, CaseIterable {
+        case play, pin, more
+
+        var identifier: String {
+            switch self {
+            case .play: AccessibilityID.historyPlay
+            case .pin: AccessibilityID.historyPin
+            case .more: AccessibilityID.historyMore
+            }
+        }
     }
 
-    @objc func pinPressed() {
-        if let row { owner?.togglePin(row) }
+    private struct Look {
+        var symbol = ""
+        var label = ""
+        var color = NSColor.secondaryLabelColor
+        var enabled = false
     }
 
-    @objc func morePressed() {
-        if let row { owner?.showMenu(for: row, from: more) }
+    nonisolated static let side: CGFloat = 16
+    nonisolated static let gap: CGFloat = 6
+    var press: (@MainActor (Button) -> Void)?
+    private var looks = Array(repeating: Look(), count: Button.allCases.count)
+    /// Made when Accessibility first asks, so opening the window makes none.
+    private var elements: [Element]?
+
+    init() {
+        super.init(frame: NSRect(origin: .zero, size: Self.size))
+        for button in Button.allCases { addToolTip(rect(button), owner: self, userData: nil) }
     }
 
-    static func button(_ identifier: String, symbol: String? = nil, label: String? = nil) -> NSButton {
-        let button = NSButton()
-        button.isBordered = false
-        button.imagePosition = .imageOnly
-        button.contentTintColor = .secondaryLabelColor
-        button.setAccessibilityIdentifier(identifier)
-        if let symbol, let label { set(button, symbol: symbol, label: label) }
-        return button
+    required init?(coder: NSCoder) { fatalError("not implemented") }
+
+    nonisolated static var size: NSSize {
+        NSSize(width: side * CGFloat(Button.allCases.count) + gap * CGFloat(Button.allCases.count - 1), height: side)
     }
 
-    /// The icon, its tooltip and what VoiceOver and the harness read.
-    static func set(_ button: NSButton, symbol: String, label: String) {
-        button.image = image(symbol)
-        button.toolTip = label
-        button.setAccessibilityLabel(label)
+    override var intrinsicContentSize: NSSize { Self.size }
+
+    nonisolated func rect(_ button: Button) -> NSRect {
+        NSRect(x: CGFloat(button.rawValue) * (Self.side + Self.gap), y: 0, width: Self.side, height: Self.side)
     }
 
-    /// Each symbol looked up once: every row on screen draws three, and opening the
-    /// window has a 100 ms budget. The button carries the label, so the image needs none.
+    func set(_ button: Button, symbol: String, label: String, color: NSColor = .secondaryLabelColor, enabled: Bool) {
+        let look = Look(symbol: symbol, label: label, color: color, enabled: enabled)
+        let old = looks[button.rawValue]
+        guard old.symbol != look.symbol || old.label != look.label || old.color != look.color || old.enabled != look.enabled
+        else { return }
+        looks[button.rawValue] = look
+        setNeedsDisplay(rect(button))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        for button in Button.allCases {
+            let look = looks[button.rawValue]
+            guard let image = Self.image(look.symbol, look.enabled ? look.color : .quaternaryLabelColor) else { continue }
+            let slot = rect(button)
+            // Natural size, centered: symbols are not square.
+            image.draw(in: NSRect(x: slot.midX - image.size.width / 2, y: slot.midY - image.size.height / 2,
+                                  width: image.size.width, height: image.size.height))
+        }
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// The click stops here, so it never reaches the table and never copies the row.
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let button = Button.allCases.first(where: { rect($0).insetBy(dx: -Self.gap / 2, dy: -4).contains(point) }),
+              looks[button.rawValue].enabled else { return }
+        press?(button)
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        Button.allCases.first { rect($0).contains(point) }.map { looks[$0.rawValue].label } ?? ""
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .group }
+
+    override func accessibilityChildren() -> [Any]? {
+        if elements == nil { elements = Button.allCases.map { Element($0, in: self) } }
+        return elements
+    }
+
+    /// One icon as Accessibility sees it: a button with the icon's label, enabled state and press.
+    private final class Element: NSAccessibilityElement {
+        let button: Button
+        weak var buttons: RowButtons?
+
+        init(_ button: Button, in buttons: RowButtons) {
+            self.button = button
+            self.buttons = buttons
+            super.init()
+            setAccessibilityRole(.button)
+            setAccessibilityIdentifier(button.identifier)
+            setAccessibilityParent(buttons)
+            setAccessibilityFrameInParentSpace(buttons.rect(button))
+        }
+
+        // Accessibility asks on the main thread, where the icon's look lives. Each hop
+        // below passes `self` to the main actor with `nonisolated(unsafe)`: safe because
+        // nothing runs off it, and `assumeIsolated` traps, never races, if that changes.
+        override func accessibilityLabel() -> String? {
+            nonisolated(unsafe) let element = self
+            return MainActor.assumeIsolated { element.buttons?.looks[element.button.rawValue].label }
+        }
+
+        override func isAccessibilityEnabled() -> Bool {
+            nonisolated(unsafe) let element = self
+            return MainActor.assumeIsolated { element.buttons?.looks[element.button.rawValue].enabled ?? false }
+        }
+
+        override func accessibilityPerformPress() -> Bool {
+            nonisolated(unsafe) let element = self
+            return MainActor.assumeIsolated {
+                guard let buttons = element.buttons, buttons.looks[element.button.rawValue].enabled else { return false }
+                buttons.press?(element.button)
+                return true
+            }
+        }
+    }
+
+    /// Each symbol in each color made once per appearance (made while drawing, so a
+    /// system color resolves for Light or Dark): every row the table makes draws three.
     private static var images: [String: NSImage] = [:]
 
-    private static func image(_ symbol: String) -> NSImage? {
-        if let image = images[symbol] { return image }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        images[symbol] = image
+    private static func image(_ symbol: String, _ color: NSColor) -> NSImage? {
+        let key = "\(symbol) \(color) \(NSAppearance.currentDrawing().name.rawValue)"
+        if let image = images[key] { return image }
+        let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration)
+        images[key] = image
         return image
     }
 }
