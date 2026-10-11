@@ -207,6 +207,8 @@ Rejected: Sonnet's three-process split (see ADR 0001); always-resident local mod
 
 Builders record accepted deviations here, with who accepted them, and update the usage, signatures and ownership above before the next unit starts. Architect's scrap rule applies: if the same workaround shows up across unrelated code, if types need escape hatches (`@unchecked Sendable`, casts, always-set optionals), or if two independent deviations share a shape, stop and re-run `/pstack:architect` instead of bolting fixes on.
 
+- **The app shell starts the fn tap until #56** ([#53](https://github.com/jparker2006/lexicon/issues/53), proposed by its builder, for the Reviewer to accept). `LexiconSystem.live` doesn't exist yet, so `AppDelegate.startKeyboard` starts `Keyboard` and drains its commands, which reach only the `fn` log. #56 deletes `startKeyboard`, the `keyboard` property and the drain, starts the tap in `LexiconSystem.live`, and passes `Keyboard.commands` to `Conductor.follow`. The same `InputClock` goes to both `Keyboard` and `TargetApp`, or the late-text rule never sees typing.
+
 ## Hand-offs
 
 All settled by [Spec: Lexicon v0](https://github.com/jparker2006/lexicon/issues/36):

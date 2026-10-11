@@ -51,7 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = statusItem
         self.indicator = indicator
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
-        // TODO(#56): `LexiconSystem.live` starts the tap and `run()` hands its commands to `conductor.follow`.
+        // TODO(#56): delete `startKeyboard`, `keyboard` and the drain; `LexiconSystem.live` starts the tap
+        // and `run()` hands its commands to `conductor.follow` (docs/architecture.md, Implementation reconciliation).
         keyboard = Self.startKeyboard(log: log)
         #if DEBUG
         testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator)

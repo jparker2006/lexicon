@@ -7,7 +7,7 @@ public enum GlobeKey {
     /// True when the globe key has a system action of its own.
     public static var hasSystemAction: Bool {
         let domain = "com.apple.HIToolbox" as CFString
-        CFPreferencesAppSynchronize(domain)
+        CFPreferencesAppSynchronize(domain)  // System Settings writes it from another process; drop our cached copy
         return hasSystemAction(usageType: CFPreferencesCopyAppValue("AppleFnUsageType" as CFString, domain) as? Int)
     }
 
