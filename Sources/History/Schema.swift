@@ -70,6 +70,12 @@ enum HistorySchema {
           inserted_at       INTEGER NOT NULL       -- unix ms
         );
         """,
+        """
+        -- Covering for the History window's day sections: a year of History is
+        -- counted from this index alone, never reading the rows' text.
+        DROP INDEX dictation_by_time;
+        CREATE INDEX dictation_by_time ON dictation(started_at DESC, status, audio_storage);
+        """,
     ]
 
     /// Indexes whose SQL is generated from Swift enums. Not migrations (a
