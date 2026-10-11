@@ -33,6 +33,10 @@ enum LoginItem {
         }
     }
 
+    /// Whether the first-run offer is spent: once it is registered, however it
+    /// got there, a later removal in System Settings must stick.
+    nonisolated static func offered(_ offered: Bool, status: Status) -> Bool { offered || status != .notRegistered }
+
     /// The menu toggle. Turned off in System Settings, it can only be turned on there.
     nonisolated static func toggleAction(status: Status) -> Action {
         switch status {

@@ -186,3 +186,20 @@ public enum SetupCopy {
         }
     }
 }
+
+/// One relaunch at a time. A start that failed leaves Restart working, and the
+/// poll doesn't retry it by itself, or it would log a failure every second.
+public struct RelaunchGate: Sendable, Hashable {
+    private enum State: Sendable, Hashable { case idle, starting, failed }
+    private var state = State.idle
+    public init() {}
+
+    /// `byJake`: the Restart button, which may retry after a failure.
+    public mutating func begin(byJake: Bool) -> Bool {
+        guard state == .idle || (state == .failed && byJake) else { return false }
+        state = .starting
+        return true
+    }
+
+    public mutating func failed() { state = .failed }
+}

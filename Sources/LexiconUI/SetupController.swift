@@ -56,7 +56,7 @@ public final class Setup: NSObject {
     private var window: SetupWindowController?
     private var timer: Timer?
     private var downloading: Task<Void, Never>?
-    private var relaunching = false
+    private var relaunch = RelaunchGate()
     private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "setup")
 
     public init(statusItem: StatusItemController, preferences: PreferencesStore, services: Services,
@@ -156,7 +156,7 @@ public final class Setup: NSObject {
         // Private mode turned off since the download was refused: try again.
         if next.model == .privateMode, preferences.snapshot().privacy == .standard { next.model = .missing }
         update(next)
-        if relaunchRule.shouldRelaunch(trustedNow: next.accessibility) { relaunch() }
+        if relaunchRule.shouldRelaunch(trustedNow: next.accessibility) { relaunchApp(byJake: false) }
     }
 
     private func update(_ next: SetupFacts) {
@@ -186,15 +186,20 @@ public final class Setup: NSObject {
         SetupWindowActions(
             allowMicrophone: { [weak self] in self?.allowMicrophone() },
             openAccessibility: { [weak self] in self?.openAccessibility() },
-            restart: { [weak self] in self?.relaunch() },
+            restart: { [weak self] in self?.relaunchApp(byJake: true) },
             downloadModel: { [weak self] in self?.downloadModel() },
-            openKeyboardSettings: { [weak self] in self?.openKeyboardSettings() },
-            triedFn: { [weak self] in
-                guard let self else { return }
-                var next = facts
-                next.triedFn = true
-                update(next)
-            })
+            openKeyboardSettings: { [weak self] in self?.openKeyboardSettings() })
+    }
+
+    /// Runs until `events` ends. "Try it" is done when a Dictation is typed
+    /// into the setup window's box, not when Jake types there by hand.
+    public func follow(_ events: AsyncStream<ConductorEvent>) async {
+        for await event in events {
+            guard case .finished(_, .inserted) = event, window?.dictationLandedHere == true, !facts.triedFn else { continue }
+            var next = facts
+            next.triedFn = true
+            update(next)
+        }
     }
 
     /// The macOS prompt the first time; after a denial only System Settings can change it.
@@ -280,9 +285,8 @@ public final class Setup: NSObject {
     /// (test hooks, mic), plus `relaunchArgument`. Quitting waits for any
     /// Dictation in flight (`applicationShouldTerminate`); the shell gives up
     /// after 60 s, and `open` then just brings the old copy forward.
-    private func relaunch() {
-        guard !relaunching else { return }
-        relaunching = true
+    private func relaunchApp(byJake: Bool) {
+        guard relaunch.begin(byJake: byJake) else { return }
         let arguments = CommandLine.arguments.dropFirst().filter { $0 != Self.relaunchArgument } + [Self.relaunchArgument]
         let waiter = Process()
         waiter.executableURL = URL(filePath: "/bin/sh")
@@ -296,7 +300,8 @@ public final class Setup: NSObject {
             log.notice("relaunching to turn on fn")
             NSApp.terminate(nil)
         } catch {
-            // Restart stays offered: Jake can quit and reopen by hand.
+            // Restart stays offered (and works); the poll doesn't retry by itself.
+            relaunch.failed()
             log.error("relaunch failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -305,6 +310,9 @@ public final class Setup: NSObject {
 
     private func applyLoginItemAtLaunch() {
         let settings = preferences.snapshot(), status = LoginItem.status
+        if LoginItem.offered(settings.startAtLoginOffered, status: status) != settings.startAtLoginOffered {
+            preferences.update { $0.startAtLoginOffered = true }
+        }
         guard let action = LoginItem.launchAction(wanted: settings.startAtLogin, offered: settings.startAtLoginOffered,
                                                   status: status),
               action != .register || registersAtLogin else { return }

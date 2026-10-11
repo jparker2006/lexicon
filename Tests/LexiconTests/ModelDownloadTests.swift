@@ -26,7 +26,7 @@ private struct HangingDownload: Sendable {
 
 /// A model download needs no key.
 private func openAccess() throws -> CloudAccess {
-    try #require(CloudAccess.granted(by: .defaults, app: .unknown, keys: noKeys))
+    try #require(CloudAccess.granted(by: .defaults, for: .modelInstall, keys: noKeys))
 }
 
 private let noKeys: @Sendable (CredentialID) -> String? = { _ in nil }

@@ -8,14 +8,13 @@ struct SetupWindowActions {
     var restart: @MainActor () -> Void              // Accessibility row's "Restart Lexicon"
     var downloadModel: @MainActor () -> Void        // Speech model row's "Download" / "Try Again"
     var openKeyboardSettings: @MainActor () -> Void // globe key line's button
-    var triedFn: @MainActor () -> Void              // called once when the try field's text first becomes non-empty
 }
 
 /// The first-run setup window: a row per SetupStep, the globe key line and Done.
-/// It draws only what SetupCopy says, so the words Jake reads are the tested ones.
+/// Each step row draws what SetupCopy says, so the words that change with the facts are the tested ones.
 /// Closing drops the controller; the next open builds a fresh one.
 @MainActor
-final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
+final class SetupWindowController: NSWindowController, NSWindowDelegate {
     let actions: SetupWindowActions
     let onClose: @MainActor () -> Void
     private let stack = NSStackView()
@@ -27,8 +26,6 @@ final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextF
     private var facts: SetupFacts?
     /// True once the window has a place: a saved frame, or centered at the first show.
     private var positioned = false
-    /// Only the first keystroke reports to the coordinator, which keeps the fact.
-    private var reportedTry = false
 
     init(actions: SetupWindowActions, onClose: @escaping @MainActor () -> Void) {
         self.actions = actions
@@ -57,7 +54,6 @@ final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextF
         }
         tryField.placeholderString = "Your words land here"
         tryField.setAccessibilityIdentifier(AccessibilityID.setupTryField)
-        tryField.delegate = self
         tryField.isEnabled = false
         rows[.tryFn]?.column.addArrangedSubview(tryField)
         rows[.tryFn].map { tryField.fill($0.column) }
@@ -163,11 +159,9 @@ final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextF
         window?.performClose(nil)
     }
 
-    func controlTextDidChange(_ notification: Notification) {
-        guard !reportedTry, !tryField.stringValue.isEmpty else { return }
-        reportedTry = true
-        actions.triedFn()
-    }
+    /// A Dictation just finished as typed: it landed here when this window is
+    /// in front and its box has text. Typing in the box by hand never counts.
+    var dictationLandedHere: Bool { window?.isKeyWindow == true && !tryField.stringValue.isEmpty }
 
     func windowWillClose(_ notification: Notification) {
         onClose()

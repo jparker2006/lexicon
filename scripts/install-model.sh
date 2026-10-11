@@ -47,8 +47,13 @@ if [ "$FLAVOR" = daily ]; then
     fi
 elif complete "$DAILY"; then
     [ -e "$DEV" ] || ln -s "$DAILY" "$DEV"
-    echo "install-model: Lexicon Dev uses the daily copy's model"
-    exit 0
+    if [ -L "$DEV" ]; then
+        echo "install-model: Lexicon Dev uses the daily copy's model"
+        exit 0
+    fi
+    # A folder of its own (first-run setup downloaded into it): it is installed
+    # there, never replaced by a link without asking.
+    echo "install-model: $DEV is a folder of its own, not a link; installing there (remove it to share the daily model)" >&2
 elif [ -L "$DEV" ]; then
     # Linked to an incomplete daily install: download into a dev folder of its
     # own rather than through the link into the daily one.

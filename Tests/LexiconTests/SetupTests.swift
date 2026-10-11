@@ -82,6 +82,14 @@ private func facts(microphone: MicrophoneAccess = .granted, accessibility: Bool 
     #expect(LoginItem.launchAction(wanted: false, offered: true, status: .notRegistered) == nil)
 }
 
+@Test func aLoginItemFoundRegisteredSpendsTheFirstRunOffer() {
+    // Turned on some other way (Jake added it in System Settings): removing it later must stick.
+    #expect(LoginItem.offered(false, status: .enabled))
+    #expect(LoginItem.offered(false, status: .requiresApproval))
+    #expect(!LoginItem.offered(false, status: .notRegistered))
+    #expect(LoginItem.offered(true, status: .notRegistered))
+}
+
 @Test func theMenuToggleFlipsStartAtLogin() {
     #expect(LoginItem.toggleAction(status: .notRegistered) == .register)
     #expect(LoginItem.toggleAction(status: .enabled) == .unregister)
@@ -130,4 +138,20 @@ private func facts(microphone: MicrophoneAccess = .granted, accessibility: Bool 
         + [SetupCopy.globeKey(ok: false).detail, SetupCopy.globeKey(ok: true).detail]
         + SetupStep.allCases.flatMap { [SetupCopy.warningMenuTitle($0), SetupCopy.warningLabel($0)] }
     #expect(!words.contains { $0.contains("\u{2014}") })
+}
+
+@Test func aRelaunchThatFailedToStartCanBeRetriedByRestartButNotByThePoll() {
+    var gate = RelaunchGate()
+    let first = gate.begin(byJake: false)
+    // One at a time.
+    let whileStarting = gate.begin(byJake: true)
+    gate.failed()
+    // The poll would otherwise retry, and log a failure, every second.
+    let pollAfterFailure = gate.begin(byJake: false)
+    // Restart works again.
+    let restartAfterFailure = gate.begin(byJake: true)
+    #expect(first)
+    #expect(!whileStarting)
+    #expect(!pollAfterFailure)
+    #expect(restartAfterFailure)
 }
