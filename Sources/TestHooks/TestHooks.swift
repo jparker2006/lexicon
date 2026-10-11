@@ -23,6 +23,11 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     case dictate(wav: String)
     /// Show one indicator state.
     case indicator(state: String)
+    /// Record from the mic for `seconds` and measure it (#52). `preparedIdle`:
+    /// prepare the engine as at launch and wait this long before fn-down; nil
+    /// builds it on fn-down (cold). `deviceChange`: rebuild the engine halfway,
+    /// as when hardware changes. `deviceUID` nil: built-in mic.
+    case capture(seconds: Double, preparedIdle: Double?, deviceChange: Bool, deviceUID: String?)
     /// Paste `text` at the cursor through the real AppText path, as a Dictation
     /// would at fn-up: capture the focused field after `delay` seconds (time to
     /// click into the field), then insert.
@@ -31,6 +36,7 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
 
 public enum TestHookReply: Codable, Sendable, Equatable {
     case status(TestHookStatus)
+    case capture(MicMeasurement)
     case inserted(TestHookInsertion)
     /// The app understood the command but could not do it; the text says why.
     case failed(String)
