@@ -1,0 +1,14 @@
+name: CI
+
+# Every push, one check named CI. A push run also reports on any PR from this
+# repo whose head is that commit; adding pull_request would report it twice.
+# PRs from forks get no run (there are none).
+on: push
+
+jobs:
+  check:
+    name: CI
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - run: scripts/check.sh
