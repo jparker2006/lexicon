@@ -1,3 +1,4 @@
+import os
 import LexiconDomain
 
 /// Cloud vs local once recording stops (`Preferences.raceDeadline`). Pure, so the
@@ -71,6 +72,8 @@ struct ResidencyPolicy: Sendable, Hashable {
 /// which returns the process to its idle budget.
 actor LocalResidency {
     let transcriber: any LocalTranscriber
+    /// Loads and unloads, so idle memory can be read against them.
+    private let log = Logger(subsystem: "Lexicon", category: "speech")
     let clock: any Clock<Duration>
     /// Dictations between fn-down and their text. The model never unloads under one.
     private var dictating = 0
@@ -104,6 +107,22 @@ actor LocalResidency {
         if !(await transcriber.isResident) {
             try? await transcriber.load()  // a failed load shows up as a failed transcription
         }
+    }
+
+    /// Launch: load now if not resident, then follow `policy` (the idle unload),
+    /// or a newer one fed while the load ran (a first load takes about 25 s).
+    func warm(_ policy: ResidencyPolicy) async {
+        if !(await transcriber.isResident) {
+            let started = ContinuousClock.now
+            do {
+                try await transcriber.load()
+                let ms = (started.duration(to: .now) / .milliseconds(1)).rounded()
+                log.notice("local model loaded at launch in \(Int(ms), privacy: .public) ms")
+            } catch {
+                log.notice("local model not loaded at launch: \(String(describing: error), privacy: .private)")
+            }
+        }
+        await policyChanged(fed ?? policy)
     }
 
     /// The Dictation has its text (or was cancelled): start the idle timer.
@@ -151,5 +170,6 @@ actor LocalResidency {
         guard dictating == 0, !Task.isCancelled else { return }
         unloadTimer = nil
         await transcriber.unload()
+        log.notice("local model unloaded: no Dictation for the linger time")
     }
 }

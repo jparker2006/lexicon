@@ -17,6 +17,8 @@ public actor HeadlessDestination: TextDestination {
 
     let fixedContext: AppContext
     private(set) var delivered: [DictationID: String] = [:]
+    /// Every Dictation typed, in the order it was typed.
+    private(set) var typedOrder: [DictationID] = []
 
     /// `context`: what the Test set entry says Jake was dictating into (#15 manifest `context`).
     public init(context: AppContext = .unknown) { self.fixedContext = context }
@@ -33,6 +35,7 @@ public actor HeadlessDestination: TextDestination {
             return .notInserted(reason)
         case .insert:
             delivered[id] = text
+            typedOrder.append(id)
             return .inserted(InsertionReceipt(appBundleID: fixedContext.bundleID, fieldFingerprint: "headless",
                                               caretAfter: text.utf16.count, contextBefore: "", contextAfter: "",
                                               insertedAt: Date()))

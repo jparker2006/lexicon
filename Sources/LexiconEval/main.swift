@@ -109,6 +109,7 @@ func runEval(arguments: [String]) async -> Int32 {
 func evalFile(_ wav: URL, scripted: String?, lexicon: URL?) async -> Int32 {
     let entries: [LexiconEntry]
     do { entries = try readLexicon(lexicon) } catch { return fail("cannot read the Lexicon file: \(error.localizedDescription)") }
+    if scripted == nil { await warmParakeet() }
     let paths = AppPaths.temporary()
     defer { try? FileManager.default.removeItem(at: paths.root) }
     let system: HeadlessSystem
@@ -139,6 +140,7 @@ func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, le
         // Never over a manifest, a baseline or another run: they may be Jake's data.
         guard !FileManager.default.fileExists(atPath: out.path(percentEncoded: false)) else { return fail("--out already exists") }
     }
+    if !scriptedGold { await warmParakeet() }
     let entries: [LexiconEntry]
     do { entries = try readLexicon(lexicon) } catch { return fail("cannot read the Lexicon file: \(error.localizedDescription)") }
     let lines: [RunLine]
@@ -184,6 +186,7 @@ func transcribe(_ manifest: URL, out: URL) async -> Int32 {
     guard mayWriteRun(to: out, manifest: manifest, repo: repo) else {
         return fail("--out is inside a git repo but the manifest is not public; Test set text never goes in a repo")
     }
+    await warmParakeet()
     do {
         try await transcribeManifest(manifest, to: out) { _ in parakeet } progress: { done, total in
             FileHandle.standardError.write(Data("lexicon-eval: \(done)/\(total)\r".utf8))
@@ -210,6 +213,15 @@ struct PinnedModel: LocalTranscriber {
 }
 
 let parakeet = PinnedModel(parakeet: ParakeetTranscriber(paths: .forBundle(id: AppPaths.devBundleID)))
+
+/// Loads Parakeet before the first clip, as the app does at launch. A new
+/// executable's first load compiles for about 25 s, which would otherwise land
+/// on the first clip's lag, or past fn-up's 2 s wait and leave it waiting.
+/// A missing model is not an error here: each clip then reports it.
+func warmParakeet() async {
+    FileHandle.standardError.write(Data("lexicon-eval: loading Parakeet\r".utf8))
+    try? await parakeet.load()
+}
 
 /// The page's Import, from a shell: the same store call, so a second run adds
 /// nothing. Prints counts only, never an entry: the file may be Jake's starter

@@ -43,6 +43,7 @@ public enum TestHookReply: Codable, Sendable, Equatable {
     case soundPlayed(latency: Duration)
     case capture(MicMeasurement)
     case inserted(TestHookInsertion)
+    case dictated(TestHookDictation)
     /// The app understood the command but could not do it; the text says why.
     case failed(String)
 }
@@ -97,6 +98,24 @@ public struct TestHookInsertion: Codable, Sendable, Equatable {
         self.contextAfterCount = contextAfterCount
         self.clipboardAccessBefore = clipboardAccessBefore
         self.clipboardAccessAfter = clipboardAccessAfter
+    }
+}
+
+/// What one `dictate` did. No text: it can land in one of Jake's fields.
+public struct TestHookDictation: Codable, Sendable, Equatable {
+    /// The Dictation's status ("inserted", "notInserted", "waiting", ...), nil if nothing was recorded.
+    public let status: String?
+    /// End of file (its "fn-up") to the target app reading the paste.
+    public let lagMillis: Int?
+    /// The engine that won, as History names it ("local:parakeetUnified").
+    public let model: String?
+    public let characters: Int?
+
+    public init(status: String?, lagMillis: Int?, model: String?, characters: Int?) {
+        self.status = status
+        self.lagMillis = lagMillis
+        self.model = model
+        self.characters = characters
     }
 }
 
