@@ -3,6 +3,7 @@ import LexiconDomain
 import LexiconCore
 import AudioCapture
 import Transcription
+import WordStore
 
 /// One manifest line: NeMo-style (`audio_filepath`, `text`, `duration`) plus
 /// Lexicon's `session`, `terms`, `speech_end`, `context` and `split`. The scorer
@@ -75,9 +76,10 @@ enum EvalError: Error, CustomStringConvertible {
 /// is deleted after. `engine` gives the speech model for an entry: the local
 /// model, a scripted fake, or nil for none. Every audio file is checked before
 /// the first entry runs, so a broken manifest fails in seconds, not mid-run.
-/// `preferences` applies to every entry.
+/// `preferences` applies to every entry. `lexicon` is imported into each entry's
+/// own temporary Lexicon, as the app's Import would.
 func runManifest(_ manifest: URL, split: String?, pace: FilePace, preferences: Preferences = .defaults,
-                 engine: (ManifestEntry) -> (any LocalTranscriber)?,
+                 lexicon: [LexiconEntry] = [], engine: (ManifestEntry) -> (any LocalTranscriber)?,
                  progress: (Int, Int) -> Void = { _, _ in }) async throws -> [RunLine] {
     let entries = try readManifest(manifest).filter { split == nil || $0.split == split }
     guard !entries.isEmpty else { throw EvalError.noEntries(split: split) }
@@ -91,7 +93,8 @@ func runManifest(_ manifest: URL, split: String?, pace: FilePace, preferences: P
     var lines: [RunLine] = []
     for (entry, wav) in zip(entries, audio) {
         progress(lines.count, entries.count)
-        lines.append(try await run(entry, wav: wav, pace: pace, preferences: preferences, local: engine(entry)))
+        lines.append(try await run(entry, wav: wav, pace: pace, preferences: preferences, lexicon: lexicon,
+                                   local: engine(entry)))
     }
     progress(lines.count, entries.count)
     return lines
@@ -144,13 +147,14 @@ private func readManifest(_ url: URL) throws -> [ManifestEntry] {
 }
 
 private func run(_ entry: ManifestEntry, wav: URL, pace: FilePace, preferences: Preferences,
-                 local: (any LocalTranscriber)?) async throws -> RunLine {
+                 lexicon: [LexiconEntry], local: (any LocalTranscriber)?) async throws -> RunLine {
     let paths = AppPaths.temporary()
     defer { try? FileManager.default.removeItem(at: paths.root) }
     let context = AppContext(bundleID: entry.context, appName: nil, windowTitle: nil, workingDirectory: nil)
     let system: HeadlessSystem
     do {
         system = try HeadlessSystem.make(paths: paths, context: context, preferences: preferences, local: local)
+        if !lexicon.isEmpty { _ = try await system.lexicon.add(lexicon) }
     } catch {
         throw EvalError.setup("\(error)")
     }

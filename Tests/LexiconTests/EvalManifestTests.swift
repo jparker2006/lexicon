@@ -3,6 +3,7 @@ import Testing
 @testable import LexiconEval
 import LexiconCore
 import LexiconDomain
+import WordStore
 
 // `lexicon-eval --manifest` (#49): the real headless Conductor over a NeMo-style
 // manifest, one run line per entry for the scorer. A scripted engine stands in
@@ -14,6 +15,10 @@ private let gold = [
     (id: "b", text: "Open App.tsx in the worktree.", split: "held-back"),
     (id: "c", text: "Run kubectl against the staging cluster.", split: "everyday"),
 ]
+
+// The public sample Lexicon (made-up words, scorer/fixtures).
+private let sample = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().appending(path: "scorer/fixtures/sample-lexicon.txt")
 
 private func writeManifest(_ entries: [(id: String, text: String, split: String)], audio: String,
                            in dir: URL, withText: Bool = true) throws -> URL {
@@ -174,4 +179,46 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
     #expect(!mayWriteRun(to: repo.appending(path: "scorer/../run.jsonl"), manifest: privateSet, repo: repo))
     #expect(!mayWriteRun(to: main.appending(path: "run.jsonl"), manifest: privateSet, repo: repo))
     #expect(!mayWriteRun(to: main.appending(path: "worktrees/other/run.jsonl"), manifest: privateSet, repo: repo))
+}
+
+@Test func aLexiconFilesRulesApplyToEveryEntryOfTheManifest() async throws {
+    let manifest = try fixtureManifest()
+    let entries = try LexiconFile(contentsOf: sample).entries
+
+    let lines = try await runManifest(manifest, split: nil, pace: .asFastAsPossible, lexicon: entries) { _ in
+        ScriptedTranscriber(text: "Frob nicate the quux kit.")
+    }
+
+    #expect(lines.map(\.id) == ["a", "b", "c"])
+    #expect(lines.map(\.insertedText) == Array(repeating: "Frobnicate the QuuxKit.", count: 3))
+}
+
+@Test func withNoLexiconFileTheSameRunTypesTheWordsAsHeard() async throws {
+    let manifest = try fixtureManifest()
+
+    let lines = try await runManifest(manifest, split: nil, pace: .asFastAsPossible) { _ in
+        ScriptedTranscriber(text: "Frob nicate the quux kit.")
+    }
+
+    #expect(lines.map(\.insertedText) == Array(repeating: "Frob nicate the quux kit.", count: 3))
+}
+
+@Test func transcribeRejectsALexiconFile() async {
+    let code = await runEval(arguments: ["lexicon-eval", "--transcribe", "m.jsonl", "--out", "o.jsonl", "--lexicon", "x.txt"])
+    #expect(code == 2)  // usage: nothing runs
+}
+
+@Test func installModelRejectsALexiconFileBeforeAnyDownload() async {
+    let code = await runEval(arguments: ["lexicon-eval", "--install-model", "/tmp/x", "--lexicon", "x.txt"])
+    #expect(code == 2)  // usage: the install guard counts every option, so nothing downloads
+}
+
+@Test func aLexiconFileThatCannotBeReadFailsBeforeAnyDictation() async throws {
+    let dir = try scratchDirectory()
+    let wav = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: dir)
+    let missing = dir.appending(path: "missing.txt")
+
+    let code = await runEval(arguments: ["lexicon-eval", wav.path(percentEncoded: false), "--scripted", "x",
+                                         "--lexicon", missing.path(percentEncoded: false)])
+    #expect(code == 1)
 }

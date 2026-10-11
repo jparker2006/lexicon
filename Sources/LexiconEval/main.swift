@@ -3,15 +3,16 @@ import LexiconDomain
 import LexiconCore
 import LocalParakeet
 import Transcription
+import WordStore
 
 // `lexicon-eval`: dev tool, never shipped. Runs the real Conductor headless, at
 // the speed of speech, on one WAV or on every entry of a manifest.
 //
-//   swift run lexicon-eval <wav> [--scripted <text>]
+//   swift run lexicon-eval <wav> [--scripted <text>] [--lexicon <file>]
 //       {"status": "inserted", "text": "...", "lag_ms": 42}
 //
 //   swift run lexicon-eval --manifest <manifest.jsonl> [--split <name>]
-//       [--baseline <run.jsonl>] [--out <run.jsonl>] [--scripted-gold]
+//       [--baseline <run.jsonl>] [--out <run.jsonl>] [--scripted-gold] [--lexicon <file>]
 //       the report from `scorer/score report` (see scorer/README.md)
 //
 //   swift run lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
@@ -27,6 +28,9 @@ import Transcription
 // model. Without them local Parakeet runs from Lexicon Dev's `models/` (a
 // symlink to the daily copy's once that is installed); with no model there,
 // every Dictation waits and scores as no text.
+//
+// `--lexicon <file>` imports a Lexicon file (the app's import format) into every
+// Dictation, and a manifest run counts false alarms against its words too.
 //
 // A manifest run writes one run line per entry (`--out` keeps the file; it is
 // what a later run's `--baseline` reads), then passes it to the scorer and exits
@@ -61,7 +65,7 @@ func runEval(arguments: [String]) async -> Int32 {
     while let argument = rest.popFirst() {
         switch argument {
         case "--scripted-gold": scriptedGold = true
-        case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model", "--transcribe":
+        case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model", "--transcribe", "--lexicon":
             guard let value = rest.popFirst(), options[argument] == nil else { return usage() }
             options[argument] = value
         default:
@@ -82,19 +86,26 @@ func runEval(arguments: [String]) async -> Int32 {
         guard files.isEmpty, options["--scripted"] == nil else { return usage() }
         return await evalManifest(URL(filePath: manifest), split: options["--split"],
                                   baseline: options["--baseline"].map { URL(filePath: $0) },
-                                  out: options["--out"].map { URL(filePath: $0) }, scriptedGold: scriptedGold)
+                                  out: options["--out"].map { URL(filePath: $0) },
+                                  lexicon: options["--lexicon"].map { URL(filePath: $0) }, scriptedGold: scriptedGold)
     }
-    guard files.count == 1, options.keys.allSatisfy({ $0 == "--scripted" }), !scriptedGold else { return usage() }
-    return await evalFile(URL(filePath: files[0]), scripted: options["--scripted"])
+    guard files.count == 1, options.keys.allSatisfy({ $0 == "--scripted" || $0 == "--lexicon" }), !scriptedGold else {
+        return usage()
+    }
+    return await evalFile(URL(filePath: files[0]), scripted: options["--scripted"],
+                          lexicon: options["--lexicon"].map { URL(filePath: $0) })
 }
 
-func evalFile(_ wav: URL, scripted: String?) async -> Int32 {
+func evalFile(_ wav: URL, scripted: String?, lexicon: URL?) async -> Int32 {
+    let entries: [LexiconEntry]
+    do { entries = try readLexicon(lexicon) } catch { return fail("cannot read the Lexicon file: \(error.localizedDescription)") }
     let paths = AppPaths.temporary()
     defer { try? FileManager.default.removeItem(at: paths.root) }
     let system: HeadlessSystem
     do {
         system = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
                                          local: scripted.map(ScriptedTranscriber.init(text:)) ?? parakeet)
+        if !entries.isEmpty { _ = try await system.lexicon.add(entries) }
     } catch {
         return fail("\(error)")
     }
@@ -109,7 +120,8 @@ func evalFile(_ wav: URL, scripted: String?) async -> Int32 {
     return result.status == nil ? 1 : 0
 }
 
-func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, scriptedGold: Bool) async -> Int32 {
+func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, lexicon: URL?,
+                  scriptedGold: Bool) async -> Int32 {
     if let out {
         guard mayWriteRun(to: out, manifest: manifest, repo: repo) else {
             return fail("--out is inside a git repo but the manifest is not public; Test set text never goes in a repo")
@@ -117,9 +129,11 @@ func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, sc
         // Never over a manifest, a baseline or another run: they may be Jake's data.
         guard !FileManager.default.fileExists(atPath: out.path(percentEncoded: false)) else { return fail("--out already exists") }
     }
+    let entries: [LexiconEntry]
+    do { entries = try readLexicon(lexicon) } catch { return fail("cannot read the Lexicon file: \(error.localizedDescription)") }
     let lines: [RunLine]
     do {
-        lines = try await runManifest(manifest, split: split, pace: .realtime) { entry in
+        lines = try await runManifest(manifest, split: split, pace: .realtime, lexicon: entries) { entry in
             scriptedGold ? ScriptedTranscriber(text: entry.text ?? "") as any LocalTranscriber : parakeet
         } progress: { done, total in
             FileHandle.standardError.write(Data("lexicon-eval: \(done)/\(total)\r".utf8))
@@ -133,10 +147,21 @@ func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, sc
     defer { if out == nil { try? FileManager.default.removeItem(at: runFile) } }
     do { try writeRun(lines, to: runFile) } catch { return fail("\(error)") }
 
+    // A false alarm counts against the gold entry's Terms and the whole Lexicon, so
+    // the Lexicon's written forms go to the scorer in a file of their own.
+    let termsFile = FileManager.default.temporaryDirectory.appending(path: "lexicon-terms-\(UUID().uuidString).txt")
+    defer { if lexicon != nil { try? FileManager.default.removeItem(at: termsFile) } }
+
     var arguments = [repo.appending(path: "scorer/score").path(percentEncoded: false), "report", "--gold", manifest.path(percentEncoded: false),
                      "--run", runFile.path(percentEncoded: false)]
     if let split { arguments += ["--split", split] }
     if let baseline { arguments += ["--baseline", baseline.path(percentEncoded: false)] }
+    if lexicon != nil {
+        do { try writtenForms(entries).write(to: termsFile, atomically: true, encoding: .utf8) } catch {
+            return fail("cannot write the Lexicon's written forms: \(error.localizedDescription)")
+        }
+        arguments += ["--terms", termsFile.path(percentEncoded: false)]
+    }
     let scorer = Process()
     scorer.executableURL = URL(filePath: "/bin/sh")
     scorer.arguments = arguments
@@ -189,6 +214,33 @@ func installModel(into folder: URL) async -> Int32 {
     }
 }
 
+/// The `--lexicon` file, read once before a run. Only its counts go to stderr,
+/// never an entry: the file may be Jake's starter Lexicon.
+func readLexicon(_ url: URL?) throws -> [LexiconEntry] {
+    guard let url else { return [] }
+    let file = try LexiconFile(contentsOf: url)
+    let terms = file.entries.count(where: { if case .term = $0 { true } else { false } })
+    var report = "lexicon-eval: Lexicon: \(terms) Terms, \(file.entries.count - terms) Rules"
+    if file.unreadable > 0 { report += ", \(file.unreadable) lines not read" }
+    FileHandle.standardError.write(Data((report + "\n").utf8))
+    return file.entries
+}
+
+/// The written forms of a Lexicon, each once, one per line: a Term's text and a
+/// Rule's written side. The scorer's `--terms` file.
+func writtenForms(_ entries: [LexiconEntry]) -> String {
+    var seen = Set<String>()
+    var body = ""
+    for entry in entries {
+        let form = switch entry {
+        case .term(let term): term.text
+        case .rule(let rule): rule.written
+        }
+        if seen.insert(form).inserted { body += form + "\n" }
+    }
+    return body
+}
+
 func fail(_ message: String) -> Int32 {
     FileHandle.standardError.write(Data("lexicon-eval: \(message)\n".utf8))
     return 1
@@ -196,9 +248,9 @@ func fail(_ message: String) -> Int32 {
 
 func usage() -> Int32 {
     FileHandle.standardError.write(Data("""
-        usage: lexicon-eval <wav> [--scripted <text>]
+        usage: lexicon-eval <wav> [--scripted <text>] [--lexicon <file>]
                lexicon-eval --manifest <manifest.jsonl> [--split <name>] [--baseline <run.jsonl>]
-                            [--out <run.jsonl>] [--scripted-gold]
+                            [--out <run.jsonl>] [--scripted-gold] [--lexicon <file>]
                lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
                lexicon-eval --install-model <data folder>
 
