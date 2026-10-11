@@ -75,9 +75,9 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples == source)
 }
 
-@Test func insertTargetsCannotBeMadeOutsideTheirModules() throws {
+@Test func insertTargetsCannotBeMadeOutsideTheirModules() async throws {
     let imports = "import AppText\nimport KeyInput\nimport LexiconCore\nimport LexiconDomain\n"
-    let fetched = try compile(imports + """
+    let fetched = try await compile(imports + """
         func live(_ app: TargetApp) async -> TargetApp.Target? { await app.target() }
         func headless(_ destination: HeadlessDestination) async -> HeadlessDestination.Target? {
             await destination.target()
@@ -85,7 +85,7 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
         """)
     #expect(fetched.status == 0, "control snippet must compile: \(fetched.output)")
 
-    let live = try compile(imports + """
+    let live = try await compile(imports + """
         func make(_ clock: InputClock) -> TargetApp.Target {
             TargetApp.Target(focus: FocusSnapshot(pid: 1, fieldFingerprint: nil), bundleID: nil,
                              mark: clock.mark(), capturedAt: .now())
@@ -94,7 +94,7 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(live.status != 0)
     #expect(live.output.contains("inaccessible"), "\(live.output)")
 
-    let headless = try compile(imports + """
+    let headless = try await compile(imports + """
         func make() -> HeadlessDestination.Target {
             HeadlessDestination.Target(serial: 0, focus: FocusSnapshot(pid: 1, fieldFingerprint: nil))
         }
@@ -103,14 +103,14 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(headless.output.contains("inaccessible"), "\(headless.output)")
 }
 
-@Test func finishingASpeechAttemptTwiceIsACompileError() throws {
+@Test func finishingASpeechAttemptTwiceIsACompileError() async throws {
     let imports = "import LexiconDomain\nimport Transcription\n"
-    let once = try compile(imports + """
+    let once = try await compile(imports + """
         func run(_ attempt: consuming SpeechAttempt, _ clip: AudioClip) async { _ = await attempt.finish(clip) }
         """)
     #expect(once.status == 0, "control snippet must compile: \(once.output)")
 
-    let twice = try compile(imports + """
+    let twice = try await compile(imports + """
         func run(_ attempt: consuming SpeechAttempt, _ clip: AudioClip) async {
             _ = await attempt.finish(clip)
             _ = await attempt.finish(clip)
