@@ -140,6 +140,24 @@ func sleepWithTheNextPressStillQueuedKeepsThatDictation() async throws {
     #expect(try cafFiles(in: rig.history).count == 2)
 }
 
+@Test(.timeLimit(.minutes(1)))
+func quitWaitsForTheRecordingDictationToLand() async throws {
+    let rig = try FnRig()
+    var events = await rig.conductor.events().makeAsyncIterator()
+    let id = DictationID()
+
+    await rig.conductor.handle(.dictationBegan(id, at: fnAt(0)))
+    #expect(await awaitStart(&events) == id)
+    let quitting = Task { await rig.conductor.idle() }
+    await rig.conductor.handle(.dictationConfirmed(id, .hold))
+    await rig.conductor.handle(.dictationStopped(id, at: fnAt(600)))
+    await quitting.value
+
+    // Nothing else waited: `idle` alone leaves the row written and the audio closed.
+    #expect(await rig.history.dictation(id)?.status == .inserted)
+    #expect(try CAFFile.read(rig.history.audioURL(for: id)).samples.count > 0)
+}
+
 /// The real recognizer behind a `Keyboard`, fed by the test instead of the fn tap.
 private final class ScriptedKeys: Sendable {
     let keyboard: Keyboard

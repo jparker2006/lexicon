@@ -5,6 +5,7 @@ import LexiconDomain
 import AppText
 import AudioCapture
 import KeyInput
+import LexiconCore
 import LexiconUI
 import TestHooks
 
@@ -13,11 +14,14 @@ import TestHooks
 /// none of this is in it (scripts/bundle.sh checks).
 @MainActor
 enum AppTestHooks {
-    static func start(bundleID: String, paths: AppPaths, indicator: DictationIndicator) -> TestHookServer? {
+    static func start(bundleID: String, paths: AppPaths, indicator: DictationIndicator,
+                      system: LexiconSystem?) -> TestHookServer? {
         guard bundleID == AppPaths.devBundleID,
               CommandLine.arguments.contains(TestHookChannel.launchArgument) else { return nil }
         do {
-            return try TestHookServer(channel: TestHookChannel(paths: paths)) { await handle($0, indicator: indicator) }
+            return try TestHookServer(channel: TestHookChannel(paths: paths)) {
+                await handle($0, indicator: indicator, system: system)
+            }
         } catch {
             Logger(subsystem: bundleID, category: "test-hooks")
                 .error("test hooks did not start: \(error.localizedDescription, privacy: .public)")
@@ -25,15 +29,17 @@ enum AppTestHooks {
         }
     }
 
-    static func handle(_ command: TestHookCommand, indicator: DictationIndicator) async -> TestHookReply {
-        switch command {
+    static func handle(_ command: TestHookCommand, indicator: DictationIndicator,
+                       system: LexiconSystem?) async -> TestHookReply {
+        guard let system else { return .failed("the app did not open its History, so nothing runs") }
+        return switch command {
         case .status:
             .status(TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
                                    version: AppDelegate.version(of: .main), pid: getpid(),
                                    accessibility: Permissions.accessibility,
                                    microphone: Permissions.microphoneName))
-        case .dictate:
-            .failed("no live Dictation in the app yet: the Conductor is wired in by #56")
+        case .dictate(let wav):
+            await dictate(URL(filePath: wav), on: system)
         case .indicator(let state):
             showing(state, on: indicator)
         case .sound(let cue):
@@ -45,7 +51,7 @@ enum AppTestHooks {
         case .capture(let seconds, let preparedIdle, let deviceChange, let deviceUID):
             await capture(seconds: seconds, preparedIdle: preparedIdle, deviceChange: deviceChange, deviceUID: deviceUID)
         case .insert(let text, let delay):
-            await insert(text, after: delay)
+            await insert(text, after: delay, into: system.text)
         }
     }
 
@@ -66,13 +72,17 @@ enum AppTestHooks {
         return .done
     }
 
-    /// The live paste path with no fn tap yet: one `TargetApp`, as `LexiconSystem`
-    /// will own, and the same target-then-insert a Dictation makes.
-    private static var text: TargetApp?
+    /// The live path on a WAV: the same run as fn, typed into the focused field at
+    /// the end of the file, at the speed of speech.
+    private static func dictate(_ wav: URL, on system: LexiconSystem) async -> TestHookReply {
+        let result = await system.conductor.dictate(file: wav, pace: .realtime)
+        return .dictated(TestHookDictation(status: result.status?.rawValue, lagMillis: result.lag.map { micros($0) / 1_000 },
+                                           model: result.model?.id, characters: result.versions?.cleaned.count))
+    }
 
-    private static func insert(_ text: String, after delay: Double) async -> TestHookReply {
-        let app = self.text ?? TargetApp(input: InputClock())
-        self.text = app
+    /// The live paste path alone: the system's `TargetApp`, and the same
+    /// target-then-insert a Dictation makes.
+    private static func insert(_ text: String, after delay: Double, into app: TargetApp) async -> TestHookReply {
         try? await Task.sleep(for: .seconds(max(0, min(delay, 20))))
         let before = access()
         let bundleID = await app.context().bundleID

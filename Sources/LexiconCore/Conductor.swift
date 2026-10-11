@@ -166,6 +166,16 @@ public actor Conductor<Destination: TextDestination> {
         if let id = capturingID { endCapture(id, .stop(at: .now())) }
     }
 
+    /// Quit: returns once no Dictation is recording or finishing, and History and
+    /// the audio files have everything. A recording Dictation ends the normal way,
+    /// at fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
+    /// A waiting Dictation keeps its audio and is picked up at the next launch.
+    public func idle() async {
+        while let run = inFlight.values.first { _ = await run.value }
+        await history.flush()
+        await recorder.settle()
+    }
+
     /// UI, logs. Each call returns a new stream (any number of observers).
     public func events() -> AsyncStream<ConductorEvent> {
         let (stream, continuation) = AsyncStream<ConductorEvent>.makeStream(bufferingPolicy: .bufferingNewest(32))

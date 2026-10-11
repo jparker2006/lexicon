@@ -1,4 +1,5 @@
 import Foundation
+import os
 import LexiconDomain
 import KeyInput
 import AudioCapture
@@ -113,6 +114,7 @@ extension Conductor {
             // Keep the audio and show "waiting"; Jake is never asked to redo it. A
             // waiting Dictation gives up its turn, so later Dictations still insert.
             history.record(.waiting(id, reason: String(describing: reason)))
+            log.notice("Dictation \(id, privacy: .public) waiting: \(String(describing: reason), privacy: .public)")
             if reason.waitsForNetwork { emit(.notice(.waitingForNetwork(id))) }
             releaseInsertTurn(id)
             run.hold.end()
@@ -125,6 +127,7 @@ extension Conductor {
 
         case .unavailable(let reason):
             history.record(.failed(id, reason: String(describing: reason)))
+            log.notice("Dictation \(id, privacy: .public) failed: \(String(describing: reason), privacy: .public)")
             emit(.finished(id, .failed))
             return DictationResult(id: id, status: .failed, versions: nil, cleanup: nil, model: nil, lag: nil,
                                    attempts: [])
@@ -164,6 +167,12 @@ extension Conductor {
                 _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)
             }
             let status = DictationStatus.landed(delivery, origin: run.origin, previous: run.previous)
+            // `lag` is the spec's number: fn-up to the target app reading the paste (scripts/lag-report.sh).
+            let lagText = lag.map { "lag \($0.milliseconds) ms, " } ?? ""
+            log.notice("""
+                Dictation \(id, privacy: .public) \(status.rawValue, privacy: .public): \(lagText, privacy: .public)\
+                engine \(heard.model.id, privacy: .public), speech \(heard.finalizeToText.milliseconds, privacy: .public) ms
+                """)
             emit(.finished(id, status))
             return DictationResult(id: id, status: status, versions: cleaned.versions, cleanup: cleaned.outcome,
                                    model: heard.model, lag: lag, attempts: heard.attempts)
@@ -190,4 +199,9 @@ extension Conductor {
             return await group.next() ?? .stop(at: .now())
         }
     }
+}
+
+extension Duration {
+    /// Whole milliseconds, for the log.
+    var milliseconds: Int64 { Int64((self / .milliseconds(1)).rounded()) }
 }
