@@ -7,8 +7,9 @@ public import LexiconDomain
 /// (`CleanupSession.finish`).
 ///
 /// Order, fixed here and nowhere else:
-///   1. Rules (the Lexicon's "heard X, write Y"); none before #70
-///   2. the filler pass, one line at a time (`Fillers.clean`)
+///   1. Rules and Term folding (`RuleSet.apply`)
+///   2. the filler pass, one line at a time (`Fillers.clean`), which never
+///      changes the case of a Term or a Rule's written side
 ///
 /// The speech model already supplies punctuation and capitals. The pass only
 /// deletes listed fillers and accidental repeats, then tidies the spacing,
@@ -20,7 +21,7 @@ public enum TextPass {
         var dictationStart = true
         return ruled.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
             .map { line in
-                let cleaned = Fillers.clean(line, dictationStart: dictationStart)
+                let cleaned = Fillers.clean(line, dictationStart: dictationStart, rules: rules)
                 if !cleaned.isEmpty { dictationStart = false }
                 return cleaned
             }
@@ -96,7 +97,7 @@ enum Fillers {
 
     /// The filler pass over one line. A line always starts a sentence;
     /// `dictationStart`: no earlier line kept anything.
-    static func clean(_ line: Substring, dictationStart: Bool) -> String {
+    static func clean(_ line: Substring, dictationStart: Bool, rules: RuleSet) -> String {
         let tokens = line.split(whereSeparator: \.isWhitespace).map(Token.init)
         var kept: [String] = []
         var keptWords: [String] = []
@@ -141,7 +142,9 @@ enum Fillers {
             }
 
             var text = String(token.text)
-            if sentenceKept == 0, droppedOpener, !token.isCode { text = Token.capitalized(text) }
+            if sentenceKept == 0, droppedOpener, !token.isCode, !rules.isWritten(token.text) {
+                text = Token.capitalized(text)
+            }
             kept.append(text)
             keptWords.append(token.word)
             sentenceKept = token.endsSentence ? 0 : sentenceKept + 1
