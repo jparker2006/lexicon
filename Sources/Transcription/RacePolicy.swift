@@ -42,24 +42,77 @@ struct ResidencyPolicy: Sendable, Hashable {
     var networkReachable: Bool
     var linger: Duration
 
-    /// Should the model be resident `idle` after the last Dictation ended?
-    func keepResident(idle: Duration) -> Bool {
-        // TODO: privacy == .private || !networkReachable || idle < linger
-        fatalError("not implemented")
+    /// Reachability is not watched until the cloud race lands (#66): with no
+    /// cloud engine there is nothing to lose, so the network counts as up.
+    init(_ preferences: Preferences, networkReachable: Bool = true) {
+        privacy = preferences.privacy
+        self.networkReachable = networkReachable
+        linger = preferences.localModelLinger
+    }
+
+    /// How long after the last Dictation to unload. nil: stay resident.
+    var unloadAfter: Duration? {
+        privacy == .private || !networkReachable ? nil : linger
     }
 }
 
 /// Applies `ResidencyPolicy` to the one local model: loads on fn-down if not
 /// resident, loads at once when the policy turns "always" (Private mode on,
-/// network lost), schedules the unload otherwise. Returns the process to its
-/// idle budget when the policy allows.
+/// network lost), and unloads once no Dictation has run for the linger time,
+/// which returns the process to its idle budget.
 actor LocalResidency {
     let transcriber: any LocalTranscriber
-    init(transcriber: any LocalTranscriber) { self.transcriber = transcriber }
+    let clock: any Clock<Duration>
+    /// Dictations between fn-down and their text. The model never unloads under one.
+    private var dictating = 0
+    private var unloadTimer: Task<Void, Never>?
 
-    /// fn-down: load if not resident, then re-arm the unload timer under `policy`.
-    func dictationBegan(_ policy: ResidencyPolicy) async { fatalError("not implemented") }
+    init(transcriber: any LocalTranscriber, clock: any Clock<Duration>) {
+        self.transcriber = transcriber
+        self.clock = clock
+    }
+
+    /// fn-down: stop the unload timer and load if not resident.
+    func dictationBegan() async {
+        dictating += 1
+        unloadTimer?.cancel()
+        unloadTimer = nil
+        if !(await transcriber.isResident) {
+            try? await transcriber.load()  // a failed load shows up as a failed transcription
+        }
+    }
+
+    /// The Dictation has its text (or was cancelled): start the idle timer.
+    func dictationEnded(_ policy: ResidencyPolicy) {
+        dictating -= 1
+        armUnload(policy)
+    }
 
     /// Private mode toggled or reachability changed (SpeechEngine feeds this).
-    func policyChanged(_ policy: ResidencyPolicy) async { fatalError("not implemented") }
+    func policyChanged(_ policy: ResidencyPolicy) async {
+        if policy.unloadAfter == nil {
+            unloadTimer?.cancel()
+            unloadTimer = nil
+            if !(await transcriber.isResident) { try? await transcriber.load() }
+        } else {
+            armUnload(policy)
+        }
+    }
+
+    private func armUnload(_ policy: ResidencyPolicy) {
+        unloadTimer?.cancel()
+        unloadTimer = nil
+        guard dictating == 0, let linger = policy.unloadAfter else { return }
+        let clock = clock
+        unloadTimer = Task {
+            do { try await clock.sleep(for: linger) } catch { return }
+            await self.unloadIfIdle()
+        }
+    }
+
+    private func unloadIfIdle() async {
+        guard dictating == 0, !Task.isCancelled else { return }
+        unloadTimer = nil
+        await transcriber.unload()
+    }
 }
