@@ -92,7 +92,7 @@ let package = Package(
         // SwiftPM products (ADR 0003): bundle, Info.plist, entitlements, signing (#14).
         .executableTarget(
             name: "LexiconApp",
-            dependencies: ["LexiconDomain", "LexiconCore", "LexiconUI", "LocalParakeet", "TestHooks"]
+            dependencies: ["LexiconDomain", "LexiconCore", "LexiconUI", "LocalParakeet", "AudioCapture", "TestHooks"]
         ),
 
         // `lexicon-eval`: headless pipeline on WAV files for the scorer (#15). Dev only, never shipped.
