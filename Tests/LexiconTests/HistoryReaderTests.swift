@@ -1,0 +1,366 @@
+import Foundation
+import Testing
+@testable import History
+import LexiconDomain
+
+// The History window's reader over a throwaway data folder. Small cases go in
+// through History's write API; the year-sized cases are seeded with synthetic
+// text in one transaction. A fixed clock and time zone, so day headers and
+// DST never depend on when or where the tests run.
+
+private let pacific: Calendar = {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+    return calendar
+}()
+
+/// The fake clock: Sunday 11 October 2026, 15:00 in Los Angeles.
+private let now = pacific.date(from: DateComponents(year: 2026, month: 10, day: 11, hour: 15))!
+
+private func at(_ month: Int, _ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+    pacific.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour, minute: minute))!
+}
+
+private let app = AppContext(bundleID: "com.example.editor", appName: "Editor", windowTitle: nil, workingDirectory: nil)
+private let parakeet = SpeechModel.local(.parakeetUnified)
+private let audio = AudioSummary(duration: .milliseconds(1_200), startGap: nil, deviceName: "Mic", storage: .onDisk, gaps: [])
+
+private func makeStore() throws -> (HistoryStore, AppPaths) {
+    let paths = AppPaths.temporary()
+    return (try HistoryStore(paths: paths), paths)
+}
+
+/// A live Dictation recorded through to inserted, as the Conductor would.
+@discardableResult
+private func dictate(_ store: HistoryStore, _ text: String, at start: Date) -> DictationID {
+    let id = DictationID()
+    store.record(.began(id, origin: .live, purpose: .type, at: start, app: app))
+    store.record(.audioEnded(id, audio))
+    store.record(.textReady(id, TextVersions(model: text, cleaned: text), cleanup: .rulesOnly(.off), model: parakeet, typing: true))
+    store.record(.delivered(id, InsertionReceipt(appBundleID: app.bundleID, fieldFingerprint: nil, caretAfter: nil,
+                                                 contextBefore: "", contextAfter: "", insertedAt: start),
+                            lag: .milliseconds(420)))
+    return id
+}
+
+/// Every row of every section, page by page, as the window would fetch them.
+@MainActor
+private func allRows(_ reader: HistoryReader, _ sections: [DaySection], page: Int = 50) -> [[HistoryRow]] {
+    sections.map { section in
+        stride(from: 0, to: section.count, by: page).flatMap { reader.rows(in: section, offsets: $0..<min($0 + page, section.count)) }
+    }
+}
+
+// MARK: - A year of synthetic History
+
+/// About three times Jake's rate (the spec's 441 Wispr clips in about two weeks is about 30 a day).
+private let perDay = 100
+private let jakesRate = 30
+private let days = 365
+private let marker = "zanzibar"
+/// Every 97th Dictation says the marker word, in a known place.
+private let markerEvery = 97
+
+/// Deterministic synthetic text: no real Dictation, no randomness between runs.
+private struct Synthetic {
+    private var state: UInt64 = 0x2545_F491_4F6C_DD1D
+    private static let words = """
+        the auth callback should retry once then fall back to the local model and log the lag so we can see \
+        whether the cloud helps make sure history opens fast and search stays under twenty milliseconds please \
+        ship it after the tests pass and the reviewer merges keep the clipboard as it was
+        """.split(separator: " ").map(String.init)
+
+    mutating func next() -> UInt64 {
+        state ^= state << 13
+        state ^= state >> 7
+        state ^= state << 17
+        return state
+    }
+
+    mutating func sentence(_ index: Int) -> String {
+        let count = 8 + Int(next() % 90)
+        var words = (0..<count).map { _ in Self.words[Int(next() % UInt64(Self.words.count))] }
+        if index % markerEvery == 0 { words.insert(index % 2 == 0 ? marker : marker.uppercased(), at: words.count / 2) }
+        let text = words.joined(separator: " ")
+        return text.prefix(1).uppercased() + text.dropFirst() + "."
+    }
+}
+
+/// One seeded year for every test that only reads it.
+@MainActor private var seededYear: Task<(paths: AppPaths, total: Int), any Error>?
+
+@MainActor private func year() async throws -> (paths: AppPaths, total: Int) {
+    if seededYear == nil {
+        seededYear = Task {
+            let (store, paths) = try makeStore()
+            return (paths, try await seedYear(store))
+        }
+    }
+    return try await seededYear!.value
+}
+
+/// `perDay` Dictations on each of the last `days` days, newest at `now`, spread over waking hours.
+private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws -> Int {
+    var synthetic = Synthetic()
+    var rows: [(id: String, at: Int64, text: String)] = []
+    for day in 0..<days {
+        let date = pacific.date(byAdding: .day, value: -day, to: pacific.startOfDay(for: now))!
+        for slot in 0..<perDay {
+            // 07:00 to 15:00, so today's rows are all before the fake clock.
+            let ms = date.unixMs + Int64(7 * 3_600_000) + Int64(slot) * (28_800_000 / Int64(perDay))
+            rows.append((DictationID().description, ms, synthetic.sentence(rows.count)))
+        }
+    }
+    let cleanup = try CleanupOutcome.rulesOnly(.off).column()
+    try await store.read { [rows] db in
+        try db.transaction { db in
+            for row in rows {
+                try db.execute("""
+                    INSERT INTO dictation (id, started_at, origin, purpose, status, model_text, cleaned_text, final_text,
+                                           cleanup, model, lag_ms, audio_storage)
+                    VALUES (?, ?, 'live', 'type', 'inserted', ?, ?, ?, ?, ?, 480, 'onDisk')
+                    """, [.text(row.id), .int(row.at), .text(row.text), .text(row.text), .text(row.text),
+                          .text(cleanup), .text(parakeet.id)])
+            }
+        }
+    }
+    return rows.count
+}
+
+// MARK: - Rows
+
+@MainActor @Test func aDictationShowsUnderItsDayWithEverythingTheRowDraws() async throws {
+    let (store, paths) = try makeStore()
+    let id = dictate(store, "Wire the auth callback into Supabase.", at: at(10, 11, 9, 41))
+    await store.flush()
+
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let sections = reader.sections(matching: nil)
+    #expect(sections.map(\.day) == [DateComponents(year: 2026, month: 10, day: 11)])
+    #expect(sections.map(\.count) == [1])
+
+    let row = try #require(reader.rows(in: sections[0], offsets: 0..<1).first)
+    #expect(row.id == id)
+    #expect(row.startedAt == at(10, 11, 9, 41))
+    #expect(row.finalText == "Wire the auth callback into Supabase.")
+    #expect(row.status == .inserted)
+    #expect(row.model == parakeet)
+    #expect(row.lag == .milliseconds(420))
+    #expect(row.cleanup == .rulesOnly(.off))
+    #expect(row.hasAudio)
+    #expect(!row.pinned)
+}
+
+@MainActor @Test func aDictationThatIsNotInsertedShowsItsStatusAndNoTextYet() async throws {
+    let (store, paths) = try makeStore()
+    let id = DictationID()
+    store.record(.began(id, origin: .live, purpose: .type, at: at(10, 11, 9), app: app))
+    store.record(.audioEnded(id, audio))
+    store.record(.waiting(id, reason: "offline"))
+    await store.flush()
+
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let row = try #require(reader.rows(in: reader.sections(matching: nil)[0], offsets: 0..<1).first)
+    #expect(row.status == .waiting)
+    #expect(row.finalText == nil)
+    #expect(row.model == nil)
+    #expect(row.lag == nil)
+}
+
+@MainActor @Test func fullTextComesBackWhole() async throws {
+    let (store, paths) = try makeStore()
+    let long = String(repeating: "Every word of a long hands-free Dictation stays in History. ", count: 200)
+    dictate(store, long, at: at(10, 11, 9))
+    await store.flush()
+
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    #expect(reader.rows(in: reader.sections(matching: nil)[0], offsets: 0..<1).first?.finalText == long)
+}
+
+@MainActor @Test func daysAreNewestFirstAndEndAtLocalMidnightThroughADSTChange() async throws {
+    let (store, paths) = try makeStore()
+    // 1 November 2026 is the day clocks fall back in Los Angeles: a 25-hour day.
+    dictate(store, "Late on Halloween.", at: at(10, 31, 23, 59))
+    dictate(store, "Just after midnight.", at: at(11, 1, 0, 1))
+    dictate(store, "The extra hour, late at night.", at: at(11, 1, 23, 30))
+    dictate(store, "Next morning.", at: at(11, 2, 8))
+    await store.flush()
+
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let sections = reader.sections(matching: nil)
+    #expect(sections.map(\.day) == [DateComponents(year: 2026, month: 11, day: 2), DateComponents(year: 2026, month: 11, day: 1),
+                                    DateComponents(year: 2026, month: 10, day: 31)])
+    #expect(allRows(reader, sections).map { $0.compactMap(\.finalText) } == [
+        ["Next morning."], ["The extra hour, late at night.", "Just after midnight."], ["Late on Halloween."],
+    ])
+}
+
+@MainActor @Test func aDeletedDictationIsGone() async throws {
+    let (store, paths) = try makeStore()
+    let kept = dictate(store, "Keep this one.", at: at(10, 11, 9))
+    let gone = dictate(store, "Delete this one.", at: at(10, 11, 10))
+    try Data([0]).write(to: store.audioURL(for: gone))
+    store.record(.deleted(gone))
+    await store.flush()
+
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let sections = reader.sections(matching: nil)
+    #expect(sections.map(\.count) == [1])
+    #expect(reader.rows(in: sections[0], offsets: 0..<5).map(\.id) == [kept])
+}
+
+@MainActor @Test func aRowWithAStatusFromANewerBuildIsNeitherShownNorCounted() async throws {
+    let (store, paths) = try makeStore()
+    let kept = dictate(store, "Known status.", at: at(10, 11, 9))
+    try await store.read { db in
+        try db.execute("""
+            INSERT INTO dictation (id, started_at, origin, purpose, status, final_text, audio_storage)
+            VALUES (?, ?, 'live', 'type', 'someFutureStatus', 'From a newer build.', 'onDisk')
+            """, [.text(DictationID().description), .int(at(10, 11, 10).unixMs)])
+    }
+
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let sections = reader.sections(matching: nil)
+    #expect(sections.map(\.count) == [1])
+    #expect(reader.rows(in: sections[0], offsets: 0..<5).map(\.id) == [kept])
+}
+
+@MainActor @Test func beforeTheFirstDictationHistoryIsEmptyAndNoFileIsMade() throws {
+    let paths = AppPaths.temporary()
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    #expect(reader.sections(matching: nil).isEmpty)
+    #expect(reader.sections(matching: "anything").isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: paths.root.appending(path: "history.sqlite").path(percentEncoded: false)))
+}
+
+@MainActor @Test func versionMovesWhenTheWriterCommitsSoTheWindowKnowsToReload() async throws {
+    let (store, paths) = try makeStore()
+    dictate(store, "First.", at: at(10, 11, 9))
+    await store.flush()
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let before = reader.version
+    #expect(reader.version == before)
+
+    dictate(store, "Second.", at: at(10, 11, 10))
+    await store.flush()
+    #expect(reader.version != before)
+    #expect(reader.sections(matching: nil).map(\.count) == [2])
+}
+
+// MARK: - Search
+
+@MainActor @Test func searchIsAPlainCaseInsensitiveMatchOnFinalText() async throws {
+    let (store, paths) = try makeStore()
+    dictate(store, "Move the Supabase keys.", at: at(10, 10, 9))
+    dictate(store, "We are 100% done.", at: at(10, 11, 9))
+    dictate(store, "Rename it to snake_case.", at: at(10, 11, 10))
+    dictate(store, "Escape the back\\slash.", at: at(10, 11, 11))
+    await store.flush()
+
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    func found(_ query: String?) -> [String] {
+        allRows(reader, reader.sections(matching: query)).flatMap { $0.compactMap(\.finalText) }
+    }
+    #expect(found("supabase") == ["Move the Supabase keys."])
+    #expect(found("SUPA") == ["Move the Supabase keys."])
+    // LIKE's wildcards and its escape character match only themselves.
+    #expect(found("%") == ["We are 100% done."])
+    #expect(found("_") == ["Rename it to snake_case."])
+    #expect(found("\\") == ["Escape the back\\slash."])
+    #expect(found("nothing like this") == [])
+    #expect(found("  ").count == 4)
+    #expect(found(nil).count == 4)
+}
+
+// MARK: - A year of History
+
+@MainActor @Test func aYearOfHistoryOpensOnTodayAndPagesThroughEveryDay() async throws {
+    let (paths, total) = try await year()
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let sections = reader.sections(matching: nil)
+    #expect(sections.count == days)
+    #expect(sections.first?.day == DateComponents(year: 2026, month: 10, day: 11))
+    #expect(sections.allSatisfy { $0.count == perDay })
+    #expect(sections.reduce(0) { $0 + $1.count } == total)
+
+    // First rows: one page of today's newest.
+    let first = reader.rows(in: sections[0], offsets: 0..<20)
+    #expect(first.count == 20)
+    #expect(first.map(\.startedAt) == first.map(\.startedAt).sorted(by: >))
+    #expect(first.allSatisfy { pacific.isDate($0.startedAt, inSameDayAs: now) })
+
+    // Paging a day returns each of its rows once, in order, and only that day's.
+    let pages = allRows(reader, Array(sections.prefix(3)), page: 30)
+    for (section, rows) in zip(sections, pages) {
+        #expect(rows.count == section.count)
+        #expect(Set(rows.map(\.id)).count == section.count)
+        #expect(rows.map(\.startedAt) == rows.map(\.startedAt).sorted(by: >))
+        #expect(rows.allSatisfy { pacific.dateComponents([.year, .month, .day], from: $0.startedAt) == section.day })
+    }
+}
+
+@MainActor @Test func searchOverAYearFindsEveryMatchAndNothingElse() async throws {
+    let (paths, total) = try await year()
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let sections = reader.sections(matching: marker)
+    let rows = allRows(reader, sections).flatMap { $0 }
+    #expect(rows.count == (total + markerEvery - 1) / markerEvery)
+    #expect(sections.reduce(0) { $0 + $1.count } == rows.count)
+    #expect(rows.allSatisfy { $0.finalText?.localizedCaseInsensitiveContains(marker) == true })
+}
+
+// MARK: - Speed (opt in: LEXICON_BENCH=1)
+
+// The window's two latency targets, measured on a year of synthetic History.
+// Wall-clock numbers depend on the machine, so these never run in CI or a plain
+// `swift test`; run them alone, on a quiet Mac:
+//
+//     LEXICON_BENCH=1 swift test -c release --no-parallel --filter speed
+private let bench = ProcessInfo.processInfo.environment["LEXICON_BENCH"] != nil
+
+private func percentile(_ samples: [Duration], _ p: Double) -> Duration {
+    let sorted = samples.sorted()
+    return sorted[min(sorted.count - 1, Int((Double(sorted.count) * p).rounded(.up)) - 1)]
+}
+
+@MainActor @Test(.enabled(if: bench)) func speedFirstRowsWithinBudget() async throws {
+    let paths = try await year().paths
+    let clock = ContinuousClock()
+    var samples: [Duration] = []
+    for _ in 0..<50 {
+        samples.append(try clock.measure {
+            // What a window open costs the reader: a new connection, the day sections, the first screenful.
+            let reader = try HistoryReader(paths: paths, calendar: pacific)
+            let sections = reader.sections(matching: nil)
+            _ = reader.rows(in: sections[0], offsets: 0..<30)
+        })
+    }
+    print("History reader, first rows over \(perDay * days) Dictations: p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")
+    #expect(percentile(samples, 0.95) <= .milliseconds(100))
+}
+
+/// Search over `paths` with a few queries, as Jake types them: day sections plus the first screenful.
+@MainActor
+private func searchTimes(_ paths: AppPaths) throws -> [Duration] {
+    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let clock = ContinuousClock()
+    return ["zanzibar", "callback", "milliseconds please", "no such words anywhere"].flatMap { query in
+        (0..<10).map { _ in
+            clock.measure {
+                let sections = reader.sections(matching: query)
+                if let first = sections.first { _ = reader.rows(in: first, offsets: 0..<30) }
+            }
+        }
+    }
+}
+
+/// The target is about 20 ms at Jake's own rate; the heavy year is reported, not held to it.
+@MainActor @Test(.enabled(if: bench)) func speedSearchWithinTarget() async throws {
+    let (store, paths) = try makeStore()
+    let total = try await seedYear(store, perDay: jakesRate)
+    let samples = try searchTimes(paths)
+    let heavy = try searchTimes(try await year().paths)
+    print("History search over \(total) Dictations: p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")
+    print("History search over \(perDay * days) Dictations: p50 \(percentile(heavy, 0.5)), p95 \(percentile(heavy, 0.95))")
+    #expect(percentile(samples, 0.5) <= .milliseconds(25))
+}
