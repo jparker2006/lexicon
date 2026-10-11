@@ -7,16 +7,20 @@ import Foundation
 // whose app has the Accessibility grant (the harness inherits it). One builder
 // at a time: it drives the live app.
 #if DEBUG
+import AppKit
 import LexiconDomain
 import TestHooks
 
 let usage = """
-    usage: lexicon-harness check
-           lexicon-harness hook status | dictate <wav> | indicator <state>
+    usage: lexicon-harness check | paste-check
+           lexicon-harness hook status | dictate <wav> | indicator <state> | insert [--delay <seconds>] <text>
 
-      check   launch Lexicon Dev with test hooks, find its status item by identifier,
-              list its windows, open the target field, read it and clear it
-      hook    send one test hook to the running Lexicon Dev and print the reply
+      check        launch Lexicon Dev with test hooks, find its status item by identifier,
+                   list its windows, open the target field, read it and clear it
+      paste-check  focus the target field, paste a sentence into it through the real
+                   paste path, then check the field reads it and the clipboard is restored
+      hook         send one test hook to the running Lexicon Dev and print the reply
+                   (insert pastes <text> at the focused field after --delay seconds, default 0)
     """
 
 func ok(_ line: String) { print("ok    \(line)") }
@@ -24,6 +28,13 @@ func ok(_ line: String) { print("ok    \(line)") }
 func fail(_ message: String, code: Int32 = 1) -> Never {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
     exit(code)
+}
+
+/// Pretty-printed with sorted keys, so two runs diff cleanly.
+func printJSON<Value: Encodable>(_ value: Value) throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    print(String(decoding: try encoder.encode(value), as: UTF8.self))
 }
 
 @MainActor
@@ -47,18 +58,95 @@ func check() async throws {
     ok("target field cleared")
 }
 
-func hook(_ arguments: [String]) async throws {
-    let command: TestHookCommand = switch (arguments.first, arguments.dropFirst().first, arguments.count) {
-    case ("status", _, 1): .status
-    case ("dictate", let wav?, 2): .dictate(wav: URL(filePath: wav).standardizedFileURL.path)
-    case ("indicator", let state?, 2): .indicator(state: state)
-    default: fail(usage, code: 64)
+@MainActor
+func pasteCheck() async throws {
+    try AX.start()
+    let app = try await DevApp.launch()
+    let status = app.status
+    ok("Lexicon Dev \(status.version) answers test hooks (pid \(status.pid), accessibility=\(status.accessibility), microphone=\(status.microphone))")
+
+    // Cmd-V goes to the focused field of the frontmost app, so the target must take focus.
+    let target = try await TargetField.open(text: "", focused: true)
+    defer { target.close() }
+    let focusDeadline = ContinuousClock.now + .seconds(2)
+    while NSWorkspace.shared.frontmostApplication?.processIdentifier != target.process.processIdentifier {
+        guard ContinuousClock.now < focusDeadline else { throw HarnessError("the target field did not become the frontmost app within 2 s, so Cmd-V would not reach it") }
+        try await Task.sleep(for: .milliseconds(50))
     }
-    switch try await DevApp.hooks.send(command, timeout: .seconds(10)) {
+    ok("target field is frontmost")
+
+    // A sentinel on the clipboard: after the paste, Lexicon must have put it back.
+    let pasteboard = NSPasteboard.general
+    let sentinel = "lexicon-harness clipboard \(UUID().uuidString.prefix(8))"
+    pasteboard.clearContents()
+    pasteboard.setString(sentinel, forType: .string)
+    let count = pasteboard.changeCount
+
+    let text = "Lexicon paste check \(UUID().uuidString.prefix(8))"
+    let reply = try await DevApp.hooks.send(.insert(text: text, delay: 0), timeout: .seconds(10))
+    switch reply {
+    case .inserted(let insertion):
+        let paste = insertion.pasteWorkMicros.map { "\($0) us" } ?? "none"
+        ok("insert reply: \(insertion.outcome), target \(insertion.targetMicros) us, paste \(paste), clipboard access \(insertion.clipboardAccessBefore) -> \(insertion.clipboardAccessAfter)")
+        guard insertion.outcome == "inserted" else { throw HarnessError("Lexicon did not insert: \(insertion.outcome)") }
+    case .failed(let reason):
+        throw HarnessError(reason)
+    case .status:
+        throw HarnessError("unexpected reply to insert: \(reply)")
+    }
+
+    let readDeadline = ContinuousClock.now + .seconds(1)
+    while try target.text() != text {
+        guard ContinuousClock.now < readDeadline else { throw HarnessError("the target field reads \(try target.text().debugDescription), not \(text.debugDescription)") }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    ok("target field reads the pasted text")
+
+    // Lexicon restores the clipboard 200 ms after the paste is read; 1 s leaves room on a slow machine.
+    try await Task.sleep(for: .seconds(1))
+    let held = pasteboard.string(forType: .string)
+    let wrote = pasteboard.changeCount != count
+    // Says what the clipboard holds without printing it: it can be text Jake copied himself.
+    let holds = switch held {
+    case sentinel?: "the sentinel"
+    case text?: "the pasted text"
+    case let other?: "\(other.count) characters"
+    case nil: "no string"
+    }
+    guard wrote, held == sentinel else {
+        throw HarnessError(wrote ? "the clipboard holds \(holds), not the sentinel" : "the clipboard did not change, so Lexicon never wrote to it")
+    }
+    ok("clipboard restored to the sentinel")
+}
+
+func hook(_ arguments: [String]) async throws {
+    var timeout = Duration.seconds(10)
+    let command: TestHookCommand
+    if arguments.first == "insert" {
+        var words = arguments.dropFirst()
+        var delay = 0.0
+        if words.first == "--delay" {
+            guard let seconds = words.dropFirst().first.flatMap(Double.init), seconds >= 0 else { fail(usage, code: 64) }
+            delay = seconds
+            words = words.dropFirst(2)
+        }
+        guard !words.isEmpty else { fail(usage, code: 64) }
+        command = .insert(text: words.joined(separator: " "), delay: delay)
+        // The app waits `delay` seconds for a click into the field before it pastes.
+        timeout += .seconds(delay)
+    } else {
+        command = switch (arguments.first, arguments.dropFirst().first, arguments.count) {
+        case ("status", _, 1): .status
+        case ("dictate", let wav?, 2): .dictate(wav: URL(filePath: wav).standardizedFileURL.path)
+        case ("indicator", let state?, 2): .indicator(state: state)
+        default: fail(usage, code: 64)
+        }
+    }
+    switch try await DevApp.hooks.send(command, timeout: timeout) {
     case .status(let status):
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        print(String(decoding: try encoder.encode(status), as: UTF8.self))
+        try printJSON(status)
+    case .inserted(let insertion):
+        try printJSON(insertion)
     case .failed(let reason):
         fail("FAIL  \(reason)")
     }
@@ -68,8 +156,9 @@ let arguments = Array(CommandLine.arguments.dropFirst())
 do {
     switch arguments.first {
     case "check": try await check()
+    case "paste-check": try await pasteCheck()
     case "hook": try await hook(Array(arguments.dropFirst()))
-    case TargetField.mode: TargetField.serve(text: arguments.dropFirst().first ?? "")
+    case TargetField.mode: TargetField.serve(text: arguments.dropFirst().first ?? "", focused: arguments.dropFirst(2).first == "focused")
     default: fail(usage, code: 64)
     }
 } catch TestHookError.noReply {
