@@ -33,9 +33,12 @@ extension Conductor {
         } catch {
             // Give up the capture slot, or every later fn-down finds it taken and is dropped. A discard,
             // not a cancel: a cancel sends `stopped`, and the pill would play a stop sound for a mic that never started.
-            if capturingID == id { endCapture(.discard) }
+            // Only this run's own capture: a later fn press may already own the slot and the gesture.
+            if capturingID == id {
+                endCapture(.discard)
+                keyboard?.endDictation()
+            }
             emit(.notice(.microphoneUnavailable(String(describing: error))))
-            keyboard?.endDictation()
             return .nothing(id)  // nothing was captured, so nothing can be lost
         }
         let context = await contextValue
