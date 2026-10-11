@@ -174,6 +174,14 @@ struct Field { let el: AXUIElement?; let text: NSString; let caret: Int; let sel
 func manualAX(_ pid: pid_t) { AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXManualAccessibility" as CFString, kCFBooleanTrue) }
 
 func readField() -> Field? {
+    for attempt in 0..<4 {
+        if let f = readFieldOnce() { if attempt > 0 { log("ax read ok after \(attempt) retries") }; return f }
+        usleep(120_000)
+    }
+    return nil
+}
+
+func readFieldOnce() -> Field? {
     guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
     let pid = front.processIdentifier, appEl = AXUIElementCreateApplication(pid)
     manualAX(pid)
@@ -217,6 +225,7 @@ func key(_ code: CGKeyCode, _ flags: CGEventFlags = [], times: Int = 1) {
         for down in [true, false] {
             let e = CGEvent(keyboardEventSource: keySource, virtualKey: code, keyDown: down)!
             e.flags = flags; e.setIntegerValueField(.eventSourceUserData, value: ourEventTag); e.post(tap: .cghidEventTap)
+            usleep(4_000)
         }
     }
 }
@@ -532,7 +541,7 @@ final class Proto: NSObject, NSApplicationDelegate {
             how = "keys: left + shift-left + paste"
             key(123, times: tail); key(123, .maskShift, times: c.range.length)
         }
-        paste(word); key(124, times: tail)
+        usleep(40_000); paste(word); usleep(120_000); key(124, times: tail)
         if f.synthetic, let li = lastInsert { lastInsert = ((li.text as NSString).replacingCharacters(in: c.range, with: word), li.pid, li.at) }
         done(c, word, f, trigger, t0, tApply, how, note)
     }
