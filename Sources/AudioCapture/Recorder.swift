@@ -107,7 +107,7 @@ public final class Recorder: Sendable {
 
 /// How a LiveCapture ends.
 public enum Ending: Sendable, Hashable {
-    /// Jake released fn at this time: capture the adaptive tail (TailPolicy), then stop.
+    /// Jake released fn at this time: capture the adaptive tail (`Tail`), then stop.
     case released(at: HostTime)
     /// Cancel, discard, sleep: stop now, no tail.
     case immediately

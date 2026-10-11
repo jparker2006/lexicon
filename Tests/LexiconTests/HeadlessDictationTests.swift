@@ -75,7 +75,8 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples == source)
 }
 
-@Test func onAFullDiskTheTextIsStillTypedAndJakeIsTold() async throws {
+@Test(.timeLimit(.minutes(1)))
+func onAFullDiskTheTextIsStillTypedAndJakeIsTold() async throws {
     let source = syntheticSamples(count: 19_200)
     let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
     let paths = AppPaths.temporary()

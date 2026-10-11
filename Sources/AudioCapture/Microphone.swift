@@ -105,10 +105,10 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     private let microphone: Microphone
     private let keyDown: HostTime
     private let info: Mutex<(name: String?, gaps: [Duration])>
-    private var engine: MicEngine
+    /// nil once released: a stopped engine still holds the device, so it is dropped.
+    private var engine: MicEngine?
     private var events: SourceEvents?
     private var stopped = false
-    private var broken = false
     private var observer: (any NSObjectProtocol)?
     private var poll: (any DispatchSourceTimer)?
 
@@ -128,13 +128,15 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     func start(_ events: SourceEvents) {
         microphone.queue.async { [self] in
             self.events = events
-            guard !stopped else { return events.ended(nil) }
+            guard !stopped, let engine else { return events.ended(nil) }
             watch(engine)
             whenFirstAudio(of: engine) { [self] at in
                 events.firstAudio(at)
                 let gap = at.duration(since: keyDown)
                 Self.log.notice("first audio \(gap.ms, privacy: .public) ms after fn-down, engine \(self.warm ? "prepared" : "cold", privacy: .public)")
             }
+            // The hardware changed between the engine's start and the watch above.
+            if !engine.isRunning { rebuild(lostAt: .now(), attempt: 1) }
         }
     }
 
@@ -158,7 +160,8 @@ final class MicSource: CaptureSource, @unchecked Sendable {
         poll?.cancel()
         poll = nil
         unwatch()
-        engine.stop()
+        engine?.stop()
+        engine = nil  // released before the next engine is prepared on the same device
         microphone.released(self, prepareNext: prepareNext)
     }
 
@@ -182,9 +185,10 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     /// the capture keeps writing the same file from its new ring.
     private func rebuild(lostAt: HostTime, attempt: Int) {
         // A change that left the engine running needs nothing.
-        guard !stopped, !broken, attempt > 1 || !engine.isRunning else { return }
+        guard !stopped, attempt > 1 || engine?.isRunning != true else { return }
         unwatch()
-        engine.stop()
+        engine?.stop()
+        engine = nil
         do {
             // The pinned device, or the fixed fallback when it is gone.
             guard let device = microphone.findDevice(deviceUID) else { throw RecorderError.noInputDevice }
@@ -194,20 +198,19 @@ final class MicSource: CaptureSource, @unchecked Sendable {
             watch(next)
             events?.switched(next.segment)
             info.withLock { $0.name = InputDevices.name(device) }
+            let events = events
             whenFirstAudio(of: next) { [self] at in
+                // The change may have come before the first buffer: then this is it.
+                events?.firstAudio(at)
                 let gap = at.duration(since: lostAt)
                 info.withLock { $0.gaps.append(gap) }
                 Self.log.notice("device change: engine rebuilt, \(gap.ms, privacy: .public) ms without audio")
             }
         } catch {
-            // Mid-switch a device can briefly report no format. Try again; past
-            // that the input has broken off, and the Dictation stops with what it has.
-            guard attempt < 5 else {
-                broken = true
-                Self.log.error("device change: no engine after \(attempt, privacy: .public) tries")
-                events?.ended(nil)
-                return
-            }
+            // Mid-switch a device can report no format for a while, and no
+            // device at all is possible: keep trying until fn-up stops the
+            // Dictation, which keeps everything captured so far.
+            if attempt == 5 { Self.log.error("device change: still no engine after \(attempt, privacy: .public) tries") }
             microphone.queue.asyncAfter(deadline: .now() + .milliseconds(100)) {
                 self.rebuild(lostAt: lostAt, attempt: attempt + 1)
             }
@@ -233,7 +236,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
 
     #if DEBUG
     fileprivate func simulateDeviceChange() {
-        guard !stopped else { return }
+        guard !stopped, let engine else { return }
         engine.stop()
         NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine.engine)
     }

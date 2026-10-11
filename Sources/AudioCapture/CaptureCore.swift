@@ -12,7 +12,8 @@ import LexiconDomain
 /// Under 1 GB free, or on a write error, the capture carries on in RAM.
 ///
 /// `@unchecked Sendable`: every `var` is touched only on `queue` (all entry
-/// points dispatch onto it); the `let`s are immutable or thread-safe themselves.
+/// points dispatch onto it), except `tailLength` (see there); the `let`s are
+/// immutable or thread-safe themselves.
 final class CaptureCore: @unchecked Sendable {
     let feed: AudioFeed
     let signals: CaptureSignals
@@ -39,7 +40,8 @@ final class CaptureCore: @unchecked Sendable {
     /// Samples captured before fn-up, once it came.
     private var heardBeforeRelease: Int?
     private var take: Take?
-    /// Audio kept after fn-up. Set by `finish`, so safe to read once `stop` returned.
+    /// Audio kept after fn-up. Set by `finish` on the writer queue; read only
+    /// after `stop` returned, which orders it after the write.
     private(set) var tailLength: Duration?
 
     init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, startedAt: HostTime) {
@@ -126,8 +128,10 @@ final class CaptureCore: @unchecked Sendable {
     private func captureTail(releasedAt: HostTime, then done: @escaping () -> Void) {
         drain()
         heardBeforeRelease = samples.count
-        tail.release(late: HostTime.now().duration(since: releasedAt))
-        let backstop = DispatchTime.now() + (tail.cap + .milliseconds(100)).dispatch
+        let late = HostTime.now().duration(since: releasedAt)
+        tail.release(late: late)
+        // The cap plus one late buffer, counted from fn-up.
+        let backstop = DispatchTime.now() + (tail.cap - late + .milliseconds(20)).dispatch
         let over = { [self] in tail.isOver || signals.end.isSettled || DispatchTime.now() >= backstop }
         guard !over() else { return done() }
         let timer = DispatchSource.makeTimerSource(queue: queue)
