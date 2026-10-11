@@ -6,7 +6,8 @@ import LexiconCore
 // First-run setup's model download goes through `CloudAccess` like every
 // network use (#5, #57): Private mode blocks it, and turning Private mode on
 // mid-download cancels it. The fake download only waits for its cancellation,
-// so no test touches the network or depends on machine speed.
+// so no test touches the network or depends on machine speed; the time limit
+// turns a download that is never cancelled into a failure, not a hung run.
 
 /// A download that reports it started, then runs until it is cancelled.
 private struct HangingDownload: Sendable {
@@ -42,7 +43,8 @@ private func withStore(_ body: (PreferencesStore) async throws -> Void) async re
     #expect(try await access.untilRevoked { 42 } == 42)
 }
 
-@Test func revokingAccessCancelsTheDownloadMidway() async throws {
+@Test(.timeLimit(.minutes(1)))
+func revokingAccessCancelsTheDownloadMidway() async throws {
     let access = try openAccess()
     let download = HangingDownload()
     let running = Task { try await access.untilRevoked { try await download.run() } }
@@ -68,7 +70,8 @@ private func withStore(_ body: (PreferencesStore) async throws -> Void) async re
     }
 }
 
-@Test func turningPrivateModeOnMidDownloadStopsIt() async throws {
+@Test(.timeLimit(.minutes(1)))
+func turningPrivateModeOnMidDownloadStopsIt() async throws {
     try await withStore { store in
         let download = HangingDownload()
         let running = Task { try await store.downloading { access in try await access.untilRevoked { try await download.run() } } }
@@ -78,23 +81,15 @@ private func withStore(_ body: (PreferencesStore) async throws -> Void) async re
     }
 }
 
-@Test func anotherSettingChangedMidDownloadLeavesItRunning() async throws {
+@Test(.timeLimit(.minutes(1)))
+func privateModeTurnedOnAfterAnotherChangeStillStopsIt() async throws {
     try await withStore { store in
-        let (started, start) = AsyncStream<Void>.makeStream()
-        let (finish, finished) = AsyncStream<Void>.makeStream()
-        let running = Task {
-            try await store.downloading { access in
-                try await access.untilRevoked {
-                    start.yield()
-                    for await _ in finish { break }
-                    return access.revoked == nil
-                }
-            }
-        }
-        for await _ in started { break }
+        let download = HangingDownload()
+        let running = Task { try await store.downloading { access in try await access.untilRevoked { try await download.run() } } }
+        for await _ in download.started { break }
+        // The watch keeps watching past a change that isn't Private mode.
         store.update { $0.soundsOn = false }
-        finished.yield()
-        let stillGranted = try await running.value
-        #expect(stillGranted)
+        store.update { $0.privacy = .private }
+        await #expect(throws: CloudAccessRevoked(.privateModeOn)) { try await running.value }
     }
 }

@@ -10,9 +10,10 @@ private enum Finished<T: Sendable>: Sendable {
 }
 
 extension CloudAccess {
-    /// Runs `work` until it finishes or this access is revoked, whichever comes
-    /// first. A revoke cancels `work` at once (a model download stops mid-file,
-    /// #5) and throws `CloudAccessRevoked`. Already revoked: `work` never starts.
+    /// Runs `work` until it finishes or this access is revoked. A revoke cancels
+    /// `work` and throws `CloudAccessRevoked` once `work` returns: a download
+    /// stops mid-file (#5), local work that ignores cancellation (a CoreML
+    /// compile) runs out first. Already revoked: `work` never starts.
     public func untilRevoked<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
         if let revoked { throw CloudAccessRevoked(revoked) }
         return try await withThrowingTaskGroup(of: Finished<T>.self) { group in

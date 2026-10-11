@@ -11,7 +11,7 @@ public import LexiconCore
 /// and relaunches the app once Accessibility is granted.
 ///
 /// Polls: macOS announces neither grant to a running app. Once a second while
-/// the window is open or a grant is awaited, every five seconds otherwise.
+/// the window is open, every five seconds otherwise.
 @MainActor
 public final class Setup: NSObject {
     /// What only the app shell can reach: the fn tap, the globe key setting
@@ -67,9 +67,9 @@ public final class Setup: NSObject {
         self.relaunched = relaunched
         self.registersAtLogin = registersAtLogin
         let trusted = AXIsProcessTrusted()
-        relaunchRule = RelaunchRule(trustedAtLaunch: trusted)
+        relaunchRule = RelaunchRule(trustedAtLaunch: trusted, fnOn: services.fnOn)
         facts = SetupFacts(microphone: Self.microphone, accessibility: trusted, fnOn: services.fnOn,
-                           model: services.modelInstalled() ? .installed : .missing,
+                           trustedAtLaunch: trusted, model: services.modelInstalled() ? .installed : .missing,
                            globeKeyOK: services.globeKeyOK(), triedFn: false)
         super.init()
     }
@@ -103,6 +103,8 @@ public final class Setup: NSObject {
             })
         }
         facts.globeKeyOK = services.globeKeyOK()
+        // Opening setup again is the retry for a download that stopped while it was closed.
+        if facts.model == .failed { facts.model = .missing }
         window?.render(facts)
         window?.focus(step ?? facts.current)
         startDownloadIfDue()
@@ -167,7 +169,7 @@ public final class Setup: NSObject {
     }
 
     private func schedulePoll() {
-        let interval: TimeInterval = window != nil || !relaunchRule.trustedAtLaunch ? 1 : 5
+        let interval: TimeInterval = window != nil ? 1 : 5
         if let timer, timer.isValid, timer.timeInterval == interval { return }
         timer?.invalidate()
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
@@ -231,7 +233,8 @@ public final class Setup: NSObject {
         let install = services.installModel, installed = services.modelInstalledNow
         // Whole percents only: FluidAudio reports far more often than the bar can show.
         let report: @Sendable (Double) -> Void = { fraction in
-            let percent = (fraction * 100).rounded(.down) / 100
+            // The nudge keeps 0.57 from reading as 56 (0.57 * 100 is 56.99999999999999).
+            let percent = (fraction * 100 + 1e-9).rounded(.down) / 100
             Task { @MainActor in self.downloaded(percent) }
         }
         // Setup lives as long as the app, so holding it here costs nothing.
@@ -239,6 +242,10 @@ public final class Setup: NSObject {
             let model: ModelState
             do {
                 try await preferences.downloading { access in try await install(access, report) }
+                await installed()
+                model = .installed
+            } catch is CloudAccessRevoked where services.modelInstalled() {
+                // The last byte landed as Private mode came on: the model is here, nothing more will download.
                 await installed()
                 model = .installed
             } catch is CloudAccessRevoked {
@@ -265,27 +272,32 @@ public final class Setup: NSObject {
 
     // MARK: - Relaunch
 
-    /// A new copy first, then this one quits: the tap can only start in a fresh
-    /// process. LaunchServices starts it, so launchd is its parent and the
-    /// launch guard lets it run. The arguments carry over (test hooks, mic),
-    /// plus `relaunchArgument`.
+    /// The tap can only start in a fresh process, so this one quits and a small
+    /// shell waits for it to be gone, then opens the app again: one copy at a
+    /// time, so the new one's crash recovery never sees this one's rows as
+    /// abandoned. `open` goes through LaunchServices, so launchd is the new
+    /// copy's parent and the launch guard lets it run. The arguments carry over
+    /// (test hooks, mic), plus `relaunchArgument`. Quitting waits for any
+    /// Dictation in flight (`applicationShouldTerminate`); the shell gives up
+    /// after 60 s, and `open` then just brings the old copy forward.
     private func relaunch() {
         guard !relaunching else { return }
         relaunching = true
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-        configuration.arguments = CommandLine.arguments.dropFirst().filter { $0 != Self.relaunchArgument }
-            + [Self.relaunchArgument]
-        log.notice("relaunching to turn on fn")
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, error in
-            Task { @MainActor [weak self] in
-                guard let error else {
-                    NSApp.terminate(nil)
-                    return
-                }
-                self?.log.error("relaunch failed: \(error.localizedDescription, privacy: .public)")
-                self?.relaunching = false
-            }
+        let arguments = CommandLine.arguments.dropFirst().filter { $0 != Self.relaunchArgument } + [Self.relaunchArgument]
+        let waiter = Process()
+        waiter.executableURL = URL(filePath: "/bin/sh")
+        waiter.arguments = ["-c", """
+            pid=$1; app=$2; shift 2; i=0
+            while kill -0 "$pid" 2>/dev/null && [ $i -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
+            exec /usr/bin/open "$app" --args "$@"
+            """, "relaunch", String(getpid()), Bundle.main.bundlePath] + arguments
+        do {
+            try waiter.run()
+            log.notice("relaunching to turn on fn")
+            NSApp.terminate(nil)
+        } catch {
+            // Restart stays offered: Jake can quit and reopen by hand.
+            log.error("relaunch failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

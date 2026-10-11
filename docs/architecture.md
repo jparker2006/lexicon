@@ -139,7 +139,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 - `history.sqlite`: `dictation` (status, origin, model, cleaned and final text, speech model, lag, Cleanup outcome, audio state, pin), `attempt` (every engine try), `fix`, `insertion` (receipts). Enum columns store Swift raw values; partial indexes are generated from `DictationStatus`.
 - `audio/<id>.caf`: 16 kHz mono 16-bit, kept a rolling 14 days or 1 GB (whichever first), never deleted while a Dictation needs it, pinned audio kept forever.
 - `lexicon.sqlite`: Terms and Rules (each Rule with a source field: added or learned), owned by WordStore. Code Terms are held in memory, not stored.
-- `models/`: Parakeet weights (about 609 MB), never in the bundle.
+- `models/`: Parakeet weights (about 614 MB), never in the bundle.
 - `inbox/`: hook messages, only if hooks come back.
 - `test-hooks/`: dev builds only, the harness's requests and the app's replies.
 - Keychain: one item per cloud credential (Meta, OpenRouter, TypeSafe), service = bundle ID. `lexicon-eval` reads environment variables instead.

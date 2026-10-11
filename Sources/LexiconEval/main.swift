@@ -20,7 +20,7 @@ import WordStore
 //
 //   swift run lexicon-eval --install-model <data folder>
 //       downloads the local model into `<data folder>/models/`
-//       (`scripts/install-model.sh` runs it until onboarding exists)
+//       (`scripts/install-model.sh` runs it; first-run setup installs it in the app)
 //
 //   swift run lexicon-eval --import-lexicon <file> --into <data folder>
 //       imports a Lexicon file into `<data folder>/lexicon.sqlite`, as the

@@ -132,13 +132,14 @@ public actor ParakeetTranscriber: LocalTranscriber {
     /// here does not warm another process: the app compiles on its own first load.
     public static func install(paths: AppPaths, access: CloudAccess,
                                progress: @escaping @Sendable (Double) -> Void) async throws {
+        // Whole already: nothing to fetch, and FluidAudio's repair never runs through a link into the daily folder.
+        guard !isInstalled(paths: paths) else { return }
         let models = modelsFolder(paths)
-        if !isInstalled(paths: paths),
-           (try? FileManager.default.destinationOfSymbolicLink(atPath: models.path)) != nil {
-            // Removes the link only, never what it points at.
-            try FileManager.default.removeItem(at: models)
-        }
         try await access.untilRevoked {
+            if (try? FileManager.default.destinationOfSymbolicLink(atPath: models.path)) != nil {
+                // Removes the link only, never what it points at.
+                try FileManager.default.removeItem(at: models)
+            }
             let manager = UnifiedAsrManager(encoderPrecision: .int8)
             try await manager.loadModels(to: models, progressHandler: { progress($0.fractionCompleted) })
             await manager.cleanup()

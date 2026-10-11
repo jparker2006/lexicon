@@ -1,12 +1,10 @@
 /// First-run setup's steps, in order. Only Microphone and Accessibility are
 /// permissions; the model and the fn try are what make the first Dictation work.
-public enum SetupStep: Int, Sendable, Hashable, CaseIterable, Comparable {
+public enum SetupStep: Int, Sendable, Hashable, CaseIterable {
     case microphone
     case accessibility
     case model
     case tryFn
-
-    public static func < (a: SetupStep, b: SetupStep) -> Bool { a.rawValue < b.rawValue }
 }
 
 public enum MicrophoneAccess: Sendable, Hashable {
@@ -35,6 +33,9 @@ public struct SetupFacts: Sendable, Hashable {
     /// The fn tap is running. It starts only at launch, so a grant made while
     /// the app runs leaves it off until the relaunch.
     public var fnOn: Bool
+    /// This launch began with Accessibility. Then a tap that still failed
+    /// needs more than a restart: listen access (Input Monitoring) is off.
+    public var trustedAtLaunch: Bool
     public var model: ModelState
     /// The globe key is set to Do Nothing. Shown in setup, never a step: Lexicon
     /// only reads the setting.
@@ -42,11 +43,12 @@ public struct SetupFacts: Sendable, Hashable {
     /// Some text landed in the setup window's try field.
     public var triedFn: Bool
 
-    public init(microphone: MicrophoneAccess, accessibility: Bool, fnOn: Bool, model: ModelState,
-                globeKeyOK: Bool, triedFn: Bool) {
+    public init(microphone: MicrophoneAccess, accessibility: Bool, fnOn: Bool, trustedAtLaunch: Bool,
+                model: ModelState, globeKeyOK: Bool, triedFn: Bool) {
         self.microphone = microphone
         self.accessibility = accessibility
         self.fnOn = fnOn
+        self.trustedAtLaunch = trustedAtLaunch
         self.model = model
         self.globeKeyOK = globeKeyOK
         self.triedFn = triedFn
@@ -85,13 +87,17 @@ public struct SetupFacts: Sendable, Hashable {
 
 /// Granting Accessibility can't turn on the fn tap in a running process: the
 /// tap starts only at launch. So setup relaunches the app the moment trust
-/// appears, once per launch that began without it. A launch that began trusted
-/// never relaunches, so a tap that still fails can't loop.
+/// appears, in a launch that began without it and has no tap. A launch that
+/// began trusted never relaunches, so a tap that still fails can't loop.
 public struct RelaunchRule: Sendable, Hashable {
     public let trustedAtLaunch: Bool
-    public init(trustedAtLaunch: Bool) { self.trustedAtLaunch = trustedAtLaunch }
+    public let fnOn: Bool
+    public init(trustedAtLaunch: Bool, fnOn: Bool) {
+        self.trustedAtLaunch = trustedAtLaunch
+        self.fnOn = fnOn
+    }
 
-    public func shouldRelaunch(trustedNow: Bool) -> Bool { !trustedAtLaunch && trustedNow }
+    public func shouldRelaunch(trustedNow: Bool) -> Bool { !trustedAtLaunch && !fnOn && trustedNow }
 }
 
 /// How a row reads: done (a check), the one to do now (its button works), or
@@ -115,7 +121,7 @@ public struct SetupRow: Sendable, Hashable {
 /// The setup window's words, decided here so the rules and the copy are tested
 /// together. No em dashes (Jake reads these).
 public enum SetupCopy {
-    public static let modelSize = "about 610 MB"
+    public static let modelSize = "about 614 MB"
 
     public static func row(_ step: SetupStep, _ facts: SetupFacts) -> SetupRow {
         let state: RowState = facts.isDone(step) ? .done : facts.current == step ? .current : .waiting
@@ -126,7 +132,7 @@ public enum SetupCopy {
         case .microphone:
             return switch facts.microphone {
             case .granted: row("Microphone", "Allowed.")
-            case .undetermined: row("Microphone", "Lexicon listens only while you hold fn.", "Allow Microphone")
+            case .undetermined: row("Microphone", "Lexicon listens only while you dictate.", "Allow Microphone")
             case .denied: row("Microphone", "Turned off for Lexicon. Turn it on in System Settings.", "Open System Settings")
             }
         case .accessibility:
@@ -134,16 +140,18 @@ public enum SetupCopy {
                 return row("Accessibility", "Lexicon needs it to hear fn and paste where you type. Turn on Lexicon in the list, and it restarts by itself.",
                            "Open System Settings")
             }
-            return facts.fnOn
-                ? row("Accessibility", "Allowed. fn is on.")
+            if facts.fnOn { return row("Accessibility", "Allowed. fn is on.") }
+            return facts.trustedAtLaunch
+                ? row("Accessibility", "Allowed, but fn is still off. Allow Lexicon in Privacy & Security > Input Monitoring too, then restart.",
+                      "Restart Lexicon")
                 : row("Accessibility", "Allowed. Restart Lexicon to turn on fn.", "Restart Lexicon")
         case .model:
             return switch facts.model {
             case .installed: row("Speech model", "Installed. Your words are transcribed on this Mac.")
             case .missing: row("Speech model", "Transcribes on this Mac. A one-time download, \(modelSize).", "Download")
             case .downloading(let fraction):
-                row("Speech model", "Downloading, \(Int((fraction * 100).rounded(.down)))%.", progress: fraction)
-            case .privateMode: row("Speech model", "Private mode is on, so nothing downloads. Turn it off, then try again.", "Try Again")
+                row("Speech model", "Downloading, \(Int((fraction * 100).rounded()))%.", progress: fraction)
+            case .privateMode: row("Speech model", "Private mode is on, so nothing downloads. Turn it off and the download starts.")
             case .failed: row("Speech model", "The download stopped. Check your connection, then try again.", "Try Again")
             }
         case .tryFn:
