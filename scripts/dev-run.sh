@@ -19,5 +19,5 @@ RELEASE=
 if [ "${1:-}" = --release ]; then RELEASE=--release; shift; fi
 if [ "${1:-}" = -- ]; then shift; elif [ $# -gt 0 ]; then echo "usage: dev-run.sh [--release] [-- app args]" >&2; exit 64; fi
 
-APP=$(scripts/bundle.sh dev $RELEASE | tail -n 1)
-exec lockf -t 600 "${TMPDIR:-/tmp}/dev.jparker.lexicon.dev.install.lock" scripts/lib/install-app.sh dev "$APP" "$@"
+APP=$(scripts/bundle.sh dev $RELEASE)
+exec lockf -k -t 600 "${TMPDIR:-/tmp}/dev.jparker.lexicon.dev.install.lock" scripts/lib/install-app.sh dev "$APP" "$@"

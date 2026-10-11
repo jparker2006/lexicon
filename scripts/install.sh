@@ -12,6 +12,6 @@ set -eu
 cd "$(dirname "$0")/.."
 
 [ $# -eq 0 ] || { echo "usage: install.sh" >&2; exit 64; }
-APP=$(scripts/bundle.sh daily | tail -n 1)
+APP=$(scripts/bundle.sh daily)
 echo "Installing Lexicon $(plutil -extract LexiconCommit raw "$APP/Contents/Info.plist")" >&2
-exec lockf -t 600 "${TMPDIR:-/tmp}/dev.jparker.lexicon.install.lock" scripts/lib/install-app.sh daily "$APP"
+exec lockf -k -t 600 "${TMPDIR:-/tmp}/dev.jparker.lexicon.install.lock" scripts/lib/install-app.sh daily "$APP"
