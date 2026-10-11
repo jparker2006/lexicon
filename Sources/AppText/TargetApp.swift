@@ -89,7 +89,9 @@ public actor TargetApp: TextDestination {
     }
 
     public nonisolated func appChanges() -> AsyncStream<AppContext> {
-        let (stream, continuation) = AsyncStream<AppContext>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        // Unbounded: an activation landing between the observer and the first yield
+        // below must not be replaced by that older frontmost app.
+        let (stream, continuation) = AsyncStream<AppContext>.makeStream()
         let observer = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: nil
         ) { note in

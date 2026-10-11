@@ -244,11 +244,9 @@ func importLexicon(_ file: URL, into folder: URL) async -> Int32 {
 }
 
 /// The app's own saved settings decide: with Private mode on in it, its model
-/// install opens no connection (#5), the same as an install the app would run.
+/// install opens no connection, the same as an install the app would run.
 func installModel(for bundleID: String) async -> Int32 {
-    guard let defaults = UserDefaults(suiteName: bundleID) else { return fail("cannot read \(bundleID)'s settings") }
-    let preferences = PreferencesStore(defaults: defaults).snapshot()
-    guard let access = CloudAccess.granted(by: preferences, for: .modelInstall, keys: { _ in nil }) else {
+    guard let access = PreferencesStore.modelInstallAccess(forApp: bundleID) else {
         return fail("Private mode is on in \(bundleID): turn it off to download the model")
     }
     do {

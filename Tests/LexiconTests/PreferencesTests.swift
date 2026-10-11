@@ -117,3 +117,13 @@ import LexiconDomain
     #expect(relaunched.privacy == .private)
     #expect(relaunched.alwaysPrivateApps == ["com.example.bank"])
 }
+
+@Test func modelInstallFollowsTheAppsOwnSavedPrivateMode() {
+    let name = "lexicon.tests.\(UUID())"
+    let suite = UserDefaults(suiteName: name)!
+    defer { suite.removePersistentDomain(forName: name) }
+
+    #expect(PreferencesStore.modelInstallAccess(forApp: name) != nil)
+    PreferencesStore(defaults: suite).update { $0.privacy = .private }
+    #expect(PreferencesStore.modelInstallAccess(forApp: name) == nil)
+}

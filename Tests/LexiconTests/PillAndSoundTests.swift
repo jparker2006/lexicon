@@ -1,4 +1,4 @@
-import AppKit
+import CoreGraphics
 import Darwin
 import Foundation
 import Testing
@@ -56,13 +56,14 @@ import LexiconDomain
 
 @MainActor
 @Test func theOutlinedLogoIsHollowAndStaysATemplate() throws {
-    let filled = try #require(pixels(LogoMark.image()))
-    let outlined = try #require(pixels(LogoMark.image(outlined: true)))
+    let filled = try #require(pixels(LogoMark.image().cgImage(forProposedRect: nil, context: nil, hints: nil)))
+    let outlined = try #require(pixels(LogoMark.image(outlined: true).cgImage(forProposedRect: nil, context: nil,
+                                                                                hints: nil)))
     // Inside the circle, left of the mouth: solid in the fill, empty in the outline.
-    #expect(alpha(filled, x: 5, y: 9) > 0.9)
-    #expect(alpha(outlined, x: 5, y: 9) < 0.1)
-    #expect(solidPixels(outlined) > 0, "the outline still has a line")
-    #expect(solidPixels(outlined) < solidPixels(filled))
+    #expect(filled.alpha(atX: 0.3, y: 0.5) > 200)
+    #expect(outlined.alpha(atX: 0.3, y: 0.5) < 30)
+    #expect(outlined.solid > 0, "the outline still has a line")
+    #expect(outlined.solid < filled.solid)
     #expect(LogoMark.image(outlined: true).isTemplate)
 }
 
@@ -99,15 +100,15 @@ import LexiconDomain
     defer { suite.removePersistentDomain(forName: name) }
     let store = PreferencesStore(defaults: suite)
     let status = StatusItemController(appName: "Lexicon", version: "test")
-    defer { NSStatusBar.system.removeStatusItem(status.item) }
+    defer { status.item.statusBar?.removeStatusItem(status.item) }
     let indicator = DictationIndicator(statusItem: status, preferences: store)
 
-    let menu = NSMenu()
     let item = indicator.privateModeMenuItem()
-    menu.addItem(item)
+    // What choosing the line does: its action, sent to its target with the item.
+    let choose = { _ = (item.target as? NSObject)?.perform(item.action, with: item) }
     #expect(item.state == .off)
 
-    menu.performActionForItem(at: 0)
+    choose()
     #expect(store.snapshot().privacy == .private)
     #expect(item.state == .on)
     // The look follows the setting from the store's stream, on the main actor.
@@ -115,7 +116,7 @@ import LexiconDomain
     #expect(indicator.pill.view.isPrivate)
     #expect(status.isPrivate)
 
-    menu.performActionForItem(at: 0)
+    choose()
     #expect(store.snapshot().privacy == .standard)
     #expect(item.state == .off)
     await settle { !indicator.pill.view.isPrivate && !status.isPrivate }
@@ -123,32 +124,33 @@ import LexiconDomain
     #expect(!status.isPrivate)
 }
 
-/// The image drawn at 1x into a bitmap, so the test reads the pixels the menu bar would show.
-@MainActor
-private func pixels(_ image: NSImage) -> NSBitmapImageRep? {
-    let width = Int(image.size.width), height = Int(image.size.height)
-    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
-                                     bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                     colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    image.draw(in: NSRect(x: 0, y: 0, width: width, height: height))
-    NSGraphicsContext.restoreGraphicsState()
-    return rep
-}
+/// An image's alpha channel, drawn with CoreGraphics: AppKit stays out of the test target.
+private struct Pixels {
+    let width: Int, height: Int
+    /// Rows top to bottom, as the bitmap holds them.
+    let alpha: [UInt8]
 
-@MainActor
-private func alpha(_ rep: NSBitmapImageRep, x: Int, y: Int) -> CGFloat {
-    rep.colorAt(x: x, y: y)?.alphaComponent ?? 0
-}
-
-@MainActor
-private func solidPixels(_ rep: NSBitmapImageRep) -> Int {
-    var count = 0
-    for y in 0..<rep.pixelsHigh {
-        for x in 0..<rep.pixelsWide where alpha(rep, x: x, y: y) > 0.5 { count += 1 }
+    /// At fractions of the width and height, measured from the bottom left like the logo's drawing.
+    func alpha(atX x: Double, y: Double) -> UInt8 {
+        alpha[(height - 1 - Int(y * Double(height))) * width + Int(x * Double(width))]
     }
-    return count
+
+    var solid: Int { alpha.filter { $0 > 127 }.count }
+}
+
+private func pixels(_ image: CGImage?) -> Pixels? {
+    guard let image else { return nil }
+    let width = image.width, height = image.height
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+        guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return true
+    }
+    guard drawn else { return nil }
+    return Pixels(width: width, height: height, alpha: stride(from: 3, to: bytes.count, by: 4).map { bytes[$0] })
 }
 
 /// Yields until `condition` holds. The indicator applies a settings change in a Task on the

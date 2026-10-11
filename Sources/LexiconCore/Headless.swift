@@ -29,7 +29,7 @@ public actor HeadlessDestination: TextDestination {
     public func appChanges() -> AsyncStream<AppContext> {
         let (stream, continuation) = AsyncStream<AppContext>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let id = UUID()
-        continuation.onTermination = { _ in Task { await self.stopWatching(id) } }
+        continuation.onTermination = { [weak self] _ in Task { await self?.stopWatching(id) } }
         focusWatchers[id] = continuation
         continuation.yield(current)
         return stream

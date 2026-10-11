@@ -120,7 +120,9 @@ private struct Pipeline {
     let result = try #require(await pipeline.result(of: running))
 
     #expect(result.model == .local(.parakeetUnified))
-    #expect(result.attempts.first { $0.model == .cloud(.museVoice) }?.result == .failed)
+    let cloudAttempt = try #require(result.attempts.first { $0.model == .cloud(.museVoice) })
+    #expect(cloudAttempt.result == .failed)
+    #expect(cloudAttempt.error?.contains("alwaysPrivateApp") == true)
     #expect(pipeline.clock.now.offset == .zero)  // local was used at once, not after the deadline
 }
 
@@ -173,6 +175,22 @@ private struct Pipeline {
 
     #expect(pipeline.cloud.log.connects == 1)
     #expect(await pipeline.history.owesText(first.id))
+}
+
+@Test(.timeLimit(.minutes(1))) func aSecretCutCarriesIntoTheRetry() async throws {
+    let secret = "ghp_" + "aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY2zA4"
+    let pipeline = try Pipeline([.final("the token is \(secret)", afterFrames: 1)], local: false)
+
+    // The Secret guard cuts the stream; with no local model the Dictation waits.
+    let first = try #require(await pipeline.result(of: pipeline.dictate()))
+    #expect(first.status == .waiting)
+    #expect(pipeline.cloud.log.connects == 1)
+
+    // The next try never reopens the cloud for this audio.
+    await pipeline.clock.waitForSleep(endingAt: SpeechEngine.retryInterval)
+    await pipeline.clock.advance(by: SpeechEngine.retryInterval)
+    await pipeline.clock.waitForSleep(endingAt: SpeechEngine.retryInterval * 2)
+    #expect(pipeline.cloud.log.connects == 1)
 }
 
 @Test(.timeLimit(.minutes(1))) func aRetryInPrivateModeOpensNoSocket() async throws {
