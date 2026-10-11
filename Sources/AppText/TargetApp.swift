@@ -32,8 +32,9 @@ public actor TargetApp: TextDestination {
     /// then read only by `deinit`.
     private nonisolated(unsafe) var activations: (any NSObjectProtocol)?
 
-    /// Lexicon's own work in the latest insert, from the call to Cmd-V sent
-    /// (the focus check, the pasteboard write, the key). Budget: 10 ms.
+    /// Lexicon's own work in the latest insert, from the focus check to Cmd-V
+    /// sent (the check, the pasteboard write, the key); a wait behind an
+    /// earlier unread paste comes before it and is not counted. Budget: 10 ms.
     public private(set) var lastPasteWork: Duration?
 
     public init(input: InputClock) {
@@ -100,21 +101,24 @@ public actor TargetApp: TextDestination {
     }
 
     public func insert(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
-        let start = ContinuousClock.now
-        let now = Focus.now()
-        // The same element as at fn-up keeps fn-up's snapshot; anything else differs from it.
-        let focusNow = now.map { now in
-            now.pid == target.focus.pid && Self.same(now.field, target.field?.element) ? target.focus
-                : now.snapshot(durable: nil)
+        let order = await PasteOrder.run(text, lane: Paster.shared) {
+            let now = Focus.now()
+            // The same element as at fn-up keeps fn-up's snapshot; anything else differs from it.
+            let focusNow = now.map { now in
+                now.pid == target.focus.pid && Self.same(now.field, target.field?.element) ? target.focus
+                    : now.snapshot(durable: nil)
+            }
+            return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
+                                       inputSinceMark: input.hasInput(since: target.mark)), now)
         }
-        switch InsertGuard.decide(target: target.focus, focusNow: focusNow, inputSinceMark: input.hasInput(since: target.mark)) {
-        case .hold(let reason):
-            return .notInserted(reason)
-        case .insert:
-            break
+        let paste: ClipboardKeeper.PasteID, now: Focus?
+        switch order {
+        case .held(let reason): return .notInserted(reason)
+        case .failed: return .notInserted(.pasteFailed)
+        case .sent(let id, let checkedAt, let seen):
+            (paste, now) = (id, seen)
+            lastPasteWork = ContinuousClock.now - checkedAt
         }
-        guard let paste = await Paster.shared.paste(text) else { return .notInserted(.pasteFailed) }
-        lastPasteWork = ContinuousClock.now - start
         // A paste with no read is not reported as typed: the text waits for paste-last.
         guard await Paster.shared.receipt(paste), let now else { return .notInserted(.pasteFailed) }
         await caretPassed(target.pasteStart.map { $0 + text.utf16.count }, in: now.field)

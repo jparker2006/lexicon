@@ -3,7 +3,7 @@ import AppKit
 /// The one owner of the general pasteboard during a paste: puts the text up,
 /// sends Cmd-V, and runs the restore timer. Main actor, because pasteboard
 /// promise callbacks arrive on the main run loop.
-@MainActor final class Paster {
+@MainActor final class Paster: PasteLane {
     static let shared = Paster()
 
     private let keeper = ClipboardKeeper(pasteboard: SystemPasteboard())
@@ -20,18 +20,18 @@ import AppKit
         schedule()
     }
 
-    /// Puts `text` up and sends Cmd-V. nil when no Cmd-V key or event could be
-    /// made; then the pasteboard is untouched. Waits first while an earlier
-    /// paste is unread (paste-last does not take a Dictation's insert turn), so
-    /// its queued Cmd-V never pastes this text.
-    func paste(_ text: String) async -> ClipboardKeeper.PasteID? {
+    func idle() async {
         while let unread = latest, !keeper.isReleased(unread) { await keeper.released(unread) }
-        guard let code = PasteKey.current(), let chord = PasteKey.Chord(code) else { return nil }
+    }
+
+    func paste(_ text: String) -> PasteAttempt {
+        if let unread = latest, !keeper.isReleased(unread) { return .busy }
+        guard let code = PasteKey.current(), let chord = PasteKey.Chord(code) else { return .failed }
         let id = keeper.put(text)
         latest = id
         chord.post()
         schedule()
-        return id
+        return .sent(id)
     }
 
     func receipt(_ id: ClipboardKeeper.PasteID) async -> Bool { await keeper.receipt(id) }
