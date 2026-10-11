@@ -103,7 +103,7 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(headless.output.contains("inaccessible"), "\(headless.output)")
 }
 
-@Test func finishingASpeechAttemptTwiceIsACompileError() async throws {
+@Test(.timeLimit(.minutes(1))) func finishingASpeechAttemptTwiceIsACompileError() async throws {
     let imports = "import LexiconDomain\nimport Transcription\n"
     let once = try await compile(imports + """
         func run(_ attempt: consuming SpeechAttempt, _ clip: AudioClip) async { _ = await attempt.finish(clip) }
