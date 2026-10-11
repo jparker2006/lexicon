@@ -161,8 +161,11 @@ extension Conductor {
                 history.record(.notInserted(id, reason))
                 emit(.notice(.readyToPaste(id)))
             case .historyOnly:
-                // Esc'd live Dictation: say it's waiting in paste-last (#18 indicator state).
-                if run.origin == .live, run.purpose == .type { emit(.notice(.readyToPaste(id))) }
+                // Esc'd or late live Dictation: say it's waiting in paste-last (#18 indicator state).
+                // Not for a Retry of one already settled: Jake is looking at it in History.
+                if run.origin == .live, run.purpose == .type, run.previous?.isTerminal != true {
+                    emit(.notice(.readyToPaste(id)))
+                }
             }
             // Only a live target may change another app: recovered or late text is never typed (#4).
             if case .respeak(let fixing) = run.purpose, run.target != nil {
