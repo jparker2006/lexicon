@@ -180,11 +180,12 @@ func isLost(reported: DictationStatus?, saved: (status: DictationStatus, audio: 
     return !saved.status.hasText && saved.audio != .onDisk
 }
 
-/// Run files hold text from the Test set, so one may go inside a git work tree
-/// (this checkout, the main one that holds the worktrees, any other) only when
-/// the manifest is inside this repo too: the public fixtures. Paths compare by
-/// component, case-insensitively, since APFS is.
-func mayWriteRun(to out: URL, manifest: URL, repo: URL) -> Bool {
+/// Run files hold text from the Test set, and typed text holds the written side
+/// of any Rule that fired, so one may go inside a git work tree (this checkout,
+/// the main one that holds the worktrees, any other) only when the manifest and
+/// the `--lexicon` file are inside this repo too: the public fixtures. Paths
+/// compare by component, case-insensitively, since APFS is.
+func mayWriteRun(to out: URL, manifest: URL, lexicon: URL? = nil, repo: URL) -> Bool {
     func components(_ url: URL) -> [String] {
         url.absoluteURL.standardizedFileURL.resolvingSymlinksInPath().pathComponents.map { $0.lowercased() }
     }
@@ -196,7 +197,7 @@ func mayWriteRun(to out: URL, manifest: URL, repo: URL) -> Bool {
         }
         return false
     }
-    return !inGitWorkTree(out) || components(manifest).starts(with: components(repo))
+    return !inGitWorkTree(out) || [manifest, lexicon].compactMap { $0 }.allSatisfy { components($0).starts(with: components(repo)) }
 }
 
 private func label(_ outcome: CleanupOutcome) -> String {

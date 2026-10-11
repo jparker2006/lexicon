@@ -4,8 +4,8 @@ import Testing
 import LexiconDomain
 import WordStore
 
-// The words the Lexicon page draws. The window itself (add, search, delete,
-// import) is checked in the live-app lane: AppKit stays out of the test target.
+// The words the Lexicon page draws and what its Add field reads. The window
+// itself (add, search, delete, import) is checked in the live-app lane.
 
 @Test func aTermsTitleIsItsText() {
     let zorblax = LexiconEntry.term(Term(text: "Zorblax"))
@@ -108,4 +108,21 @@ import WordStore
     let two = LexiconText.summary(of: ImportCounts(), unreadable: 2)
     #expect(two.message == "Nothing new to import")
     #expect(two.detail == "2 lines not read: a Rule needs both sides, heard -> written.")
+}
+
+@Test func theAddFieldTakesOneTermOrOneRuleTypedEitherWay() {
+    #expect(LexiconText.entry(typed: "  Zorblax ") == .term(Term(text: "Zorblax")))
+    #expect(LexiconText.entry(typed: "frob nicate -> Frobnicate") == .rule(Rule(heard: "frob nicate", written: "Frobnicate")))
+    #expect(LexiconText.entry(typed: "frob nicate → Frobnicate") == .rule(Rule(heard: "frob nicate", written: "Frobnicate")))
+    for nothing in ["", "   ", "# a comment", "-> Frobnicate", "frob nicate ->"] {
+        #expect(LexiconText.entry(typed: nothing) == nil, "\(nothing)")
+    }
+}
+
+@Test func anEntryJustAddedFindsItsRowWhateverCaseAndSpacingTheStoreKept() {
+    let typed = LexiconEntry.rule(Rule(heard: "frob  nicate", written: "Frobnicate"))
+    #expect(LexiconText.isSame(.rule(Rule(heard: "Frob nicate", written: "FROBNICATE")), typed))
+    #expect(LexiconText.isSame(.term(Term(text: "zorblax")), .term(Term(text: "Zorblax"))))
+    #expect(!LexiconText.isSame(.term(Term(text: "frob nicate")), typed))
+    #expect(!LexiconText.isSame(.term(Term(text: "Zorblax")), .term(Term(text: "Vexmo"))))
 }

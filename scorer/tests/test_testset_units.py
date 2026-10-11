@@ -73,11 +73,11 @@ class ParseLexicon(unittest.TestCase):
         lexicon = parse_lexicon("kubectl\nSupabase\ncube cuddle -> kubectl\nuse effect -> useEffect\n")
         self.assertEqual(lexicon.written, ["Supabase", "kubectl", "useEffect"])
 
-    def test_the_public_sample_reads_as_the_app_reads_it(self):
-        # The Swift import tests read this same file, so the two parsers can't drift.
+    def test_the_public_sample_reads_as_the_swift_import_tests_expect(self):
+        # Tests/LexiconTests/LexiconImportTests.swift expects the same entries from this file.
         path = Path(__file__).resolve().parent.parent / "fixtures" / "sample-lexicon.txt"
         lexicon = parse_lexicon(path.read_text(encoding="utf-8"))
-        # Python keeps the case duplicate ZORBLAX as a Term of its own.
+        # Parsing keeps the case duplicate ZORBLAX; only the app's store folds it into Zorblax.
         self.assertEqual(lexicon.terms,
                          ("Zorblax", "QuuxKit", "flimDB", "snorp-ctl", "Vexmo", "Trellium.md", "ZORBLAX"))
         self.assertEqual(lexicon.rules,

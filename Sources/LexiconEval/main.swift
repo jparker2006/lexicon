@@ -123,8 +123,8 @@ func evalFile(_ wav: URL, scripted: String?, lexicon: URL?) async -> Int32 {
 func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, lexicon: URL?,
                   scriptedGold: Bool) async -> Int32 {
     if let out {
-        guard mayWriteRun(to: out, manifest: manifest, repo: repo) else {
-            return fail("--out is inside a git repo but the manifest is not public; Test set text never goes in a repo")
+        guard mayWriteRun(to: out, manifest: manifest, lexicon: lexicon, repo: repo) else {
+            return fail("--out is inside a git repo but the manifest or Lexicon is not public; private text never goes in a repo")
         }
         // Never over a manifest, a baseline or another run: they may be Jake's data.
         guard !FileManager.default.fileExists(atPath: out.path(percentEncoded: false)) else { return fail("--out already exists") }
@@ -157,7 +157,7 @@ func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, le
     if let split { arguments += ["--split", split] }
     if let baseline { arguments += ["--baseline", baseline.path(percentEncoded: false)] }
     if lexicon != nil {
-        do { try writtenForms(entries).write(to: termsFile, atomically: true, encoding: .utf8) } catch {
+        do { try await writtenForms(entries).write(to: termsFile, atomically: true, encoding: .utf8) } catch {
             return fail("cannot write the Lexicon's written forms: \(error.localizedDescription)")
         }
         arguments += ["--terms", termsFile.path(percentEncoded: false)]
@@ -226,12 +226,18 @@ func readLexicon(_ url: URL?) throws -> [LexiconEntry] {
     return file.entries
 }
 
-/// The written forms of a Lexicon, each once, one per line: a Term's text and a
-/// Rule's written side. The scorer's `--terms` file.
-func writtenForms(_ entries: [LexiconEntry]) -> String {
+/// The written forms of the Lexicon the file imports to, each once, one per
+/// line: a Term's text and a Rule's written side. The scorer's `--terms` file.
+/// Read back from a store, so a Term listed twice in another case is one Term,
+/// as it is in the app.
+func writtenForms(_ entries: [LexiconEntry]) async throws -> String {
+    let paths = AppPaths.temporary()
+    defer { try? FileManager.default.removeItem(at: paths.root) }
+    let lexicon = try Lexicon(paths: paths)
+    _ = try await lexicon.add(entries)
     var seen = Set<String>()
     var body = ""
-    for entry in entries {
+    for entry in await lexicon.entries {
         let form = switch entry {
         case .term(let term): term.text
         case .rule(let rule): rule.written

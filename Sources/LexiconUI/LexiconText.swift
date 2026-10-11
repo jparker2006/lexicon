@@ -12,6 +12,13 @@ enum LexiconText {
         }
     }
 
+    /// What the Add field holds: exactly one line of the import format, or nil.
+    /// The page shows Rules with "→", so a Rule typed the way it is shown is one too.
+    static func entry(typed text: String) -> LexiconEntry? {
+        let file = LexiconFile(parsing: text.replacingOccurrences(of: "→", with: "->"))
+        return file.entries.count == 1 && file.unreadable == 0 ? file.entries.first : nil
+    }
+
     /// Search: a plain match, ignoring case and accents, on a Term or on either side of a Rule.
     static func matches(_ entry: LexiconEntry, _ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespaces)

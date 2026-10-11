@@ -3,7 +3,7 @@ public import LexiconDomain
 
 /// One Term or one Rule: a line of a Lexicon file, a line typed into the page's
 /// Add field, or a row on the page.
-public enum LexiconEntry: Sendable, Hashable {
+public enum LexiconEntry: Sendable, Equatable {
     case term(Term)
     case rule(Rule)
 }
@@ -46,7 +46,7 @@ public struct LexiconFile: Sendable, Equatable {
 
 /// What an import added: Terms and Rules new to the Lexicon, and entries it
 /// already had (in any case), which an import leaves as they are.
-public struct ImportCounts: Sendable, Hashable {
+public struct ImportCounts: Sendable, Equatable {
     public var terms = 0
     public var rules = 0
     public var duplicates = 0

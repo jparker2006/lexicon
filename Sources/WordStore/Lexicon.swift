@@ -67,7 +67,7 @@ public actor Lexicon {
     }
 
     /// Import: every entry the Lexicon doesn't have yet, in one transaction and
-    /// one recompile, so the word list is read once for the whole file. An entry
+    /// one recompile, so the system word list is read once for the whole file. An entry
     /// it already has, in any case, stays as it is: importing a file twice, or
     /// over Jake's own edits, changes nothing. (Add, above, replaces instead:
     /// typing a spelling means Jake wants that spelling.)

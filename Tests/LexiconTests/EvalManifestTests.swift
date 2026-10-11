@@ -179,6 +179,13 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
     #expect(!mayWriteRun(to: repo.appending(path: "scorer/../run.jsonl"), manifest: privateSet, repo: repo))
     #expect(!mayWriteRun(to: main.appending(path: "run.jsonl"), manifest: privateSet, repo: repo))
     #expect(!mayWriteRun(to: main.appending(path: "worktrees/other/run.jsonl"), manifest: privateSet, repo: repo))
+    // A run's typed text carries the Lexicon's written words, so a private Lexicon
+    // keeps the run out of a repo even with the public manifest.
+    let starter = root.appending(path: "starter-lexicon.txt")
+    #expect(!mayWriteRun(to: repo.appending(path: "run.jsonl"), manifest: fixture, lexicon: starter, repo: repo))
+    #expect(mayWriteRun(to: repo.appending(path: "run.jsonl"), manifest: fixture,
+                        lexicon: repo.appending(path: "scorer/sample-lexicon.txt"), repo: repo))
+    #expect(mayWriteRun(to: root.appending(path: "runs/run.jsonl"), manifest: fixture, lexicon: starter, repo: repo))
 }
 
 @Test func aLexiconFilesRulesApplyToEveryEntryOfTheManifest() async throws {
@@ -208,8 +215,9 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
     #expect(code == 2)  // usage: nothing runs
 }
 
-@Test func installModelRejectsALexiconFileBeforeAnyDownload() async {
-    let code = await runEval(arguments: ["lexicon-eval", "--install-model", "/tmp/x", "--lexicon", "x.txt"])
+@Test func installModelRejectsALexiconFileBeforeAnyDownload() async throws {
+    let folder = try scratchDirectory().path(percentEncoded: false)
+    let code = await runEval(arguments: ["lexicon-eval", "--install-model", folder, "--lexicon", "x.txt"])
     #expect(code == 2)  // usage: the install guard counts every option, so nothing downloads
 }
 
@@ -221,4 +229,15 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
     let code = await runEval(arguments: ["lexicon-eval", wav.path(percentEncoded: false), "--scripted", "x",
                                          "--lexicon", missing.path(percentEncoded: false)])
     #expect(code == 1)
+}
+
+@Test func aLexiconFileIsReadByPathAndItsWrittenFormsGoToTheScorerOnce() async throws {
+    let entries = try readLexicon(sample)
+    #expect(entries == (try LexiconFile(contentsOf: sample)).entries)
+    #expect(try readLexicon(nil).isEmpty)
+    // "ZORBLAX" is "Zorblax" again, and "QuuxKit" is a Term and a Rule's written
+    // side: each is one line of the scorer's --terms.
+    #expect(try await writtenForms(entries).split(separator: "\n") == [
+        "Zorblax", "QuuxKit", "flimDB", "snorp-ctl", "Vexmo", "Trellium.md", "Frobnicate", "/zap", "kubenector",
+    ])
 }

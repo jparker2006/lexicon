@@ -4,9 +4,9 @@ import LexiconDomain
 public import WordStore
 
 /// Opens the Lexicon page from the menu bar. One window at a time; a second open
-/// brings it forward. Closing drops the window and its copy of the list. The
-/// Lexicon itself is the app's one store, the same actor every Dictation reads
-/// at fn-down, so an edit here reaches the next Dictation.
+/// brings it forward. Closing drops the window and its copy of the list. Give it
+/// the Lexicon the Conductor reads at fn-down (the system's), so an edit here
+/// reaches the next Dictation; a second actor on the same file would not see it.
 @MainActor
 public final class LexiconWindowPresenter: NSObject {
     private let lexicon: Lexicon
@@ -228,11 +228,7 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
     /// typing a spelling means that spelling. Anything but one entry beeps and
     /// keeps the sheet open.
     @objc func addTyped(_ sender: Any?) {
-        // The page shows Rules with "→", so a Rule typed the way it is shown is one too.
-        let line = addField.stringValue.replacingOccurrences(of: "→", with: "->")
-        let file = LexiconFile(parsing: line)
-        guard let window, let sheet = window.attachedSheet, file.entries.count == 1, file.unreadable == 0,
-              let entry = file.entries.first else {
+        guard let window, let sheet = window.attachedSheet, let entry = LexiconText.entry(typed: addField.stringValue) else {
             NSSound.beep()
             return
         }
@@ -273,7 +269,8 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
         Task {
             let alert = NSAlert()
             do {
-                let file = try LexiconFile(contentsOf: url)
+                // Off the main thread: a file in iCloud may have to download first.
+                let file = try await Task.detached(priority: .userInitiated) { try LexiconFile(contentsOf: url) }.value
                 let counts = try await lexicon.add(file.entries)
                 (alert.messageText, alert.informativeText) = LexiconText.summary(of: counts, unreadable: file.unreadable)
                 log.notice("""
@@ -283,7 +280,7 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
             } catch {
                 alert.alertStyle = .warning
                 alert.messageText = "Couldn't import that file"
-                alert.informativeText = "Import reads a plain text file in UTF-8, one entry per line."
+                alert.informativeText = "Import reads a plain text file, one entry per line. Nothing was added."
                 log.error("import failed: \(String(describing: error), privacy: .private)")
             }
             await reload()
