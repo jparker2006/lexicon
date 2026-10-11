@@ -13,6 +13,8 @@ public actor Lexicon {
     /// The current repo's code Terms, in the order selection takes them
     /// (`CodeTerms`). Held in memory, never stored.
     public private(set) var codeTerms: [Term] = []
+    /// Every Term, then every Rule, in one read: what the Lexicon page lists.
+    public var entries: [LexiconEntry] { terms.map(LexiconEntry.term) + rules.map(LexiconEntry.rule) }
     /// The plain-English words among those inside Terms (`EnglishWords`).
     private var english = Set<String>()
     private var compiled = RuleSet.empty
