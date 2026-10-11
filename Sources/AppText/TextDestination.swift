@@ -21,4 +21,14 @@ public protocol TextDestination: Sendable {
     /// nothing typed since the mark; every insert, no grace window), then pastes.
     /// Returns `.inserted(receipt)` or `.notInserted(reason)`; never `.historyOnly`.
     func insert(_ text: String, for id: DictationID, at target: Target) async -> Delivery
+
+    /// ⌃⌘V: the same insert, except that Jake asked for it, so it still pastes
+    /// when Lexicon can't save his clipboard (`TargetApp`, without the restore).
+    func pasteLast(_ text: String, for id: DictationID, at target: Target) async -> Delivery
+}
+
+extension TextDestination {
+    public func pasteLast(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
+        await insert(text, for: id, at: target)
+    }
 }

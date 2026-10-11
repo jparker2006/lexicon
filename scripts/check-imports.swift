@@ -21,6 +21,7 @@ let soleOwners: [String: Set<String>] = [
     "AppKit": ["AppText", "LexiconUI", "LexiconApp", "LexiconHarness"],
     "Cocoa": ["AppText", "LexiconUI", "LexiconApp", "LexiconHarness"],  // re-exports AppKit
     "ApplicationServices": ["AppText"],
+    "Carbon": ["KeyInput", "AppText"],  // the fn tap's IsSecureEventInputEnabled; the Cmd-V key's layout lookup
     "FoundationModels": ["Cleanup"],
     "Security": ["LexiconCore"],  // keys live only in the Keychain code
     "SwiftUI": [],  // AppKit only (Jake's decision)

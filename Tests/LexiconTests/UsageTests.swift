@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-@testable import KeyInput
 @testable import Cleanup
 @testable import History
 import AppText
@@ -13,18 +12,7 @@ import LexiconCore
 // A test whose body calls a sketch stub stays disabled until its ticket lands;
 // `scripts/check.sh` still compiles every one.
 
-@Test(.disabled("lands with #53")) func holdPastThresholdIsPushToTalk() {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300), doubleTapWindow: .milliseconds(250))
-    let t0 = HostTime(nanoseconds: 1_000_000_000)
-    let down = gesture.handle(.fnDown(t0))
-    #expect(down.commands == [.dictationBegan(at: t0)])
-    #expect(down.swallow == false)  // fn always passes through
-    _ = gesture.handle(.deadline(HostTime(nanoseconds: t0.nanoseconds + 300_000_000)))
-    let up = gesture.handle(.fnUp(HostTime(nanoseconds: t0.nanoseconds + 2_000_000_000)))
-    #expect(up.commands.contains(.dictationStopped(at: HostTime(nanoseconds: t0.nanoseconds + 2_000_000_000))))
-}
-
-@Test(.disabled("lands with #59")) func recoveryPlanIsIdempotent() {
+@Test func recoveryPlanIsIdempotent() {
     let id = DictationID()
     let rows = [RecoveryPlan.RowState(id: id, status: .recording, audio: .onDisk)]
     let first = RecoveryPlan.plan(rows: rows, files: [id: .open])

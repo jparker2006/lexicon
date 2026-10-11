@@ -33,9 +33,12 @@ extension Conductor {
         } catch {
             // Give up the capture slot, or every later fn-down finds it taken and is dropped. A discard,
             // not a cancel: a cancel sends `stopped`, and the pill would play a stop sound for a mic that never started.
-            if capturingID == id { endCapture(.discard) }
+            // Only this run's own capture: a later fn press may already own the slot and the gesture.
+            if capturingID == id {
+                endCapture(.discard)
+                keyboard?.endDictation()
+            }
             emit(.notice(.microphoneUnavailable(String(describing: error))))
-            keyboard?.endDictation()
             return .nothing(id)  // nothing was captured, so nothing can be lost
         }
         let context = await contextValue
@@ -81,8 +84,8 @@ extension Conductor {
             emit(.transcribing(id))
             let outcome = await attempt.finish(take.clip)
             let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
-                                   clip: take.clip, speechPlan: speechPlan, cleanupPlan: cleanupPlan,
-                                   cleaning: cleaning, cleanupDeadline: start.preferences.cleanupDeadline,
+                                   clip: take.clip, cleaning: cleaning,
+                                   cleanupDeadline: start.preferences.cleanupDeadline,
                                    access: access, target: nil, releasedAt: nil, previous: nil, hold: hold)
             return await land(outcome, run)
 
@@ -95,8 +98,8 @@ extension Conductor {
             emit(.transcribing(id))
             let outcome = await attempt.finish(take.clip)              // finalize + race local + deadline
             let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
-                                   clip: take.clip, speechPlan: speechPlan, cleanupPlan: cleanupPlan,
-                                   cleaning: cleaning, cleanupDeadline: start.preferences.cleanupDeadline,
+                                   clip: take.clip, cleaning: cleaning,
+                                   cleanupDeadline: start.preferences.cleanupDeadline,
                                    access: access, target: await target, releasedAt: releasedAt,
                                    previous: nil, hold: hold)
             return await land(outcome, run)
@@ -115,10 +118,9 @@ extension Conductor {
             history.record(.waiting(id, reason: String(describing: reason)))
             if reason.waitsForNetwork { emit(.notice(.waitingForNetwork(id))) }
             releaseInsertTurn(id)
-            run.hold.end()
-            // TODO(#59): once the network returns or a local model is installed,
-            // `speech.transcribe` the clip and `land` it again with `previous: .waiting`
-            // and a fresh cleanup session. Late text still passes the target check.
+            run.hold?.end()
+            await run.cleaning.cancel()  // the retry cleans with a fresh session
+            retryWhenReady(run, after: reason)
             emit(.finished(id, .waiting))
             return DictationResult(id: id, status: .waiting, versions: nil, cleanup: nil, model: nil, lag: nil,
                                    attempts: [])
@@ -145,7 +147,7 @@ extension Conductor {
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
             }
             releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
-            run.hold.end()  // the Dictation landed: App Nap may return
+            run.hold?.end()  // the Dictation landed: App Nap may return
 
             // Everything below is after the text landed: off the fn-up path.
             switch delivery {
@@ -160,7 +162,8 @@ extension Conductor {
                 // Esc'd live Dictation: say it's waiting in paste-last (#18 indicator state).
                 if run.origin == .live, run.purpose == .type { emit(.notice(.readyToPaste(id))) }
             }
-            if case .respeak(let fixing) = run.purpose {
+            // Only a live target may change another app: recovered or late text is never typed (#4).
+            if case .respeak(let fixing) = run.purpose, run.target != nil {
                 _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)
             }
             let status = DictationStatus.landed(delivery, origin: run.origin, previous: run.previous)
