@@ -1,4 +1,4 @@
-import Carbon
+import Carbon.HIToolbox
 import CoreGraphics
 
 /// Cmd-V as a physical key: whichever key types "v" with Command held on the
@@ -18,6 +18,15 @@ enum PasteKey {
         }
         guard let ascii = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue() else { return nil }
         return keyCode(for: "v", in: ascii)
+    }
+
+    /// The key for `character` on an installed layout, enabled or not, by its
+    /// input source id ("com.apple.keylayout.Dvorak"). nil if not installed.
+    static func keyCode(for character: String, layoutID: String) -> CGKeyCode? {
+        let filter = [kTISPropertyInputSourceID as String: layoutID] as CFDictionary
+        guard let sources = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource],
+              let source = sources.first else { return nil }
+        return keyCode(for: character, in: source)
     }
 
     /// The key that types `character` with Command held on `source`'s layout.
