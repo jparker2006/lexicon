@@ -73,7 +73,14 @@ def _lexicon_eval(lexicon_eval: Path, manifest: Path, split: str, out: Path, bas
     print(file=sys.stderr)
     if child.returncode not in (0, 3):
         raise TestSetError(f"lexicon-eval exited {child.returncode} on {split} ({hidden} messages hidden)")
-    return json.loads(stdout)
+    report = json.loads(stdout)
+    # No model to answer: every Dictation waits with no text and scores as
+    # "worse", which would save an empty baseline as the reference.
+    unanswered = sum(report["run"]["statuses"].get(s, 0) for s in ("waiting", "nothing", "recording", "transcribing"))
+    if unanswered:
+        raise TestSetError(f"local Parakeet gave no answer for {unanswered} {split} clips; "
+                           "install it with scripts/install-model.sh")
+    return report
 
 
 def _line(stream) -> str | None:

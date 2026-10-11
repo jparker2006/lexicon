@@ -43,7 +43,8 @@ with open(out, "x", encoding="utf-8") as f:
         f.write(json.dumps({"id": e["id"], "status": "inserted", "speech_text": heard,
                             "inserted_text": heard, "lag_ms": 700, "engine": "parakeet", "lost": False}) + "\\n")
 print("lexicon-eval: 2/2\\r", end="", file=sys.stderr, flush=True)
-print(json.dumps({"run": {"wer": 0.1, "term_error_rate": None, "lag_ms": {"p50": 500, "p95": 900, "count": 2}},
+print(json.dumps({"run": {"wer": 0.1, "term_error_rate": None, "lag_ms": {"p50": 500, "p95": 900, "count": 2},
+                          "statuses": {"inserted": len(mine)}},
                   "worse": ["wer"]}))
 sys.exit(3)
 """
@@ -155,6 +156,15 @@ class BaselinesTest(unittest.TestCase):
         self.assertFalse((self.root / "baselines/2026-10-12").exists())
         self.assertEqual(list((self.root / "baselines").glob(".*.partial")), [])
         self.assertFalse((self.root / ".baselines-work").exists())
+
+    def test_a_missing_model_saves_no_baseline(self):
+        # With no model every Dictation waits with no text: that scores as "worse", not as an error.
+        self.write_fake(FAKE_EVAL.replace('"statuses": {"inserted": len(mine)}', '"statuses": {"waiting": len(mine)}'))
+
+        with self.assertRaises(TestSetError):
+            self.run_baselines()
+        self.assertFalse((self.root / "baselines/2026-10-12").exists())
+        self.assertEqual(list((self.root / "baselines").glob(".*.partial")), [])
 
     def test_refuses_while_another_test_set_command_holds_the_lock(self):
         with locked(self.root):
