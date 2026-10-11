@@ -157,36 +157,42 @@ public struct TestHookChannel: Sendable {
     }
 
     /// Waits for the reply to request `name`, woken by the replies folder
-    /// changing rather than a poll, and on no reply takes the request back. The
-    /// deadline is a Dispatch timer, not this task waking: under load the task can
-    /// wake late, and a reply that landed in time must still count.
+    /// changing rather than a poll, and on no reply takes the request back.
     func reply(to name: String, timeout: Duration) async throws -> TestHookReply {
         let files = FileManager.default
-        try files.createDirectory(at: replies, withIntermediateDirectories: true)
+        let request = requests.appending(path: name)
         let reply = replies.appending(path: name)
+        try? files.createDirectory(at: replies, withIntermediateDirectories: true)
         let folder = open(replies.path, O_EVTONLY)
-        guard folder >= 0 else { throw CocoaError(.fileReadNoPermission) }
+        guard folder >= 0 else {
+            try? files.removeItem(at: request)
+            throw CocoaError(.fileReadNoPermission)
+        }
         let queue = DispatchQueue(label: "dev.jparker.lexicon.test-hooks.reply")
         let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: folder, eventMask: .write, queue: queue)
-        source.setCancelHandler { close(folder) }
-        let data: Data? = await withCheckedContinuation { continuation in
-            // Runs on `queue` only, so `isCancelled` says the wait already ended.
-            @Sendable func check(atDeadline: Bool) {
-                guard !source.isCancelled else { return }
-                let data = try? Data(contentsOf: reply)
-                guard data != nil || atDeadline else { return }
-                source.cancel()
-                continuation.resume(returning: data)
+        // Every way the wait ends cancels the source, and its cancel handler runs
+        // once: it reads the reply a last time, so one that landed by the deadline
+        // counts however late this task wakes. The deadline is a Dispatch timer for
+        // the same reason: under load a task can wake long after it asked to.
+        let data: Data? = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                source.setCancelHandler {
+                    close(folder)
+                    continuation.resume(returning: try? Data(contentsOf: reply))
+                }
+                source.setEventHandler { if FileManager.default.fileExists(atPath: reply.path) { source.cancel() } }
+                source.resume()
+                // Dispatch registers the source before `queue` runs anything queued after
+                // resume(), so this check runs with the watch live: a reply is either
+                // here now or raises an event.
+                queue.async { if FileManager.default.fileExists(atPath: reply.path) { source.cancel() } }
+                queue.asyncAfter(deadline: .now() + timeout / .seconds(1)) { source.cancel() }
             }
-            source.setEventHandler { check(atDeadline: false) }
-            source.resume()
-            // The source registers on `queue` as it resumes, so this check runs with
-            // the watch live: a reply is either here now or raises an event.
-            queue.async { check(atDeadline: false) }
-            queue.asyncAfter(deadline: .now() + timeout / .seconds(1)) { check(atDeadline: true) }
+        } onCancel: {
+            source.cancel()
         }
         guard let data else {
-            try? files.removeItem(at: requests.appending(path: name))
+            try? files.removeItem(at: request)
             throw TestHookError.noReply
         }
         try? files.removeItem(at: reply)
@@ -217,9 +223,10 @@ public final class TestHookServer {
         source.setEventHandler { Self.drain(channel, handle) }
         source.setCancelHandler { close(folder) }
         source.resume()
-        // Requests written before the watch started raise no event. The source
-        // registers on `queue` as it resumes, so this drain runs with the watch
-        // live: once init returns, no request is missed, whenever it was written.
+        // Requests written before the watch started raise no event. Dispatch
+        // registers the source before `queue` runs anything queued after resume(),
+        // so this drain runs with the watch live: once init returns, the server
+        // has seen or will see every request, whenever it was written.
         queue.sync { Self.drain(channel, handle) }
     }
 

@@ -13,7 +13,7 @@ private let status = TestHookStatus(bundleID: AppPaths.devBundleID, version: "0.
 
 /// How long a test waits for a reply that takes milliseconds. Generous on
 /// purpose: the server answers from a task, and a loaded CI runner can leave
-/// tasks waiting for a thread for 15 s or more. The wait ends on the reply,
+/// tasks waiting many seconds for a thread. The wait ends on the reply,
 /// not on this limit, so a pass never costs it.
 private let replyLimit = Duration.seconds(120)
 
@@ -56,9 +56,21 @@ private let replyLimit = Duration.seconds(120)
     #expect(leftovers(channel).isEmpty)
 }
 
+@Test(.timeLimit(.minutes(1))) func aCancelledSenderStopsWaitingAndTakesItsRequestBack() async throws {
+    let channel = TestHookChannel(paths: AppPaths.temporary())
+    let sent = Task {
+        // Cancelled before the wait starts: the hardest case, so this needs no timing.
+        withUnsafeCurrentTask { $0?.cancel() }
+        return try await channel.send(.status, timeout: replyLimit)
+    }
+    await #expect(throws: TestHookError.noReply) { try await sent.value }
+    #expect(leftovers(channel).isEmpty)
+}
+
 @Test func aReplyThatLandedInTimeIsReadHoweverLateTheSenderWakes() async throws {
-    // Under load the sender's wait can end after its deadline; a reply already
-    // written still counts. A zero timeout is the latest a sender can wake.
+    // Under load the sender can wake after its deadline; a reply that landed by
+    // then still counts. A zero timeout is a sender whose deadline has passed
+    // with the reply already there.
     let channel = TestHookChannel(paths: AppPaths.temporary())
     let name = try channel.post(.status)
     try answer(name, with: .status(status), on: channel)
@@ -78,7 +90,7 @@ private let replyLimit = Duration.seconds(120)
 @Test func aStaleRequestIsDroppedUnanswered() async throws {
     let channel = TestHookChannel(paths: AppPaths.temporary())
     let request = try post(Data(#"{"dictate":{"wav":"/tmp/old.wav"}}"#.utf8), to: channel)
-    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)],
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -2 * TestHookChannel.staleAfter)],
                                           ofItemAtPath: request.path)
     let handled = Handled()
     let server = try TestHookServer(channel: channel) { command in
