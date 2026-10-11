@@ -180,6 +180,7 @@ private actor StatusAtInsert: TextDestination {
     init(history: HistoryStore) { self.history = history }
 
     func context() -> AppContext { .unknown }
+    func appChanges() -> AsyncStream<AppContext> { AsyncStream { $0.yield(.unknown) } }
     func target() -> Target? { Target() }
     func insert(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
         // Reads run on History's writer queue after every event recorded before them.

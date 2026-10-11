@@ -34,6 +34,9 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     /// would at fn-up: capture the focused field after `delay` seconds (time to
     /// click into the field), then insert.
     case insert(text: String, delay: Double)
+    /// Turn Private mode on or off. A non-nil `alwaysPrivateApps` replaces the
+    /// always-private list: nil leaves it as it is, [] clears it. Replies with the status.
+    case privacy(PrivacyMode, alwaysPrivateApps: [String]?)
 }
 
 public enum TestHookReply: Codable, Sendable, Equatable {
@@ -56,13 +59,19 @@ public struct TestHookStatus: Codable, Sendable, Equatable {
     public let accessibility: Bool
     /// "granted", "denied" or "undetermined".
     public let microphone: String
+    public let privacy: PrivacyMode
+    /// Sorted, so two replies for the same settings are equal.
+    public let alwaysPrivateApps: [String]
 
-    public init(bundleID: String, version: String, pid: Int32, accessibility: Bool, microphone: String) {
+    public init(bundleID: String, version: String, pid: Int32, accessibility: Bool, microphone: String,
+                privacy: PrivacyMode, alwaysPrivateApps: [String]) {
         self.bundleID = bundleID
         self.version = version
         self.pid = pid
         self.accessibility = accessibility
         self.microphone = microphone
+        self.privacy = privacy
+        self.alwaysPrivateApps = alwaysPrivateApps
     }
 }
 

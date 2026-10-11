@@ -91,6 +91,17 @@ public final class PreferencesStore: Sendable {
     }
 }
 
+extension PreferencesStore {
+    /// Model install for the app with this bundle id, from that app's saved settings:
+    /// nil while Private mode is on in it, so the download opens no connection.
+    /// Only reads them: `lexicon-eval --install-model` runs outside the app.
+    public static func modelInstallAccess(forApp bundleID: String) -> CloudAccess? {
+        guard let defaults = UserDefaults(suiteName: bundleID) else { return nil }
+        return CloudAccess.granted(by: PreferencesStore(defaults: defaults).snapshot(), for: .modelInstall,
+                                   keys: { _ in nil })
+    }
+}
+
 /// API keys in the Keychain (#8): generic passwords, service = bundle id,
 /// account = `CredentialID.account`. Each key is read once, on first use, and
 /// kept in memory (a missing key too, until `set` stores one). A read that
@@ -106,7 +117,7 @@ public final class Secrets: Sendable {
 
     public init(_ source: Source) { self.source = source }
 
-    /// Handed to `CloudAccess.granted(by:app:keys:)`. Called only when a cloud
+    /// Handed to `CloudAccess.granted(by:for:keys:)`. Called only when a cloud
     /// call needs its key: the speech stream asks at fn-down, when it opens.
     public var lookup: @Sendable (CredentialID) -> String? {
         switch source {

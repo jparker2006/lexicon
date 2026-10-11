@@ -17,10 +17,21 @@ public final class DictationIndicator {
     /// The mouth step last drawn in the menu bar, so the icon is redrawn only when it changes.
     private var mouthStep = 0
     private var hideTimer: Timer?
+    /// The Private mode look currently drawn, so an unrelated settings change doesn't redraw it.
+    private var appliedPrivate = false
 
     public init(statusItem: StatusItemController, preferences: PreferencesStore) {
         self.statusItem = statusItem
         self.preferences = preferences
+        applyPrivacy(privacyOn)
+        // Subscribed here rather than inside the Task, so a change made before the Task first runs is not missed.
+        let changes = preferences.changes()
+        Task { @MainActor [weak self] in
+            for await settings in changes {
+                guard let self else { return }
+                self.applyPrivacy(settings.privacy == .private)
+            }
+        }
     }
 
     /// Runs until `events` ends.
@@ -95,10 +106,31 @@ public final class DictationIndicator {
         return item
     }
 
+    /// The "Private mode" line for the menu bar menu, with a check while on.
+    public func privateModeMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Private mode", action: #selector(PrivacyToggle.toggle(_:)), keyEquivalent: "")
+        item.target = privacyToggle
+        item.state = privacyOn ? .on : .off
+        return item
+    }
+
     private lazy var toggle = SoundsToggle(preferences: preferences)
+    /// Held here because an NSMenuItem holds its target weakly.
+    private lazy var privacyToggle = PrivacyToggle(preferences: preferences)
 
     /// Read each time: the engine never runs while Sounds is off, since a running one keeps the Mac awake.
     private var soundsOn: Bool { preferences.snapshot().soundsOn }
+
+    /// Only the setting counts: being offline doesn't make Lexicon private.
+    private var privacyOn: Bool { preferences.snapshot().privacy == .private }
+
+    /// The look follows the setting through `changes`, so the menu toggle only writes it.
+    private func applyPrivacy(_ on: Bool) {
+        guard on != appliedPrivate else { return }
+        appliedPrivate = on
+        statusItem.setPrivate(on)
+        pill.setPrivate(on)
+    }
 
     private func play(_ cue: SoundCue) {
         if soundsOn { sounds.play(cue) }
@@ -129,4 +161,16 @@ private final class SoundsToggle: NSObject {
     init(preferences: PreferencesStore) { self.preferences = preferences }
 
     @objc func toggle() { preferences.update { $0.soundsOn.toggle() } }
+}
+
+@MainActor
+private final class PrivacyToggle: NSObject {
+    let preferences: PreferencesStore
+    init(preferences: PreferencesStore) { self.preferences = preferences }
+
+    /// The clicked item takes the new check at once, in case the menu still shows it.
+    @objc func toggle(_ sender: NSMenuItem) {
+        preferences.update { $0.privacy = $0.privacy == .private ? .standard : .private }
+        sender.state = preferences.snapshot().privacy == .private ? .on : .off
+    }
 }

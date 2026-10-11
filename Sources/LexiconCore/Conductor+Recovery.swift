@@ -69,6 +69,9 @@ extension Conductor {
     private func retry(waiting run: DictationRun, audio: URL, after reason: SpeechUnavailable) async {
         defer { waiting[run.id] = nil }
         var reason = reason
+        // The Dictation's own access: once revoked (Private mode, an always-private app,
+        // a secret), or denied at a try, it stays gone, so this audio never leaves later.
+        var standing = run.access
         while true {
             await speech.untilRetry(after: reason)
             if Task.isCancelled { return }  // a cancelled sleep returns at once: never spin
@@ -77,12 +80,19 @@ extension Conductor {
             if clip == nil { clip = await Self.read(audio) }
             guard let clip else { continue }
             // Today's settings: a model installed or chosen since then is the one that answers,
-            // and the cloud only if both fn-down and now allow it (Private mode turned on meanwhile).
+            // and the cloud only if fn-down, every try since and now all allow it.
             let preferences = preferences.snapshot()
-            let access = run.access == nil ? nil
-                : CloudAccess.granted(by: preferences, app: run.context, keys: secrets.lookup)
+            let access = standing.flatMap { standing in
+                standing.revoked == nil
+                    ? CloudAccess.granted(by: preferences, for: .app(run.context), keys: secrets.lookup) : nil
+            }
+            standing = access
             let words = await lexicon.forDictation(in: run.context)
             let plan = SpeechPlan.make(preferences: preferences, access: access, terms: words.terms)
+            // Watched like a live run, through its cleanup: Private mode turned on while
+            // this try waits behind a live job, or streams, cuts it at once.
+            let privacyWatch = access.map { revokeWhenDenied($0, in: run.context, followingFocus: false) }
+            defer { privacyWatch?.cancel() }
             // Background: a retry never goes ahead of the Dictation Jake is making now.
             let outcome = await speech.transcribe(clip, plan: plan, priority: .background)
             if case .unavailable(let still) = outcome, still.waits {
