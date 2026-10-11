@@ -134,7 +134,7 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     let id = dictate(store, "Wire the auth callback into Supabase.", at: at(10, 11, 9, 41))
     await store.flush()
 
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let sections = reader.sections(matching: nil)
     #expect(sections.map(\.day) == [DateComponents(year: 2026, month: 10, day: 11)])
     #expect(sections.map(\.count) == [1])
@@ -159,7 +159,7 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     store.record(.waiting(id, reason: "offline"))
     await store.flush()
 
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let row = try #require(reader.rows(in: reader.sections(matching: nil)[0], offsets: 0..<1).first)
     #expect(row.status == .waiting)
     #expect(row.finalText == nil)
@@ -173,7 +173,7 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     dictate(store, long, at: at(10, 11, 9))
     await store.flush()
 
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     #expect(reader.rows(in: reader.sections(matching: nil)[0], offsets: 0..<1).first?.finalText == long)
 }
 
@@ -186,7 +186,7 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     dictate(store, "Next morning.", at: at(11, 2, 8))
     await store.flush()
 
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let sections = reader.sections(matching: nil)
     #expect(sections.map(\.day) == [DateComponents(year: 2026, month: 11, day: 2), DateComponents(year: 2026, month: 11, day: 1),
                                     DateComponents(year: 2026, month: 10, day: 31)])
@@ -203,7 +203,7 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     store.record(.deleted(gone))
     await store.flush()
 
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let sections = reader.sections(matching: nil)
     #expect(sections.map(\.count) == [1])
     #expect(reader.rows(in: sections[0], offsets: 0..<5).map(\.id) == [kept])
@@ -219,25 +219,33 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
             """, [.text(DictationID().description), .int(at(10, 11, 10).unixMs)])
     }
 
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let sections = reader.sections(matching: nil)
     #expect(sections.map(\.count) == [1])
     #expect(reader.rows(in: sections[0], offsets: 0..<5).map(\.id) == [kept])
 }
 
-@MainActor @Test func beforeTheFirstDictationHistoryIsEmptyAndNoFileIsMade() throws {
+@MainActor @Test func beforeTheFirstDictationHistoryIsEmptyUntilOneArrives() async throws {
     let paths = AppPaths.temporary()
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     #expect(reader.sections(matching: nil).isEmpty)
     #expect(reader.sections(matching: "anything").isEmpty)
     #expect(!FileManager.default.fileExists(atPath: paths.root.appending(path: "history.sqlite").path(percentEncoded: false)))
+    let empty = reader.version
+
+    // A window opened before the first Dictation shows it once it lands.
+    let store = try HistoryStore(paths: paths)
+    dictate(store, "The very first Dictation.", at: at(10, 11, 9))
+    await store.flush()
+    #expect(reader.version != empty)
+    #expect(reader.sections(matching: nil).map(\.count) == [1])
 }
 
 @MainActor @Test func versionMovesWhenTheWriterCommitsSoTheWindowKnowsToReload() async throws {
     let (store, paths) = try makeStore()
     dictate(store, "First.", at: at(10, 11, 9))
     await store.flush()
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let before = reader.version
     #expect(reader.version == before)
 
@@ -257,7 +265,7 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     dictate(store, "Escape the back\\slash.", at: at(10, 11, 11))
     await store.flush()
 
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     func found(_ query: String?) -> [String] {
         allRows(reader, reader.sections(matching: query)).flatMap { $0.compactMap(\.finalText) }
     }
@@ -276,7 +284,7 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
 
 @MainActor @Test func aYearOfHistoryOpensOnTodayAndPagesThroughEveryDay() async throws {
     let (paths, total) = try await year()
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let sections = reader.sections(matching: nil)
     #expect(sections.count == days)
     #expect(sections.first?.day == DateComponents(year: 2026, month: 10, day: 11))
@@ -301,12 +309,12 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
 
 @MainActor @Test func searchOverAYearFindsEveryMatchAndNothingElse() async throws {
     let (paths, total) = try await year()
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let sections = reader.sections(matching: marker)
     let rows = allRows(reader, sections).flatMap { $0 }
     #expect(rows.count == (total + markerEvery - 1) / markerEvery)
     #expect(sections.reduce(0) { $0 + $1.count } == rows.count)
-    #expect(rows.allSatisfy { $0.finalText?.localizedCaseInsensitiveContains(marker) == true })
+    #expect(rows.allSatisfy { $0.finalText?.lowercased().contains(marker) == true })
 }
 
 // MARK: - Speed (opt in: LEXICON_BENCH=1)
@@ -328,9 +336,9 @@ private func percentile(_ samples: [Duration], _ p: Double) -> Duration {
     let clock = ContinuousClock()
     var samples: [Duration] = []
     for _ in 0..<50 {
-        samples.append(try clock.measure {
+        samples.append(clock.measure {
             // What a window open costs the reader: a new connection, the day sections, the first screenful.
-            let reader = try HistoryReader(paths: paths, calendar: pacific)
+            let reader = HistoryReader(paths: paths, calendar: pacific)
             let sections = reader.sections(matching: nil)
             _ = reader.rows(in: sections[0], offsets: 0..<30)
         })
@@ -341,8 +349,8 @@ private func percentile(_ samples: [Duration], _ p: Double) -> Duration {
 
 /// Search over `paths` with a few queries, as Jake types them: day sections plus the first screenful.
 @MainActor
-private func searchTimes(_ paths: AppPaths) throws -> [Duration] {
-    let reader = try HistoryReader(paths: paths, calendar: pacific)
+private func searchTimes(_ paths: AppPaths) -> [Duration] {
+    let reader = HistoryReader(paths: paths, calendar: pacific)
     let clock = ContinuousClock()
     return ["zanzibar", "callback", "milliseconds please", "no such words anywhere"].flatMap { query in
         (0..<10).map { _ in
@@ -358,8 +366,8 @@ private func searchTimes(_ paths: AppPaths) throws -> [Duration] {
 @MainActor @Test(.enabled(if: bench)) func speedSearchWithinTarget() async throws {
     let (store, paths) = try makeStore()
     let total = try await seedYear(store, perDay: jakesRate)
-    let samples = try searchTimes(paths)
-    let heavy = try searchTimes(try await year().paths)
+    let samples = searchTimes(paths)
+    let heavy = searchTimes(try await year().paths)
     print("History search over \(total) Dictations: p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")
     print("History search over \(perDay * days) Dictations: p50 \(percentile(heavy, 0.5)), p95 \(percentile(heavy, 0.95))")
     #expect(percentile(samples, 0.5) <= .milliseconds(25))

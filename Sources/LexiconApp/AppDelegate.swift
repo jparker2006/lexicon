@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let history = HistoryWindowPresenter(paths: paths)
         self.history = history
         statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle),
-                                          openHistory: { history.show() }, extraItems: { Permissions.menuItems() })
+                                          extraItems: { [history.menuItem()] + Permissions.menuItems() })
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
         #if DEBUG
         testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths)

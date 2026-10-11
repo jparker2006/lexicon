@@ -13,10 +13,13 @@ import TestHooks
 let usage = """
     usage: lexicon-harness check
            lexicon-harness hook status | dictate <wav> | indicator <state>
+           lexicon-harness history [search word]
 
       check   launch Lexicon Dev with test hooks, find its status item by identifier,
               list its windows, open the target field, read it and clear it
       hook    send one test hook to the running Lexicon Dev and print the reply
+      history open the History window from the menu bar and time it, click to copy,
+              search, close, and compare memory before and after
     """
 
 func ok(_ line: String) { print("ok    \(line)") }
@@ -69,6 +72,7 @@ do {
     switch arguments.first {
     case "check": try await check()
     case "hook": try await hook(Array(arguments.dropFirst()))
+    case "history": try await HistoryCheck.run(search: arguments.dropFirst().first)
     case TargetField.mode: TargetField.serve(text: arguments.dropFirst().first ?? "")
     default: fail(usage, code: 64)
     }

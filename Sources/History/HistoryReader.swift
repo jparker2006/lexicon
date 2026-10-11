@@ -1,10 +1,12 @@
 public import Foundation
 public import LexiconDomain
 import SQLiteKit
+import os
 
 /// The History window's read side. Its own read-only connection (WAL allows a
-/// reader beside the writer), confined to the main thread, opened when the
-/// window opens and closed when it closes, so a closed window costs nothing.
+/// reader beside the writer), confined to the main thread, opened with the
+/// window (or with the first Dictation, if the window came first) and closed
+/// when it closes, so a closed window costs nothing.
 ///
 /// Access pattern (NSTableView asks only for rows on screen): the table's flat
 /// index is [day header, rows..., day header, rows...]. `sections` reads only
@@ -12,26 +14,40 @@ import SQLiteKit
 /// into local days in Swift, so the calendar decides where a day ends, DST
 /// included. Rows are then fetched a page at a time within one day (its
 /// `started_at` range plus a small OFFSET). Opening the window costs one pass
-/// over the time index plus one page, whatever the History size.
+/// over the time index plus one page: no Dictation's text is read until its
+/// row is on screen.
 @MainActor
 public final class HistoryReader {
-    /// nil until the first Dictation creates `history.sqlite`: an empty History.
-    private let db: Database?
+    private let file: URL
     private let calendar: Calendar
+    /// nil until `history.sqlite` exists: before the first Dictation, History is empty.
+    private var opened: Database?
+    private let log = Logger(subsystem: "Lexicon", category: "History")
 
     /// `calendar` decides the day buckets; tests pass a fixed time zone.
-    public init(paths: AppPaths, calendar: Calendar = .current) throws {
-        let file = paths.root.appending(path: "history.sqlite")
-        db = FileManager.default.fileExists(atPath: file.path(percentEncoded: false))
-            ? try Database(at: file, mode: .readOnly, migrations: []) : nil
+    public init(paths: AppPaths, calendar: Calendar = .current) {
+        file = paths.root.appending(path: "history.sqlite")
         self.calendar = calendar
     }
 
-    /// Changes whenever the writer commits, so the window reloads only when there is something new.
-    public var version: Int { db?.dataVersion ?? 0 }
+    private var db: Database? {
+        if opened == nil, FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) {
+            do {
+                opened = try Database(at: file, mode: .readOnly, migrations: [])
+            } catch {
+                log.error("History window cannot read History: \(String(describing: error), privacy: .private)")
+            }
+        }
+        return opened
+    }
 
-    /// Newest day first. `matching` is a plain-text, case-insensitive search over
-    /// final text (LIKE; FTS5 only if measured slow: #4). Blank means everything.
+    /// Changes whenever the writer commits, so the window reloads only when there
+    /// is something new. 0 means no History yet; it moves when History appears.
+    public var version: Int { db.map { $0.dataVersion &+ 1 } ?? 0 }
+
+    /// Newest day first. `matching` is a plain-text search over final text,
+    /// case-insensitive for ASCII as SQLite's LIKE is (FTS5 only if measured
+    /// slow: #4). Blank means everything.
     public func sections(matching query: String?) -> [DaySection] {
         guard let db else { return [] }
         let filter = Filter(query)

@@ -9,7 +9,7 @@ import LexiconCore
 /// Closing the window drops it, its reader and the reader's SQLite connection
 /// (closed, not hidden: #4), so a closed window costs no memory.
 @MainActor
-public final class HistoryWindowPresenter {
+public final class HistoryWindowPresenter: NSObject {
     private let paths: AppPaths
     private var controller: HistoryWindowController?
     private let log = Logger(subsystem: "Lexicon", category: "History")
@@ -18,7 +18,14 @@ public final class HistoryWindowPresenter {
         self.paths = paths
     }
 
-    public func show() {
+    /// The menu bar menu's "History" line.
+    public func menuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "History", action: #selector(show), keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    @objc public func show() {
         // An accessory app shows no menu bar, but key equivalents (Cmd-W, Cmd-V in
         // the search field) still route through the main menu.
         if NSApp.mainMenu == nil { NSApp.mainMenu = Self.keyEquivalents() }
@@ -29,14 +36,9 @@ public final class HistoryWindowPresenter {
         }
         let clock = ContinuousClock()
         let opened = clock.now
-        let reader: HistoryReader?
-        do {
-            reader = try HistoryReader(paths: paths)
-        } catch {
-            log.error("History window opened without its reader: \(String(describing: error), privacy: .private)")
-            reader = nil
+        let controller = HistoryWindowController(reader: HistoryReader(paths: paths), pasteboard: .general) { [weak self] in
+            self?.controller = nil
         }
-        let controller = HistoryWindowController(reader: reader, pasteboard: .general) { [weak self] in self?.controller = nil }
         self.controller = controller
         controller.showWindow(nil)
         controller.window?.displayIfNeeded()
@@ -73,8 +75,7 @@ public final class HistoryWindowPresenter {
 @MainActor
 final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate,
     NSToolbarDelegate {
-    /// nil when History could not be opened: the window shows it as empty.
-    let reader: HistoryReader?
+    let reader: HistoryReader
     let pasteboard: NSPasteboard
     let onClose: @MainActor () -> Void
     let table = NSTableView()
@@ -83,6 +84,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     var sections: [DaySection] = []
     /// The flat index of each section's header.
     var headers: [Int] = []
+    var rowCount = 0
     var pages: [Page: [HistoryRow]] = [:]
     var version = 0
     static let pageSize = 50
@@ -97,7 +99,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case row(section: Int, offset: Int)
     }
 
-    init(reader: HistoryReader?, pasteboard: NSPasteboard, onClose: @escaping @MainActor () -> Void) {
+    init(reader: HistoryReader, pasteboard: NSPasteboard, onClose: @escaping @MainActor () -> Void) {
         self.reader = reader
         self.pasteboard = pasteboard
         self.onClose = onClose
@@ -161,13 +163,14 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     required init?(coder: NSCoder) { fatalError("not implemented") }
 
     func reload() {
-        sections = reader?.sections(matching: search.searchField.stringValue) ?? []
-        version = reader?.version ?? 0
+        // Version first: a commit landing between the two reads then costs one extra reload, never a missed one.
+        version = reader.version
+        sections = reader.sections(matching: search.searchField.stringValue)
         pages = [:]
-        var next = 0
+        rowCount = 0
         headers = sections.map { section in
-            defer { next += 1 + section.count }
-            return next
+            defer { rowCount += 1 + section.count }
+            return rowCount
         }
         empty.stringValue = search.searchField.stringValue.isEmpty ? "No Dictations yet" : "No matches"
         empty.isHidden = !sections.isEmpty
@@ -191,30 +194,33 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RowCell)?.flashCopied()
     }
 
+    /// Binary search over the headers: the table asks for every row it lays out.
     func item(at row: Int) -> Item? {
-        guard row >= 0, let section = headers.lastIndex(where: { $0 <= row }) else { return nil }
+        guard row >= 0, row < rowCount else { return nil }
+        var low = 0, high = headers.count
+        while high - low > 1 {
+            let middle = (low + high) / 2
+            if headers[middle] <= row { low = middle } else { high = middle }
+        }
+        let section = low
         let offset = row - headers[section] - 1
-        guard offset < sections[section].count else { return nil }
         return offset < 0 ? .header(section) : .row(section: section, offset: offset)
     }
 
     func historyRow(at row: Int) -> HistoryRow? {
-        guard case .row(let section, let offset) = item(at: row), let reader else { return nil }
+        guard case .row(let section, let offset) = item(at: row) else { return nil }
         let page = Page(section: section, index: offset / Self.pageSize)
-        if pages[page] == nil {
-            let start = page.index * Self.pageSize
-            pages[page] = reader.rows(in: sections[section], offsets: start..<min(start + Self.pageSize, sections[section].count))
-        }
-        let rows = pages[page] ?? []
+        let start = page.index * Self.pageSize
+        let rows = pages[page] ?? reader.rows(in: sections[section], offsets: start..<min(start + Self.pageSize, sections[section].count))
+        // A short page (a read error) is fetched again next time rather than kept.
+        if start + rows.count == min(start + Self.pageSize, sections[section].count) { pages[page] = rows }
         let index = offset % Self.pageSize
         return index < rows.count ? rows[index] : nil
     }
 
     // MARK: Table
 
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        sections.reduce(sections.count) { $0 + $1.count }
-    }
+    func numberOfRows(in tableView: NSTableView) -> Int { rowCount }
 
     func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
         if case .header = item(at: row) { true } else { false }
@@ -224,7 +230,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         switch item(at: row) {
         case .header(let section):
             let cell = tableView.makeView(withIdentifier: HeaderCell.identifier, owner: nil) as? HeaderCell ?? HeaderCell()
-            cell.label.stringValue = Self.title(for: sections[section].day)
+            cell.label.stringValue = HistoryText.title(for: sections[section].day)
             return cell
         case .row:
             let cell = tableView.makeView(withIdentifier: RowCell.identifier, owner: nil) as? RowCell ?? RowCell()
@@ -239,7 +245,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
 
     /// Back from another app: show what was dictated meanwhile.
     func windowDidBecomeKey(_ notification: Notification) {
-        if reader?.version != version { reload() }
+        if reader.version != version { reload() }
     }
 
     /// Closing drops the controller, the reader and its connection.
@@ -258,55 +264,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         itemIdentifier == search.itemIdentifier ? search : nil
-    }
-
-    // MARK: Text
-
-    /// "Today", "Yesterday", "Friday, October 9", and the year once it is not this year's.
-    static func title(for day: DateComponents, now: Date = Date(), calendar: Calendar = .current) -> String {
-        guard let date = calendar.date(from: day) else { return "" }
-        if calendar.isDate(date, inSameDayAs: now) { return "Today" }
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
-            return "Yesterday"
-        }
-        var style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).weekday(.wide).month(.wide).day()
-        if calendar.component(.year, from: date) != calendar.component(.year, from: now) { style = style.year() }
-        return date.formatted(style)
-    }
-
-    /// The grey line: model, lag, then any status or Cleanup outcome worth a word.
-    static func details(_ row: HistoryRow) -> String {
-        [
-            row.model?.displayName,
-            row.lag.map { "\(Int(($0 / .milliseconds(1)).rounded())) ms" },
-            label(for: row.status),
-            row.cleanup.flatMap(label(for:)),
-        ].compactMap { $0 }.joined(separator: " · ")
-    }
-
-    /// Status text is an exhaustive switch: a new DictationStatus fails the build here.
-    static func label(for status: DictationStatus) -> String? {
-        switch status {
-        case .recording: "recording"
-        case .transcribing: "transcribing"
-        case .waiting: "waiting"
-        case .inserted: nil
-        case .ready: "pasting"
-        case .notInserted: "not inserted"
-        case .recovered: "recovered"
-        case .failed: "failed"
-        }
-    }
-
-    /// Cleanup's part of the grey line. Exhaustive: a new reason fails the build here.
-    static func label(for cleanup: CleanupOutcome) -> String? {
-        switch cleanup {
-        case .aiAccepted: nil
-        case .rulesOnly(.off): nil
-        case .rulesOnly(.rejected): "cleanup rejected"
-        case .rulesOnly(.deadline): "cleanup late"
-        case .rulesOnly(.unavailable): "cleanup unavailable"
-        }
     }
 }
 
@@ -387,7 +344,7 @@ final class RowCell: NSTableCellView {
         time.stringValue = row?.startedAt.formatted(date: .omitted, time: .shortened) ?? ""
         text.stringValue = row?.finalText ?? ""
         text.placeholderString = row?.finalText == nil ? "No text" : nil
-        details.stringValue = row.map(HistoryWindowController.details) ?? ""
+        details.stringValue = row.map(HistoryText.details) ?? ""
     }
 
     func flashCopied() {
@@ -399,14 +356,6 @@ final class RowCell: NSTableCellView {
             copied.isHidden = true
         }
     }
-}
-
-/// What the History window may ask for. Closures over the system, so the window
-/// never holds the Conductor or the store directly.
-struct HistoryCommands {
-    let retry: @MainActor (DictationID, SpeechModel?) -> Void
-    let setPinned: @MainActor (DictationID, Bool) -> Void
-    let delete: @MainActor (DictationID) -> Void
 }
 
 /// Settings: Private mode, cloud model, local model (install / remove), mic,
