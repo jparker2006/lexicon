@@ -17,6 +17,7 @@ let usage = """
            lexicon-harness hook insert [--delay <seconds>] <text>
            lexicon-harness hook capture <seconds> [prepared[=<idle s>]] [change] [device=<uid>]
            lexicon-harness pill [--shots <dir>]
+           lexicon-harness history [search word]
 
       check   launch Lexicon Dev with test hooks, find its status item by identifier,
               list its windows, open the target field, read it and clear it
@@ -34,6 +35,8 @@ let usage = """
       pill    show each indicator state on Lexicon Dev and check the pill, the menu bar
               icon and the focus; then play each sound and time it. --shots <dir> saves
               a picture of the pill and the menu bar icon for each state
+      history open the History window from the menu bar and time it, click to copy,
+              search, close, and compare memory before and after
     """
 
 func ok(_ line: String) { print("ok    \(line)") }
@@ -232,6 +235,7 @@ do {
     case "hook": try await hook(Array(arguments.dropFirst()))
     case "pill": try await pill(Array(arguments.dropFirst()))
     case "paste-check": try await pasteCheck()
+    case "history": try await HistoryCheck.run(search: arguments.dropFirst().first)
     case TargetField.mode: TargetField.serve(text: arguments.dropFirst().first ?? "", focused: arguments.dropFirst(2).first == "focused")
     default: fail(usage, code: 64)
     }

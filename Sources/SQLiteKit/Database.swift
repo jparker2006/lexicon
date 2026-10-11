@@ -5,7 +5,14 @@ import SQLite3
 /// confines its connection to one queue (History's writer queue, WordStore's
 /// actor, the History window's main thread). Two connections, never one shared.
 public final class Database {
-    public enum Mode: Sendable { case readWrite, readOnly }
+    public enum Mode: Sendable {
+        case readWrite
+        /// Never writes (`query_only`) and never creates the database. Opened read-write
+        /// at the file level all the same: a WAL database is unreadable until its -shm
+        /// file exists, and SQLite makes that file only for a connection that may write,
+        /// so a true read-only open fails whenever no writer has the file open.
+        case readOnly
+    }
 
     let handle: OpaquePointer?
     private var statements: [String: OpaquePointer] = [:]
@@ -19,14 +26,17 @@ public final class Database {
         var handle: OpaquePointer?
         let flags = switch mode {
         case .readWrite: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
-        case .readOnly: SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
+        case .readOnly: SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX
         }
         let opened = sqlite3_open_v2(url.path(percentEncoded: false), &handle, flags, nil)
         self.handle = handle
         guard opened == SQLITE_OK else { throw error(opened) }
         sqlite3_busy_timeout(handle, 5_000)
         try execute("PRAGMA foreign_keys = ON")
-        guard mode == .readWrite else { return }
+        guard mode == .readWrite else {
+            try execute("PRAGMA query_only = ON")
+            return
+        }
         try execute("PRAGMA journal_mode = WAL")
         try execute("PRAGMA synchronous = NORMAL")
 
