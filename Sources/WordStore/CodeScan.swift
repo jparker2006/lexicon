@@ -22,16 +22,16 @@ struct CodeIndex: Sendable, Equatable {
 
     /// The current repo's code Terms in the order selection cuts them: the repo's
     /// name, its glossary, its skills and commands, its dependencies, then the
-    /// skills and commands from the home folder and the other repos' names.
-    /// With no current repo, only the last two. The same name twice, in any case,
-    /// is kept once, where it first appears.
+    /// skills and commands from the home folder, which work in every repo. With no
+    /// current repo, only those. Other repos' names stay on the Mac: the models
+    /// see only the current repo's. The same name twice, in any case, is kept
+    /// once, where it first appears.
     func terms(current: String?) -> [Term] {
         var names: [String] = []
         if let current, let repo = repos[current] {
             names += [repo.name].compactMap { $0 } + repo.glossary + repo.skills + repo.dependencies
         }
         names += user
-        names += repos.keys.sorted().filter { $0 != current }.compactMap { repos[$0]?.name }
         var seen = Set<String>()
         return names.filter { seen.insert($0.lowercased()).inserted }.map(Term.init)
     }
@@ -47,10 +47,16 @@ enum CodeScan {
     /// Folders below a repo's root holding manifests: two levels covers the
     /// workspaces of every monorepo layout seen (`packages/*`, `crates/*`).
     static let manifestDepth = 2
-    /// Folders never read for manifests: dependencies and build output.
-    static let skipped: Set<String> = [
-        "node_modules", "build", "dist", "out", "target", "vendor", "Pods", "DerivedData", "venv", "__pycache__",
+    /// Folders a tool writes, not Jake: dependencies, build output and git's own.
+    /// A change inside one never makes its repo current, and their manifests are never read.
+    static let derived: Set<String> = [
+        ".git", ".build", "node_modules", "build", "dist", "out", "target", "vendor", "Pods", "DerivedData", "venv",
+        ".venv", "__pycache__",
     ]
+    /// Folders whose manifests name packages for a sample, not for the repo.
+    static let samples: Set<String> = ["examples", "fixtures", "testdata"]
+    /// A manifest or glossary bigger than this is not one a person wrote: skipped.
+    static let largestFile = 1 << 20
     /// Where skills and slash commands live, in a repo and in the home folder:
     /// Claude Code's skills and commands, and the shared `.agents` skills Codex reads.
     static let skillFolders = [".claude/skills", ".claude/commands", ".agents/skills"]
@@ -72,11 +78,10 @@ enum CodeScan {
 
     /// One repo's names, plain-English ones and all.
     private static func allNames(ofRepo url: URL) -> RepoNames {
-        let glossary = (try? String(contentsOf: url.appending(path: "GLOSSARY.md"), encoding: .utf8))
-            .map(boldTerms(in:)) ?? []
+        let glossary = text(of: url.appending(path: "GLOSSARY.md")).map(boldTerms(in:)) ?? []
         var dependencies: [String] = []
         for manifest in manifests(in: url, depth: 0) {
-            guard let text = try? String(contentsOf: manifest, encoding: .utf8) else { continue }
+            guard let text = text(of: manifest) else { continue }
             dependencies += Manifest.dependencies(fileName: manifest.lastPathComponent, text: text)
         }
         return RepoNames(name: url.lastPathComponent, glossary: glossary, skills: skillNames(in: url),
@@ -84,17 +89,22 @@ enum CodeScan {
     }
 
     /// True when a change at `components` (the path below a repo's root) can
-    /// change the repo's names, so the repo is read again.
-    static func changesNames(_ components: [Substring]) -> Bool {
+    /// change the repo's names, so the repo is read again. A folder counts where a
+    /// manifest could sit inside it: renaming `packages/web` moves its manifest
+    /// without an event for the file.
+    static func changesNames(_ components: [Substring], folder: Bool) -> Bool {
         guard let last = components.last else { return true }  // the repo folder itself
-        if components.count == 1 && last == "GLOSSARY.md" { return true }
+        // The file system ignores case, so `glossary.md` is the file the scan read.
+        if components.count == 1 && last.lowercased() == "glossary.md" { return true }
         let path = components.joined(separator: "/")
-        for folder in skillFolders where path == folder || path.hasPrefix(folder + "/") || folder.hasPrefix(path + "/") {
+        for skills in skillFolders where path == skills || path.hasPrefix(skills + "/") || skills.hasPrefix(path + "/") {
             return true
         }
-        let folders = components.dropLast()
-        return Manifest.fileNames.contains(String(last)) && folders.count <= manifestDepth
-            && !folders.contains { $0.hasPrefix(".") || skipped.contains(String($0)) }
+        let folders = folder ? components : components.dropLast()
+        guard folders.count <= manifestDepth,
+              !folders.contains(where: { $0.hasPrefix(".") || derived.contains(String($0)) || samples.contains(String($0)) })
+        else { return false }
+        return folder || Manifest.fileNames.contains(String(last))
     }
 
     /// "/name" for each skill (a folder holding SKILL.md) and each slash command
@@ -116,20 +126,35 @@ enum CodeScan {
     }
 
     /// The text inside each `**bold**` span that reads as a term: one line, at
-    /// most 4 words and 40 characters. A trailing colon is dropped ("**Fix**:").
+    /// most 4 words and 40 characters. A trailing colon is dropped ("**Fix**:"),
+    /// and so are stars, underscores and backticks around it ("***Fix***").
     static func boldTerms(in markdown: String) -> [String] {
         var terms: [String] = []
         for line in markdown.split(whereSeparator: \.isNewline) {
             let spans = line.components(separatedBy: "**")
             // Odd pieces sit between an opening and a closing "**".
             for index in stride(from: 1, to: spans.count - 1, by: 2) {
-                var term = spans[index].trimmingCharacters(in: .whitespaces)
+                var term = spans[index].trimmingCharacters(in: CharacterSet(charactersIn: " *_`"))
                 if term.hasSuffix(":") { term.removeLast() }
-                guard !term.isEmpty, term.count <= 40, term.split(separator: " ").count <= 4 else { continue }
+                // Backticks or stars left inside mean the "**" pair was code or emphasis, not a term.
+                guard !term.isEmpty, term.count <= 40, term.split(separator: " ").count <= 4,
+                      !term.contains(where: { $0 == "`" || $0 == "*" }) else { continue }
                 terms.append(term)
             }
         }
         return terms
+    }
+
+    /// True when `path` lies inside a folder a tool writes (`derived`).
+    static func isDerived(_ path: String) -> Bool {
+        path.split(separator: "/").contains { derived.contains(String($0)) }
+    }
+
+    private static func text(of url: URL) -> String? {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= largestFile else {
+            return nil
+        }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 
     /// Visible subfolders of `url`, sorted by name.
@@ -150,7 +175,8 @@ enum CodeScan {
         var found = Manifest.fileNames.sorted().map { url.appending(path: $0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         guard depth < manifestDepth else { return found }
-        for folder in folders(in: url) where !skipped.contains(folder.lastPathComponent) {
+        for folder in folders(in: url)
+        where !derived.contains(folder.lastPathComponent) && !samples.contains(folder.lastPathComponent) {
             found += manifests(in: folder, depth: depth + 1)
         }
         return found
@@ -188,7 +214,8 @@ struct PlainNames {
 
     func keeps(_ name: String) -> Bool {
         let runs = Self.runs(in: name)
-        guard !runs.isEmpty else { return false }  // no letters: not a name anyone says
+        // No letters, or a lone letter ("n"): not a name anyone says, and a lone letter would bend "and".
+        guard !runs.isEmpty, name.count > 1 else { return false }
         return name.contains(where: \.isNumber) || !runs.allSatisfy(english.contains)
     }
 

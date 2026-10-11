@@ -71,6 +71,24 @@ private func milliseconds(_ duration: Duration) -> Double {
         """)
     await terms.stop()
     #expect(times.max() ?? .infinity < 1000)
+    #expect(growth.max() ?? .max < 5 << 20)
+}
+
+/// Waits for `repo` to become current, or 10 s.
+private func becomes(_ terms: CodeTerms, _ repo: String) async -> Bool {
+    await withTaskGroup(of: Bool.self) { group in
+        group.addTask {
+            for await current in terms.changes where current == repo { return true }
+            return false
+        }
+        group.addTask {
+            try? await Task.sleep(for: .seconds(10))
+            return false
+        }
+        let first = await group.next() ?? false
+        group.cancelAll()
+        return first
+    }
 }
 
 @Test(.enabled(if: measuring)) func codeTermsMeasureTouchToCurrent() async throws {
@@ -84,17 +102,18 @@ private func milliseconds(_ duration: Duration) -> Double {
     await terms.start()
     // Settle on quaxly first, so no change from the setup is still waiting to be read.
     try "".write(to: code.appending(path: "quaxly/file.txt"), atomically: false, encoding: .utf8)
-    for await current in terms.changes where current == "quaxly" { break }
+    #expect(await becomes(terms, "quaxly"))
     let clock = ContinuousClock()
     var times: [Double] = []
     for round in 0..<10 {
         let repo = round.isMultiple(of: 2) ? "zentrik" : "quaxly"
         let start = clock.now
         try "\(round)".write(to: code.appending(path: "\(repo)/file.txt"), atomically: false, encoding: .utf8)
-        for await current in terms.changes where current == repo { break }
+        guard await becomes(terms, repo) else { break }
         times.append(milliseconds(clock.now - start))
     }
     await terms.stop()
+    try? FileManager.default.removeItem(at: root)
     print("code-terms touch to current ms: \(times.map { String(format: "%.0f", $0) }.joined(separator: ", "))")
-    #expect(times.max() ?? .infinity < 1000)
+    #expect(times.count == 10 && times.max() ?? .infinity < 1000)
 }

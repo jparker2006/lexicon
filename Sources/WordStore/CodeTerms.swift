@@ -33,6 +33,8 @@ public actor CodeTerms {
     private var reader: Task<Void, Never>?
     private var replay: CheckedContinuation<Void, Never>?
     private var replayed = false
+    private var started = false
+    private var stopped = false
     private var pending = Pending()
 
     /// What events changed since they were last applied.
@@ -42,6 +44,9 @@ public actor CodeTerms {
         var everything = false
         /// The repo of the newest content change.
         var newest: String?
+
+        /// True when some names must be read from disk again.
+        var readsFiles: Bool { !repos.isEmpty || user || everything }
     }
 
     /// How far back launch looks for the most recent file change: a weekend away
@@ -62,25 +67,30 @@ public actor CodeTerms {
     /// Scans, hands the Lexicon its code Terms, starts watching, and returns once
     /// the recent history has picked the current repo (or the deadline passed).
     /// The replay takes seconds after a day of builds, so launch calls this in a
-    /// task of its own, never before fn works.
+    /// task of its own, never before fn works. Runs once: a second call, or one
+    /// after `stop()`, returns at once.
     public func start() async {
-        guard events == nil else { return }
+        guard !started else { return }
+        started = true
         codeRoot = Self.realPath(code)
         homeFolders = CodeScan.skillFolders.compactMap { Self.realPath(home.appending(path: $0)) }
         index = CodeScan.scan(code: codeRoot.map { URL(filePath: $0) }, home: home)
         await publish(current: currentRepo)
+        guard !stopped else { return }
 
         let paths = [codeRoot].compactMap { $0 } + homeFolders
         let since = codeRoot.map { FileEvents.lastEvent(on: $0, before: Self.history) }
             ?? FSEventStreamEventId(kFSEventStreamEventIdSinceNow)
         let (batches, deliver) = AsyncStream.makeStream(of: [FileEvent].self)
         guard !paths.isEmpty, let events = FileEvents(paths: paths, since: since, latency: Self.latency,
-                                                      deliver: deliver) else { return }
+                                                      ignoring: CodeScan.isDerived, deliver: deliver) else { return }
         self.events = events
         reader = Task { [weak self] in
             for await batch in batches { await self?.handle(batch) }
         }
-        guard since != FSEventStreamEventId(kFSEventStreamEventIdSinceNow), !replayed else { return }
+        // With no history to replay, every batch applies as it comes.
+        guard since != FSEventStreamEventId(kFSEventStreamEventIdSinceNow) else { return endReplay() }
+        guard !replayed else { return }
         Task { [weak self] in
             try? await Task.sleep(for: Self.replayDeadline)
             await self?.replayDeadlinePassed()
@@ -88,11 +98,14 @@ public actor CodeTerms {
         await withCheckedContinuation { replay = $0 }
     }
 
+    /// Stops watching for good, and ends `changes`.
     public func stop() {
+        stopped = true
         events = nil
         reader?.cancel()
         reader = nil
         endReplay()
+        changed.finish()
     }
 
     private func handle(_ batch: [FileEvent]) async {
@@ -102,18 +115,30 @@ public actor CodeTerms {
                 historyDone = true
                 continue
             }
-            if event.mustRescan { pending.everything = true }
             if let root = codeRoot, let components = Self.components(of: event.path, below: root) {
-                guard let repo = components.first, !repo.hasPrefix("."), !components.contains(".git") else { continue }
+                guard let repo = components.first, !repo.hasPrefix(".") else {
+                    if event.mustRescan { pending.everything = true }
+                    continue
+                }
+                if event.mustRescan { pending.repos.insert(String(repo)) }
                 if event.changesContent { pending.newest = String(repo) }
-                if CodeScan.changesNames(Array(components.dropFirst())) { pending.repos.insert(String(repo)) }
+                if CodeScan.changesNames(Array(components.dropFirst()), folder: event.isFolder) {
+                    pending.repos.insert(String(repo))
+                }
             } else if homeFolders.contains(where: { Self.components(of: event.path, below: $0) != nil }) {
                 pending.user = true
+            } else if event.mustRescan {
+                pending.everything = true
             }
         }
         // While history replays, only note what changed: a week of builds would
         // read the same repos again for every batch.
         guard replayed || historyDone else { return }
+        // A save in the current repo, the usual case, changes nothing to hand over.
+        if !pending.readsFiles, pending.newest == nil || pending.newest == published?.repo, !historyDone {
+            pending = Pending()
+            return
+        }
         await apply()
         // Only now: `start()` returns with the replayed repo already in the Lexicon.
         if historyDone { endReplay() }
@@ -129,7 +154,8 @@ public actor CodeTerms {
             for repo in changes.repos { rescan(repo) }
             if changes.user { index.user = CodeScan.skillNames(in: home) }
         }
-        var current = currentRepo
+        // Build on what was last handed over, not `currentRepo`, which waits for the Lexicon.
+        var current = published?.repo ?? nil
         if let newest = changes.newest, index.repos[newest] != nil { current = newest }
         if let repo = current, index.repos[repo] == nil { current = nil }
         await publish(current: current)
@@ -191,6 +217,7 @@ struct FileEvent: Sendable {
     let flags: FSEventStreamEventFlags
 
     var isHistoryDone: Bool { has(kFSEventStreamEventFlagHistoryDone) }
+    var isFolder: Bool { has(kFSEventStreamEventFlagItemIsDir) }
     /// Events were dropped or coalesced past one folder: read everything again.
     var mustRescan: Bool { has(kFSEventStreamEventFlagMustScanSubDirs) || has(kFSEventStreamEventFlagRootChanged) }
     /// A file or folder was created, removed, renamed, written or touched. An
@@ -207,26 +234,45 @@ struct FileEvent: Sendable {
 /// An FSEvents stream with file-level events, delivered in order as batches.
 /// Stops when released.
 final class FileEvents {
-    /// What the C callback holds: only the continuation, which is Sendable.
+    /// What the C callback holds: the filter and the continuation, both Sendable.
     private final class Sink: Sendable {
+        let ignoring: @Sendable (String) -> Bool
         let deliver: AsyncStream<[FileEvent]>.Continuation
-        init(_ deliver: AsyncStream<[FileEvent]>.Continuation) { self.deliver = deliver }
+        init(_ ignoring: @escaping @Sendable (String) -> Bool, _ deliver: AsyncStream<[FileEvent]>.Continuation) {
+            self.ignoring = ignoring
+            self.deliver = deliver
+        }
     }
 
     private let stream: FSEventStreamRef
     private let sink: Sink
 
     /// `since` replays the events after that ID first, ending with a HistoryDone event.
+    /// Events on a path `ignoring` accepts are dropped on FSEvents' queue: a build
+    /// writes thousands, and none of them should queue up or wake the caller.
     init?(paths: [String], since: FSEventStreamEventId, latency: TimeInterval,
-          deliver: AsyncStream<[FileEvent]>.Continuation) {
-        let sink = Sink(deliver)
-        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(sink).toOpaque(),
-                                           retain: nil, release: nil, copyDescription: nil)
+          ignoring: @escaping @Sendable (String) -> Bool, deliver: AsyncStream<[FileEvent]>.Continuation) {
+        let sink = Sink(ignoring, deliver)
+        // The stream holds its own reference to the sink and drops it only once it
+        // is released, so no callback can outlive what it reads.
+        var context = FSEventStreamContext(
+            version: 0, info: Unmanaged.passUnretained(sink).toOpaque(),
+            retain: { info in
+                guard let info else { return nil }
+                return UnsafeRawPointer(Unmanaged<Sink>.fromOpaque(info).retain().toOpaque())
+            },
+            release: { info in
+                guard let info else { return }
+                Unmanaged<Sink>.fromOpaque(info).release()
+            },
+            copyDescription: nil)
         let callback: FSEventStreamCallback = { _, info, count, paths, flags, _ in
             guard let info else { return }
             let sink = Unmanaged<Sink>.fromOpaque(info).takeUnretainedValue()
             guard let paths = unsafeBitCast(paths, to: NSArray.self) as? [String] else { return }
-            sink.deliver.yield((0..<count).map { FileEvent(path: paths[$0], flags: flags[$0]) })
+            let events = (0..<count).map { FileEvent(path: paths[$0], flags: flags[$0]) }
+                .filter { $0.isHistoryDone || $0.mustRescan || !sink.ignoring($0.path) }
+            if !events.isEmpty { sink.deliver.yield(events) }
         }
         let flags = kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents
             | kFSEventStreamCreateFlagNoDefer
@@ -235,15 +281,11 @@ final class FileEvents {
         self.stream = stream
         self.sink = sink
         FSEventStreamSetDispatchQueue(stream, DispatchQueue(label: "lexicon.code-terms.events"))
-        guard FSEventStreamStart(stream) else {
-            FSEventStreamInvalidate(stream)
-            FSEventStreamRelease(stream)
-            return nil
-        }
+        // On failure deinit stops, invalidates and releases the stream: it is fully set up.
+        guard FSEventStreamStart(stream) else { return nil }
     }
 
     deinit {
-        // Stop and invalidate before the sink goes: no callback can run after this.
         FSEventStreamStop(stream)
         FSEventStreamInvalidate(stream)
         FSEventStreamRelease(stream)
