@@ -159,8 +159,8 @@ extension Conductor {
                 // Esc'd live Dictation: say it's waiting in paste-last (#18 indicator state).
                 if run.origin == .live, run.purpose == .type { emit(.notice(.readyToPaste(id))) }
             }
-            // A recovered Re-speak changes nothing in another app: recovered text is never typed (#4).
-            if case .respeak(let fixing) = run.purpose, run.origin != .recovered {
+            // Only a live target may change another app: recovered or late text is never typed (#4).
+            if case .respeak(let fixing) = run.purpose, run.target != nil {
                 _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)
             }
             let status = DictationStatus.landed(delivery, origin: run.origin, previous: run.previous)
