@@ -166,8 +166,12 @@ func backToBackDictationsTypeInTheOrderTheyWereSpoken() async throws {
     let first = DictationID(), second = DictationID()
 
     for command: KeyCommand in [.dictationBegan(first, at: fnAt(0)), .dictationConfirmed(first, .hold),
-                                .dictationStopped(first, at: fnAt(600)), .dictationBegan(second, at: fnAt(700)),
-                                .dictationConfirmed(second, .hold), .dictationStopped(second, at: fnAt(1_300))] {
+                                .dictationStopped(first, at: fnAt(600))] {
+        await rig.conductor.handle(command)
+    }
+    await model.waitForCalls(1)  // the first is in the model, held
+    for command: KeyCommand in [.dictationBegan(second, at: fnAt(700)), .dictationConfirmed(second, .hold),
+                                .dictationStopped(second, at: fnAt(1_300))] {
         await rig.conductor.handle(command)
     }
     await model.waitForCalls(2)  // the second has its text while the first is still in the model

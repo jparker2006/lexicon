@@ -130,10 +130,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// SIGTERM ends the app through `terminate(_:)`, the same path as Quit, so
     /// `applicationShouldTerminate` gets its say. The default action would kill it outright.
+    ///
+    /// `terminate` runs as a run loop block, not inside this main-queue handler:
+    /// with `.terminateLater` it spins the run loop until the reply, and the reply
+    /// comes from a main-actor task, which can't run while the main queue is
+    /// still inside this handler. Called from here, Quit would wait forever.
     static func terminateOnSIGTERM() -> any DispatchSourceSignal {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler { MainActor.assumeIsolated { NSApplication.shared.terminate(nil) } }
+        source.setEventHandler {
+            let main = CFRunLoopGetMain()
+            CFRunLoopPerformBlock(main, CFRunLoopMode.commonModes.rawValue) {
+                MainActor.assumeIsolated { NSApplication.shared.terminate(nil) }
+            }
+            CFRunLoopWakeUp(main)
+        }
         source.resume()
         return source
     }
