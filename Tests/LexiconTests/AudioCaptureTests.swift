@@ -275,6 +275,9 @@ func report(_ line: String) {
 /// far as SIL: ownership ("consumed more than once") is checked there, after type checking.
 /// Waits for swiftc on a GCD thread, never the cooperative pool: blocking a pool
 /// thread for its 6 to 10 s starves the realtime audio tests on a 3-core runner.
+/// The exit comes from `terminationHandler`, not `waitUntilExit`: that sleeps in
+/// the waiting thread's run loop until something wakes it, and on a GCD thread
+/// nothing may (it hung `scripts/check.sh` with swiftc long gone).
 func compile(_ source: String) async throws -> (status: Int32, output: String) {
     var image = Dl_info()
     try #require(dladdr(#dsohandle, &image) != 0)
@@ -298,12 +301,15 @@ func compile(_ source: String) async throws -> (status: Int32, output: String) {
     let pipe = Pipe()
     process.standardOutput = pipe
     process.standardError = pipe
+    let exited = DispatchGroup()
+    exited.enter()
+    process.terminationHandler = { _ in exited.leave() }
     try process.run()
     return await withCheckedContinuation { continuation in
+        // Read while it runs, so a long output can't fill the pipe and stall swiftc.
         DispatchQueue.global().async {
             let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            process.waitUntilExit()
-            continuation.resume(returning: (process.terminationStatus, output))
+            exited.notify(queue: .global()) { continuation.resume(returning: (process.terminationStatus, output)) }
         }
     }
 }
