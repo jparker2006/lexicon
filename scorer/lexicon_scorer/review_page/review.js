@@ -13,10 +13,11 @@ let mode = "normal"; // normal | edit | mark
 let cursor = { model: "parakeet", word: 0 };
 let rate = 1;
 let error = "";
-// An answer or mark is being saved: keys wait for it (a few ms), so a quick
-// second key never lands on the wrong clip or undoes the first.
+// An answer or mark is being saved (a few ms): keys pressed meanwhile are
+// dropped, so a quick second key never lands on the wrong clip or undoes the first.
 let busy = false;
 let moves = Promise.resolve();
+let clearing = null; // the clip whose answer one Backspace asked to clear
 let difference = -1; // which difference D last jumped to, on this clip
 const audio = new Audio();
 const blobs = new Map(); // clip id -> Promise of an object URL
@@ -83,7 +84,10 @@ function blob(clip) {
     blobs.set(clip.id, fetch(`/audio/${encodeURIComponent(clip.id)}`).then((r) => {
       if (!r.ok) throw new Error(`${r.status}`);
       return r.blob();
-    }).then((b) => URL.createObjectURL(b)));
+    }).then((b) => URL.createObjectURL(b), (e) => {
+      blobs.delete(clip.id); // try again next time
+      throw e;
+    }));
   }
   return blobs.get(clip.id);
 }
@@ -103,6 +107,9 @@ function prefetch() {
 async function load() {
   const clip = clips[at];
   audio.pause();
+  // Never the previous clip's audio under this clip's text, even if this one fails to load.
+  audio.removeAttribute("src");
+  audio.load();
   try {
     const url = await blob(clip);
     if (clips[at] !== clip) return;
@@ -147,6 +154,7 @@ function nextUnanswered() {
     const i = (at + step) % clips.length;
     if (!answers[clips[i].id] || answers[clips[i].id].text == null) return go(i);
   }
+  $("saved").textContent = "Every clip is answered";
 }
 
 // Answering
@@ -216,9 +224,12 @@ function hints(element, list) {
 }
 
 function render() {
+  const e = $("error");
+  e.hidden = !error;
+  e.textContent = error;
   const clip = clips[at];
   if (!clip) {
-    $("where").textContent = "No clips to review.";
+    $("where").textContent = error ? "" : "No clips to review.";
     return;
   }
   const done = clips.filter((c) => answers[c.id] && answers[c.id].text != null).length;
@@ -258,13 +269,14 @@ function render() {
       "F fixes it, J moves on as it is."
     : "";
 
+  if (clearing === clip.id) {
+    warn.hidden = false;
+    warn.textContent = "Press Backspace again to clear this answer.";
+  }
+
   $("editor").hidden = mode !== "edit";
   const pointed = document.querySelector(".words span.at");
   if (pointed) pointed.scrollIntoView({ block: "nearest" });
-
-  const e = $("error");
-  e.hidden = !error;
-  e.textContent = error;
 }
 
 // Keys
@@ -310,7 +322,7 @@ function markKeys(event) {
   const size = clip.words[cursor.model].length;
   switch (letter(event)) {
     case "ArrowLeft": cursor.word = Math.max(0, cursor.word - 1); break;
-    case "ArrowRight": cursor.word = Math.min(size - 1, cursor.word + 1); break;
+    case "ArrowRight": cursor.word = Math.max(0, Math.min(size - 1, cursor.word + 1)); break;
     case "ArrowUp": case "ArrowDown": {
       cursor.model = cursor.model === "parakeet" ? "wispr" : "parakeet";
       cursor.word = Math.min(cursor.word, Math.max(0, clip.words[cursor.model].length - 1));
@@ -360,7 +372,13 @@ function normalKeys(event) {
     case "k": case "p": case "ArrowUp": go(at - 1); break;
     case "u": nextUnanswered(); break;
     case "m": mode = "mark"; render(); break;
-    case "Backspace": case "Delete": if (mine && mine.text != null) answer(null, null); break;
+    case "Backspace": case "Delete": {
+      if (!mine || mine.text == null) break;
+      // Two presses: one stray key never erases typed gold.
+      if (clearing === clip.id) answer(null, null);
+      else { clearing = clip.id; render(); }
+      return true;
+    }
     default: return false;
   }
   return true;
@@ -369,7 +387,14 @@ function normalKeys(event) {
 document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey || clips.length === 0) return;
   if (busy) return event.preventDefault();
+  // A held key would answer clip after clip unheard; only seeking repeats.
+  if (event.repeat && mode !== "edit" && !event.key.startsWith("Arrow")) return event.preventDefault();
+  const wasClearing = clearing;
   const handled = mode === "edit" ? editKeys(event) : mode === "mark" ? markKeys(event) : normalKeys(event);
+  if (clearing === wasClearing && clearing !== null) {
+    clearing = null;
+    render();
+  }
   if (handled) event.preventDefault();
 });
 
