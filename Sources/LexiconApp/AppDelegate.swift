@@ -3,6 +3,9 @@ import os
 import LexiconDomain
 import LexiconCore
 import LexiconUI
+#if DEBUG
+import TestHooks
+#endif
 
 /// Launch order (budget: fn works within 150 ms of process start):
 /// 0. `LaunchGuard` (in main.swift): not launched by launchd -> message and exit, no event tap.
@@ -14,12 +17,15 @@ import LexiconUI
 /// 5. `SMAppService.mainApp.register()` when `startAtLogin` (no helper app). (#57)
 /// 6. NSWorkspace will-sleep -> `conductor.systemWillSleep()`. (#56)
 ///
-/// Test hooks are on only for the dev bundle id AND `--test-hooks` (#45).
+/// Test hooks (debug builds only) answer when the dev bundle id is launched with `--test-hooks`.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var system: LexiconSystem?
     var statusItem: StatusItemController?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
+    #if DEBUG
+    var testHooks: TestHookServer?
+    #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundle = Bundle.main
@@ -36,6 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle),
                                           extraItems: { Permissions.menuItems() })
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
+        #if DEBUG
+        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths)
+        #endif
 
         let permissions = Permissions.summary
         DispatchQueue.main.async {

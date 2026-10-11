@@ -18,8 +18,8 @@ import Foundation
 let soleOwners: [String: Set<String>] = [
     "SQLite3": ["SQLiteKit"],
     "FluidAudio": ["LocalParakeet"],
-    "AppKit": ["AppText", "LexiconUI", "LexiconApp"],
-    "Cocoa": ["AppText", "LexiconUI", "LexiconApp"],  // re-exports AppKit
+    "AppKit": ["AppText", "LexiconUI", "LexiconApp", "LexiconHarness"],
+    "Cocoa": ["AppText", "LexiconUI", "LexiconApp", "LexiconHarness"],  // re-exports AppKit
     "ApplicationServices": ["AppText"],
     "FoundationModels": ["Cleanup"],
     "SwiftUI": [],  // AppKit only (Jake's decision)

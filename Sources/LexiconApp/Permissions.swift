@@ -10,16 +10,18 @@ enum Permissions {
     static var microphone: AVAudioApplication.recordPermission { AVAudioApplication.shared.recordPermission }
     static var accessibility: Bool { AXIsProcessTrusted() }
 
-    /// For the launch log line, read by the grant check in the PR evidence.
-    static var summary: String {
-        let mic = switch microphone {
+    /// "granted", "denied" or "undetermined".
+    static var microphoneName: String {
+        switch microphone {
         case .granted: "granted"
         case .denied: "denied"
         case .undetermined: "undetermined"
         @unknown default: "unknown"
         }
-        return "accessibility=\(accessibility) microphone=\(mic)"
     }
+
+    /// For the launch log line, read by the grant check in the PR evidence.
+    static var summary: String { "accessibility=\(accessibility) microphone=\(microphoneName)" }
 
     static func menuItems() -> [NSMenuItem] {
         [

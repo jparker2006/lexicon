@@ -26,12 +26,11 @@ public final class LexiconSystem: Sendable {
     let lexicon: Lexicon
     let fixes: FixEngine
     let inbox: InboxWatcher
-    let testHooks: Bool
 
     /// Throws `KeyboardError.notTrusted` when Accessibility is missing; the
     /// shell shows onboarding and retries after relaunch (#6).
     public static func live(paths: AppPaths, bundleID: String, local: (any LocalTranscriber)?,
-                            prompter: any FixPrompter, testHooks: Bool) throws -> LexiconSystem {
+                            prompter: any FixPrompter) throws -> LexiconSystem {
         fatalError("not implemented")
     }
 
@@ -53,9 +52,6 @@ public final class LexiconSystem: Sendable {
         case .promptSubmitted(let prompt):
             if let directory = prompt.workingDirectory { await lexicon.noteProject(URL(filePath: directory)) }
             await fixes.promptSubmitted(prompt)
-        case .dictateFile(let path):
-            guard testHooks else { return }
-            _ = await conductor.dictate(file: URL(filePath: path), pace: .realtime)
         }
     }
 }
