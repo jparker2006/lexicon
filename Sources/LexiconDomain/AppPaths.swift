@@ -27,8 +27,9 @@ public struct AppPaths: Sendable, Hashable {
         id bundleID: String,
         in applicationSupport: URL = URL.applicationSupportDirectory
     ) -> AppPaths {
-        // Reverse-DNS only, so an unknown id can never be named "Lexicon".
-        precondition(bundleID.contains(".") && !bundleID.contains("/"), "not a bundle id: \(bundleID)")
+        // Reverse-DNS only, so an unknown id can never be named "Lexicon" or climb out with "..".
+        precondition(bundleID.contains(".") && !bundleID.hasPrefix(".") && !bundleID.contains("/"),
+                     "not a bundle id: \(bundleID)")
         let name = switch bundleID {
         case dailyBundleID: "Lexicon"
         case devBundleID: "Lexicon Dev"
