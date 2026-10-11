@@ -2,6 +2,7 @@
 import AppKit
 import os
 import LexiconDomain
+import LexiconUI
 import TestHooks
 
 /// The app's end of the test hooks: debug builds only, and on only for the dev
@@ -9,11 +10,11 @@ import TestHooks
 /// none of this is in it (scripts/bundle.sh checks).
 @MainActor
 enum AppTestHooks {
-    static func start(bundleID: String, paths: AppPaths) -> TestHookServer? {
+    static func start(bundleID: String, paths: AppPaths, indicator: DictationIndicator) -> TestHookServer? {
         guard bundleID == AppPaths.devBundleID,
               CommandLine.arguments.contains(TestHookChannel.launchArgument) else { return nil }
         do {
-            return try TestHookServer(channel: TestHookChannel(paths: paths)) { await handle($0) }
+            return try TestHookServer(channel: TestHookChannel(paths: paths)) { await handle($0, indicator: indicator) }
         } catch {
             Logger(subsystem: bundleID, category: "test-hooks")
                 .error("test hooks did not start: \(error.localizedDescription, privacy: .public)")
@@ -21,7 +22,7 @@ enum AppTestHooks {
         }
     }
 
-    static func handle(_ command: TestHookCommand) -> TestHookReply {
+    static func handle(_ command: TestHookCommand, indicator: DictationIndicator) async -> TestHookReply {
         switch command {
         case .status:
             .status(TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
@@ -30,9 +31,21 @@ enum AppTestHooks {
                                    microphone: Permissions.microphoneName))
         case .dictate:
             .failed("no live Dictation in the app yet: the Conductor is wired in by #56")
-        case .indicator:
-            .failed("no indicator yet: the pill and menu bar states come with #55")
+        case .indicator(let state):
+            showing(state, on: indicator)
+        case .sound(let cue):
+            if let latency = await indicator.playAndMeasure(cue) {
+                .soundPlayed(latency: latency)
+            } else {
+                .failed("the \(cue.rawValue) sound did not play: Sounds is off, or no output device")
+            }
         }
+    }
+
+    private static func showing(_ state: IndicatorState, on indicator: DictationIndicator) -> TestHookReply {
+        // A steady level, so the recording states show their bars the way speech does.
+        indicator.show(state, level: 0.6)
+        return .done
     }
 }
 #endif
