@@ -76,10 +76,16 @@ struct Focus {
         return Focus(pid: pid, app: app, field: AX.element(app, kAXFocusedUIElementAttribute))
     }
 
-    var isSecure: Bool {
-        guard let field else { return false }
-        return AX.string(field, kAXSubroleAttribute) == kAXSecureTextFieldSubrole
-            || AX.string(field, kAXRoleAttribute) == kAXSecureTextFieldSubrole
+    var isSecure: Bool { traits.map { FieldTraits.accepts($0) == .secure } ?? false }
+
+    /// nil when the app exposes no focused element.
+    var traits: FieldTraits? {
+        guard let field else { return nil }
+        var settable: DarwinBoolean = false
+        _ = AXUIElementIsAttributeSettable(field, kAXValueAttribute as CFString, &settable)
+        return FieldTraits(role: AX.string(field, kAXRoleAttribute), subrole: AX.string(field, kAXSubroleAttribute),
+                           valueSettable: settable.boolValue,
+                           editableAncestor: AX.value(field, "AXEditableAncestor") != nil)
     }
 
     /// For the late-text check: the same pid and the very same element. The
@@ -120,6 +126,25 @@ struct Focus {
         }
         return InsertionReceipt(appBundleID: bundleID, fieldFingerprint: fingerprint, caretAfter: caret,
                                 contextBefore: before, contextAfter: after, insertedAt: Date())
+    }
+}
+
+/// What the focused element says about taking a paste. A target app reads the
+/// pasteboard on Cmd-V even with a link or button focused, so that read alone
+/// can't tell that the text landed: the element has to look like it takes text.
+struct FieldTraits: Equatable {
+    let role: String?
+    let subrole: String?
+    let valueSettable: Bool
+    /// Chromium and Electron mark everything inside an editable web area.
+    let editableAncestor: Bool
+
+    enum Accepts { case text, secure, nothing }
+
+    static func accepts(_ traits: FieldTraits) -> Accepts {
+        if traits.role == kAXSecureTextFieldSubrole || traits.subrole == kAXSecureTextFieldSubrole { return .secure }
+        if let role = traits.role, [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role) { return .text }
+        return traits.valueSettable || traits.editableAncestor ? .text : .nothing
     }
 }
 
