@@ -207,6 +207,8 @@ private struct Token {
     let trailing: String
     /// `"uh"`, `(so)`: a word quoted on purpose, never a filler.
     let isQuoted: Bool
+    /// "...", "e.g." and "p.m." do not end a sentence.
+    let endsSentence: Bool
 
     init(_ text: Substring) {
         var body = text
@@ -214,7 +216,7 @@ private struct Token {
         var comma = false
         var other: Character?
         func peelMarks() {
-            while let c = body.last, ",.!?;:".contains(c) {
+            while let c = body.last, c.isMark {
                 switch c {
                 case ".", "!", "?": sentence.insert(c, at: sentence.startIndex)
                 case ",": comma = true
@@ -225,9 +227,9 @@ private struct Token {
         }
         peelMarks()
         var closing = Substring()
-        if sentence.isEmpty, !comma, other == nil, body.last.map(Token.quotes.contains) == true {
+        if sentence.isEmpty, !comma, other == nil, body.last?.isQuote == true {
             // `"done."`: the marks sit inside the closing quote.
-            while let c = body.last, Token.quotes.contains(c) {
+            while let c = body.last, c.isQuote {
                 closing.insert(c, at: closing.startIndex)
                 body = body.dropLast()
             }
@@ -238,21 +240,16 @@ private struct Token {
         self.text = sentence.isEmpty && !comma ? text : body + trailing + closing
         self.trailing = trailing
         let unquoted = body.count
-        while let c = body.first, Token.quotes.contains(c) { body = body.dropFirst() }
-        while let c = body.last, Token.quotes.contains(c) { body = body.dropLast() }
+        while let c = body.first, c.isQuote { body = body.dropFirst() }
+        while let c = body.last, c.isQuote { body = body.dropLast() }
         self.isQuoted = body.count != unquoted || !closing.isEmpty
         var word = body.lowercased()
         if word.contains("’") { word = String(word.map { $0 == "’" ? "'" : $0 }) }
         self.word = word
+        self.endsSentence = !sentence.isEmpty && !sentence.hasSuffix("..") && !Fillers.abbreviations.contains(word)
     }
-
-    private static let quotes: Set<Character> = ["\"", "'", "(", ")", "[", "]", "{", "}", "‘", "’", "“", "”"]
 
     var isPunctuationOnly: Bool { word.isEmpty && !trailing.isEmpty }
-    var endsSentence: Bool {
-        (trailing.hasSuffix(".") || trailing.hasSuffix("!") || trailing.hasSuffix("?"))
-            && !trailing.hasSuffix("..") && !Fillers.abbreviations.contains(word)
-    }
     /// A comma or a sentence end after this token sets off the one after it.
     var setsOffNext: Bool { !trailing.isEmpty }
     /// Letters and apostrophes only: digits and code are never "repeats".
@@ -275,5 +272,20 @@ private struct Token {
         guard let first = text.first, first.isLowercase,
               !text.dropFirst().contains(where: \.isUppercase) else { return text }
         return first.uppercased() + text.dropFirst()
+    }
+}
+
+private extension Character {
+    var isMark: Bool {
+        switch self {
+        case ",", ".", "!", "?", ";", ":": true
+        default: false
+        }
+    }
+    var isQuote: Bool {
+        switch self {
+        case "\"", "'", "(", ")", "[", "]", "{", "}", "‘", "’", "“", "”": true
+        default: false
+        }
     }
 }
