@@ -20,8 +20,14 @@ public actor SpeechEngine {
     /// Feeds the network path to residency for as long as this engine lives.
     private let networkWatch: Task<Void, Never>?
 
+    /// How often a waiting Dictation tries again. Nothing announces a local model
+    /// installed by another process (`scripts/install-model.sh`), and a missing
+    /// model costs one file check to find, so trying is how it is noticed.
+    public static let retryInterval: Duration = .seconds(30)
+
     /// `cloud`: `.network` in the app and eval; tests pass a scripted link.
-    /// `clock` times the race deadline and the local model's idle unload; tests pass a fake one.
+    /// `clock` times the race deadline, the local model's idle unload and a
+    /// waiting Dictation's retries; tests pass a fake one.
     public init(local: (any LocalTranscriber)?, cloud: CloudLink = .network,
                 clock: any Clock<Duration> = ContinuousClock()) {
         self.local = local
@@ -52,8 +58,38 @@ public actor SpeechEngine {
     /// `priority`: `.background` for recovery and Retry, so they queue behind any
     /// live Dictation on the Neural Engine; `.live` when the text may still be typed.
     public func transcribe(_ clip: AudioClip, plan: SpeechPlan, priority: LocalPriority = .background) async -> SpeechOutcome {
-        // TODO: same body as begin(feed: clip.replay(), plan: plan) with local work at `priority`; then finish(clip)
-        fatalError("not implemented")
+        let attempt = SpeechAttempt(core: AttemptCore(feed: clip.replay(), plan: plan, local: local,
+                                                      residency: residency, cloud: cloud, clock: clock,
+                                                      priority: priority))
+        return await attempt.finish(clip)
+    }
+
+    /// Returns when a Dictation that got no text for `reason` should try again:
+    /// after `retryInterval`, or sooner when it waits on the network and the
+    /// network comes back. Only a return counts: a path that is already up when
+    /// the wait starts does not end it, or a provider error would retry at once,
+    /// over and over.
+    public func untilRetry(after reason: SpeechUnavailable) async {
+        let clock = clock
+        guard reason.waitsForNetwork else {
+            try? await clock.sleep(for: Self.retryInterval)
+            return
+        }
+        let changes = cloud.path.changes()
+        // Read now, not from the stream: it keeps only the newest value, so a quick
+        // down-then-up would otherwise arrive as "up" alone.
+        let downAtStart = !cloud.path.isUp
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { try? await clock.sleep(for: Self.retryInterval) }
+            group.addTask {
+                var wasDown = downAtStart
+                for await isUp in changes {
+                    if !isUp { wasDown = true } else if wasDown { return }
+                }
+            }
+            await group.next()
+            group.cancelAll()
+        }
     }
 
     /// Private mode toggled or settings changed. With reachability (NWPathMonitor,

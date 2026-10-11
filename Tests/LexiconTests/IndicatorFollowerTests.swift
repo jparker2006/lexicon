@@ -62,6 +62,13 @@ private func cues(_ events: [ConductorEvent]) -> [SoundCue] { follow(events).com
     #expect(cues(events).last == .error)
 }
 
+@Test func aRecoveredDictationSaysWhereItIsWithoutASound() {
+    // At launch, after a crash: nothing was recording, and a sound would come from nowhere.
+    let events: [ConductorEvent] = [.notice(.recovered(a))]
+    #expect(states(events).last == .error("Recovered a Dictation. It's in History"))
+    #expect(cues(events).isEmpty)
+}
+
 @Test func aWaitingDictationSaysItIsSaved() {
     let events: [ConductorEvent] = [.confirmed(a, .hold), .stopped(a), .notice(.waitingForNetwork(a)),
                                     .finished(a, .waiting)]
