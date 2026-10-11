@@ -6,6 +6,8 @@ import http.client
 import io
 import json
 import re
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -99,6 +101,16 @@ class ReviewDataTest(Fixture):
         self.assertEqual(reopened.position, ONE)
         self.assertEqual(reopened.state()["position"], ONE)
         self.assertEqual(reopened.state()["answers"][ONE]["choice"], "wispr")
+
+    def test_the_tour_shows_once_and_keeps_the_place(self):
+        # The state file from before the tour: only the place.
+        (self.root / "review-state.json").write_text(json.dumps({"position": TWO}))
+        self.assertFalse(self.open_review().state()["toured"])
+        self.open_review().tour_seen()
+        reopened = self.open_review()
+        self.assertEqual((reopened.state()["toured"], reopened.state()["position"]), (True, TWO))
+        reopened.move(THREE)
+        self.assertEqual((self.open_review().state()["toured"], self.open_review().position), (True, THREE))
 
     def test_a_typed_answer_is_one_clean_line(self):
         self.open_review().answer(TWO, "typed", "  some  typed\ntext ")
@@ -240,7 +252,7 @@ class ServerTest(Fixture):
         self.assertIn("default-src 'none'", headers["content-security-policy"])
         self.assertIn("connect-src 'self'", headers["content-security-policy"])
         self.assertEqual(headers["cache-control"], "no-store")
-        for path in ("/review.js", "/review.css"):
+        for path in ("/review.js", "/review_logic.js", "/review.css"):
             self.assertEqual(self.request("GET", path, self.key)[0], 200)
 
     def test_the_api_and_audio_serve_the_review_clips(self):
@@ -271,7 +283,11 @@ class ServerTest(Fixture):
         for refused in ({**headers, "Content-Type": "text/plain"}, {**headers, "Origin": "http://evil.example"},
                         {"Content-Type": "application/json"}):
             self.assertEqual(self.request("POST", "/api/answer", refused, body)[0], 403)
+            self.assertEqual(self.request("POST", "/api/toured", refused, b"{}")[0], 403)
         self.assertEqual(self.entries()[THREE]["gold"], "review")
+        self.assertFalse(self.server.review.toured)
+        self.assertEqual(self.request("POST", "/api/toured", headers, b"{}")[0], 200)
+        self.assertTrue(self.server.review.toured)
 
         unknown = json.dumps({"id": "x", "choice": "parakeet"}).encode()
         self.assertEqual(self.request("POST", "/api/answer", headers, unknown)[0], 400)
@@ -279,6 +295,49 @@ class ServerTest(Fixture):
     def test_the_page_will_not_start_while_the_test_set_is_locked(self):
         with locked(self.root), self.assertRaises(TestSetError):
             review.serve(self.root, self.lexfile, open_page=False, out=io.StringIO())
+
+
+@unittest.skipUnless(sys.platform == "darwin", "runs the page's script with osascript's JavaScript")
+class PageTest(unittest.TestCase):
+    """The page's keys and its Neither box, run from the script the page loads."""
+
+    def run_page(self, expression: str):
+        script = (review.PAGE / "review_logic.js").read_text(encoding="utf-8") + f"\nJSON.stringify({expression})"
+        done = subprocess.run(["osascript", "-l", "JavaScript", "-e", script],
+                              capture_output=True, text=True, timeout=30, check=True)
+        return json.loads(done.stdout)
+
+    def neither(self, parakeet: str, wispr: str) -> list:
+        """What Neither opens with: B's text, and what is selected and what follows the caret."""
+        clip = json.dumps({"wispr": wispr, "words": {"parakeet": parakeet.split(), "wispr": wispr.split()}})
+        return self.run_page(f"((f) => [f.text, f.text.slice(f.start, f.end), f.text.slice(f.end)])(prefill({clip}))")
+
+    def test_the_answer_keys(self):
+        keys = ["a", "B", "n", "N", "d", " ", "j", "k", "u", "e", "1", "Backspace", "Escape", "q"]
+        self.assertEqual(self.run_page(f"{json.dumps(keys)}.map(command)"),
+                         ["pickA", "pickB", "neither", "neither", "difference", "play", "next", "previous",
+                          "unanswered", "edit", "fixFromA", "clear", None, None])
+
+    def test_neither_starts_from_b_with_the_first_differing_word_selected(self):
+        self.assertEqual(self.neither("we pushed to git hub daily", "We pushed to GitHub, daily."),
+                         ["We pushed to GitHub, daily.", "GitHub,", " daily."])
+        self.assertEqual(self.neither("use super base", "Use Supabase."), ["Use Supabase.", "Supabase.", ""])
+
+    def test_where_b_is_missing_a_word_the_caret_sits_where_it_goes(self):
+        self.assertEqual(self.neither("check the new lexicon", "Check the lexicon."),
+                         ["Check the lexicon.", "", "lexicon."])
+        self.assertEqual(self.neither("open the docs now", "Open the docs."), ["Open the docs.", "", ""])
+
+    def test_d_plays_from_just_before_each_difference(self):
+        clip = json.dumps({"words": {"parakeet": "one two three four five six seven eight nine ten".split(),
+                                     "wispr": "one two three four five six seven ate nine ten".split()}})
+        self.assertEqual(self.run_page(f"differenceTimes({clip}, 10)"), [{"model": "parakeet", "word": 7, "time": 5.5}])
+
+    def test_time_left_is_rough(self):
+        cases = "[[0, []], [1, [10]], [3, [20, 20, 600]], [250, []], [180, [20]]]"
+        self.assertEqual(self.run_page(f"{cases}.map(([n, s]) => timeLeft(n, s))"),
+                         ["all done", "under a minute left", "about 1 min left", "about 1 h 25 min left",
+                          "about 1 h left"])
 
 
 if __name__ == "__main__":
