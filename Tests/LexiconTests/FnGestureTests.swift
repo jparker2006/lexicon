@@ -88,11 +88,14 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
     #expect(gesture.isRecording == isHold)
 }
 
-@Test func earlyDeadlineDoesNotConfirm() {
-    // A timer that fires a little early (at 0.29 s) confirms nothing; the hold
-    // is confirmed by the next input at or past 0.30 s.
-    #expect(run([.fnDown(at(0), secureInput: false), .deadline(at(290)), .deadline(at(310)), .fnUp(at(600))])
-        == [.dictationBegan(at: at(0)), .dictationConfirmed(.hold), .dictationStopped(at: at(600))])
+@Test func earlyDeadlineAsksAgainInsteadOfConfirming() {
+    // A timer that fires a little early (at 0.29 s, or on wake from sleep) confirms
+    // nothing and asks for the deadline again, so the hold is still confirmed at 0.30 s.
+    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    _ = gesture.handle(.fnDown(at(0), secureInput: false))
+    #expect(gesture.handle(.deadline(at(290))) == FnGesture.Output(wakeAt: at(300)))
+    #expect(gesture.handle(.deadline(at(300))).commands == [.dictationConfirmed(.hold)])
+    #expect(gesture.handle(.fnUp(at(600))).commands == [.dictationStopped(at: at(600))])
 }
 
 @Test func fnDownWithSecureInputStartsNothing() {

@@ -59,7 +59,9 @@ struct FnGesture: Sendable {
             phase = .pressed(since: at)
             return Output(commands: [.dictationBegan(at: at)], wakeAt: at.advanced(by: holdThreshold))
 
-        case (.pressed(let since), .deadline(let now)) where isHeld(since, at: now):
+        case (.pressed(let since), .deadline(let now)):
+            // A timer that fires a hair early asks again rather than leaving the hold unconfirmed.
+            guard isHeld(since, at: now) else { return Output(wakeAt: since.advanced(by: holdThreshold)) }
             phase = .holding
             return Output(commands: [.dictationConfirmed(.hold)])
 

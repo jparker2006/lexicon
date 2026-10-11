@@ -39,6 +39,7 @@ final class EventTapThread: @unchecked Sendable {
     func start() throws(KeyboardError) {
         let types: [CGEventType] = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
+        // Unretained is safe: the thread below captures self and its run loop never exits.
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                           eventsOfInterest: mask, callback: tapCallback,
                                           userInfo: Unmanaged.passUnretained(self).toOpaque())
@@ -70,6 +71,10 @@ final class EventTapThread: @unchecked Sendable {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             log.error("fn tap was disabled (\(type.rawValue, privacy: .public)); re-enabled")
+            // An fn-up lost while the tap was off would leave the mic recording until the next press.
+            if gesture.isRecording, !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
+                feed(.fnUp(.now()))
+            }
             return pass
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
@@ -132,13 +137,13 @@ extension KeyInput {
     /// Option, Control, Caps Lock) is ignored, so a modifier never cancels.
     /// `secureInput` is asked only on fn-down.
     init?(_ event: CGEvent, secureInput: () -> Bool, now: HostTime) {
-        let at = HostTime(eventTimestamp: event.timestamp, now: now)
         switch event.type {
         case .flagsChanged:
             guard event.getIntegerValueField(.keyboardEventKeycode) == Self.fnKeyCode else { return nil }
+            let at = HostTime(eventTimestamp: event.timestamp, now: now)
             self = event.flags.contains(.maskSecondaryFn) ? .fnDown(at, secureInput: secureInput()) : .fnUp(at)
         case .keyDown:
-            self = .otherKey(at)
+            self = .otherKey(HostTime(eventTimestamp: event.timestamp, now: now))
         default:
             return nil
         }
@@ -151,8 +156,8 @@ extension HostTime {
     /// old, is taken as `now`.
     init(eventTimestamp stamp: CGEventTimestamp, now: HostTime) {
         // TODO(#53 live check): the header says "roughly nanoseconds"; keep whichever reading the live log proves.
-        let readings = [HostTime(nanoseconds: stamp),
-                        HostTime(nanoseconds: stamp * machTimebase.numer / machTimebase.denom)]
+        let (scaled, overflow) = stamp.multipliedReportingOverflow(by: machTimebase.numer)
+        let readings = [HostTime(nanoseconds: stamp)] + (overflow ? [] : [HostTime(nanoseconds: scaled / machTimebase.denom)])
         self = readings.first { $0 <= now && now.duration(since: $0) < .seconds(1) } ?? now
     }
 }
