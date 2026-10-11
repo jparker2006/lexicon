@@ -358,6 +358,7 @@ final class ReportingDestination: TextDestination, @unchecked Sendable {
     init(killMidPaste: Bool = false) { self.killMidPaste = killMidPaste }
 
     func context() async -> AppContext { .unknown }
+    func appChanges() async -> AsyncStream<AppContext> { AsyncStream { $0.yield(.unknown) } }
     func target() async -> Target? { Target() }
     func insert(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
         if killMidPaste {

@@ -8,6 +8,7 @@
 #   scripts/harness.sh hook dictate <wav>    dictate a WAV through the live path
 #   scripts/harness.sh hook indicator <state> [message]   show one pill state
 #   scripts/harness.sh hook sound <cue>      play one sound, reply with its latency
+#   scripts/harness.sh hook privacy on|off [--always-private <ids>]   Private mode and the always-private apps
 #   scripts/harness.sh pill [--shots <dir>]  every pill state checked, sounds timed
 #   scripts/harness.sh history [word]        History window: open time, copy, search, close
 #
