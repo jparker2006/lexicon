@@ -79,11 +79,33 @@ public actor TargetApp: TextDestination {
     }
 
     public func context() -> AppContext {
-        guard let focus = Focus.now() else { return .unknown }
+        // No focused element (or no Accessibility): the frontmost app still names
+        // where Jake is, so an app he made always-private is still recognized.
+        guard let focus = Focus.now() else { return Self.context(of: NSWorkspace.shared.frontmostApplication) }
         let app = NSRunningApplication(processIdentifier: focus.pid)
         let window = AX.element(focus.app, kAXFocusedWindowAttribute)
         return AppContext(bundleID: app?.bundleIdentifier, appName: app?.localizedName,
                           windowTitle: window.flatMap { AX.string($0, kAXTitleAttribute) }, workingDirectory: nil)
+    }
+
+    public nonisolated func appChanges() -> AsyncStream<AppContext> {
+        // Unbounded: an activation landing between the observer and the first yield
+        // below must not be replaced by that older frontmost app.
+        let (stream, continuation) = AsyncStream<AppContext>.makeStream()
+        let observer = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: nil
+        ) { note in
+            continuation.yield(Self.context(of: note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication))
+        }
+        // The token is only handed back to the notification center, which takes it from any thread.
+        nonisolated(unsafe) let token = observer
+        continuation.onTermination = { _ in NSWorkspace.shared.notificationCenter.removeObserver(token) }
+        continuation.yield(Self.context(of: NSWorkspace.shared.frontmostApplication))
+        return stream
+    }
+
+    private static func context(of app: NSRunningApplication?) -> AppContext {
+        AppContext(bundleID: app?.bundleIdentifier, appName: app?.localizedName, windowTitle: nil, workingDirectory: nil)
     }
 
     public func target() async -> Target? {

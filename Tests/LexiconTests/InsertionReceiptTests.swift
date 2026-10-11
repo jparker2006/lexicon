@@ -21,6 +21,7 @@ private actor Answering: TextDestination {
     let delivery: Delivery
     init(_ delivery: Delivery) { self.delivery = delivery }
     func context() -> AppContext { AppContext(bundleID: "com.example.editor", appName: nil, windowTitle: nil, workingDirectory: nil) }
+    func appChanges() -> AsyncStream<AppContext> { AsyncStream { $0.yield(context()) } }
     func target() -> Target? { Target() }
     func insert(_ text: String, for id: DictationID, at target: Target) -> Delivery { delivery }
 }

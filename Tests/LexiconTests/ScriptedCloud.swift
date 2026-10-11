@@ -88,7 +88,7 @@ final class ScriptedCloud: Sendable {
 
     private struct State {
         var log = SocketLog()
-        var waiters: [(check: @Sendable (SocketLog) -> Bool, wake: CheckedContinuation<Void, Never>)] = []
+        var waiters: [(id: UUID, check: @Sendable (SocketLog) -> Bool, wake: CheckedContinuation<Void, Never>)] = []
     }
 
     /// - `connectError`: opening the socket fails (a dead network or a refused handshake).
@@ -106,15 +106,24 @@ final class ScriptedCloud: Sendable {
 
     var log: SocketLog { state.withLock { $0.log } }
 
-    /// Returns once `condition` holds for the socket log (an explicit signal, not a sleep).
+    /// Returns once `condition` holds for the socket log (an explicit signal, not a sleep),
+    /// or the test is cancelled: a test's time limit then fails it instead of hanging the run.
     func wait(until condition: @escaping @Sendable (SocketLog) -> Bool) async {
-        await withCheckedContinuation { wake in
-            let now = state.withLock { state -> Bool in
-                if condition(state.log) { return true }
-                state.waiters.append((condition, wake))
-                return false
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { wake in
+                let now = state.withLock { state -> Bool in
+                    if condition(state.log) || Task.isCancelled { return true }
+                    state.waiters.append((id, condition, wake))
+                    return false
+                }
+                if now { wake.resume() }
             }
-            if now { wake.resume() }
+        } onCancel: {
+            let waiter = state.withLock { state in
+                state.waiters.firstIndex { $0.id == id }.map { state.waiters.remove(at: $0) }
+            }
+            waiter?.wake.resume()
         }
     }
 
