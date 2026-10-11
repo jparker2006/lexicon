@@ -24,7 +24,7 @@ A review ends in one verdict: **merge**, **merge with notes**, or **don't merge*
 
 - `InsertGuard.decide` runs on every insert. Late text, or text whose target is gone or changed, waits for paste-last instead of landing in the wrong place. No grace window, except the spec's fallback where an app's field can't be detected (same app and under 5 s).
 - The clipboard is restored after paste, and a restore never overwrites something Jake copied in between.
-- Insertion works in the four apps that matter: Claude desktop, ChatGPT (Codex), a native text field, a terminal. A change here says which it checked in the live-app lane.
+- Insertion works in the four apps that matter: Claude desktop, ChatGPT (Codex), a native text field, a terminal. A change here cites the Live checks comment saying which it checked.
 
 ## Network, keys and private data
 
