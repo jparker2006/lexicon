@@ -49,5 +49,5 @@ The saved record of every Dictation, its text versions and audio, shown in the H
 _Avoid_: Log, archive, transcripts
 
 **Secret guard**:
-A check on the Mac that keeps any Dictation containing a key, token or password from leaving the Mac.
+A check on the Mac that keeps keys, tokens and passwords out of every text call and cuts the speech stream once one is heard. Audio already streamed can't be recalled.
 _Avoid_: Redaction, filter
