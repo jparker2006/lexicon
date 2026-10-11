@@ -115,7 +115,7 @@ let neverAnswers: [Pair] = [
 @Test func lexiconTermsMayBeAddedOtherWordsMayNot() {
     let ruled = "Point the callback at the database, not the cache."
     let output = "Point the callback at the Supabase database, not the cache."
-    #expect(StructuralCheck.check(output, ruled: ruled, terms: [Term(text: "Supabase", kind: .name)]) == nil)
+    #expect(StructuralCheck.check(output, ruled: ruled, terms: [Term(text: "Supabase")]) == nil)
     #expect(StructuralCheck.check(output, ruled: ruled, terms: []) == .addedWord)
 }
 
@@ -167,7 +167,7 @@ let neverAnswers: [Pair] = [
 let benchLexicon: [Term] = [
     "Lexicon", "Parakeet", "FluidAudio", "Supabase", "Stripe", "Postgres", "TypeScript", "Info.plist",
     "appcast", "useAuth", "useSession", "parseConfig", "fetchUser", "loadUser", "dryRun",
-].map { Term(text: $0, kind: .code) }
+].map { Term(text: $0) }
 
 /// The 29 cases written for the bench, after the 20 rules cases.
 let newCases: [Accepted] = [
