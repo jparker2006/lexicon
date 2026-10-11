@@ -254,6 +254,22 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     #expect(days(reader).map(\.count) == [1])
 }
 
+@MainActor @Test func historyReadsWithNoWriterOpen() async throws {
+    // The window can open while nothing holds history.sqlite open. A clean close
+    // leaves the main file alone, without the WAL's -shm and -wal files, and a
+    // read-only connection cannot make them itself.
+    let (store, written) = try makeStore()
+    dictate(store, "Written, then the writer closed.", at: at(10, 11, 9))
+    await store.flush()
+    try await store.read { db in try db.execute("PRAGMA wal_checkpoint(TRUNCATE)") }
+    let paths = AppPaths.temporary()
+    try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
+    try FileManager.default.copyItem(at: written.root.appending(path: "history.sqlite"), to: paths.root.appending(path: "history.sqlite"))
+
+    let reader = HistoryReader(paths: paths, calendar: pacific)
+    #expect(days(reader).map(\.count) == [1])
+}
+
 @MainActor @Test func versionMovesWhenTheWriterCommitsSoTheWindowKnowsToReload() async throws {
     let (store, paths) = try makeStore()
     dictate(store, "First.", at: at(10, 11, 9))
