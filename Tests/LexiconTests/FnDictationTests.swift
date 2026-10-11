@@ -211,14 +211,12 @@ func aMicStartThatNeverReturnsEndsTheDictationAndTheNextOneRecords() async throw
     defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
     let rig = try FnRig(hardware: mic.hardware)
     var events = await rig.conductor.events().makeAsyncIterator()
-    var engines = mic.made.makeAsyncIterator()
+    var starts = mic.wedged.makeAsyncIterator()
     let stuck = DictationID(), next = DictationID()
 
     await rig.conductor.handle(.dictationBegan(stuck, at: fnAt(0)))
     await rig.conductor.handle(.dictationConfirmed(stuck, .hold))
-    let wedged = try #require(await engines.next())
-    var entered = wedged.started.makeAsyncIterator()
-    await entered.next()
+    let wedged = try #require(await starts.next())
     // The row is there before the mic answers.
     await rig.history.flush()
     #expect(await rig.history.dictation(stuck)?.status == .recording)
@@ -260,33 +258,44 @@ func aMicStartThatNeverReturnsEndsTheDictationAndTheNextOneRecords() async throw
 }
 
 @Test(.timeLimit(.minutes(1)))
-func aStartHeldByTheMicPermissionPromptWaitsForJakesAnswer() async throws {
-    // macOS holds the first start after a permission reset until Jake answers its Allow prompt.
+func theMicPromptGetsJakesTimeAndLaterStartsStillHaveTheLimit() async throws {
+    // After a permission reset macOS reports "undetermined", and can go on saying so
+    // after Jake clicks Allow. The second engine's start gets stuck.
     let clock = TestClock()
-    let mic = FakeMic(wedgesAtStart: [0], clock: clock, askingPermission: true)
+    let mic = FakeMic(wedgesAtStart: [1], clock: clock, askingPermission: true)
     defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
     let rig = try FnRig(hardware: mic.hardware)
     var events = await rig.conductor.events().makeAsyncIterator()
-    let id = DictationID()
+    let first = DictationID(), second = DictationID()
 
-    await rig.conductor.handle(.dictationBegan(id, at: fnAt(0)))
-    await rig.conductor.handle(.dictationConfirmed(id, .hold))
-    for _ in 1...3 {  // the prompt stays up past the start limit, three times over
-        await clock.waitForSleepers(1)
-        await clock.advance(by: Microphone.startLimit)
-    }
+    await rig.conductor.handle(.dictationBegan(first, at: fnAt(0)))
+    await rig.conductor.handle(.dictationConfirmed(first, .hold))
     await clock.waitForSleepers(1)
+    await clock.advance(by: Microphone.startLimit * 3)  // Jake reads the prompt
     mic.answerPrompt()
-    mic.unwedge()
-    await rig.conductor.handle(.dictationStopped(id, at: fnAt(600)))
-    let seen = await eventsUntilFinished(&events)
+    await rig.conductor.handle(.dictationStopped(first, at: fnAt(600)))
+    let landed = await eventsUntilFinished(&events)
+    #expect(landed.contains(where: { event in
+        if case .finished(let who, .inserted) = event { who == first } else { false }
+    }))
 
-    #expect(seen.contains(where: { event in
-        if case .finished(let who, .inserted) = event { who == id } else { false }
-    }))
-    #expect(!seen.contains(where: { event in
-        if case .notice(.microphoneUnavailable) = event { true } else { false }
-    }))
+    var starts = mic.wedged.makeAsyncIterator()
+    await rig.conductor.handle(.dictationBegan(second, at: fnAt(700)))
+    _ = await starts.next()
+    await clock.waitForSleepers(1)
+    await clock.advance(by: Microphone.startLimit)
+    var failed = false
+    while let event = await events.next() {
+        if case .notice(.microphoneUnavailable) = event {
+            failed = true
+            break
+        }
+    }
+    await settleFn(rig)
+
+    #expect(failed)
+    #expect(await rig.history.dictation(second)?.status == .failed)
+    #expect(mic.timesAsked == 1)
 }
 
 @Test(.timeLimit(.minutes(1)))
