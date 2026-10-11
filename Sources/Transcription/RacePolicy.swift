@@ -1,9 +1,9 @@
 import LexiconDomain
 
-/// Cloud vs local after fn-up (#8; values owned by #19). Pure, so the policy is
-/// unit-tested with fake timings and no network.
+/// Cloud vs local once recording stops (`Preferences.raceDeadline`). Pure, so the
+/// policy is unit-tested with fake timings and no network.
 struct RacePolicy: Sendable, Hashable {
-    /// After finalize: wait this long for the cloud final before using local text.
+    /// After recording stops: wait this long for the cloud final before using local text.
     var deadline: Duration
     /// Cloud attempt retries once before giving up (#4).
     var cloudRetries: Int = 1
@@ -28,7 +28,7 @@ struct RacePolicy: Sendable, Hashable {
     }
 }
 
-/// THE local model residency rule, in one place (values are #19's).
+/// THE local model residency rule, in one place (`Preferences.localModelLinger`).
 ///
 /// - Private mode on, or the network unreachable: ALWAYS resident. Local is then
 ///   the only engine, so a load on fn-down would sit directly in front of the text.

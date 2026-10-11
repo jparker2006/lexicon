@@ -93,7 +93,7 @@ public enum SpeechOutcome: Sendable {
 }
 
 public enum SpeechUnavailable: Sendable, Hashable {
-    /// Cloud failed twice and there is no local model (M0-M1): the Dictation waits for the network.
+    /// Cloud failed twice and there is no local model: the Dictation waits for the network.
     case offline
     case providerError(String)
     /// Private mode and no local model.

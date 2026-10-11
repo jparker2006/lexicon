@@ -4,7 +4,7 @@ public import LexiconDomain
 /// Sole owner of UserDefaults. Modules never read settings themselves: the
 /// Conductor snapshots `Preferences` once per Dictation and passes values down.
 /// Launch arguments override (`open ... --args -microphone <uid>`), via the
-/// UserDefaults argument domain, for the head-to-head harness (#15).
+/// UserDefaults argument domain.
 public final class PreferencesStore: @unchecked Sendable {
     public init(defaults: UserDefaults = .standard) { fatalError("not implemented") }
 

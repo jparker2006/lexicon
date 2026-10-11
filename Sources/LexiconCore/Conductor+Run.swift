@@ -78,7 +78,7 @@ extension Conductor {
             let outcome = await attempt.finish(take.clip)
             let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
                                    clip: take.clip, speechPlan: speechPlan, cleanupPlan: cleanupPlan,
-                                   cleaning: cleaning, cleanupDeadline: start.preferences.cleanupBudget,
+                                   cleaning: cleaning, cleanupDeadline: start.preferences.cleanupDeadline,
                                    access: access, target: nil, releasedAt: nil, previous: nil, hold: hold)
             return await land(outcome, run)
 
@@ -91,7 +91,7 @@ extension Conductor {
             let outcome = await attempt.finish(take.clip)              // finalize + race local + deadline
             let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
                                    clip: take.clip, speechPlan: speechPlan, cleanupPlan: cleanupPlan,
-                                   cleaning: cleaning, cleanupDeadline: start.preferences.cleanupBudget,
+                                   cleaning: cleaning, cleanupDeadline: start.preferences.cleanupDeadline,
                                    access: access, target: await target, releasedAt: releasedAt,
                                    previous: nil, hold: hold)
             return await land(outcome, run)

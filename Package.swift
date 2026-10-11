@@ -1,35 +1,34 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 //
-// Lexicon v0 type sketch (candidate A). Every target here is one module a
-// builder works inside. The dependency list of each target IS the "may import"
-// rule: CI builds with `--explicit-target-dependency-import-check error`, so an
-// import that is not declared below fails the build. That flag misses a
+// Lexicon v0. Every target here is one module a builder works inside. The
+// dependency list of each target IS the "may import" rule: `scripts/check.sh`
+// (local and CI) builds with `--explicit-target-dependency-import-check error`,
+// so an import that is not declared below fails the build. That flag misses a
 // TRANSITIVE import (LexiconCore writing `import SQLiteKit` through History), so
-// CI also runs `swift scripts/check-imports.swift`, which derives the rule from
+// the script also runs `scripts/check-imports.swift`, which derives the rule from
 // this file and fails on any import a target does not declare directly.
 //
-// Shape: one app process, a status-bar app shell (AppKit only), one tiny hook
-// CLI that drops messages into an inbox directory, one dev-only eval CLI that
-// runs the exact same Conductor on a WAV.
+// Shape: one app process, a status-bar app shell (AppKit only), one dev-only
+// eval CLI that runs the exact same Conductor on a WAV. The `lexicon` hook CLI
+// is not built: no hooks before the after-M1 grill.
 //
-// No external packages. FluidAudio (the one approved dependency, #8) would be
-// added ONLY to the `LocalParakeet` target:
-//   .package(url: "https://github.com/FluidInference/FluidAudio", exact: "<pinned>")
-//   .product(name: "FluidAudio", package: "FluidAudio")
+// One external package: FluidAudio, declared ONLY for the `LocalParakeet` target.
+// `traits: []` drops its default NeMo text normalization binary (about 8 MB),
+// which would not fit the 12 MB bundle budget.
 import PackageDescription
 
 let package = Package(
     name: "Lexicon",
-    // Lexicon supports macOS 26 and up (Jake's decision). See design.md if the
-    // string form below had to fall back to `.v15` under tools-version 6.0.
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS(.v26)],
     products: [
         .library(name: "LexiconCore", targets: ["LexiconCore"]),
         .library(name: "LexiconUI", targets: ["LexiconUI"]),
         .library(name: "LocalParakeet", targets: ["LocalParakeet"]),
         .executable(name: "LexiconApp", targets: ["LexiconApp"]),
-        .executable(name: "lexicon", targets: ["LexiconHookCLI"]),
         .executable(name: "lexicon-eval", targets: ["LexiconEval"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/FluidInference/FluidAudio", exact: "0.17.4", traits: []),
     ],
     targets: [
         // Vocabulary value types shared by two or more modules. Foundation only.
@@ -39,8 +38,8 @@ let package = Package(
         // WordStore may depend on it: each owns its own database file.
         .target(name: "SQLiteKit", linkerSettings: [.linkedLibrary("sqlite3")]),
 
-        // Inbox wire format, writer (hook CLI) and watcher (app). Tiny on purpose:
-        // the hook CLI links only this and LexiconDomain.
+        // Inbox wire format, writer and watcher (app). Tiny on purpose: a
+        // short-lived writer process links only this and LexiconDomain.
         .target(name: "Inbox", dependencies: ["LexiconDomain"]),
 
         // fn key: event tap thread, gesture recognizer, input clock.
@@ -53,7 +52,10 @@ let package = Package(
         .target(name: "Transcription", dependencies: ["LexiconDomain"]),
 
         // FluidAudio adapter. The ONLY target allowed to import FluidAudio.
-        .target(name: "LocalParakeet", dependencies: ["LexiconDomain", "Transcription"]),
+        .target(
+            name: "LocalParakeet",
+            dependencies: ["LexiconDomain", "Transcription", .product(name: "FluidAudio", package: "FluidAudio")]
+        ),
 
         // Deterministic cleanup pass plus Rules plus light app formatting. Pure.
         .target(name: "Cleanup", dependencies: ["LexiconDomain"]),
@@ -89,9 +91,6 @@ let package = Package(
         // SwiftPM products (ADR 0003): bundle, Info.plist, entitlements, signing (#14).
         .executableTarget(name: "LexiconApp", dependencies: ["LexiconDomain", "LexiconCore", "LexiconUI", "LocalParakeet"]),
 
-        // `lexicon`: the hook command (Claude Code / Codex UserPromptSubmit) and dev test hooks.
-        .executableTarget(name: "LexiconHookCLI", dependencies: ["LexiconDomain", "Inbox"]),
-
         // `lexicon-eval`: headless pipeline on WAV files for the scorer (#15). Dev only, never shipped.
         .executableTarget(name: "LexiconEval", dependencies: ["LexiconDomain", "LexiconCore", "History", "LocalParakeet"]),
 
@@ -102,7 +101,8 @@ let package = Package(
                 "LexiconCore",
             ]
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )
 
 // Every `import` is internal unless written `public import` (SE-0409). A module

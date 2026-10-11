@@ -189,7 +189,7 @@ extension Conductor {
         let speechPlan: SpeechPlan
         let cleanupPlan: CleanupPlan
         var cleaning: CleanupSession
-        /// Live: `Preferences.cleanupBudget` (250 ms). Retry and recovery: seconds (nobody waits).
+        /// Live: `Preferences.cleanupDeadline` (about 450 ms). Retry and recovery: seconds (nobody waits).
         let cleanupDeadline: Duration
         let access: CloudAccess?
         /// nil: never typed (recovery, retry). No public init exists to make one up.

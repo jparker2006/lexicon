@@ -37,7 +37,7 @@ public enum RulesOnlyReason: Sendable, Hashable, Codable {
     case off
     /// The LLM answered but failed the structural check. History shows "cleanup rejected".
     case rejected(CheckFailure)
-    /// The LLM missed its deadline after fn-up (250 ms p95 budget, #20).
+    /// The LLM missed `Preferences.cleanupDeadline` after the speech final.
     case deadline
     /// No model could run (no key, network error, on-device model missing).
     case unavailable

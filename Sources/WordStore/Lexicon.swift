@@ -14,8 +14,9 @@ public actor Lexicon {
     /// Opens `<root>/lexicon.sqlite` (this module names it) and loads the term index.
     public init(paths: AppPaths) throws { fatalError("not implemented") }
 
-    /// fn-down: the 50-100 most relevant terms for this context (never the whole
-    /// Lexicon: #10) plus a compiled snapshot of every Rule. Under 1 ms.
+    /// fn-down: up to `Preferences.cleanupTerms` most relevant Terms for this
+    /// context, best first (never the whole Lexicon: #10), plus a compiled
+    /// snapshot of every Rule. Speech takes the first `speechTerms`. Under 1 ms.
     public func forDictation(in context: AppContext) -> DictationWords {
         fatalError("not implemented")
     }

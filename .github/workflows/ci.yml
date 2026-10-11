@@ -1,0 +1,13 @@
+name: CI
+
+# Every push and every PR, one check named CI. A push run already reports on
+# any PR whose head is that commit; a pull_request trigger would report it twice.
+on: push
+
+jobs:
+  check:
+    name: CI
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - run: scripts/check.sh

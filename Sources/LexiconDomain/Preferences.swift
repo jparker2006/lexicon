@@ -16,12 +16,15 @@ public struct Preferences: Sendable, Hashable, Codable {
     public var privacy: PrivacyMode
     /// Bundle IDs that are always private (#5). Starts empty; Jake adds apps.
     public var alwaysPrivateApps: Set<String>
-    public var cloudModel: CloudModel
+    /// nil: no cloud engine, local Parakeet only. M0 and M1 run local only; the
+    /// Muse adapter lands in M2 (#67), which makes `.museVoice` the default.
+    public var cloudModel: CloudModel?
     public var localModel: LocalModel?
     /// Core Audio device UID. nil means the built-in mic (#4). Also settable with
-    /// `--args -microphone <uid>` for the BlackHole head-to-head (#15).
+    /// `--args -microphone <uid>`.
     public var microphoneUID: String?
-    /// Race deadline after fn-up before local text is used (#19 owns the value).
+    /// The cloud wins if its final text arrives within this long after recording
+    /// stops; otherwise local text is used. Fixed in code, not shown in Settings.
     public var raceDeadline: Duration
     /// Keep the local model resident this long after the last Dictation. Ignored
     /// (always resident) while Private mode is on or the network is unreachable:
@@ -29,16 +32,24 @@ public struct Preferences: Sendable, Hashable, Codable {
     public var localModelLinger: Duration
     /// The "AI cleanup" toggle (#20), on by default. Off = rules-only cleanup and
     /// nothing leaves the Mac for cleanup (Cleanup withholds `CloudAccess`).
+    /// Inert until M3 (#75): M0 to M2 run rules-only Cleanup.
     public var aiCleanup: Bool
     public var cleanupModel: CloudCleanupModel
-    /// How long a live Dictation's cleanup may wait for the LLM after the model
-    /// text arrives, before the rules-only text is typed (#20: 250 ms p95).
-    public var cleanupBudget: Duration
+    /// How long a live Dictation's cleanup may wait for the LLM after the speech
+    /// final arrives, before the rules-only text is typed. A starting value,
+    /// tuned on the Test set to keep total lag within the pass mark.
+    public var cleanupDeadline: Duration
+    /// Most relevant Lexicon Terms, best first, chosen at fn-down: speech gets
+    /// the first `speechTerms` (fewer if a provider cap binds), Cleanup gets the
+    /// first `cleanupTerms`. Private mode sends no list.
+    public var speechTerms: Int
+    public var cleanupTerms: Int
     public var startAtLogin: Bool
 
-    public init(privacy: PrivacyMode, alwaysPrivateApps: Set<String>, cloudModel: CloudModel, localModel: LocalModel?, microphoneUID: String?,
+    public init(privacy: PrivacyMode, alwaysPrivateApps: Set<String>, cloudModel: CloudModel?, localModel: LocalModel?, microphoneUID: String?,
                 raceDeadline: Duration, localModelLinger: Duration, aiCleanup: Bool,
-                cleanupModel: CloudCleanupModel, cleanupBudget: Duration, startAtLogin: Bool) {
+                cleanupModel: CloudCleanupModel, cleanupDeadline: Duration, speechTerms: Int, cleanupTerms: Int,
+                startAtLogin: Bool) {
         self.privacy = privacy
         self.alwaysPrivateApps = alwaysPrivateApps
         self.cloudModel = cloudModel
@@ -48,14 +59,17 @@ public struct Preferences: Sendable, Hashable, Codable {
         self.localModelLinger = localModelLinger
         self.aiCleanup = aiCleanup
         self.cleanupModel = cleanupModel
-        self.cleanupBudget = cleanupBudget
+        self.cleanupDeadline = cleanupDeadline
+        self.speechTerms = speechTerms
+        self.cleanupTerms = cleanupTerms
         self.startAtLogin = startAtLogin
     }
 
     public static let defaults = Preferences(
-        privacy: .standard, alwaysPrivateApps: [], cloudModel: .museVoice, localModel: .parakeetUnified, microphoneUID: nil,
-        raceDeadline: .milliseconds(800), localModelLinger: .seconds(600), aiCleanup: true,
-        cleanupModel: .openRouterFast, cleanupBudget: .milliseconds(250), startAtLogin: true
+        privacy: .standard, alwaysPrivateApps: [], cloudModel: nil, localModel: .parakeetUnified, microphoneUID: nil,
+        raceDeadline: .milliseconds(300), localModelLinger: .seconds(600), aiCleanup: true,
+        cleanupModel: .openRouterFast, cleanupDeadline: .milliseconds(450), speechTerms: 50, cleanupTerms: 200,
+        startAtLogin: true
     )
 }
 

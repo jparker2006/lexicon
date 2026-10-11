@@ -7,7 +7,7 @@ import Foundation
 /// new adapter file is written. The model picker, the Keychain account name and
 /// the stored model id all derive from this enum. Nothing else lists providers.
 public enum CloudModel: String, Sendable, Codable, CaseIterable {
-    /// Default for now (#8): wss://api.meta.ai/v1/asr/realtime, keywords at session start.
+    /// The cloud default from M2 (#67): wss://api.meta.ai/v1/asr/realtime, keywords at session start.
     case museVoice = "meta.muse-voice-transcribe-1.0"
 
     public var displayName: String {

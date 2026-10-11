@@ -10,7 +10,7 @@ import LexiconDomain
 /// Internal: a provider's wire types can never leak out of Transcription.
 protocol StreamingProvider: Sendable {
     func connectRequest(key: String) -> URLRequest
-    /// Sent right after connect. Keywords (50-100 Lexicon terms: #10) go here.
+    /// Sent right after connect. Keywords (up to `Preferences.speechTerms` Lexicon Terms) go here.
     func sessionStart(terms: [Term]) -> ProviderMessage?
     func audio(_ chunk: PCMChunk) -> ProviderMessage
     /// Sent the instant the feed ends (manual finalize mode; never server VAD).

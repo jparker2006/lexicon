@@ -2,8 +2,9 @@ public import Foundation
 public import LexiconDomain
 
 // The inbox is how short-lived processes talk to the running app: a directory
-// of JSON files. The hook CLI writes one file per message (write temp, then
-// rename: atomic); the app watches the directory, reads each file, deletes it.
+// of JSON files. A writer posts one file per message (write temp, then rename:
+// atomic); the app watches the directory, reads each file, deletes it. The
+// `lexicon` hook CLI that would write them is not built before the after-M1 grill.
 //
 // Why a directory and not a socket: no listener thread in the app, nothing to
 // lose when the app is not running (files wait for the next launch), and file
@@ -20,7 +21,7 @@ public enum InboxMessage: Sendable, Codable, Hashable {
     case dictateFile(path: String)
 }
 
-/// Used by the `lexicon` CLI. Foundation only, starts in milliseconds.
+/// For a short-lived writer process. Foundation only, starts in milliseconds.
 public struct InboxWriter: Sendable {
     /// `<root>/inbox/` (this module names it).
     public init(paths: AppPaths) { fatalError("not implemented") }

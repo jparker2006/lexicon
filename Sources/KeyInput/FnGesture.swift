@@ -52,7 +52,7 @@ struct FnGesture: Sendable {
         self.doubleTapWindow = doubleTapWindow
     }
 
-    /// True while recording, so Esc and Space are swallowed only then.
+    /// True while recording, so Esc is swallowed only then.
     var isRecording: Bool { phase != .idle }
 
     mutating func handle(_ input: KeyInput) -> Output {
