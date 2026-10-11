@@ -152,3 +152,24 @@ private func wav() throws -> URL {
     #expect(retried.versions == nil)
     #expect(await system.history.dictation(first.id)?.status == .waiting)
 }
+
+@Test func aStoredWaitingDictationIsLeftForLaunchRecovery() async throws {
+    // Waiting before a restart, and recovery has not restarted its loop yet.
+    let system = try system(hearing: "found it")
+    let id = DictationID()
+    let recorder = Recorder()
+    let capture = try await recorder.start(.file(try wav(), pace: .asFastAsPossible),
+                                           writingTo: system.history.audioURL(for: id))
+    let ended = try #require(await capture.signals.inputEnded())
+    let take = await capture.stop(.released(at: ended))
+    await recorder.settle()
+    system.history.record(.began(id, origin: .live, purpose: .type, at: Date(), app: .unknown))
+    system.history.record(.audioEnded(id, take.summary))
+    system.history.record(.waiting(id, reason: "noModel"))
+
+    let retried = await system.conductor.retry(id, with: nil)
+    await system.history.flush()
+
+    #expect(retried.versions == nil)
+    #expect(await system.history.dictation(id)?.status == .waiting)
+}

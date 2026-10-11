@@ -13,10 +13,11 @@ extension Conductor {
     /// `model` nil = the normal plan; otherwise the picker's choice. Does nothing
     /// (versions nil) while the Dictation is in flight, already being retried
     /// (here, or by the waiting loop, which keeps trying until it has text), once
-    /// its audio is gone, or when the retry hears nothing: the row keeps what it had. A failed Dictation that gets text becomes not inserted
-    /// (recovered, if it came from a crash).
+    /// its audio is gone, or when the retry hears nothing: the row keeps what it
+    /// had. A failed Dictation that gets text becomes not inserted (recovered, if
+    /// it came from a crash).
     public func retry(_ id: DictationID, with model: SpeechModel?) async -> DictationResult {
-        guard inFlight[id] == nil, waiting[id] == nil else { return .nothing(id) }
+        guard inFlight[id] == nil else { return .nothing(id) }
         // In `inFlight` like any Dictation being heard, so Quit waits for it to land.
         let task = Task { await self.retrying(id, with: model) }
         inFlight[id] = task
@@ -25,7 +26,10 @@ extension Conductor {
 
     private func retrying(_ id: DictationID, with model: SpeechModel?) async -> DictationResult {
         defer { inFlight[id] = nil }
-        guard let record = await history.dictation(id), !record.status.isInFlight,
+        // Waiting: its own loop keeps trying until it has text. Checked on the stored
+        // row, not `waiting`: before launch recovery restarts the loop, this Retry would
+        // hold its place in `inFlight`, and an empty Retry would leave it with no loop.
+        guard let record = await history.dictation(id), !record.status.isInFlight, record.status != .waiting,
               let clip = await history.clip(id) else { return .nothing(id) }
         let preferences = preferences.snapshot()
         // Today's settings and today's access for the app it was dictated into.
