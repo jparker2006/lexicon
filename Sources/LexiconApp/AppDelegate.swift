@@ -22,6 +22,7 @@ import TestHooks
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var system: LexiconSystem?
     var statusItem: StatusItemController?
+    var history: HistoryWindowPresenter?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     #if DEBUG
     var testHooks: TestHookServer?
@@ -39,8 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let appName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lexicon"
+        let history = HistoryWindowPresenter(paths: paths)
+        self.history = history
         statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle),
-                                          extraItems: { Permissions.menuItems() })
+                                          openHistory: { history.show() }, extraItems: { Permissions.menuItems() })
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
         #if DEBUG
         testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths)
@@ -59,9 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Reopened from Spotlight or Finder: open History (#63). Nothing to show yet.
+    /// Reopened from Spotlight or Finder: open History.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        false
+        history?.show()
+        return false
     }
 
     /// `scripts/install.sh` and `scripts/dev-run.sh` quit the old copy with SIGTERM
