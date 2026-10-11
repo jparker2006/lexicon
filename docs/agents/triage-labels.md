@@ -26,7 +26,9 @@ At most one per issue, set by whoever moves the work and removed when the state 
 | `waiting-on-jake` | The next step is Jake's: a decision, a test to try, a review or an approval |
 | `parked` | Deliberately put off |
 
-No label means not started, or finished.
+No label means not started, or finished but not yet installed or checked by Jake. Merged and installed come from git and the Reviewer's install comments, never from a label.
+
+**The first line of every issue comment states the status** in plain words ("Building: ...", "Ready for review: PR #M", "Verdict: merge"). For `waiting-on-jake`, the first line is the ask ("Jake: try ...", "Jake: decide ...").
 
 ## Other labels
 
