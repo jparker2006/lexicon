@@ -37,8 +37,13 @@ SCORER = Path(__file__).resolve().parent.parent
 PROGRESS = re.compile(r"lexicon-eval: \d+/\d+")
 
 
+def _keyless() -> dict:
+    """The environment with no key in it, so nothing a child runs can reach a provider."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("LEXICON_KEY_")}
+
+
 def _scorer_report(manifest: Path, run: Path, split: str) -> dict:
-    env = os.environ | {"PYTHONSAFEPATH": "1", "PYTHONPATH": str(SCORER)}
+    env = _keyless() | {"PYTHONSAFEPATH": "1", "PYTHONPATH": str(SCORER)}
     done = subprocess.run([sys.executable, "-m", "lexicon_scorer", "report", "--gold", str(manifest),
                            "--run", str(run), "--split", split],
                           env=env, capture_output=True, text=True)
@@ -50,7 +55,7 @@ def _scorer_report(manifest: Path, run: Path, split: str) -> dict:
 def _lexicon_eval(lexicon_eval: Path, manifest: Path, split: str, out: Path, baseline: Path, work: Path) -> dict:
     """Local Parakeet on one split through the real pipeline, scored against
     Wispr's run. Exit 3 means it scored worse than Wispr: expected, not an error."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("LEXICON_KEY_")} | {"TMPDIR": str(work)}
+    env = _keyless() | {"TMPDIR": str(work)}
     hidden = 0
 
     def progress(stderr):

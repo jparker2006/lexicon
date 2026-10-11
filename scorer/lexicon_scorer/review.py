@@ -29,9 +29,10 @@ and at start, so a crash between writes is repaired on the next open.
 The page makes no network requests: it is served with a Content-Security-Policy
 that lets it load only its own files and talk only to this server, its audio is
 fetched from here, and nothing is cached on disk (no-store). The server answers
-only 127.0.0.1 with the right Host header (no DNS rebinding) and a session
-cookie set from a one-time link (no other web page can read or write through
-it). It never logs a request: paths name clips.
+only 127.0.0.1 with the right Host header (no DNS rebinding), and Jake's data
+only with the key from the link it opens, which the page sends as a header (no
+other web page can read or write through it). It never logs a request: paths
+name clips.
 """
 
 import difflib
@@ -46,7 +47,7 @@ import sys
 import threading
 import unicodedata
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 from .score import term_counts
 from .testset import (Lexicon, TestSetError, _read_jsonl, _spelling_variant, _words, _write_jsonl,
@@ -99,28 +100,38 @@ def runs(indexes: list[int]) -> list[tuple[int, int]]:
     return [(a, b) for a, b in spans]
 
 
+def _fixes(text: str, lexicon: Lexicon) -> list[tuple[int, int, str]]:
+    """(start, end, written) for each place `text` holds a Term in another case
+    or spacing, or a Rule's heard side: gold must hold the written form,
+    case-sensitive. A match inside a written form already there is left alone
+    ("Next.js" holds the heard side of `next -> Next.js`), and where two
+    overlap the longer wins."""
+    written = [(m.start(), m.end()) for form in lexicon.written for m in re.finditer(re.escape(form), text)]
+    candidates = [(m.start(), m.end(), term) for term in lexicon.written
+                  for m in _spelling_variant(term).finditer(text) if m.group() and m.group() != term]
+    candidates += [(m.start(), m.end(), form) for heard, form in lexicon.rules
+                   for m in re.finditer(r"(?<!\w)" + _words(heard) + r"(?!\w)", text, re.IGNORECASE)]
+    chosen: list[tuple[int, int, str]] = []
+    for start, end, form in sorted(candidates, key=lambda c: (c[0] - c[1], c[0])):
+        if any(a <= start and end <= b for a, b in written):
+            continue
+        if all(end <= a or b <= start for a, b, _ in chosen):
+            chosen.append((start, end, form))
+    return sorted(chosen)
+
+
 def suggestions(text: str, lexicon: Lexicon) -> list[dict]:
-    """Places where `text` holds a Term in another case or spacing, or a Rule's
-    heard side: gold must hold the written form, case-sensitive. Only hints;
-    Jake decides."""
+    """What the page shows: each different (found, written) pair. Only hints; Jake decides."""
     text = unicodedata.normalize("NFC", text)
-    found = {}
-    for term in lexicon.written:
-        for match in _spelling_variant(term).finditer(text):
-            if match.group() != term:
-                found[match.group()] = term
-    for heard, written in lexicon.rules:
-        for match in re.finditer(r"(?<!\w)" + _words(heard) + r"(?!\w)", text, re.IGNORECASE):
-            found[match.group()] = written
-    return [{"found": f, "written": w} for f, w in sorted(found.items())]
+    pairs = {(text[a:b], form) for a, b, form in _fixes(text, lexicon)}
+    return [{"found": f, "written": w} for f, w in sorted(pairs)]
 
 
 def with_suggestions(text: str, lexicon: Lexicon) -> str:
-    """`text` with every suggestion applied, longest first so a Rule's heard
-    phrase wins over a Term inside it."""
+    """`text` with every suggestion applied once (F on the page)."""
     text = unicodedata.normalize("NFC", text)
-    for s in sorted(suggestions(text, lexicon), key=lambda s: -len(s["found"])):
-        text = re.sub(r"(?<!\w)" + re.escape(s["found"]) + r"(?!\w)", lambda _: s["written"], text)
+    for start, end, form in reversed(_fixes(text, lexicon)):
+        text = text[:start] + form + text[end:]
     return text
 
 
@@ -303,8 +314,10 @@ class Server(http.server.ThreadingHTTPServer):
         return f"http://127.0.0.1:{self.server_address[1]}"
 
     @property
-    def start_url(self) -> str:
-        return f"{self.origin}/start?key={self.token}"
+    def page_url(self) -> str:
+        # In the fragment, which a browser never sends anywhere: the page reads it
+        # and sends it back to this server only, as a header.
+        return f"{self.origin}/#key={self.token}"
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -339,34 +352,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _json(self, value) -> None:
         self._send(200, json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8")
 
-    def _allowed(self) -> bool:
-        """Only this server's own page: the Host it was opened at (a web page
-        that rebinds its name to 127.0.0.1 sends its own Host) and the cookie
-        from the start link (a cross-site request carries no SameSite=Strict
-        cookie)."""
+    def _allowed(self, keyed: bool) -> bool:
+        """Only this server's own page. The Host must be the one it was opened
+        at: a web page that rebinds its name to 127.0.0.1 sends its own. Anything
+        holding Jake's data needs the key from the page's link in a header,
+        which no other web page can send here without a CORS preflight this
+        server never grants. No cookie: the browser would hand it to any server
+        on 127.0.0.1, whatever its port."""
         if self.headers.get("Host") != self.server.origin.removeprefix("http://"):
             self._send(403)
             return False
-        if urlsplit(self.path).path == "/start":
-            return True
-        cookie = self.headers.get("Cookie", "")
-        sent = dict(p.strip().split("=", 1) for p in cookie.split(";") if "=" in p).get("review", "")
-        if not hmac.compare_digest(sent.encode(), self.server.token.encode()):
-            self._send(403, b"Open the link scripts/test-set.sh review printed.")
+        if keyed and not hmac.compare_digest(self.headers.get("X-Review-Key", "").encode(), self.server.token.encode()):
+            self._send(403)
             return False
         return True
 
     def do_GET(self):
-        if not self._allowed():
-            return
         url = urlsplit(self.path)
-        if url.path == "/start":
-            key = parse_qs(url.query).get("key", [""])[0]
-            if not hmac.compare_digest(key.encode(), self.server.token.encode()):
-                return self._send(403, b"This link is from an earlier run. Open the one just printed.")
-            return self._send(303, headers={
-                "Location": "/",
-                "Set-Cookie": f"review={self.server.token}; Path=/; HttpOnly; SameSite=Strict"})
+        # The page's own files hold no data, so they need only the right Host.
+        if not self._allowed(keyed=url.path not in FILES):
+            return
         if url.path in FILES:
             name, content_type = FILES[url.path]
             return self._send(200, (PAGE / name).read_bytes(), content_type)
@@ -385,7 +390,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     do_HEAD = do_GET
 
     def do_POST(self):
-        if not self._allowed():
+        if not self._allowed(keyed=True):
             return
         # A cross-site form can't send JSON, and a fetch from another origin
         # carries its own Origin.
@@ -430,10 +435,13 @@ def serve(root: Path, lexicon_file: Path, *, open_page: bool = True, out=sys.std
         clips, answered, marked = review.counts()
         say(f"review: {answered} of {clips} clips answered, {marked} marks")
         server = Server(review)
-        say(f"open: {server.start_url}")
-        say("Ctrl-C stops it; every answer is already saved.")
         if open_page:
-            subprocess.run(["open", server.start_url], check=False)
+            # The link holds the key, so it goes to the browser, not the terminal.
+            subprocess.run(["open", server.page_url], check=False)
+            say(f"opened {server.origin}/ in your browser")
+        else:
+            say(f"open: {server.page_url}")
+        say("Ctrl-C stops it; every answer is already saved.")
         try:
             server.serve_forever()
         except KeyboardInterrupt:

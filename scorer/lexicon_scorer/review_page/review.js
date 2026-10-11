@@ -23,11 +23,14 @@ const audio = new Audio();
 const blobs = new Map(); // clip id -> Promise of an object URL
 
 const $ = (id) => document.getElementById(id);
+// The server's key, from the link's fragment (never sent by the browser itself).
+const KEY = new URLSearchParams(location.hash.slice(1)).get("key") || "";
+const keyed = (headers = {}) => ({ ...headers, "X-Review-Key": KEY });
 
 async function call(path, body) {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: keyed({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!response.ok) throw new Error(`${response.status}`);
@@ -47,7 +50,7 @@ async function save(path, body) {
     $("saved").textContent = "Saved";
     return result;
   } catch {
-    fail("Not saved. Is scripts/test-set.sh review still running? Reopen the link it prints.");
+    fail("Not saved. Is scripts/test-set.sh review still running? It opens a new page each run.");
     $("saved").textContent = "";
     return null;
   }
@@ -81,7 +84,7 @@ function differing(a, b) {
 
 function blob(clip) {
   if (!blobs.has(clip.id)) {
-    blobs.set(clip.id, fetch(`/audio/${encodeURIComponent(clip.id)}`).then((r) => {
+    blobs.set(clip.id, fetch(`/audio/${encodeURIComponent(clip.id)}`, { headers: keyed() }).then((r) => {
       if (!r.ok) throw new Error(`${r.status}`);
       return r.blob();
     }).then((b) => URL.createObjectURL(b), (e) => {
@@ -406,7 +409,7 @@ document.addEventListener("click", (event) => {
 
 async function start() {
   try {
-    const response = await fetch("/api/state");
+    const response = await fetch("/api/state", { headers: keyed() });
     if (!response.ok) throw new Error(`${response.status}`);
     const state = await response.json();
     clips = state.clips;
@@ -415,7 +418,7 @@ async function start() {
     const first = clips.findIndex((c) => !answers[c.id] || answers[c.id].text == null);
     at = resume >= 0 ? resume : Math.max(0, first);
   } catch {
-    fail("Could not load the review. Open the link scripts/test-set.sh review prints.");
+    fail("Could not load the review. Open it with scripts/test-set.sh review, which opens a new page each run.");
     return;
   }
   render();

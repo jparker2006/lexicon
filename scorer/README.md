@@ -78,7 +78,7 @@ One run at a time (`.lock`, shared with the review page and the baselines). It p
 scripts/test-set.sh review
 ```
 
-Jake's review of the `review` entries (#51): a page served from 127.0.0.1 until Ctrl-C, opened in the default browser. For each clip in `disagreements.jsonl` it plays the audio and shows local Parakeet's text (A) and Wispr's raw text (B) with their differences highlighted, what Wispr typed and Jake's own edit of it as hints, and any Term written in another case or spacing or Rule's heard side. Jake picks A or B or types the gold, and can mark wrong words in either text. Every key saves at once; reopening resumes on the clip he was on. The keys are on the page.
+Jake's review of the `review` entries (#51): a page served from 127.0.0.1 until Ctrl-C, opened in the default browser. For each clip in `disagreements.jsonl` it plays the audio and shows local Parakeet's text (A) and Wispr's raw text (B) with their differences highlighted, what Wispr typed and Jake's own Hand fix of it as hints, and any Term written in another case or spacing or Rule's heard side. Jake picks A or B or types the gold, and can mark wrong words in either text. Every answer and mark is saved at once; reopening resumes on the clip he was on. The keys are on the page.
 
 It writes only under the Test set folder, owner-only:
 
@@ -87,7 +87,7 @@ It writes only under the Test set folder, owner-only:
 - `marks.jsonl`: one Test set entry per run of marked words: `clip`, `audio_filepath`, `session`, `split`, `model` (`parakeet` or `wispr`), word `start` and `end`, the words `heard`, and the words `said` (lined up with his gold, null until he gives it).
 - `review-state.json`: the clip he was on.
 
-The page makes no network requests: its Content-Security-Policy lets it load only its own three files and fetch only from its own server, and nothing is cached (no-store). The server answers only `Host: 127.0.0.1:<port>` and the session cookie its one-time start link sets (SameSite=Strict), so no other web page can read or write through it, and it logs no requests. Tests: `tests/test_review.py`, on synthetic clips.
+The page makes no network requests: its Content-Security-Policy lets it load only its own three files and fetch only from its own server, and nothing is cached (no-store). The server answers only `Host: 127.0.0.1:<port>`, and serves Jake's data only with the key from the link it opens, which sits in the link's fragment (never sent by the browser) and comes back as a header no other web page can send, so no other page can read or write through it. It sets no cookie and logs no requests. `--no-open` prints the link instead of opening it. Tests: `tests/test_review.py`, on synthetic clips.
 
 ### Baselines
 
@@ -95,4 +95,4 @@ The page makes no network requests: its Content-Security-Policy lets it load onl
 scripts/test-set.sh baselines
 ```
 
-Once no entry is `review`, saves into a new `baselines/YYYY-MM-DD/`, for `everyday` then `held-back`: `wispr-<split>.jsonl` (Wispr's run on the split) and `wispr-<split>.json` (its report), and `parakeet-<split>.jsonl` (`lexicon-eval --manifest` on the split: local Parakeet through the real pipeline at the speed of speech, no key in its environment) and `parakeet-<split>.json` (its report against Wispr). It takes about as long as the audio. It prints the two scores and lag for each, numbers only. A later quick run compares against them with `lexicon-eval --manifest <test-set>/manifest.jsonl --split everyday --baseline <test-set>/baselines/<date>/parakeet-everyday.jsonl`. A clip added by a later update has no line in a saved Parakeet baseline, so run the baselines again after an update. Tests: `tests/test_baselines.py`, with a fake `lexicon-eval`.
+Once no entry is `review`, saves into a new `baselines/YYYY-MM-DD/`, for `everyday` then `held-back`: `wispr-<split>.jsonl` (Wispr's run on the split) and `wispr-<split>.json` (its report), and `parakeet-<split>.jsonl` (`lexicon-eval --manifest` on the split: local Parakeet through the real pipeline at the speed of speech, no key in its environment) and `parakeet-<split>.json` (its report against Wispr). It takes about as long as the audio. It prints the two scores and lag for each, numbers only. A later quick run compares against them with `lexicon-eval --manifest <test-set>/manifest.jsonl --split everyday --baseline <test-set>/baselines/<date>/parakeet-everyday.jsonl`. A clip added by a later update has no line in a saved Parakeet baseline, so a run that includes one needs the baselines saved again. The held-back split is for milestone checks only: Jake runs this, and agents never tune on its numbers. Tests: `tests/test_baselines.py`, with a fake `lexicon-eval`.

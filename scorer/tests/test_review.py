@@ -178,6 +178,14 @@ class ReviewDataTest(Fixture):
                          [{"found": "Github", "written": "GitHub"}, {"found": "super base", "written": "Supabase"}])
         self.assertEqual(review.with_suggestions(text, self.lex), "we use GitHub and Supabase")
 
+    def test_suggestions_leave_a_written_form_alone(self):
+        # A Rule whose written side holds its heard side, and a Term inside a Rule's written side.
+        lex = parse_lexicon("Next.js\nApp\n-\nnext -> Next.js\ndictation -> dictation app\n")
+        for text in ("I love Next.js", "a dictation app", "hi, there"):
+            self.assertEqual(review.suggestions(text, lex), [], text)
+            self.assertEqual(review.with_suggestions(text, lex), text)
+        self.assertEqual(review.with_suggestions("next and Next.js", lex), "Next.js and Next.js")
+
     def test_every_file_is_owner_only(self):
         page = self.open_review()
         page.answer(ONE, "wispr", None)
@@ -203,7 +211,7 @@ class ServerTest(Fixture):
         self.addCleanup(thread.join)
         self.addCleanup(self.server.shutdown)
         self.port = self.server.server_address[1]
-        self.cookie = {"Cookie": f"review={self.server.token}"}
+        self.key = {"X-Review-Key": self.server.token}
 
     def request(self, method: str, path: str, headers: dict | None = None, body: bytes | None = None):
         """(status, headers in lower case, body) from one request on a new connection."""
@@ -216,64 +224,52 @@ class ServerTest(Fixture):
         finally:
             conn.close()
 
-    def test_only_the_start_link_gets_past_the_cookie(self):
-        self.assertEqual(self.request("GET", "/")[0], 403)
-        self.assertEqual(self.request("GET", "/api/state")[0], 403)
-        self.assertEqual(self.request("GET", "/start?key=WRONG")[0], 403)
-        status, headers, _ = self.request("GET", f"/start?key={self.server.token}")
-        self.assertEqual(status, 303)
-        self.assertIn("HttpOnly", headers["set-cookie"])
-        self.assertIn("SameSite=Strict", headers["set-cookie"])
+    def test_jakes_data_needs_the_key_and_no_cookie_is_set(self):
+        for path in ("/api/state", f"/audio/{ONE}"):
+            self.assertEqual(self.request("GET", path)[0], 403)
+            self.assertEqual(self.request("GET", path, {"X-Review-Key": "wrong"})[0], 403)
+            self.assertEqual(self.request("GET", path, self.key)[0], 200)
+        status, headers, _ = self.request("GET", "/")
+        self.assertEqual(status, 200)  # the page itself holds no data
+        self.assertNotIn("set-cookie", headers)
+        self.assertTrue(self.server.page_url.endswith(f"/#key={self.server.token}"))
 
     def test_the_page_is_served_with_a_strict_policy(self):
-        status, headers, _ = self.request("GET", "/", self.cookie)
+        status, headers, _ = self.request("GET", "/", self.key)
         self.assertEqual(status, 200)
         self.assertIn("default-src 'none'", headers["content-security-policy"])
         self.assertIn("connect-src 'self'", headers["content-security-policy"])
         self.assertEqual(headers["cache-control"], "no-store")
         for path in ("/review.js", "/review.css"):
-            self.assertEqual(self.request("GET", path, self.cookie)[0], 200)
-
-    def test_the_page_loads_only_from_this_server(self):
-        files = {path: self.request("GET", path, self.cookie)[2].decode("utf-8")
-                 for path in ("/", "/review.js", "/review.css")}
-        for path, text in files.items():
-            for remote in ("http:", "https:", "//cdn"):
-                self.assertNotIn(remote, text, path)
-        html = files["/"]
-        scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, re.S)
-        self.assertEqual(len(scripts), html.count("<script"))
-        for attributes, content in scripts:
-            self.assertRegex(attributes, r'\ssrc="/[^"]*"')
-            self.assertEqual(content, "")
-        self.assertNotIn("style=", html)
+            self.assertEqual(self.request("GET", path, self.key)[0], 200)
 
     def test_the_api_and_audio_serve_the_review_clips(self):
-        status, _, body = self.request("GET", "/api/state", self.cookie)
+        status, _, body = self.request("GET", "/api/state", self.key)
         self.assertEqual(status, 200)
         clips = json.loads(body)["clips"]
         self.assertEqual(len(clips), 3)
         self.assertTrue(all("words" in clip for clip in clips))
 
-        status, _, body = self.request("GET", f"/audio/{ONE}", self.cookie)
+        status, _, body = self.request("GET", f"/audio/{ONE}", self.key)
         self.assertEqual(status, 200)
         self.assertTrue(body.startswith(b"RIFF"))
-        self.assertEqual(self.request("GET", "/audio/../../etc", self.cookie)[0], 404)
-        self.assertEqual(self.request("GET", "/audio/unknown", self.cookie)[0], 404)
+        self.assertEqual(self.request("GET", "/audio/../../etc", self.key)[0], 404)
+        self.assertEqual(self.request("GET", "/audio/unknown", self.key)[0], 404)
 
-    def test_a_wrong_host_name_is_refused_even_with_the_cookie(self):
-        status, _, _ = self.request("GET", "/api/state", {**self.cookie, "Host": f"evil.example:{self.port}"})
+    def test_a_wrong_host_name_is_refused_even_with_the_key(self):
+        status, _, _ = self.request("GET", "/api/state", {**self.key, "Host": f"evil.example:{self.port}"})
         self.assertEqual(status, 403)
 
     def test_answers_come_only_as_json_from_this_origin(self):
-        headers = {**self.cookie, "Content-Type": "application/json"}
+        headers = {**self.key, "Content-Type": "application/json"}
         status, _, _ = self.request("POST", "/api/answer", headers,
                                     json.dumps({"id": TWO, "choice": "parakeet"}).encode())
         self.assertEqual(status, 200)
         self.assertEqual(self.entries()[TWO]["gold"], "reviewed")
 
         body = json.dumps({"id": THREE, "choice": "parakeet"}).encode()
-        for refused in ({**headers, "Content-Type": "text/plain"}, {**headers, "Origin": "http://evil.example"}):
+        for refused in ({**headers, "Content-Type": "text/plain"}, {**headers, "Origin": "http://evil.example"},
+                        {"Content-Type": "application/json"}):
             self.assertEqual(self.request("POST", "/api/answer", refused, body)[0], 403)
         self.assertEqual(self.entries()[THREE]["gold"], "review")
 

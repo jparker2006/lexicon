@@ -1,6 +1,8 @@
 """Builds and grows Jake's private Test set from his Wispr Flow history (#50).
 
     scorer/testset update --lexicon-eval BIN
+    scorer/testset review [--no-open]              (review.py, Jake's gold review)
+    scorer/testset baselines --lexicon-eval BIN    (baselines.py)
 
 `scripts/test-set.sh` builds `lexicon-eval` and runs this; run it weekly until
 Jake switches off Wispr, which keeps only about two weeks of audio. Each run:
@@ -16,7 +18,8 @@ Jake switches off Wispr, which keeps only about two weeks of audio. Each run:
 3. Build: adds each new clip to `manifest.jsonl` (the Test set),
    `wispr-run.jsonl` (Wispr's run from its own logs, the baseline's input) and,
    when its texts disagree, `disagreements.jsonl` (Jake's gold review, #51).
-   Lines already there are never changed, so reviewed gold and the split stay.
+   Lines already there are never changed, so reviewed gold and the split stay;
+   only the gold review (review.py) rewrites a `review` entry's gold.
 
 Everything is written under the Test set folder with owner-only permissions,
 never inside a git work tree. It prints counts and paths only, never text, ids
