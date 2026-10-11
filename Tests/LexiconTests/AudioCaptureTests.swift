@@ -136,15 +136,20 @@ import LexiconDomain
     let caf = dir.appending(path: "dropped.caf")
 
     let recorder = Recorder()
+    var heard = 0
     do {
         let capture = try await recorder.start(.file(wav, pace: .realtime), writingTo: caf)
-        _ = await capture.signals.firstAudio()
+        var feed = capture.feed.makeAsyncIterator()
+        for _ in 0..<3 {
+            let chunk = await feed.next()
+            heard += try #require(chunk).samples.count
+        }
     }  // dropped here, mid-file, without stop
     await recorder.settle()
 
     #expect(CAFFile.state(of: caf) == .closed)
     let kept = try CAFFile.read(caf).samples
-    #expect(!kept.isEmpty && kept.count < source.count)
+    #expect(kept.count >= heard && kept.count < source.count)
     #expect(kept == Array(source.prefix(kept.count)))
 }
 
@@ -191,13 +196,13 @@ import LexiconDomain
     #expect(out.withUnsafeMutableBufferPointer { ring.read(into: $0) } == 0)
 }
 
-@Test func stoppingACaptureTwiceIsACompileError() throws {
-    let once = try compile("""
+@Test func stoppingACaptureTwiceIsACompileError() async throws {
+    let once = try await compile("""
         func run(_ capture: consuming LiveCapture) async { _ = await capture.stop(.immediately) }
         """)
     #expect(once.status == 0, "control snippet must compile: \(once.output)")
 
-    let twice = try compile("""
+    let twice = try await compile("""
         func run(_ capture: consuming LiveCapture) async {
             _ = await capture.stop(.immediately)
             _ = await capture.stop(.immediately)
@@ -268,7 +273,9 @@ func report(_ line: String) {
 
 /// Compiles `source` against the AudioCapture module this test run built, as
 /// far as SIL: ownership ("consumed more than once") is checked there, after type checking.
-func compile(_ source: String) throws -> (status: Int32, output: String) {
+/// Waits for swiftc on a GCD thread, never the cooperative pool: blocking a pool
+/// thread for its 6 to 10 s starves the realtime audio tests on a 3-core runner.
+func compile(_ source: String) async throws -> (status: Int32, output: String) {
     var image = Dl_info()
     try #require(dladdr(#dsohandle, &image) != 0)
     var bundle = URL(filePath: String(cString: image.dli_fname))
@@ -292,7 +299,11 @@ func compile(_ source: String) throws -> (status: Int32, output: String) {
     process.standardOutput = pipe
     process.standardError = pipe
     try process.run()
-    let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-    process.waitUntilExit()
-    return (process.terminationStatus, output)
+    return await withCheckedContinuation { continuation in
+        DispatchQueue.global().async {
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            continuation.resume(returning: (process.terminationStatus, output))
+        }
+    }
 }
