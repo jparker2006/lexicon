@@ -16,6 +16,7 @@ let usage = """
            lexicon-harness hook status | dictate <wav> | indicator <state> [message] | sound <cue>
            lexicon-harness hook insert [--delay <seconds>] <text>
            lexicon-harness hook capture <seconds> [prepared[=<idle s>]] [change] [device=<uid>]
+           lexicon-harness hook privacy on|off [--always-private <bundle id>[,<bundle id>...]]
            lexicon-harness pill [--shots <dir>]
            lexicon-harness history [search word]
 
@@ -32,6 +33,9 @@ let usage = """
               0.3 s (or the idle seconds given) before fn-down, else it is built
               cold on fn-down; `change` rebuilds the engine halfway as a device
               change would
+              privacy: turn Private mode on or off. --always-private replaces the
+              always-private apps; an empty value (--always-private "") clears them.
+              Prints the status, with the privacy mode and the list
       pill    show each indicator state on Lexicon Dev and check the pill, the menu bar
               icon and the focus; then play each sound and time it. --shots <dir> saves
               a picture of the pill and the menu bar icon for each state
@@ -192,6 +196,8 @@ func hookCommand(_ arguments: [String]) -> TestHookCommand {
         return .indicator(state)
     case "capture" where arguments.count >= 2:
         return capture(seconds: arguments[1], options: arguments.dropFirst(2))
+    case "privacy" where arguments.count == 2 || arguments.count == 4:
+        return privacy(arguments)
     case "insert" where arguments.count >= 2:
         var words = arguments.dropFirst()
         var delay = 0.0
@@ -226,6 +232,20 @@ func capture(seconds: String, options: ArraySlice<String>) -> TestHookCommand {
     let idle = prepared.map { Double($0) }
     if idle == .some(nil) { fail(usage, code: 64) }
     return .capture(seconds: seconds, preparedIdle: idle ?? nil, deviceChange: change, deviceUID: device)
+}
+
+/// `privacy on|off [--always-private <ids>]`, with the ids comma-separated. An empty
+/// list clears the always-private apps; no flag leaves them as they are.
+func privacy(_ arguments: [String]) -> TestHookCommand {
+    let mode: PrivacyMode
+    switch arguments[1] {
+    case "on": mode = .private
+    case "off": mode = .standard
+    default: fail(usage, code: 64)
+    }
+    guard arguments.count == 4 else { return .privacy(mode, alwaysPrivateApps: nil) }
+    guard arguments[2] == "--always-private" else { fail(usage, code: 64) }
+    return .privacy(mode, alwaysPrivateApps: arguments[3].split(separator: ",").map(String.init))
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())

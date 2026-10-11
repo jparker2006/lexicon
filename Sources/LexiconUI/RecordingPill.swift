@@ -68,6 +68,15 @@ final class RecordingPill {
         view.setLevel(CGFloat(level), reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
+    /// Private mode tints the pill purple. A pill that is not showing is laid out again by its next `show`.
+    func setPrivate(_ on: Bool) {
+        view.isPrivate = on
+        panel.setAccessibilityValue(on ? "Private mode" : nil)
+        if panel.isVisible {
+            _ = view.apply(view.state, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        }
+    }
+
     /// Fades out over `fade` seconds; at once with Reduce Motion.
     func hide(fade: TimeInterval) {
         view.stopAnimations()
@@ -101,7 +110,8 @@ private final class PillPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// The pill's content, drawn with layers: a dot, five level bars, an icon and a line of text.
+/// The pill's content, drawn with layers: a dot, five level bars, an icon and a line of text,
+/// over a tint layer that Private mode turns on.
 @MainActor
 final class PillView: NSView {
     static let height: CGFloat = 34
@@ -110,12 +120,15 @@ final class PillView: NSView {
     private static let weights: [CGFloat] = [0.5, 0.8, 1, 0.75, 0.45]
     private static let barMax: CGFloat = 16
 
+    /// Drawn by `apply`, so the appearance redo keeps it.
+    var isPrivate = false
+    private(set) var state: IndicatorState = .hidden
     private let effect = NSVisualEffectView()
+    private let tint = CALayer()
     private let dot = CALayer()
     private var bars: [CALayer] = []
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
-    private var state: IndicatorState = .hidden
     private var reduceMotion = false
 
     init() {
@@ -126,6 +139,8 @@ final class PillView: NSView {
         effect.wantsLayer = true
         effect.autoresizingMask = [.width, .height]
         addSubview(effect)
+        // Added first, so it sits behind everything else. `apply` sizes it to the pill.
+        effect.layer?.addSublayer(tint)
         effect.layer?.addSublayer(dot)
         for _ in Self.weights {
             let bar = CALayer()
@@ -156,6 +171,7 @@ final class PillView: NSView {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         stopAnimations()
+        tint.backgroundColor = isPrivate ? cgColor(NSColor.systemPurple.withAlphaComponent(0.22)) : nil
         dot.isHidden = true
         bars.forEach { $0.isHidden = true }
         icon.isHidden = true
@@ -212,7 +228,7 @@ final class PillView: NSView {
             break
         case .recording(let mode, let minuteLeft):
             placeDot(minuteLeft ? .systemOrange : .systemRed, pulse: true)
-            placeBars(.labelColor)
+            placeBars(isPrivate ? .systemPurple : .labelColor)
             if mode == .handsFree {
                 placeIcon("lock.fill", .secondaryLabelColor, gap: 10)
                 placeLabel("Tap fn to stop", .secondaryLabelColor)
@@ -246,7 +262,9 @@ final class PillView: NSView {
         }
         effect.layer?.cornerRadius = h / 2
         effect.layer?.masksToBounds = true
-        return NSSize(width: max(h, x + Self.padding), height: h)
+        let size = NSSize(width: max(h, x + Self.padding), height: h)
+        tint.frame = NSRect(origin: .zero, size: size)
+        return size
     }
 
     /// `level` 0...1. Only the recording state shows it.
@@ -275,6 +293,9 @@ final class PillView: NSView {
     var isAnimating: Bool {
         ([dot] + bars).contains { !($0.animationKeys() ?? []).isEmpty }
     }
+
+    /// Whether the Private mode tint is showing. For the tint test.
+    var isTinted: Bool { tint.backgroundColor != nil }
 
     private func cgColor(_ color: NSColor) -> CGColor {
         var resolved = color.cgColor

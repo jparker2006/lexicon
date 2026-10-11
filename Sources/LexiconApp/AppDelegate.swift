@@ -50,14 +50,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let history = HistoryWindowPresenter(paths: paths)
         self.history = history
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
-            [history.menuItem()] + Permissions.fnOffItems(self?.fnOff) + Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
+            [history.menuItem()] + Permissions.fnOffItems(self?.fnOff) + Permissions.menuItems() + (self?.indicator.map { [$0.privateModeMenuItem(), $0.soundsMenuItem()] } ?? [])
         }
         let indicator = DictationIndicator(statusItem: statusItem, preferences: preferences)
         self.statusItem = statusItem
         self.indicator = indicator
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
         #if DEBUG
-        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator)
+        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator, preferences: preferences)
         #endif
 
         let permissions = Permissions.summary

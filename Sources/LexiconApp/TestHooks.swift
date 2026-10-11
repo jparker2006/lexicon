@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import os
+import LexiconCore
 import LexiconDomain
 import AppText
 import AudioCapture
@@ -13,11 +14,14 @@ import TestHooks
 /// none of this is in it (scripts/bundle.sh checks).
 @MainActor
 enum AppTestHooks {
-    static func start(bundleID: String, paths: AppPaths, indicator: DictationIndicator) -> TestHookServer? {
+    static func start(bundleID: String, paths: AppPaths, indicator: DictationIndicator,
+                      preferences: PreferencesStore) -> TestHookServer? {
         guard bundleID == AppPaths.devBundleID,
               CommandLine.arguments.contains(TestHookChannel.launchArgument) else { return nil }
         do {
-            return try TestHookServer(channel: TestHookChannel(paths: paths)) { await handle($0, indicator: indicator) }
+            return try TestHookServer(channel: TestHookChannel(paths: paths)) {
+                await handle($0, indicator: indicator, preferences: preferences)
+            }
         } catch {
             Logger(subsystem: bundleID, category: "test-hooks")
                 .error("test hooks did not start: \(error.localizedDescription, privacy: .public)")
@@ -25,13 +29,13 @@ enum AppTestHooks {
         }
     }
 
-    static func handle(_ command: TestHookCommand, indicator: DictationIndicator) async -> TestHookReply {
+    static func handle(_ command: TestHookCommand, indicator: DictationIndicator,
+                       preferences: PreferencesStore) async -> TestHookReply {
         switch command {
         case .status:
-            .status(TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
-                                   version: AppDelegate.version(of: .main), pid: getpid(),
-                                   accessibility: Permissions.accessibility,
-                                   microphone: Permissions.microphoneName))
+            .status(currentStatus(preferences))
+        case .privacy(let mode, let alwaysPrivateApps):
+            privacy(mode, alwaysPrivateApps: alwaysPrivateApps, preferences: preferences)
         case .dictate:
             .failed("no live Dictation in the app yet: the Conductor is wired in by #56")
         case .indicator(let state):
@@ -58,6 +62,25 @@ enum AppTestHooks {
         } catch {
             return .failed("the mic did not start: \(error)")
         }
+    }
+
+    private static func currentStatus(_ preferences: PreferencesStore) -> TestHookStatus {
+        let settings = preferences.snapshot()
+        return TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
+                              version: AppDelegate.version(of: .main), pid: getpid(),
+                              accessibility: Permissions.accessibility,
+                              microphone: Permissions.microphoneName,
+                              privacy: settings.privacy, alwaysPrivateApps: settings.alwaysPrivateApps.sorted())
+    }
+
+    /// The store the menu and the Conductor read, so a change is saved and a relaunch keeps it.
+    private static func privacy(_ mode: PrivacyMode, alwaysPrivateApps: [String]?,
+                                preferences: PreferencesStore) -> TestHookReply {
+        preferences.update { settings in
+            settings.privacy = mode
+            if let alwaysPrivateApps { settings.alwaysPrivateApps = Set(alwaysPrivateApps) }
+        }
+        return .status(currentStatus(preferences))
     }
 
     private static func showing(_ state: IndicatorState, on indicator: DictationIndicator) -> TestHookReply {

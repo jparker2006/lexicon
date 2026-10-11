@@ -2,7 +2,8 @@ import AppKit
 
 /// The Lexicon logo shape (`assets/brand/logo.webp`), drawn in code so the menu
 /// bar icon is sharp at every scale and costs no image file: a filled circle
-/// with a mouth cut out of its right side and a small tongue inside.
+/// with a mouth cut out of its right side and a small tongue inside. `outlined`
+/// draws the same shape as thin lines (Private mode).
 ///
 /// Coordinates are fractions of the circle's radius from its center, y up,
 /// measured off the logo raster.
@@ -14,14 +15,14 @@ enum LogoMark {
     /// active states can't be shown any other way. `open` 0...1 opens the mouth
     /// with the voice; `badge` is an SF Symbol drawn to the right.
     static func image(side: CGFloat = 18, open: CGFloat = 0, color: NSColor? = nil, badge: String? = nil,
-                      description: String = "Lexicon") -> NSImage {
+                      outlined: Bool = false, description: String = "Lexicon") -> NSImage {
         let symbol = badge.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
                 .applying(.init(paletteColors: [color ?? .black])))
         let width = side + (symbol == nil ? 0 : 11)
         let image = NSImage(size: NSSize(width: width, height: side), flipped: false) { _ in
-            (color ?? .black).setFill()
-            draw(in: NSRect(x: 0, y: 0, width: side, height: side).insetBy(dx: 1, dy: 1), open: open)
+            (color ?? .black).set()
+            draw(in: NSRect(x: 0, y: 0, width: side, height: side).insetBy(dx: 1, dy: 1), open: open, outlined: outlined)
             if let symbol {
                 let size = symbol.size
                 symbol.draw(in: NSRect(x: side + 1 + (10 - size.width) / 2, y: (side - size.height) / 2,
@@ -34,8 +35,8 @@ enum LogoMark {
         return image
     }
 
-    /// Fills with the current fill color.
-    static func draw(in rect: NSRect, open: CGFloat = 0) {
+    /// Fills with the current fill color, or with the current stroke color as lines when `outlined`.
+    static func draw(in rect: NSRect, open: CGFloat = 0, outlined: Bool = false) {
         let radius = min(rect.width, rect.height) / 2
         let center = NSPoint(x: rect.midX, y: rect.midY)
         // Opening stretches the mouth (and moves the tongue) up to 1.6 times taller about its middle.
@@ -53,21 +54,47 @@ enum LogoMark {
         mouth.curve(to: p(-0.10, 0.11), controlPoint1: p(-0.27, 0.06), controlPoint2: p(-0.19, 0.11))
         mouth.close()
 
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: 2 * radius, height: 2 * radius))
-            .addClip()
-        // The mouth reaches past the circle's edge; the clip keeps only the circle minus the mouth.
-        let body = NSBezierPath(rect: rect.insetBy(dx: -radius, dy: -radius))
-        body.append(mouth)
-        body.windingRule = .evenOdd
-        body.fill()
-        NSGraphicsContext.restoreGraphicsState()
+        // The mouth reaches past the circle's edge, so `outside` is the whole square minus the mouth.
+        let outside = NSBezierPath(rect: rect.insetBy(dx: -radius, dy: -radius))
+        outside.append(mouth)
+        outside.windingRule = .evenOdd
+
+        // A stroke is centered on its path, so the outlined circle is inset by half its line
+        // to keep the whole line inside the image.
+        let line: CGFloat = 1.5
+        let circleRadius = outlined ? radius - line / 2 : radius
+        let circle = NSBezierPath(ovalIn: NSRect(x: center.x - circleRadius, y: center.y - circleRadius,
+                                                 width: 2 * circleRadius, height: 2 * circleRadius))
+        if outlined {
+            // The circle's line stops at the mouth, and the mouth's own line is kept inside the circle.
+            NSGraphicsContext.saveGraphicsState()
+            outside.addClip()
+            circle.lineWidth = line
+            circle.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+
+            NSGraphicsContext.saveGraphicsState()
+            circle.addClip()
+            mouth.lineWidth = line
+            mouth.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+        } else {
+            NSGraphicsContext.saveGraphicsState()
+            circle.addClip()
+            outside.fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
         let tongue = NSBezierPath()
         tongue.appendArc(withCenter: .zero, radius: 1, startAngle: 0, endAngle: 180)
         tongue.close()
         tongue.transform(using: AffineTransform(scaleByX: 0.27 * radius, byY: 0.235 * radius))
         tongue.transform(using: AffineTransform(translationByX: p(0.455, -0.39).x, byY: p(0.455, -0.39).y))
-        tongue.fill()
+        if outlined {
+            tongue.lineWidth = line
+            tongue.stroke()
+        } else {
+            tongue.fill()
+        }
     }
 }
