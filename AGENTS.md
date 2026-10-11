@@ -2,9 +2,11 @@
 
 Lexicon is a fast, native Swift Mac dictation app that learns your words. It replaces Wispr Flow for Jake. The design starts from `docs/grill/2026-10-10-lexicon-grill.md`.
 
-One thing is always true. Judge every change against it:
+Two things are always true. Judge every change against them:
 
 - **If Lexicon is worse than Wispr Flow on Jake's own voice, he won't use it.** Fewer words wrong, fewer tech words wrong, lag at or under Wispr's, works offline, never loses a dictation.
+
+- **Ridiculously fast and ridiculously small.** Native Swift, no web views, no heavy dependencies. Every byte and millisecond has to earn its place.
 
 ## Working with Jake
 
