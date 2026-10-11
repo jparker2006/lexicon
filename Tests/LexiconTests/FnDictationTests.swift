@@ -158,6 +158,27 @@ func quitWaitsForTheRecordingDictationToLand() async throws {
     #expect(try CAFFile.read(rig.history.audioURL(for: id)).samples.count > 0)
 }
 
+@Test(.timeLimit(.minutes(1)))
+func backToBackDictationsTypeInTheOrderTheyWereSpoken() async throws {
+    // The first Dictation's text comes last: it still types first (#18).
+    let model = HeldFirstTranscriber()
+    let rig = try FnRig(local: model)
+    let first = DictationID(), second = DictationID()
+
+    for command: KeyCommand in [.dictationBegan(first, at: fnAt(0)), .dictationConfirmed(first, .hold),
+                                .dictationStopped(first, at: fnAt(600)), .dictationBegan(second, at: fnAt(700)),
+                                .dictationConfirmed(second, .hold), .dictationStopped(second, at: fnAt(1_300))] {
+        await rig.conductor.handle(command)
+    }
+    await model.waitForCalls(2)  // the second has its text while the first is still in the model
+    await model.releaseFirst()
+    await settleFn(rig)
+
+    #expect(await rig.destination.typedOrder == [first, second])
+    #expect(await rig.destination.delivered[first] == "First.")
+    #expect(await rig.destination.delivered[second] == "Second.")
+}
+
 /// The real recognizer behind a `Keyboard`, fed by the test instead of the fn tap.
 private final class ScriptedKeys: Sendable {
     let keyboard: Keyboard
@@ -190,7 +211,7 @@ private struct FnRig {
     let destination: HeadlessDestination
     let conductor: Conductor<HeadlessDestination>
 
-    init(keyboard: Keyboard? = nil) throws {
+    init(keyboard: Keyboard? = nil, local: any LocalTranscriber = ScriptedTranscriber(text: "Ship it")) throws {
         let paths = AppPaths.temporary()
         let recorder = Recorder(hardware: FakeMic().hardware)
         let history = try HistoryStore(paths: paths)
@@ -199,10 +220,39 @@ private struct FnRig {
         self.history = history
         self.destination = destination
         conductor = Conductor(
-            recorder: recorder, speech: SpeechEngine(local: ScriptedTranscriber(text: "Ship it")), cleanup: Cleanup(),
+            recorder: recorder, speech: SpeechEngine(local: local), cleanup: Cleanup(),
             lexicon: try Lexicon(paths: paths), history: history, destination: destination,
             preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
             keyboard: keyboard, fixes: nil, jev: nil)
+    }
+}
+
+/// Hears "First." then "Second.", but holds the first answer until the test lets it go.
+private actor HeldFirstTranscriber: LocalTranscriber {
+    nonisolated let model = LocalModel.parakeetUnified
+    private var calls = 0
+    private var held: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    var isResident: Bool { true }
+    func load() {}
+    func unload() {}
+
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async -> String {
+        calls += 1
+        guard calls == 1 else { return "Second." }
+        if !released { await withCheckedContinuation { held = $0 } }
+        return "First."
+    }
+
+    func waitForCalls(_ count: Int) async {
+        while calls < count { await Task.yield() }
+    }
+
+    func releaseFirst() {
+        released = true
+        held?.resume()
+        held = nil
     }
 }
 
