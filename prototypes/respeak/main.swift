@@ -26,7 +26,20 @@ var autoDetect = false
 let unsureBelow = 0.75
 let ourEventTag: Int64 = 0x1E5C0
 let terminals: Set<String> = ["com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty", "dev.warp.Warp-Stable"]
-let techTerms = ["Supabase", "Vercel", "Postgres", "PostgreSQL", "Kubernetes", "TypeScript", "JavaScript", "GitHub", "Swift", "AppKit",
+// Jake's real words: his Wispr dictionary (local, private) plus terms measured from his Wispr history.
+let jakeTerms: [String] = {
+    var out = ["worktree", "to-spec", "ELI5", "Claude Code", "GBrain", "GSAP", "MCP", "OpenClaw", "Pocock", "/goal", "CLAUDE.md"]
+    let path = NSHomeDirectory() + "/Library/Application Support/Lexicon/test-set/wispr-2026-10-11/dictionary.json"
+    if let d = FileManager.default.contents(atPath: path),
+       let rows = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] {
+        for r in rows {
+            let w = ((r["replacement"] as? String) ?? (r["phrase"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
+            if !w.isEmpty, w.count <= 30, !w.contains("@"), !w.contains("://"), !w.contains(" ") || w.split(separator: " ").count <= 3 { out.append(w) }
+        }
+    }
+    return out
+}()
+let techTerms = Array(Set(jakeTerms)) + ["Supabase", "Vercel", "Postgres", "PostgreSQL", "Kubernetes", "TypeScript", "JavaScript", "GitHub", "Swift", "AppKit",
                  "Xcode", "Jev", "TypeSafe", "OpenRouter", "Lexicon", "Wispr", "Claude", "Codex", "Anthropic", "Next.js", "React",
                  "Tailwind", "Prisma", "Cloudflare", "Redis", "Docker", "npm", "pnpm", "Bun", "Vite", "Electron", "FluidAudio",
                  "Parakeet", "SQLite", "Glox", "Haiku", "Opus", "Sonnet", "JSON", "OAuth", "webhook", "localhost", "pstack", "gstack",
