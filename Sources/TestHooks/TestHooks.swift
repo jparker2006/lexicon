@@ -126,13 +126,21 @@ public struct TestHookChannel: Sendable {
 
     /// Harness side: post one command and wait for its reply.
     public func send(_ command: TestHookCommand, timeout: Duration) async throws -> TestHookReply {
-        let files = FileManager.default
-        try files.createDirectory(at: requests, withIntermediateDirectories: true)
+        try await reply(to: post(command), timeout: timeout)
+    }
+
+    /// Writes one request. Its file name names its reply too.
+    func post(_ command: TestHookCommand) throws -> String {
+        try FileManager.default.createDirectory(at: requests, withIntermediateDirectories: true)
         let name = "\(UUID().uuidString).json"
+        try JSONEncoder().encode(command).write(to: requests.appending(path: name), options: .atomic)
+        return name
+    }
+
+    func reply(to name: String, timeout: Duration) async throws -> TestHookReply {
+        let files = FileManager.default
         let request = requests.appending(path: name)
         let reply = replies.appending(path: name)
-        try JSONEncoder().encode(command).write(to: request, options: .atomic)
-
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
         while clock.now < deadline {
