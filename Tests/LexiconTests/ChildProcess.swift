@@ -6,8 +6,8 @@ import Testing
 /// No thread blocks on the child: its exit and the end of its output each arrive
 /// by callback, and the result waits for both. Never `waitUntilExit`: that sleeps
 /// in the calling thread's run loop for a wakeup that is sometimes lost when the
-/// child exits quickly, and the whole test run hangs with the child long gone.
-/// Cancelling the task, as a time limit does, terminates the child.
+/// child exits quickly. Cancelling the task, as a time limit does, terminates the
+/// child, so a hung child fails its test instead of holding up the whole run.
 func runChild(_ executable: URL, _ arguments: [String]) async throws -> (status: Int32, output: String) {
     let process = Process()
     process.executableURL = executable
@@ -54,9 +54,9 @@ private final class ChildOutput: Sendable {
 }
 
 @Test(.timeLimit(.minutes(1))) func childrenThatExitAtOnceAllReturn() async throws {
-    // Waiting with waitUntilExit, about one /usr/bin/true in 7,000 never returned.
+    // waitUntilExit lost about one fast exit in 7,000, so this many catch it about half the time.
     try await withThrowingTaskGroup(of: Int32.self) { group in
-        for index in 0..<1_000 {
+        for index in 0..<5_000 {
             if index >= 16 { #expect(try await group.next() == 0) }
             group.addTask { try await runChild(URL(filePath: "/usr/bin/true"), []).status }
         }
@@ -70,3 +70,4 @@ private final class ChildOutput: Sendable {
     #expect(child.status == 3)
     #expect(child.output == String(repeating: "y\n", count: 100_000) + "done\n")
 }
+

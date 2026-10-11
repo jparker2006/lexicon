@@ -24,41 +24,50 @@ cd "$(dirname "$0")/.."
 . scripts/lib/swift-flags.sh
 
 log=$(mktemp -t check)
+step=
+watchdog=
+# A background step ignores Ctrl-C, so stop it here.
+trap 'stop "$step"; stop "$watchdog"; exit 130' INT TERM
 trap 'rm -f "$log" "$log".*' EXIT
 
 # Stops a process and everything it started, children first. By parent PID, not
 # process group: SwiftPM starts its test runner in a group of its own.
 stop() {
+    [ -n "$1" ] || return 0
     for child in $(pgrep -P "$1"); do stop "$child"; done
     kill -TERM "$1" 2>/dev/null || true
 }
 
 # Runs a step, failing it once it passes its limit in seconds. On a timeout it
-# names the tests that started and never finished, from Swift Testing's output.
+# names the tests that started and never ended, from Swift Testing's event
+# stream: unlike the console output, that is written as each event happens, so
+# a killed run loses none of it.
 limited() {
     seconds=$1
     shift
     rm -f "$log".*
-    ( { status=0; "$@" || status=$?; echo "$status" > "$log.status"; } 2>&1 | tee "$log" ) &
+    "$@" &
     step=$!
-    ( sleep "$seconds"; : > "$log.timeout"; stop "$step" ) &
+    ( sleep "$seconds" && : > "$log.timeout" && stop "$step" ) &
     watchdog=$!
-    wait "$step" || true
+    status=0
+    wait "$step" || status=$?
     stop "$watchdog"
-    if [ -e "$log.timeout" ]; then
-        echo "check: stopped after ${seconds} s, still running: $*" >&2
-        sed -n 's/.* Test \(.*\) started\.$/\1/p' "$log" | grep -vx run | sort > "$log.started"
-        sed -n -E 's/.* Test (.*) (with [0-9]+ test cases? )?(passed|failed) after .*/\1/p; s/.* Test (.*) skipped.*/\1/p' "$log" |
-            sort > "$log.ended"
-        comm -23 "$log.started" "$log.ended" | sed 's/^/check: unfinished test: /' >&2
+    if [ "$status" -ne 0 ] && [ -e "$log.timeout" ]; then
+        echo "check: stopped after $seconds s: $*" >&2
+        if [ -e "$log.events" ]; then
+            sed -n 's/.*"kind":"testStarted".*"testID":"\([^"]*\)".*/\1/p' "$log.events" | sort > "$log.started"
+            sed -n 's/.*"kind":"testEnded".*"testID":"\([^"]*\)".*/\1/p' "$log.events" | sort > "$log.ended"
+            comm -23 "$log.started" "$log.ended" | sed 's|\\/|/|g; s/^/check: unfinished test: /' >&2
+        fi
         exit 1
     fi
-    return "$(cat "$log.status")"
+    return "$status"
 }
 
 limited 900 swift build "$@"
 limited 300 swift scripts/check-imports.swift
-limited 300 swift test "$@"
+limited 300 swift test "$@" --event-stream-output-path "$log.events" --event-stream-version 0
 limited 300 scorer/test
 limited 300 "$(swift build "$@" --show-bin-path)/lexicon-eval" --manifest scorer/fixtures/manifest.jsonl --split everyday \
     --baseline scorer/fixtures/wispr-baseline.jsonl --scripted-gold
