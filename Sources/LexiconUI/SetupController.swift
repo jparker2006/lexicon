@@ -56,6 +56,8 @@ public final class Setup: NSObject {
     private var window: SetupWindowController?
     private var timer: Timer?
     private var downloading: Task<Void, Never>?
+    /// A poll's reads are in flight; the timer's next tick skips rather than piling up.
+    private var polling = false
     private var relaunch = RelaunchGate()
     private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "setup")
 
@@ -75,16 +77,21 @@ public final class Setup: NSObject {
     }
 
     /// "granted", "denied" or "undetermined", for the launch log and the test hooks' status.
-    public static var microphoneName: String {
-        switch microphone {
+    public static var microphoneName: String { name(microphone) }
+
+    private static func name(_ access: MicrophoneAccess) -> String {
+        switch access {
         case .granted: "granted"
         case .denied: "denied"
         case .undetermined: "undetermined"
         }
     }
 
-    /// For the launch log line, read by the grant check in the PR evidence.
-    public static var permissionsSummary: String { "accessibility=\(AXIsProcessTrusted()) microphone=\(microphoneName)" }
+    /// For the launch log line, read by the grant check in the PR evidence. From
+    /// the facts already read, since each read costs tens of ms.
+    public var permissionsSummary: String {
+        "accessibility=\(facts.accessibility) microphone=\(Self.name(facts.microphone))"
+    }
 
     public func start() {
         applyLoginItemAtLaunch()
@@ -139,7 +146,7 @@ public final class Setup: NSObject {
 
     // MARK: - Reading the system
 
-    private static var microphone: MicrophoneAccess {
+    nonisolated private static var microphone: MicrophoneAccess {
         switch AVAudioApplication.shared.recordPermission {
         case .granted: .granted
         case .denied: .denied
@@ -148,10 +155,23 @@ public final class Setup: NSObject {
         }
     }
 
+    /// The two permission reads run off the main thread: the Microphone answer
+    /// costs about 18 ms a read, which would hitch the open window every second.
     private func poll() {
+        guard !polling else { return }
+        polling = true
+        // Setup lives as long as the app, so holding it here costs nothing.
+        Task.detached {
+            let microphone = Self.microphone, trusted = AXIsProcessTrusted()
+            await self.polled(microphone: microphone, accessibility: trusted)
+        }
+    }
+
+    private func polled(microphone: MicrophoneAccess, accessibility: Bool) {
+        polling = false
         var next = facts
-        next.microphone = Self.microphone
-        next.accessibility = AXIsProcessTrusted()
+        next.microphone = microphone
+        next.accessibility = accessibility
         if window != nil { next.globeKeyOK = services.globeKeyOK() }
         // Private mode turned off since the download was refused: try again.
         if next.model == .privateMode, preferences.snapshot().privacy == .standard { next.model = .missing }

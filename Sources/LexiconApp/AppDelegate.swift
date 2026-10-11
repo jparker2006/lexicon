@@ -96,27 +96,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
-        let setup = Setup(statusItem: statusItem, preferences: preferences,
-                          services: Self.setupServices(paths: paths, system: system),
-                          relaunched: CommandLine.arguments.contains(Setup.relaunchArgument),
-                          registersAtLogin: bundleID == AppPaths.dailyBundleID)
-        self.setup = setup
-        setup.start()
-        if let system { Task { await setup.follow(await system.conductor.events()) } }
         #if DEBUG
         testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator, system: system,
                                        preferences: preferences)
         #endif
 
-        let permissions = Setup.permissionsSummary
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self, system] in
             // One run loop turn after the status item exists: the closest in-process mark
             // for the icon being on screen (the window server composites it just after).
             let ms = { (seconds: Double?) in seconds.map { Int(($0 * 1000).rounded()) } ?? -1 }
             let icon = ms(LaunchClock.sinceProcessStart()), main = ms(LaunchClock.mainStarted)
+            // After the mark: setup's first reads (Accessibility trust and the Microphone
+            // answer, 20 to 50 ms cold, the login item, the model folder) need not hold the icon.
+            let setup = Setup(statusItem: statusItem, preferences: preferences,
+                              services: Self.setupServices(paths: paths, system: system),
+                              relaunched: CommandLine.arguments.contains(Setup.relaunchArgument),
+                              registersAtLogin: bundleID == AppPaths.dailyBundleID)
+            self?.setup = setup
+            setup.start()
+            if let system { Task { await setup.follow(await system.conductor.events()) } }
             log.notice("""
                 status item up \(icon, privacy: .public) ms after process start (main at \(main, privacy: .public) ms); \
-                \(permissions, privacy: .public)
+                \(setup.permissionsSummary, privacy: .public)
                 """)
         }
     }
