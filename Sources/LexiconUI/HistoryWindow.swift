@@ -78,7 +78,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     let reader: HistoryReader
     let pasteboard: NSPasteboard
     let onClose: @MainActor () -> Void
-    let table = NSTableView()
+    let table = HistoryTable()
     let search = NSSearchToolbarItem(itemIdentifier: NSToolbarItem.Identifier("search"))
     let empty = NSTextField(labelWithString: "")
     /// The days on the table, newest first: a screenful at open, more as Jake scrolls.
@@ -295,6 +295,13 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         itemIdentifier == search.itemIdentifier ? search : nil
     }
+}
+
+/// A click on a row copies it even when the window is in the background: without
+/// this, AppKit spends that first click bringing the window forward and the row
+/// is not copied.
+final class HistoryTable: NSTableView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 /// A day header: a floating group row.
