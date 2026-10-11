@@ -51,7 +51,8 @@ func playAndRetryAreGreyedOutOnceTheAudioAgedOut(status: DictationStatus) {
 
     let kept = RowActions(row(audio: true), canWrite: true)
     #expect(kept.play == (status != .recording))
-    #expect(kept.retry == !status.isInFlight)
+    #expect(kept.pin == !status.isInFlight)
+    #expect(kept.retry == (!status.isInFlight && status != .waiting))  // a waiting one is retried already
     #expect(kept.delete == !status.isInFlight)  // never while recording, transcribing or ready
 }
 
@@ -63,10 +64,12 @@ func playAndRetryAreGreyedOutOnceTheAudioAgedOut(status: DictationStatus) {
     #expect(!actions.pin && !actions.retry && !actions.delete)
 }
 
-@Test func theRetryPickerOffersLocalModelsUntilTheCloudRaceLands() {
-    let models = RowActions.retryModels
-    #expect(models.map(\.model) == SpeechModel.allCases)
-    #expect(models.filter(\.enabled).map(\.model) == LocalModel.allCases.map(SpeechModel.local))
+@Test func aRowBeingRetriedCannotBeRetriedDeletedOrPinnedUntilItLands() {
+    let row = HistoryRow(id: DictationID(), startedAt: Date(), finalText: "Text.", status: .failed, cleanup: nil,
+                         model: parakeet, lag: nil, pinned: false, hasAudio: true)
+    let actions = RowActions(row, canWrite: true, retrying: true)
+    #expect(actions.play)
+    #expect(!actions.retry && !actions.delete && !actions.pin)
 }
 
 @Test func showVersionsListsModelCleanedAndFinalTextThenAnyEngineThatLost() {

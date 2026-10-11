@@ -15,6 +15,9 @@ public final class HistoryWindowPresenter: NSObject {
     /// Pin, Retry and Delete go through it. nil when it did not open: History stays readable.
     private let system: LexiconSystem?
     private var controller: HistoryWindowController?
+    /// Dictations being retried. Kept here, not in the window, so History closed and
+    /// reopened mid-Retry still says "Retrying…" and still refuses a second Retry.
+    private(set) var retrying: Set<DictationID> = []
     private let log = Logger(subsystem: "Lexicon", category: "History")
 
     public init(paths: AppPaths, system: LexiconSystem?) {
@@ -44,12 +47,26 @@ public final class HistoryWindowPresenter: NSObject {
                                                   pasteboard: .general) { [weak self] in
             self?.controller = nil
         }
+        controller.presenter = self
         self.controller = controller
         controller.showWindow(nil)
         controller.window?.displayIfNeeded()
         // The budget is click to first rows, 100 ms or less at p95; this is the in-process part.
         let ms = (clock.now - opened) / .milliseconds(1)
         log.notice("History window: first rows drawn \(Int(ms.rounded()), privacy: .public) ms after open")
+    }
+
+    /// Never typed: the new text replaces the old in History, and a failed Dictation becomes not inserted.
+    func retry(_ id: DictationID, with model: SpeechModel) {
+        guard let system, retrying.insert(id).inserted else { return }
+        controller?.redrawRows()
+        Task {
+            let result = await system.conductor.retry(id, with: model)
+            await system.history.flush()
+            retrying.remove(id)
+            controller?.refresh()
+            controller?.cell(for: id)?.flash(result.versions == nil ? "No text" : "Retried")
+        }
     }
 
     private static func keyEquivalents() -> NSMenu {
@@ -102,8 +119,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     /// The one clip playing, and whose it is.
     var player: AVAudioPlayer?
     var playing: DictationID?
-    /// Rows being retried: they say "Retrying…" until the new text is in History.
-    var retrying: Set<DictationID> = []
+    /// Holds the Retries in progress. Set right after init.
+    weak var presenter: HistoryWindowPresenter?
     static let pageSize = 50
     /// Rows read at a time. Reading, and handing the table, a year of rows
     /// costs more than the whole open budget, so the window starts with the
@@ -203,6 +220,22 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         table.reloadData()
     }
 
+    /// After Jake's own change: read again, keeping the rows he has scrolled to and his place in them.
+    func refresh() {
+        let shown = rowCount
+        let clip = table.enclosingScrollView?.contentView
+        let origin = clip?.bounds.origin
+        reload()
+        if rowCount < shown {
+            while rowCount < shown, showMore() {}
+            table.reloadData()
+        }
+        if let clip, let origin {
+            clip.scroll(to: origin)
+            table.enclosingScrollView?.reflectScrolledClipView(clip)
+        }
+    }
+
     /// Reads the next `batch` rows' worth of whole days. false: nothing older matches.
     func showMore() -> Bool {
         guard !complete else { return false }
@@ -280,8 +313,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             let cell = tableView.makeView(withIdentifier: RowCell.identifier, owner: nil) as? RowCell ?? RowCell()
             cell.owner = self
             let shown = historyRow(at: row)
-            cell.show(shown, actions: shown.map { RowActions($0, canWrite: system != nil) },
-                      playing: shown != nil && shown?.id == playing, retrying: shown.map { retrying.contains($0.id) } ?? false)
+            let retrying = shown.map { presenter?.retrying.contains($0.id) ?? false } ?? false
+            cell.show(shown, actions: shown.map { RowActions($0, canWrite: system != nil, retrying: retrying) },
+                      playing: shown != nil && shown?.id == playing, retrying: retrying)
             return cell
         case nil:
             return nil
@@ -323,12 +357,15 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         let again = playing == row.id
         stopPlaying()
         guard !again else { return }
-        guard let url = reader.audioURL(row.id), let player = try? AVAudioPlayer(contentsOf: url) else {
-            // Aged out or deleted since the row was drawn.
-            return reload()
+        // Aged out or deleted since the row was drawn.
+        guard let url = reader.audioURL(row.id) else { return refresh() }
+        let player = try? AVAudioPlayer(contentsOf: url)
+        player?.delegate = self
+        // A file a crash left unreadable: say so rather than doing nothing.
+        guard let player, player.play() else {
+            cell(for: row.id)?.flash("Can't play")
+            return
         }
-        player.delegate = self
-        guard player.play() else { return }
         self.player = player
         playing = row.id
         redrawRows()
@@ -355,12 +392,12 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         system.history.record(.pinned(row.id, !row.pinned))
         Task {
             await system.history.flush()
-            reload()
+            refresh()
         }
     }
 
     func showMenu(for row: HistoryRow, from button: NSButton) {
-        let actions = RowActions(row, canWrite: system != nil)
+        let actions = RowActions(row, canWrite: system != nil, retrying: presenter?.retrying.contains(row.id) ?? false)
         let menu = NSMenu()
         menu.autoenablesItems = false
         let models = NSMenu()
@@ -386,18 +423,9 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
     }
 
-    /// Never typed: the new text replaces the old in History, and a failed Dictation becomes not inserted.
     @objc func retryPicked(_ sender: NSMenuItem) {
-        guard let system, let (id, model) = sender.representedObject as? (DictationID, SpeechModel),
-              retrying.insert(id).inserted else { return }
-        redrawRows()
-        Task {
-            let result = await system.conductor.retry(id, with: model)
-            await system.history.flush()
-            retrying.remove(id)
-            reload()
-            cell(for: id)?.flash(result.versions == nil ? "No text" : "Retried")
-        }
+        guard let (id, model) = sender.representedObject as? (DictationID, SpeechModel) else { return }
+        presenter?.retry(id, with: model)
     }
 
     @objc func versionsPicked(_ sender: NSMenuItem) {
@@ -420,7 +448,10 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         let alert = NSAlert()
         alert.messageText = "Delete this Dictation?"
         alert.informativeText = "Its text and audio are removed from History. This can't be undone."
-        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
+        // Return must not delete: Delete takes a click, and Escape (on Cancel) backs out.
+        let delete = alert.addButton(withTitle: "Delete")
+        delete.hasDestructiveAction = true
+        delete.keyEquivalent = ""
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
@@ -429,7 +460,7 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
             Task { @MainActor in
                 if self?.playing == row.id { self?.stopPlaying() }
                 await system.history.flush()
-                self?.reload()
+                self?.refresh()
             }
         }
     }
@@ -440,12 +471,15 @@ extension HistoryWindowController: AVAudioPlayerDelegate {
         table.reloadData(forRowIndexes: IndexSet(integersIn: visible.lowerBound..<visible.upperBound), columnIndexes: [0])
     }
 
+    /// The row's view on screen. After a reload the table drops its views and makes
+    /// them again at the next layout, so lay out first.
     func cell(for id: DictationID) -> RowCell? {
+        table.layoutSubtreeIfNeeded()
         let visible = table.rows(in: table.visibleRect)
         guard let row = (visible.lowerBound..<visible.upperBound).first(where: { historyRow(at: $0)?.id == id }) else {
             return nil
         }
-        return table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RowCell
+        return table.view(atColumn: 0, row: row, makeIfNecessary: true) as? RowCell
     }
 }
 
