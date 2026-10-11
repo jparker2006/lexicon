@@ -44,16 +44,6 @@ public enum DictationEvent: Sendable {
     case deleted(DictationID)
 }
 
-/// A Dictation the last run left unfinished, handed to the Conductor to transcribe.
-/// It carries no insertion target, so it cannot be typed (#4: recovered text is never typed).
-public struct UnfinishedDictation: Sendable {
-    public let id: DictationID
-    public let audio: URL
-    public let purpose: DictationPurpose
-    /// It was waiting for the network before the restart.
-    public let wasWaiting: Bool
-}
-
 /// Sole owner of `history.sqlite` and of the audio files' lifecycle (path,
 /// finalize after a crash, retention, delete). AudioCapture writes a file's
 /// bytes only while its LiveCapture is open.
@@ -66,12 +56,14 @@ public struct UnfinishedDictation: Sendable {
 /// `@unchecked Sendable`: the only mutable state is `db`, touched only on `queue`
 /// after init returns; everything else is immutable or itself Sendable.
 public final class HistoryStore: @unchecked Sendable {
-    private let audioFolder: URL
+    let audioFolder: URL
+    /// Rows and files from before this are an earlier run's: launch recovery's to finish.
+    let openedAt = Date()
     private let queue = DispatchQueue(label: "lexicon.history.writer", qos: .userInitiated)
     private let db: Database
     private let changeStream: AsyncStream<DictationID>
-    private let changed: AsyncStream<DictationID>.Continuation
-    private let log = Logger(subsystem: "Lexicon", category: "History")
+    let changed: AsyncStream<DictationID>.Continuation
+    let log = Logger(subsystem: "Lexicon", category: "History")
 
     /// Opens `<root>/history.sqlite` and `<root>/audio/` (this module names both).
     public init(paths: AppPaths) throws {
@@ -107,16 +99,6 @@ public final class HistoryStore: @unchecked Sendable {
             }
         }
     }
-
-    /// Launch. Finalizes open CAFs, adopts audio files with no row, deletes files
-    /// whose row says deleted, marks rows whose audio is missing as failed, moves
-    /// rows left in `.ready` (crashed mid-paste) to `.notInserted(.interrupted)` so
-    /// they are never typed twice, sets
-    /// `origin = recovered` on every row it hands back (so `.textReady` lands them
-    /// as `.recovered`, never typed), then returns what still needs text.
-    /// Idempotent: running it twice returns the same list and changes nothing the
-    /// second time. See RecoveryPlan.
-    public func recover() async -> [UnfinishedDictation] { fatalError("not implemented") }
 
     /// Audio retention (see `Retention`). Rows keep their text; their audio reads
     /// `.expired`. Marks every expiring row in one commit, then unlinks the files,
@@ -198,7 +180,7 @@ public final class HistoryStore: @unchecked Sendable {
     /// The second half of a delete: the row already says `deleted` and is committed,
     /// so a crash from here on leaves a file recovery deletes (`deleteGarbage`),
     /// never an orphan it would adopt and transcribe again.
-    private func dropAudio(_ id: DictationID) throws {
+    func dropAudio(_ id: DictationID) throws {
         try removeAudioFile(id)
         try db.transaction {
             try $0.execute("DELETE FROM dictation WHERE id = ? AND audio_storage = ?",
@@ -207,7 +189,7 @@ public final class HistoryStore: @unchecked Sendable {
     }
 
     /// Already gone is fine: every caller has committed the row's mark first.
-    private func removeAudioFile(_ id: DictationID) throws {
+    func removeAudioFile(_ id: DictationID) throws {
         do {
             try FileManager.default.removeItem(at: audioURL(for: id))
         } catch CocoaError.fileNoSuchFile {}

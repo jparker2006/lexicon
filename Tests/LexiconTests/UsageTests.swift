@@ -24,7 +24,7 @@ import LexiconCore
     #expect(up.commands.contains(.dictationStopped(at: HostTime(nanoseconds: t0.nanoseconds + 2_000_000_000))))
 }
 
-@Test(.disabled("lands with #59")) func recoveryPlanIsIdempotent() {
+@Test func recoveryPlanIsIdempotent() {
     let id = DictationID()
     let rows = [RecoveryPlan.RowState(id: id, status: .recording, audio: .onDisk)]
     let first = RecoveryPlan.plan(rows: rows, files: [id: .open])
