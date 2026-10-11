@@ -109,8 +109,14 @@ public enum AccessRevoked: String, Sendable, Codable, CaseIterable {
 /// lookup returns nil, speech sessions cut their stream, and the local model,
 /// already racing, finishes the text.
 public final class CloudAccess: Sendable {
+    private struct State {
+        var revoked: AccessRevoked?
+        var waiters: [Int: CheckedContinuation<AccessRevoked?, Never>] = [:]
+        var nextWaiter = 0
+    }
+
     private let lookup: @Sendable (CredentialID) -> String?
-    private let revocation = Mutex<AccessRevoked?>(nil)
+    private let state = Mutex(State())
     private init(lookup: @escaping @Sendable (CredentialID) -> String?) { self.lookup = lookup }
 
     /// The only constructor. Called by the Conductor once per Dictation (after the
@@ -125,13 +131,14 @@ public final class CloudAccess: Sendable {
     /// Key for a call that carries no Dictation text: the speech audio stream, a
     /// model download. nil once revoked.
     public func key(_ id: CredentialID) -> String? {
-        revocation.withLock { $0 } == nil ? lookup(id) : nil
+        revoked == nil ? lookup(id) : nil
     }
 
     /// Key for a call that sends `text` (Cleanup's LLM, Jev). Runs the Secret guard
     /// first: a match revokes this access for the rest of the Dictation and
     /// returns nil, so the text never leaves.
     public func key(_ id: CredentialID, sending text: String) -> String? {
+        guard revoked == nil else { return nil }
         if SecretGuard.matches(text) {
             revoke(.secretFound)
             return nil
@@ -141,30 +148,40 @@ public final class CloudAccess: Sendable {
 
     /// Ends network use for the rest of this Dictation. Idempotent: the first reason wins.
     public func revoke(_ reason: AccessRevoked) {
-        // TODO: set once under the lock; resume every `whenRevoked()` waiter.
-        fatalError("not implemented")
+        let waiters = state.withLock { state -> [CheckedContinuation<AccessRevoked?, Never>] in
+            guard state.revoked == nil else { return [] }
+            state.revoked = reason
+            defer { state.waiters = [:] }
+            return Array(state.waiters.values)
+        }
+        for waiter in waiters { waiter.resume(returning: reason) }
     }
 
-    public var revoked: AccessRevoked? { revocation.withLock { $0 } }
+    public var revoked: AccessRevoked? { state.withLock { $0.revoked } }
 
-    /// Resumes when access is revoked. A speech session races this against its
-    /// socket and closes the stream the instant it fires.
-    public func whenRevoked() async -> AccessRevoked { fatalError("not implemented") }
-}
-
-/// The Secret guard (#5): a local check, microseconds, that finds API keys,
-/// tokens, passwords and similar in text before it leaves the Mac. A match keeps
-/// the whole Dictation local-only (`CloudAccess.key(_:sending:)` revokes).
-///
-/// Limit: speech streams audio while Jake talks, so a spoken secret reaches the
-/// speech provider before any text exists to check. The guard protects every
-/// text call and cuts the rest of the stream (Transcription checks each finalized
-/// segment); it cannot recall audio already sent.
-public enum SecretGuard {
-    public static func matches(_ text: String) -> Bool {
-        // TODO: known key prefixes (sk-, ghp_, xox, AKIA, ...), JWT shape, long
-        // high-entropy tokens, "password is ..." phrases. Tune on the Test set:
-        // a false positive costs Cleanup quality, a false negative leaks.
-        fatalError("not implemented")
+    /// Resumes when access is revoked, at once if it already is. A speech session
+    /// races this against its socket and closes the stream the instant it fires.
+    /// nil when the waiting task is cancelled first (the socket ended), so a
+    /// task group racing the two can always finish.
+    public func whenRevoked() async -> AccessRevoked? {
+        let id = state.withLock { state in
+            state.nextWaiter += 1
+            return state.nextWaiter
+        }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { waiter in
+                // Under the lock, so a cancel either sees this waiter or was already
+                // visible to `Task.isCancelled` (it is set before `onCancel` runs).
+                let now: AccessRevoked?? = state.withLock { state in
+                    if let reason = state.revoked { return .some(reason) }
+                    if Task.isCancelled { return .some(nil) }
+                    state.waiters[id] = waiter
+                    return .none
+                }
+                if let now { waiter.resume(returning: now) }
+            }
+        } onCancel: {
+            state.withLock { $0.waiters.removeValue(forKey: id) }?.resume(returning: nil)
+        }
     }
 }
