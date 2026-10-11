@@ -20,6 +20,7 @@ private func at(_ milliseconds: Int) -> HostTime {
 private func keyEvent(_ keyCode: CGKeyCode, down: Bool = true, flags: CGEventFlags = []) -> CGEvent {
     let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: down)!
     event.flags = flags
+    event.timestamp = 0  // unstamped, so every reading is `now` unless a test stamps it
     return event
 }
 
@@ -165,4 +166,30 @@ private func feed(_ event: CGEvent, at now: HostTime, into gesture: inout FnGest
 
 @Test func stampFiveSecondsOldIsTakenAsNow() {
     #expect(HostTime(eventTimestamp: fixedNow.nanoseconds - 5_000_000_000, now: fixedNow) == fixedNow)
+}
+
+@Test func theEventsOwnTimeIsUsedNotWhenItWasDelivered() {
+    // fn-up stamped 200 ms before the tap saw it: judged at its own time, so a
+    // lone tap delivered late is still a tap.
+    let up = flagsChanged(63, [])
+    up.timestamp = fixedNow.nanoseconds - 200_000_000
+    #expect(KeyInput(up, secureInput: { false }, now: fixedNow)
+        == .fnUp(HostTime(nanoseconds: fixedNow.nanoseconds - 200_000_000)))
+}
+
+@Test func onlyKeyDownsAndClicksCountAsTyping() {
+    #expect(EventTapThread.isTypingOrClicking(.keyDown))
+    #expect(EventTapThread.isTypingOrClicking(.leftMouseDown))
+    #expect(EventTapThread.isTypingOrClicking(.rightMouseDown))
+    #expect(EventTapThread.isTypingOrClicking(.otherMouseDown))
+    #expect(!EventTapThread.isTypingOrClicking(.flagsChanged))  // fn-up is not "typed since fn-up"
+}
+
+@Test func inputClockSeesInputSinceAMark() {
+    let clock = InputClock()
+    let mark = clock.mark()
+    #expect(!clock.hasInput(since: mark))
+    clock.tick()
+    #expect(clock.hasInput(since: mark))
+    #expect(!clock.hasInput(since: clock.mark()))
 }

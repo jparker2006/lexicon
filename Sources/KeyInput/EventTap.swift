@@ -33,11 +33,11 @@ final class EventTapThread: @unchecked Sendable {
         self.continuation = continuation
     }
 
-    /// Creates the tap (session level, active, mask: flagsChanged, keyDown,
-    /// leftMouseDown, rightMouseDown), then spawns the thread that runs it.
+    /// Creates the tap (session level, active, mask: flagsChanged, keyDown
+    /// and the three mouse-downs), then spawns the thread that runs it.
     /// Throws `.notTrusted` without Accessibility: the tap is the permission check.
     func start() throws(KeyboardError) {
-        let types: [CGEventType] = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown]
+        let types: [CGEventType] = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         // Unretained is safe: the thread below captures self and its run loop never exits.
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
@@ -70,7 +70,8 @@ final class EventTapThread: @unchecked Sendable {
         let pass = Unmanaged.passUnretained(event)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            log.error("fn tap was disabled (\(type.rawValue, privacy: .public)); re-enabled")
+            log.error("fn tap was disabled (\(type == .tapDisabledByTimeout ? "timeout" : "user input", privacy: .public)); re-enabled")
+            input.tick()  // Jake may have typed while it was off: late text must not assume he didn't
             // An fn-up lost while the tap was off would leave the mic recording until the next press.
             if gesture.isRecording, !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
                 feed(.fnUp(.now()))
@@ -78,7 +79,7 @@ final class EventTapThread: @unchecked Sendable {
             return pass
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
-        if type != .flagsChanged { input.tick() }
+        if Self.isTypingOrClicking(type) { input.tick() }
         guard let key = KeyInput(event, secureInput: { IsSecureEventInputEnabled() }, now: .now()) else { return pass }
         feed(key)
         switch key {
@@ -88,6 +89,10 @@ final class EventTapThread: @unchecked Sendable {
         }
         return pass
     }
+
+    /// What counts as Jake typing or clicking for `InputClock`: key-downs and
+    /// mouse-downs. Modifier changes never count, so fn-up is not "typed since".
+    static func isTypingOrClicking(_ type: CGEventType) -> Bool { type != .flagsChanged }
 
     private func feed(_ key: KeyInput) {
         let output = gesture.handle(key)

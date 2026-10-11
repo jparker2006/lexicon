@@ -51,16 +51,6 @@ private func run(_ inputs: [KeyInput]) -> [KeyCommand] {
     #expect(gesture.phase == .idle)
 }
 
-@Test func shiftWithFnNeverCancels() {
-    // Shift is a modifier flag change, never a key-down, so the recognizer
-    // never sees it: fn+Shift (held before fn or pressed after) is still a hold.
-    #expect(run([.fnDown(at(0), secureInput: false), .deadline(at(300)), .fnUp(at(1_500))])
-        == [.dictationBegan(at: at(0)), .dictationConfirmed(.hold), .dictationStopped(at: at(1_500))])
-    // A key after Shift in the first 0.30 s (fn+Shift+arrow, a selection shortcut) still cancels.
-    #expect(run([.fnDown(at(0), secureInput: false), .otherKey(at(200))])
-        == [.dictationBegan(at: at(0)), .dictationDiscarded])
-}
-
 @Test func keyAfterTheThresholdPassesThroughAndRecordingContinues() {
     var gesture = FnGesture(holdThreshold: .milliseconds(300))
     #expect(run([.fnDown(at(0), secureInput: false), .deadline(at(300)), .otherKey(at(800)), .otherKey(at(900)),

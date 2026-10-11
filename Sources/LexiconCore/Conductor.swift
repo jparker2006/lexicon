@@ -152,7 +152,10 @@ public actor Conductor<Destination: TextDestination> {
     }
 
     /// Lid close or sleep is a normal stop (#4).
-    public func systemWillSleep() { endCapture(.stop(at: .now())) }
+    public func systemWillSleep() {
+        endCapture(.stop(at: .now()))
+        keyboard?.endDictation()  // or a hold through sleep would ignore the next fn press
+    }
 
     /// UI, logs. Each call returns a new stream (any number of observers).
     public func events() -> AsyncStream<ConductorEvent> {
