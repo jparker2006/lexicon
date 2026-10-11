@@ -15,15 +15,33 @@ public actor HeadlessDestination: TextDestination {
         let focus: FocusSnapshot
     }
 
-    let fixedContext: AppContext
+    private var current: AppContext
+    private var focusWatchers: [UUID: AsyncStream<AppContext>.Continuation] = [:]
     private(set) var delivered: [DictationID: String] = [:]
     /// Every Dictation typed, in the order it was typed.
     private(set) var typedOrder: [DictationID] = []
 
     /// `context`: what the Test set entry says Jake was dictating into (#15 manifest `context`).
-    public init(context: AppContext = .unknown) { self.fixedContext = context }
+    public init(context: AppContext = .unknown) { self.current = context }
 
-    public func context() -> AppContext { fixedContext }
+    public func context() -> AppContext { current }
+
+    public func appChanges() -> AsyncStream<AppContext> {
+        let (stream, continuation) = AsyncStream<AppContext>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let id = UUID()
+        continuation.onTermination = { [weak self] _ in Task { await self?.stopWatching(id) } }
+        focusWatchers[id] = continuation
+        continuation.yield(current)
+        return stream
+    }
+
+    /// Tests: Jake switches to `app` mid-Dictation.
+    public func moveFocus(to app: AppContext) {
+        current = app
+        for watcher in focusWatchers.values { watcher.yield(app) }
+    }
+
+    private func stopWatching(_ id: UUID) { focusWatchers[id] = nil }
     public func target() -> Target? {
         Target(serial: delivered.count, focus: FocusSnapshot(pid: 0, fieldFingerprint: "headless"))
     }
@@ -36,7 +54,7 @@ public actor HeadlessDestination: TextDestination {
         case .insert:
             delivered[id] = text
             typedOrder.append(id)
-            return .inserted(InsertionReceipt(appBundleID: fixedContext.bundleID, fieldFingerprint: "headless",
+            return .inserted(InsertionReceipt(appBundleID: current.bundleID, fieldFingerprint: "headless",
                                               caretAfter: text.utf16.count, contextBefore: "", contextAfter: "",
                                               insertedAt: Date()))
         }

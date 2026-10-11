@@ -97,11 +97,33 @@ public enum CredentialID: Hashable, Sendable {
     }
 }
 
+/// What a `CloudAccess` is for. Work in an app is checked against the
+/// always-private list; model install serves no app, so only Private mode stops it.
+public enum CloudUse: Sendable, Hashable {
+    /// A Dictation, or a fix, in this app.
+    case app(AppContext)
+    case modelInstall
+}
+
+extension Preferences {
+    /// Why `use` may not reach the network now, or nil when it may (#5). The one
+    /// rule behind `CloudAccess.granted` and the mid-Dictation revoke.
+    ///
+    /// An app Lexicon can't name counts as always-private once the list has any
+    /// app in it: when unsure, nothing leaves the Mac.
+    public func cloudDenied(for use: CloudUse) -> AccessRevoked? {
+        guard privacy == .standard else { return .privateModeOn }
+        guard case .app(let app) = use, !alwaysPrivateApps.isEmpty else { return nil }
+        guard let id = app.bundleID else { return .alwaysPrivateApp }
+        return alwaysPrivateApps.contains(id) ? .alwaysPrivateApp : nil
+    }
+}
+
 /// Why network access ended in the middle of a Dictation (#5).
 public enum AccessRevoked: String, Sendable, Codable, CaseIterable {
     /// Jake turned Private mode on.
     case privateModeOn
-    /// Focus moved into an always-private app.
+    /// Focus moved into an always-private app, or one Lexicon can't name while the list has any.
     case alwaysPrivateApp
     /// The Secret guard matched text from this Dictation.
     case secretFound
@@ -128,12 +150,10 @@ public final class CloudAccess: Sendable {
     private init(lookup: @escaping @Sendable (CredentialID) -> String?) { self.lookup = lookup }
 
     /// The only constructor. Called by the Conductor once per Dictation (after the
-    /// active app is known) and by model install with `app: .unknown`.
-    public static func granted(by preferences: Preferences, app: AppContext,
+    /// active app is known), for a fix in the frontmost app, and by model install.
+    public static func granted(by preferences: Preferences, for use: CloudUse,
                                keys: @escaping @Sendable (CredentialID) -> String?) -> CloudAccess? {
-        guard preferences.privacy == .standard else { return nil }
-        if let id = app.bundleID, preferences.alwaysPrivateApps.contains(id) { return nil }
-        return CloudAccess(lookup: keys)
+        preferences.cloudDenied(for: use) == nil ? CloudAccess(lookup: keys) : nil
     }
 
     /// Key for a call that carries no Dictation text: the speech audio stream, a

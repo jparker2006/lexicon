@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             [history.menuItem()] + (self?.lexiconPage.map { [$0.menuItem()] } ?? [])
                 + (self?.systemError.map { [Self.line($0)] } ?? [])
                 + (self?.setup?.menuItems() ?? [])
-                + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
+                + (self?.indicator.map { [$0.privateModeMenuItem(), $0.soundsMenuItem()] } ?? [])
         }
         let preferences = system?.preferences ?? PreferencesStore()
         let indicator = DictationIndicator(statusItem: statusItem, preferences: preferences)
@@ -102,8 +102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                           registersAtLogin: bundleID == AppPaths.dailyBundleID)
         self.setup = setup
         setup.start()
+        if let system { Task { await setup.follow(await system.conductor.events()) } }
         #if DEBUG
-        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator, system: system)
+        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator, system: system,
+                                       preferences: preferences)
         #endif
 
         let permissions = Setup.permissionsSummary

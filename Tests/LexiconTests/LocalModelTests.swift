@@ -386,15 +386,18 @@ final class TestClock: Clock, Sendable {
     }
 
     /// Returns once exactly `count` sleeps are pending: a timer task reaches
-    /// its sleep some time after it is started.
+    /// its sleep some time after it is started. Both waits also return when the
+    /// test is cancelled, so its time limit fails it instead of spinning forever.
     func waitForSleepers(_ count: Int) async {
-        while sleepers != count { await Task.yield() }
+        while sleepers != count, !Task.isCancelled { await Task.yield() }
     }
 
     /// Returns once a sleep due exactly `offset` after the clock's start is
     /// pending: a race deadline or a scripted reply, told apart by when they end.
     func waitForSleep(endingAt offset: Duration) async {
-        while !state.withLock({ $0.sleepers.contains { $0.deadline.offset == offset } }) { await Task.yield() }
+        while !state.withLock({ $0.sleepers.contains { $0.deadline.offset == offset } }), !Task.isCancelled {
+            await Task.yield()
+        }
     }
 
     /// Moves time on and wakes every sleep that is now due.

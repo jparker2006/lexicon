@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import os
+import LexiconCore
 import LexiconDomain
 import AppText
 import AudioCapture
@@ -15,12 +16,12 @@ import TestHooks
 @MainActor
 enum AppTestHooks {
     static func start(bundleID: String, paths: AppPaths, indicator: DictationIndicator,
-                      system: LexiconSystem?) -> TestHookServer? {
+                      system: LexiconSystem?, preferences: PreferencesStore) -> TestHookServer? {
         guard bundleID == AppPaths.devBundleID,
               CommandLine.arguments.contains(TestHookChannel.launchArgument) else { return nil }
         do {
             return try TestHookServer(channel: TestHookChannel(paths: paths)) {
-                await handle($0, indicator: indicator, system: system)
+                await handle($0, indicator: indicator, system: system, preferences: preferences)
             }
         } catch {
             Logger(subsystem: bundleID, category: "test-hooks")
@@ -30,13 +31,12 @@ enum AppTestHooks {
     }
 
     static func handle(_ command: TestHookCommand, indicator: DictationIndicator,
-                       system: LexiconSystem?) async -> TestHookReply {
+                       system: LexiconSystem?, preferences: PreferencesStore) async -> TestHookReply {
         return switch command {
         case .status:
-            .status(TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
-                                   version: AppDelegate.version(of: .main), pid: getpid(),
-                                   accessibility: AXIsProcessTrusted(),
-                                   microphone: Setup.microphoneName))
+            .status(currentStatus(preferences))
+        case .privacy(let mode, let alwaysPrivateApps):
+            privacy(mode, alwaysPrivateApps: alwaysPrivateApps, preferences: preferences)
         case .dictate(let wav):
             if let system { await dictate(URL(filePath: wav), on: system) } else { closed }
         case .indicator(let state):
@@ -63,6 +63,25 @@ enum AppTestHooks {
         } catch {
             return .failed("the mic did not start: \(error)")
         }
+    }
+
+    private static func currentStatus(_ preferences: PreferencesStore) -> TestHookStatus {
+        let settings = preferences.snapshot()
+        return TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
+                              version: AppDelegate.version(of: .main), pid: getpid(),
+                              accessibility: AXIsProcessTrusted(),
+                              microphone: Setup.microphoneName,
+                              privacy: settings.privacy, alwaysPrivateApps: settings.alwaysPrivateApps.sorted())
+    }
+
+    /// The store the menu and the Conductor read, so a change is saved and a relaunch keeps it.
+    private static func privacy(_ mode: PrivacyMode, alwaysPrivateApps: [String]?,
+                                preferences: PreferencesStore) -> TestHookReply {
+        preferences.update { settings in
+            settings.privacy = mode
+            if let alwaysPrivateApps { settings.alwaysPrivateApps = Set(alwaysPrivateApps) }
+        }
+        return .status(currentStatus(preferences))
     }
 
     private static func showing(_ state: IndicatorState, on indicator: DictationIndicator) -> TestHookReply {

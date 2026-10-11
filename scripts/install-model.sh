@@ -56,4 +56,5 @@ elif [ -L "$DEV" ]; then
 fi
 
 . scripts/lib/swift-flags.sh
-swift run "$@" lexicon-eval --install-model "$SUPPORT/$NAME"
+# Refused while Private mode is on in that app: a hard kill covers downloads too.
+swift run "$@" lexicon-eval --install-model "$BUNDLE_ID"

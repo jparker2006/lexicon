@@ -18,9 +18,10 @@ import LexiconDomain
 /// and yields its commands.
 ///
 /// `@unchecked Sendable` is safe because `gesture` and `deadline` are touched
-/// only on the tap thread (the callback, the timer and `perform`'s blocks all
-/// run on its run loop), and `tap` and `runLoop` are written once in `start()`
-/// before it returns, ordered by the semaphore.
+/// by one thread only: the tap thread (the callback, the timer and `perform`'s
+/// blocks all run on its run loop), or a test's thread for a tap never started.
+/// `tap` and `runLoop` are written once in `start()` before it returns, ordered
+/// by the semaphore.
 final class EventTapThread: @unchecked Sendable {
     private var gesture: FnGesture
     private var deadline: CFRunLoopTimer?
@@ -29,12 +30,16 @@ final class EventTapThread: @unchecked Sendable {
     private var tap: CFMachPort?
     private var runLoop: CFRunLoop?
     private let ownPID = Int64(getpid())
+    /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
+    private let secureInput: @Sendable () -> Bool
     private let log = Logger(subsystem: "Lexicon", category: "fn")
 
-    init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation) {
+    init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
+         secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() }) {
         self.gesture = gesture
         self.input = input
         self.continuation = continuation
+        self.secureInput = secureInput
     }
 
     /// Creates the tap (session level, listen-only, mask: flagsChanged, keyDown
@@ -96,7 +101,8 @@ final class EventTapThread: @unchecked Sendable {
         CFRunLoopWakeUp(runLoop)
     }
 
-    fileprivate func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+    /// Tap thread only (the callback); tests call it on a tap never started.
+    func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         let pass = Unmanaged.passUnretained(event)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             reenable(because: type == .tapDisabledByTimeout ? "timeout" : "user input")
@@ -104,7 +110,7 @@ final class EventTapThread: @unchecked Sendable {
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
         if Self.isTypingOrClicking(type) { input.tick() }
-        guard let key = KeyInput(event, secureInput: { IsSecureEventInputEnabled() }, now: .now()) else { return pass }
+        guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
         feed(key)
         switch key {
         case .fnDown(let at, _, _): logDelivery("down", at: at)
@@ -130,6 +136,7 @@ final class EventTapThread: @unchecked Sendable {
     /// One timer slot: a new deadline replaces the old one, and a stale one that
     /// still fires is ignored by the recognizer (it judges by time).
     private func schedule(_ wakeAt: HostTime) {
+        guard let runLoop else { return }  // a tap never started (tests): fn-up still judges the hold
         if let deadline { CFRunLoopTimerInvalidate(deadline) }
         let (whole, atto) = wakeAt.duration(since: .now()).components
         let seconds = Double(whole) + Double(atto) / 1e18

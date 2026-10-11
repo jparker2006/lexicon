@@ -99,3 +99,31 @@ import LexiconDomain
     let stored = try JSONDecoder().decode(Preferences.self, from: data)
     #expect(stored.microphoneUID == nil)
 }
+
+@Test func privateModeAndTheAlwaysPrivateListSurviveARelaunch() {
+    let name = "lexicon.tests.\(UUID())"
+    let suite = UserDefaults(suiteName: name)!
+    defer { suite.removePersistentDomain(forName: name) }
+    #expect(Preferences.defaults.privacy == .standard)
+    #expect(Preferences.defaults.alwaysPrivateApps.isEmpty)
+
+    PreferencesStore(defaults: suite).update {
+        $0.privacy = .private
+        $0.alwaysPrivateApps = ["com.example.bank"]
+    }
+
+    // A quit and a reboot both come back through a new store on the same domain.
+    let relaunched = PreferencesStore(defaults: suite).snapshot()
+    #expect(relaunched.privacy == .private)
+    #expect(relaunched.alwaysPrivateApps == ["com.example.bank"])
+}
+
+@Test func modelInstallFollowsTheAppsOwnSavedPrivateMode() {
+    let name = "lexicon.tests.\(UUID())"
+    let suite = UserDefaults(suiteName: name)!
+    defer { suite.removePersistentDomain(forName: name) }
+
+    #expect(PreferencesStore.modelInstallAccess(forApp: name) != nil)
+    PreferencesStore(defaults: suite).update { $0.privacy = .private }
+    #expect(PreferencesStore.modelInstallAccess(forApp: name) == nil)
+}

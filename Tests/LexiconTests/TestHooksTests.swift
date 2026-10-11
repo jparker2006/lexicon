@@ -9,7 +9,8 @@ import LexiconDomain
 // app answering, the Accessibility harness) is checked with `scripts/harness.sh check`.
 
 private let status = TestHookStatus(bundleID: AppPaths.devBundleID, version: "0.1 (1, abc)", pid: 42,
-                                    accessibility: true, microphone: "granted")
+                                    accessibility: true, microphone: "granted",
+                                    privacy: .private, alwaysPrivateApps: ["com.apple.Terminal", "com.microsoft.VSCode"])
 
 /// How long a test waits for a reply that takes milliseconds. Generous on
 /// purpose: the server answers from a task, and a loaded CI runner can leave
@@ -114,6 +115,20 @@ private let replyLimit = Duration.seconds(120)
     #expect(try JSONDecoder().decode(TestHookReply.self, from: Data(contentsOf: reply)) == .failed("not a test hook command"))
     #expect(requestCount(channel) == 0)
     withExtendedLifetime(server) {}
+}
+
+@Test func thePrivacyCommandAndTheStatusRoundTripThroughJSON() throws {
+    // nil leaves the always-private list alone and [] clears it, so the wire must keep them apart.
+    let commands: [TestHookCommand] = [
+        .privacy(.private, alwaysPrivateApps: ["com.apple.Terminal"]),
+        .privacy(.standard, alwaysPrivateApps: nil),
+        .privacy(.standard, alwaysPrivateApps: []),
+    ]
+    for command in commands {
+        #expect(try JSONDecoder().decode(TestHookCommand.self, from: JSONEncoder().encode(command)) == command)
+    }
+    let reply = TestHookReply.status(status)
+    #expect(try JSONDecoder().decode(TestHookReply.self, from: JSONEncoder().encode(reply)) == reply)
 }
 
 // MARK: - Helpers

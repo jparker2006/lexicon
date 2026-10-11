@@ -18,8 +18,9 @@ import WordStore
 //   swift run lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
 //       the speech text of every entry, as draft gold (see below)
 //
-//   swift run lexicon-eval --install-model <data folder>
-//       downloads the local model into `<data folder>/models/`
+//   swift run lexicon-eval --install-model <bundle id>
+//       downloads the local model into that app's `<data folder>/models/`,
+//       unless Private mode is on in that app's settings
 //       (`scripts/install-model.sh` runs it; first-run setup installs it in the app)
 //
 //   swift run lexicon-eval --import-lexicon <file> --into <data folder>
@@ -79,9 +80,10 @@ func runEval(arguments: [String]) async -> Int32 {
             files.append(argument)
         }
     }
-    if let folder = options["--install-model"] {
-        guard options.count == 1, files.isEmpty, !scriptedGold else { return usage() }
-        return await installModel(into: URL(filePath: folder, directoryHint: .isDirectory))
+    if let bundleID = options["--install-model"] {
+        guard options.count == 1, files.isEmpty, !scriptedGold, bundleID.contains("."), !bundleID.hasPrefix("."), !bundleID.contains("/")
+        else { return usage() }
+        return await installModel(for: bundleID)
     }
     if let file = options["--import-lexicon"] {
         guard let folder = options["--into"], options.count == 2, files.isEmpty, !scriptedGold else { return usage() }
@@ -241,10 +243,14 @@ func importLexicon(_ file: URL, into folder: URL) async -> Int32 {
     return 0
 }
 
-func installModel(into folder: URL) async -> Int32 {
-    guard let access = CloudAccess.granted(by: .defaults, app: .unknown, keys: { _ in nil }) else { return 1 }
+/// The app's own saved settings decide: with Private mode on in it, its model
+/// install opens no connection, the same as an install the app would run.
+func installModel(for bundleID: String) async -> Int32 {
+    guard let access = PreferencesStore.modelInstallAccess(forApp: bundleID) else {
+        return fail("Private mode is on in \(bundleID): turn it off to download the model")
+    }
     do {
-        try await ParakeetTranscriber.install(paths: AppPaths(root: folder), access: access) { fraction in
+        try await ParakeetTranscriber.install(paths: .forBundle(id: bundleID), access: access) { fraction in
             FileHandle.standardError.write(Data("\rinstalling: \(Int(fraction * 100))%".utf8))
         }
         FileHandle.standardError.write(Data("\ninstalled\n".utf8))
@@ -298,7 +304,7 @@ func usage() -> Int32 {
                lexicon-eval --manifest <manifest.jsonl> [--split <name>] [--baseline <run.jsonl>]
                             [--out <run.jsonl>] [--scripted-gold] [--lexicon <file>]
                lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
-               lexicon-eval --install-model <data folder>
+               lexicon-eval --install-model <bundle id>
                lexicon-eval --import-lexicon <file> --into <data folder>
 
         """.utf8))

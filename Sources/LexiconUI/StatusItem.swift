@@ -3,15 +3,15 @@ import LexiconDomain
 import LexiconCore
 
 /// The menu bar icon: the logo drawn in code, a template image while idle and
-/// in color with a badge while a Dictation is active (`render`). Clicking it
-/// opens the menu: name and version, whatever the shell adds, then Quit. The menu
+/// in color with a badge while a Dictation is active (`render`). Private mode
+/// draws the logo as an outline and says so in the label (`setPrivate`). Clicking
+/// it opens the menu: name and version, whatever the shell adds, then Quit. The menu
 /// is rebuilt each time it opens, so its lines are always current.
 /// Its `AXIdentifier` (`AccessibilityID.statusItem`) is how `lexicon-harness` finds it.
 /// While a permission is missing, an orange dot shows on the idle icon, and a left
 /// click opens that setup step instead of the menu (a right click still opens the menu).
 ///
-/// Still to come: History on left click and Settings (#63, #69), Private mode
-/// and the outlined logo (#68).
+/// Still to come: History on left click and Settings (#63, #69).
 @MainActor
 public final class StatusItemController: NSObject, NSMenuDelegate {
     let item: NSStatusItem
@@ -19,12 +19,14 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
     let version: String
     let extraItems: @MainActor () -> [NSMenuItem]
     let menu = NSMenu()
-    /// The last state drawn, so a change to `warning` redraws it.
-    private var state: IndicatorState = .hidden
+    /// Changed only by `setPrivate`, which redraws the icon.
+    private(set) var isPrivate = false
+    /// The last state rendered, so `setPrivate` and `warning` can redraw it.
+    private var shown: (state: IndicatorState, open: CGFloat) = (.hidden, 0)
 
     /// The permission step the warning dot points at, or nil for no dot.
     public var warning: SetupStep? {
-        didSet { if warning != oldValue { render(state, open: 0) } }
+        didSet { if warning != oldValue { render(shown.state, open: shown.open) } }
     }
     /// Called with that step when the dot shows and the icon is left-clicked.
     public var onWarningClick: (@MainActor (SetupStep) -> Void)?
@@ -77,32 +79,45 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
 
     /// Shows `state`; `open` 0...1 opens the logo's mouth with the voice while recording.
     func render(_ state: IndicatorState, open: CGFloat = 0) {
-        self.state = state
+        shown = (state, open)
         guard let button = item.button else { return }
         let look = Self.look(state)
-        // A Dictation's own label wins while it is active; otherwise the dot names the missing permission.
-        let words = look.label ?? warning.map(SetupCopy.warningLabel)
-        let label = words.map { "Lexicon: \($0)" } ?? "Lexicon"
+        let label = Self.accessibilityLabel(for: state, isPrivate: isPrivate, warning: warning)
         button.image = showsDot
-            ? Self.warningImage(description: label)
+            ? Self.warningImage(outlined: isPrivate, description: label)
             : LogoMark.image(open: look.opens ? open : 0, color: look.color, badge: look.badge,
-                             description: label)
+                             outlined: isPrivate, description: label)
         button.setAccessibilityLabel(label)
+    }
+
+    /// Private mode on or off, redrawing the current state.
+    func setPrivate(_ on: Bool) {
+        isPrivate = on
+        render(shown.state, open: shown.open)
+    }
+
+    /// Private mode and a missing permission are named here so the harness and
+    /// VoiceOver can tell them apart from the icon alone. A Dictation's own label
+    /// wins over the missing permission while it is active.
+    static func accessibilityLabel(for state: IndicatorState, isPrivate: Bool, warning: SetupStep? = nil) -> String {
+        let label = (look(state).label ?? warning.map(SetupCopy.warningLabel)).map { "Lexicon: \($0)" } ?? "Lexicon"
+        return isPrivate ? label + ", Private mode" : label
     }
 
     /// Only the bare idle icon shows the dot. A Dictation's color or badge keeps its own look,
     /// since the dot image has no badge to draw.
     private var showsDot: Bool {
-        let look = Self.look(state)
+        let look = Self.look(shown.state)
         return warning != nil && look.color == nil && look.badge == nil
     }
 
     /// The idle icon with the dot. Not a template, or the menu bar would tint the dot away;
     /// `labelColor` resolves for the menu bar's appearance each time the handler draws.
-    private static func warningImage(description: String) -> NSImage {
+    private static func warningImage(outlined: Bool, description: String) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             NSColor.labelColor.setFill()
-            LogoMark.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18).insetBy(dx: 1, dy: 1), open: 0)
+            NSColor.labelColor.setStroke()
+            LogoMark.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18).insetBy(dx: 1, dy: 1), open: 0, outlined: outlined)
             // A clear ring keeps the dot off the logo's edge.
             NSGraphicsContext.current?.compositingOperation = .clear
             NSBezierPath(ovalIn: NSRect(x: 18 - 8.5, y: 18 - 8.5, width: 10, height: 10)).fill()

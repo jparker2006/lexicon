@@ -18,7 +18,7 @@ private let cloudPreferences: Preferences = {
 private let fakeKeys: @Sendable (CredentialID) -> String? = { _ in "fake-key" }
 
 private func grantedAccess(_ preferences: Preferences) throws -> CloudAccess {
-    try #require(CloudAccess.granted(by: preferences, app: .unknown, keys: fakeKeys))
+    try #require(CloudAccess.granted(by: preferences, for: .app(.unknown), keys: fakeKeys))
 }
 
 private func pcm(_ index: Int) -> PCMChunk {
