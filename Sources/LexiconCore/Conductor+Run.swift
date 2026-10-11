@@ -115,10 +115,9 @@ extension Conductor {
             history.record(.waiting(id, reason: String(describing: reason)))
             if reason.waitsForNetwork { emit(.notice(.waitingForNetwork(id))) }
             releaseInsertTurn(id)
-            run.hold.end()
-            // TODO(#59): once the network returns or a local model is installed,
-            // `speech.transcribe` the clip and `land` it again with `previous: .waiting`
-            // and a fresh cleanup session. Late text still passes the target check.
+            run.hold?.end()
+            await run.cleaning.cancel()  // the retry cleans with a fresh session
+            retryWhenReady(run, after: reason)
             emit(.finished(id, .waiting))
             return DictationResult(id: id, status: .waiting, versions: nil, cleanup: nil, model: nil, lag: nil,
                                    attempts: [])
@@ -145,7 +144,7 @@ extension Conductor {
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
             }
             releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
-            run.hold.end()  // the Dictation landed: App Nap may return
+            run.hold?.end()  // the Dictation landed: App Nap may return
 
             // Everything below is after the text landed: off the fn-up path.
             switch delivery {
@@ -160,7 +159,8 @@ extension Conductor {
                 // Esc'd live Dictation: say it's waiting in paste-last (#18 indicator state).
                 if run.origin == .live, run.purpose == .type { emit(.notice(.readyToPaste(id))) }
             }
-            if case .respeak(let fixing) = run.purpose {
+            // A recovered Re-speak changes nothing in another app: recovered text is never typed (#4).
+            if case .respeak(let fixing) = run.purpose, run.origin != .recovered {
                 _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)
             }
             let status = DictationStatus.landed(delivery, origin: run.origin, previous: run.previous)

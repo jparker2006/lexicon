@@ -81,6 +81,10 @@ public struct IndicatorFollower: Sendable {
             return .error
         case .waitingForNetwork:
             return nil  // `finished(.waiting)` follows and says it
+        case .recovered:
+            // At launch, with nothing else going on: a line, no sound.
+            state = .error("Recovered a Dictation. It's in History")
+            return nil
         // These come with no Dictation, or with one that is now useless: say so whatever else is showing.
         case .microphoneUnavailable: return fail("Microphone unavailable")
         case .microphoneSilent: return fail("No sound from the microphone")

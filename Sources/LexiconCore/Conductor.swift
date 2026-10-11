@@ -43,8 +43,10 @@ public actor Conductor<Destination: TextDestination> {
     /// Stop signal of the Dictation that is recording. Single slot: one mic.
     var captureEnd: AsyncStream<RunEnd>.Continuation?
     var capturingID: DictationID?
-    /// Dictations past stop that still need text (transcribing, waiting).
+    /// Dictations past stop that still need text (transcribing), and recovered ones being transcribed.
     var inFlight: [DictationID: Task<DictationResult, Never>] = [:]
+    /// Waiting Dictations, each trying again until it has text (`retryWhenReady`).
+    var waiting: [DictationID: Task<Void, Never>] = [:]
     /// Live Dictations in fn-down order. A Dictation inserts only when every
     /// earlier one has inserted, been held, or gone waiting (#18: they insert in
     /// the order they were spoken). A waiting Dictation gives up its turn, so a
@@ -120,12 +122,6 @@ public actor Conductor<Destination: TextDestination> {
     /// History's ⋯ > Retry. Never typed: Jake is in the History window.
     /// `model` nil = the normal plan; otherwise the picker's choice.
     public func retry(_ id: DictationID, with model: SpeechModel?) async -> DictationResult {
-        fatalError("not implemented")
-    }
-
-    /// Launch: transcribe what the last run left unfinished. Never typed.
-    /// Safe to call twice (History.recover is idempotent; ids already in flight are skipped).
-    public func recover() async {
         fatalError("not implemented")
     }
 
@@ -205,7 +201,8 @@ extension Conductor {
         var releasedAt: HostTime?
         /// The status before this landing, for `DictationStatus.landed`.
         var previous: DictationStatus?
-        let hold: LatencyHold
+        /// nil when nobody waits for the text (recovery).
+        let hold: LatencyHold?
 
         /// Jake waits at the cursor only when the text may still be typed.
         var localPriority: LocalPriority { target == nil ? .background : .live }
@@ -294,6 +291,8 @@ public enum Notice: Sendable, Hashable {
     /// Text ready but not typed: "Dictation ready, paste-last to insert" (#4).
     case readyToPaste(DictationID)
     case waitingForNetwork(DictationID)
+    /// A Dictation the last run left unfinished has its text, at the top of History, never typed (#4).
+    case recovered(DictationID)
     case microphoneUnavailable(String)
     case microphoneSilent
     case microphoneMuted
