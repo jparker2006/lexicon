@@ -70,7 +70,7 @@ public actor CodeTerms {
     /// task of its own, never before fn works. Runs once: a second call, or one
     /// after `stop()`, returns at once.
     public func start() async {
-        guard !started else { return }
+        guard !started, !stopped else { return }
         started = true
         codeRoot = Self.realPath(code)
         homeFolders = CodeScan.skillFolders.compactMap { Self.realPath(home.appending(path: $0)) }
@@ -82,8 +82,13 @@ public actor CodeTerms {
         let since = codeRoot.map { FileEvents.lastEvent(on: $0, before: Self.history) }
             ?? FSEventStreamEventId(kFSEventStreamEventIdSinceNow)
         let (batches, deliver) = AsyncStream.makeStream(of: [FileEvent].self)
+        let root = codeRoot
+        let ignoring: @Sendable (String) -> Bool = { path in
+            guard let root, let below = Self.components(of: path, below: root) else { return false }
+            return CodeScan.isDerived(below.dropFirst())
+        }
         guard !paths.isEmpty, let events = FileEvents(paths: paths, since: since, latency: Self.latency,
-                                                      ignoring: CodeScan.isDerived, deliver: deliver) else { return }
+                                                      ignoring: ignoring, deliver: deliver) else { return }
         self.events = events
         reader = Task { [weak self] in
             for await batch in batches { await self?.handle(batch) }

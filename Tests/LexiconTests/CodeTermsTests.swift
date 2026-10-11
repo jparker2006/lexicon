@@ -139,12 +139,14 @@ private func current(_ terms: CodeTerms, is repo: String?) async -> Bool {
     try fixture.write("code/zentrik/main.rs")
     try fixture.write("code/zentrik/.git/HEAD")
     try fixture.write("code/quaxly/main.py")
+    // A repo may be named like a build folder; only folders inside a repo are output.
+    try fixture.write("code/dist/main.c")
     // Only skill folders there at launch are watched.
     try fixture.write("home/.claude/skills/old-skill/SKILL.md")
     let (terms, lexicon) = try await fixture.start()
 
     // Each touch goes to the repo the last one left behind.
-    for repo in ["zentrik", "quaxly", "zentrik"] {
+    for repo in ["zentrik", "dist", "quaxly", "zentrik"] {
         try fixture.write("code/\(repo)/main.txt", repo)
         #expect(await current(terms, is: repo))
         #expect(await lexicon.codeTerms.first?.text == repo)

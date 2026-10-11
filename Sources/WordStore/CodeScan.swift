@@ -145,9 +145,10 @@ enum CodeScan {
         return terms
     }
 
-    /// True when `path` lies inside a folder a tool writes (`derived`).
-    static func isDerived(_ path: String) -> Bool {
-        path.split(separator: "/").contains { derived.contains(String($0)) }
+    /// True when `components` (the path below a repo's root) lie inside a folder a
+    /// tool writes (`derived`). The repo's own name never counts: a repo may be called `build`.
+    static func isDerived(_ components: some Sequence<Substring>) -> Bool {
+        components.contains { derived.contains(String($0)) }
     }
 
     private static func text(of url: URL) -> String? {
