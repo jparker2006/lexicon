@@ -134,6 +134,9 @@ final class CaptureCore: @unchecked Sendable {
         drain()
         heardBeforeRelease = samples.count
         let late = HostTime.now().duration(since: releasedAt)
+        // Input over, or fn-up a full cap ago: what is captured is all there is,
+        // the converter's last few ms included, so no tail may cut any of it.
+        guard !signals.end.isSettled, late < tail.cap else { return done() }
         tail.release(late: late)
         // The cap plus one late buffer, counted from fn-up.
         let backstop = DispatchTime.now() + (tail.cap - late + .milliseconds(20)).dispatch

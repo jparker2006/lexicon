@@ -67,6 +67,23 @@ import LexiconDomain
     #expect(kept == 800 + 640)
 }
 
+@Test func aStopLongAfterFnUpKeepsEverythingCapturedBeforeIt() async throws {
+    // 48 kHz, so the converter still holds a few ms of audio when the stop comes.
+    let source = (0..<48_000).map { Int16((sin(2 * Double.pi * 1_000 * Double($0) / 48_000) * 16_384).rounded()) }
+    let wav = try writeWAV(source, rate: 48_000, in: try scratchDirectory())
+    var counts: [Int] = []
+    for late in [false, true] {
+        let capture = try await Recorder().start(.file(wav, pace: .asFastAsPossible),
+                                                 writingTo: try scratchDirectory().appending(path: "late.caf"))
+        let ended = try #require(await capture.signals.inputEnded())
+        // fn-up a whole second before the stop call: the 200 ms tail is long spent.
+        let take = await capture.stop(late ? .released(at: HostTime(nanoseconds: ended.nanoseconds - 1_000_000_000))
+                                           : .immediately)
+        counts.append(take.clip.samples.count)
+    }
+    #expect(counts[1] == counts[0])
+}
+
 // MARK: Disk full
 
 @Test func underTheFreeSpaceFloorTheAudioStaysInRAM() async throws {
