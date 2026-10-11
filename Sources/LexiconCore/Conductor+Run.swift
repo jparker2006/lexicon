@@ -104,19 +104,19 @@ extension Conductor {
     func land(_ outcome: SpeechOutcome, _ run: DictationRun) async -> DictationResult {
         let id = run.id
         switch outcome {
-        case .unavailable(.offline), .unavailable(.providerError):
-            // M1: keep the audio, show "waiting", retry when the network returns. Late
-            // text is still guarded by the target check (same field, no typing since).
-            history.record(.waiting(id, reason: "offline"))
-            emit(.notice(.waitingForNetwork(id)))
-            run.hold.end()  // a wait for the network may last hours; App Nap may return
-            await speech.networkReturned()
-            let again = await speech.transcribe(run.clip, plan: run.speechPlan, priority: run.localPriority)
-            var next = run
-            next.cleaning = cleanup.begin(plan: run.cleanupPlan)  // the failed attempt's segments are gone
-            next.releasedAt = nil
-            next.previous = .waiting
-            return await land(again, next)
+        case .unavailable(let reason) where reason.waits:
+            // Keep the audio and show "waiting"; Jake is never asked to redo it. A
+            // waiting Dictation gives up its turn, so later Dictations still insert.
+            history.record(.waiting(id, reason: String(describing: reason)))
+            if reason != .noModel { emit(.notice(.waitingForNetwork(id))) }
+            releaseInsertTurn(id)
+            run.hold.end()
+            // TODO(#59): once the network returns or a local model is installed,
+            // `speech.transcribe` the clip and `land` it again with `previous: .waiting`
+            // and a fresh cleanup session. Late text still passes the target check.
+            emit(.finished(id, .waiting))
+            return DictationResult(id: id, status: .waiting, versions: nil, cleanup: nil, model: nil, lag: nil,
+                                   attempts: [])
 
         case .unavailable(let reason):
             history.record(.failed(id, reason: String(describing: reason)))
@@ -138,6 +138,7 @@ extension Conductor {
                 await insertTurn(id)  // Dictations insert in the order they were spoken (#18)
                 delivery = await destination.insert(cleaned.versions.cleaned, for: id, at: target)  // text at the cursor
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
+                releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
             }
             run.hold.end()  // the Dictation landed: App Nap may return
 
@@ -165,10 +166,18 @@ extension Conductor {
     }
 
     /// First of: a key/sleep end from `ends`, or end of input for a file source.
+    /// A microphone's `inputEnded()` returns only once the capture stops, and
+    /// cancelling it returns nil at once, so the losing side never holds this up.
     func nextEnd(_ ends: AsyncStream<RunEnd>, signals: CaptureSignals) async -> RunEnd {
-        // TODO: race `ends.first { _ in true }` against `signals.inputEnded()` in a task group;
-        // file input -> .stop(at: end-of-file host time); mic input -> inputEnded() never returns.
-        // If `ends` finishes with no element (should not happen), treat as .stop(at: .now()).
-        fatalError("not implemented")
+        await withTaskGroup(of: RunEnd?.self) { group in
+            // `ends` finishing with no element should not happen; stopping is the safe reading.
+            group.addTask { await ends.first { _ in true } ?? .stop(at: .now()) }
+            group.addTask { await signals.inputEnded().map { .stop(at: $0) } }
+            defer { group.cancelAll() }
+            for await end in group {
+                if let end { return end }
+            }
+            return .stop(at: .now())
+        }
     }
 }

@@ -13,8 +13,10 @@ public import LexiconDomain
 /// One engine path: `transcribe(clip:plan:)` is `begin(feed: clip.replay())`
 /// followed by `finish`. Retry, recovery and eval cannot drift from live.
 public actor SpeechEngine {
+    let local: (any LocalTranscriber)?
+
     public init(local: (any LocalTranscriber)?, session: URLSession = .shared) {
-        fatalError("not implemented")
+        self.local = local
     }
 
     /// fn-down. Starts streaming `feed` to the cloud model (when the plan has
@@ -22,7 +24,7 @@ public actor SpeechEngine {
     /// is warm by fn-up (warm load 0.4-0.6 s overlaps the speech). Local work for
     /// this attempt runs at `LocalPriority.live`.
     public func begin(feed: AudioFeed, plan: SpeechPlan) -> SpeechAttempt {
-        fatalError("not implemented")
+        SpeechAttempt(core: AttemptCore(feed: feed, plan: plan, local: local, priority: .live))
     }
 
     /// Whole-clip transcription with the same race: retry, recovery, eval, and a
@@ -54,15 +56,25 @@ public struct SpeechPlan: Sendable {
 
     /// - `forcing`: the Retry model picker. A cloud model in Private mode yields
     ///   a plan with no engine, which finishes as `.unavailable(.privateMode)`.
+    ///
+    /// Local only until the cloud race lands (#66), which turns on
+    /// `cloud = access.flatMap { access in preferences.cloudModel.map { ($0, access) } }`.
     public static func make(preferences: Preferences, access: CloudAccess?, terms: [Term],
                             forcing model: SpeechModel? = nil) -> SpeechPlan {
-        fatalError("not implemented")
+        let local: LocalModel? = switch model {
+        case nil: preferences.localModel
+        case .local(let forced)?: forced
+        case .cloud?: nil
+        }
+        return SpeechPlan(cloud: nil, local: local, terms: Array(terms.prefix(preferences.speechTerms)),
+                          race: RacePolicy(deadline: preferences.raceDeadline))
     }
 }
 
 /// One in-flight transcription. Non-copyable: finished or cancelled at most once.
 public struct SpeechAttempt: ~Copyable, Sendable {
     let core: AttemptCore
+    public var segments: AsyncStream<SpeechSegment> { core.segments }
 
     /// The cloud provider's text while Jake talks: partials and finalized
     /// segments, in order (`CloudSession` maps `ProviderEvent.partial/.final`).
@@ -74,17 +86,16 @@ public struct SpeechAttempt: ~Copyable, Sendable {
     /// Every finalized segment passes `SecretGuard.matches` here, before Cleanup
     /// sees it; a match revokes the plan's `CloudAccess`, which cuts this stream
     /// and leaves the local model to finish (#5).
-    public let segments: AsyncStream<SpeechSegment>
 
     /// fn-up, after the LiveCapture's tail. Waits for `feed` to end, sends the
     /// provider's finalize, and races the local model on `clip` (the RAM copy).
     /// Never throws: every failure is an outcome.
     public consuming func finish(_ clip: AudioClip) async -> SpeechOutcome {
-        fatalError("not implemented")
+        await core.finish(clip)
     }
 
     /// Cancelled or discarded Dictation: close the socket, drop local work.
-    public consuming func cancel() { fatalError("not implemented") }
+    public consuming func cancel() { core.cancel() }
 }
 
 public enum SpeechOutcome: Sendable {
@@ -98,7 +109,18 @@ public enum SpeechUnavailable: Sendable, Hashable {
     case providerError(String)
     /// Private mode and no local model.
     case privateMode
+    /// No cloud model in the plan and no local model installed: the Dictation
+    /// waits for one.
+    case noModel
     case silence
+
+    /// The Dictation keeps its audio and waits for an engine, instead of failing.
+    public var waits: Bool {
+        switch self {
+        case .offline, .providerError, .noModel: true
+        case .privateMode, .silence: false
+        }
+    }
 }
 
 /// The winning model's text for a Dictation, plus every engine's attempt.
@@ -138,4 +160,52 @@ public enum LocalPriority: Sendable, Hashable {
     case background
 }
 
-final class AttemptCore: Sendable {}
+/// One attempt's work, shared by the non-copyable `SpeechAttempt` and its tasks.
+final class AttemptCore: Sendable {
+    let plan: SpeechPlan
+    let local: (any LocalTranscriber)?
+    let priority: LocalPriority
+    /// Empty until a cloud plan exists: local transcribes the whole clip at
+    /// `finish`, so there is no text while Jake talks.
+    let segments: AsyncStream<SpeechSegment>
+    /// Loads the local model while Jake talks, so fn-up never waits on the load.
+    let warmUp: Task<Void, Never>
+    /// The clip is the RAM copy local transcribes; the feed's own buffer of the
+    /// same chunks is read and dropped so a long Dictation holds its audio once.
+    let drain: Task<Void, Never>
+
+    init(feed: AudioFeed, plan: SpeechPlan, local: (any LocalTranscriber)?, priority: LocalPriority) {
+        self.plan = plan
+        self.local = plan.local == nil ? nil : local
+        self.priority = priority
+        let (segments, ended) = AsyncStream<SpeechSegment>.makeStream()
+        ended.finish()
+        self.segments = segments
+        let model = self.local
+        warmUp = Task {
+            guard let model, !(await model.isResident) else { return }
+            try? await model.load()  // a failed load shows up as a failed transcription
+        }
+        drain = Task { for await _ in feed {} }
+    }
+
+    func finish(_ clip: AudioClip) async -> SpeechOutcome {
+        guard let local else { return .unavailable(.noModel) }
+        await warmUp.value
+        let model = SpeechModel.local(local.model)
+        let started = ContinuousClock.now
+        do {
+            let text = try await local.transcribe(clip, terms: plan.terms, priority: priority)
+            let latency = started.duration(to: .now)
+            guard text.contains(where: { !$0.isWhitespace }) else { return .unavailable(.silence) }
+            let won = AttemptRecord(model: model, result: .won, text: text, latency: latency, error: nil)
+            return .text(SpeechText(text: text, model: model, finalizeToText: latency, attempts: [won]))
+        } catch {
+            return .unavailable(.providerError(String(describing: error)))
+        }
+    }
+
+    func cancel() {
+        drain.cancel()
+    }
+}

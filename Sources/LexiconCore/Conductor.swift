@@ -50,6 +50,8 @@ public actor Conductor<Destination: TextDestination> {
     /// the order they were spoken). A waiting Dictation gives up its turn, so a
     /// network outage never blocks later text; its late insert passes InsertGuard.
     var insertOrder: [DictationID] = []
+    /// A Dictation whose text is ready while an earlier one still holds the turn.
+    var turnWaiters: [DictationID: CheckedContinuation<Void, Never>] = [:]
     var subscribers: [UUID: AsyncStream<ConductorEvent>.Continuation] = [:]
 
     public init(recorder: Recorder, speech: SpeechEngine, cleanup: Cleanup, lexicon: Lexicon, history: HistoryStore,
@@ -132,7 +134,11 @@ public actor Conductor<Destination: TextDestination> {
     /// In the dev app the text is typed into the focused field; headless it is recorded.
     public func dictate(file: URL, pace: FilePace, purpose: DictationPurpose = .type) async -> DictationResult {
         let id = DictationID()
-        let (ends, _) = AsyncStream<RunEnd>.makeStream()   // ended by end-of-file, see `nextEnd`
+        insertOrder.append(id)
+        // Ended by end of file (see `nextEnd`). Held open until the run returns:
+        // a finished stream reads as "stop now" and would cut the file short.
+        let (ends, open) = AsyncStream<RunEnd>.makeStream()
+        defer { open.finish() }
         let start = RunStart(id: id, input: .file(file, pace: pace), preferences: preferences.snapshot(),
                              origin: .file, purpose: purpose, began: .now())
         return await run(start, ends: ends, hold: LatencyHold(reason: "Dictation \(id) from file"))
@@ -152,14 +158,14 @@ public actor Conductor<Destination: TextDestination> {
 
     /// Suspends until `id` is first in `insertOrder`.
     func insertTurn(_ id: DictationID) async {
-        // TODO: store a continuation per waiting id; resume the head when it changes.
-        fatalError("not implemented")
+        guard insertOrder.contains(id), insertOrder.first != id else { return }
+        await withCheckedContinuation { turnWaiters[id] = $0 }
     }
 
     /// Removes `id` from `insertOrder` (idempotent) and wakes the next in line.
     func releaseInsertTurn(_ id: DictationID) {
-        // TODO: remove; if the head changed, resume its waiting continuation.
-        fatalError("not implemented")
+        insertOrder.removeAll { $0 == id }
+        if let head = insertOrder.first { turnWaiters.removeValue(forKey: head)?.resume() }
     }
 
     func endCapture(_ end: RunEnd) {

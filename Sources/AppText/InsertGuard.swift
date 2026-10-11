@@ -30,10 +30,9 @@ public enum InsertGuard {
     /// - focusNow: the focus right before the paste; nil when nothing can take text.
     /// - inputSinceMark: `InputClock.hasInput(since: target's mark)`.
     public static func decide(target: FocusSnapshot, focusNow: FocusSnapshot?, inputSinceMark: Bool) -> InsertDecision {
-        // TODO: focusNow == nil -> .hold(.noField)
-        //   focusNow.pid != target.pid || focusNow.fieldFingerprint != target.fieldFingerprint -> .hold(.focusMoved)
-        //   inputSinceMark -> .hold(.typedSince)
-        //   else .insert
-        fatalError("not implemented")
+        guard let focusNow else { return .hold(.noField) }
+        if focusNow != target { return .hold(.focusMoved) }
+        if inputSinceMark { return .hold(.typedSince) }
+        return .insert
     }
 }
