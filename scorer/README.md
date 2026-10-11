@@ -78,16 +78,16 @@ One run at a time (`.lock`, shared with the review page and the baselines). It p
 scripts/test-set.sh review
 ```
 
-Jake's review of the `review` entries (#51): a page served from 127.0.0.1 until Ctrl-C, opened in the default browser. For each clip in `disagreements.jsonl` it plays the audio and shows local Parakeet's text (A) and Wispr's raw text (B) with their differences highlighted, what Wispr typed and Jake's own Hand fix of it as hints, and any Term written in another case or spacing or Rule's heard side. Jake picks A or B or types the gold, and can mark wrong words in either text. Every answer and mark is saved at once; reopening resumes on the clip he was on. The keys are on the page.
+Jake's review of the `review` entries (#51): a page served from 127.0.0.1 until Ctrl-C, opened in the default browser. For each clip in `disagreements.jsonl` it plays the audio and shows local Parakeet's text (A) and Wispr's raw text (B) with only the differing words highlighted, under one rule: gold is the words Jake said, not what he wanted typed, and punctuation doesn't matter. He presses A or B, or N to fix B in a box that opens on the first differing word. What Wispr typed, Jake's own Hand fix of it and any Term written in another case or spacing or Rule's heard side sit behind a hints toggle, since they show what he wanted typed. M marks wrong words in either text. A three-step tour shows on the first visit. Every answer and mark is saved at once; reopening resumes on the clip he was on. The five main keys are on the page, the rest behind More keys.
 
 It writes only under the Test set folder, owner-only:
 
 - `review.jsonl`: his answers (`choice`, `text`, `marks`), the source of truth.
 - `manifest.jsonl`: an answered entry gets his `text`, `terms` recomputed from it and `gold` `reviewed`; a cleared one goes back to `review`. Other entries are untouched.
 - `marks.jsonl`: one Test set entry per run of marked words: `clip`, `audio_filepath`, `session`, `split`, `model` (`parakeet` or `wispr`), word `start` and `end`, the words `heard`, and the words `said` (lined up with his gold, null until he gives it).
-- `review-state.json`: the clip he was on.
+- `review-state.json`: the clip he was on, and whether he has seen the tour.
 
-The page makes no network requests: its Content-Security-Policy lets it load only its own three files and fetch only from its own server, and nothing is cached (no-store). The server answers only `Host: 127.0.0.1:<port>`, and serves Jake's data only with the key from the link it opens, which sits in the link's fragment (never sent by the browser) and comes back as a header no other web page can send, so no other page can read or write through it. It sets no cookie and logs no requests. `--no-open` prints the link instead of opening it. Tests: `tests/test_review.py`, on synthetic clips.
+The page makes no network requests: its Content-Security-Policy lets it load only its own files and fetch only from its own server, and nothing is cached (no-store). The server answers only `Host: 127.0.0.1:<port>`, and serves Jake's data only with the key from the link it opens, which sits in the link's fragment (never sent by the browser) and comes back as a header no other web page can send, so no other page can read or write through it. It sets no cookie and logs no requests. `--no-open` prints the link instead of opening it. Tests: `tests/test_review.py`, on synthetic clips.
 
 ### Baselines
 
