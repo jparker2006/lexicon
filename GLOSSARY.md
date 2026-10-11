@@ -35,3 +35,7 @@ _Avoid_: Eval set, benchmark, dataset
 **Private mode**:
 A mode in which nothing leaves the Mac.
 _Avoid_: Offline mode, local mode
+
+**History**:
+The saved record of every Dictation, its text versions and audio, shown in the History window.
+_Avoid_: Log, archive, transcripts
