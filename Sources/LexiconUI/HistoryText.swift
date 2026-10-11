@@ -26,6 +26,35 @@ enum HistoryText {
         ].compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// Show Versions: what the model heard, what Cleanup made of it, and the final
+    /// text after Fixes, then any engine that lost or failed. Empty with no text yet.
+    static func versions(_ detail: HistoryDetail) -> [(label: String, text: String)] {
+        var sections: [(label: String, text: String)] = []
+        if let versions = detail.versions {
+            let cleanup = detail.row.cleanup.flatMap(label(for:)).map { " (\($0))" } ?? ""
+            sections = [
+                ("Model" + (detail.row.model.map { ": \($0.displayName)" } ?? ""), versions.model),
+                ("Cleaned" + cleanup, versions.cleaned),
+                ("Final", detail.row.finalText ?? versions.cleaned),
+            ]
+        }
+        for attempt in detail.attempts where attempt.result != .won {
+            sections.append(("\(attempt.model.displayName): \(label(for: attempt.result))", attempt.text ?? attempt.error ?? ""))
+        }
+        return sections
+    }
+
+    /// Exhaustive: a new result fails the build here.
+    static func label(for result: AttemptRecord.Result) -> String {
+        switch result {
+        case .won: "won"
+        case .lost: "lost"
+        case .failed: "failed"
+        case .timedOut: "timed out"
+        case .cancelled: "cancelled"
+        }
+    }
+
     /// Status text is an exhaustive switch: a new DictationStatus fails the build here.
     static func label(for status: DictationStatus) -> String? {
         switch status {

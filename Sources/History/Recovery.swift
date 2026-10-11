@@ -40,8 +40,7 @@ extension HistoryStore {
     }
 
     /// A waiting Dictation still has no text: its row is unfinished (a `.waiting` write
-    /// SQLite dropped leaves it so). False once it is deleted or has text another way
-    /// (a manual Retry). A read that fails says nothing, so it counts as still owed:
+    /// SQLite dropped leaves it so). False once it is deleted. A read that fails says nothing, so it counts as still owed:
     /// giving up then would leave the Dictation without text until the next launch.
     public func owesText(_ id: DictationID) async -> Bool {
         do {
