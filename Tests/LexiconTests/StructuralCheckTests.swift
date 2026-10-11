@@ -125,6 +125,8 @@ let neverAnswers: [Pair] = [
     #expect(check("Sure, here's the plan.", ruled: "Here's the plan.") == .addedWord)
     #expect(check("Don't touch the public API. Don't update the tests.",
                   ruled: "Don't touch the public API, but update the tests.") == .addedWord)
+    #expect(check("Don't delete the backups and merge the branch.",
+                  ruled: "Don't delete the backups, and don't merge the branch.") == .droppedContentWord)
     #expect(check("Keep the bundle over 5 MB.", ruled: "Keep the bundle under five MB.") != nil)
 }
 

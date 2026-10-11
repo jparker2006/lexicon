@@ -26,7 +26,8 @@ enum Sentences {
 ///     (`mustKeep`) are content words here (`droppedContentWord`)
 ///   - no content word is added; Lexicon `terms`, list markers ("1.", "-", "•")
 ///     and the ordinals those markers replace are allowed. No negation or hedge
-///     appears more often than it was spoken (`addedWord`)
+///     appears more often than it was spoken (`addedWord`), or less often,
+///     unless retracted (`droppedContentWord`)
 ///   - at most `lengthCap` times the ruled length plus `lengthSlack` tokens (`tooLong`)
 /// Function words ("the", "to", "it's", "can") may come and go: dropping or
 /// adding one never changes what was asked.
@@ -74,9 +75,9 @@ enum StructuralCheck {
             }
         }
 
-        let spoken = Set(ref.map(\.word))
+        let spokenWords = Set(ref.map(\.word))
         var lexicon: Set<String>?  // only when a word was added: up to 200 Terms
-        for token in out where !spoken.contains(token.word) {
+        for token in out where !spokenWords.contains(token.word) {
             let word = token.word
             if !mustKeep.contains(word), stop.contains(word) || softFillers.contains(word)
                 || Fillers.hard.contains(word) || listSequence.contains(word) {
@@ -86,12 +87,20 @@ enum StructuralCheck {
             if lexicon!.contains(word) { continue }
             failures.insert(isNumber(word) ? .numberMismatch : .addedWord)
         }
-        // "Don't touch the API, but update the tests" must not gain a second "don't".
-        let negations = { (tokens: [Token]) in tokens.reduce(into: [String: Int]()) { counts, token in
-            if mustKeep.contains(token.word) { counts[token.word, default: 0] += 1 }
-        } }
-        let spokenNegations = negations(ref)
-        if negations(out).contains(where: { $0.value > spokenNegations[$0.key, default: 0] }) {
+        // Each negation and hedge counts, not just the word: "don't delete X, and don't
+        // merge Y" must not lose its second "don't", and "don't touch X, but update Y"
+        // must not gain one. Retracted ones may go.
+        var negations: [String: Int] = [:]
+        for token in out where mustKeep.contains(token.word) { negations[token.word, default: 0] += 1 }
+        var spoken: [String: (all: Int, kept: Int)] = [:]
+        for (k, token) in ref.enumerated() where mustKeep.contains(token.word) {
+            spoken[token.word, default: (0, 0)].all += 1
+            if !retracted.contains(k) { spoken[token.word, default: (0, 0)].kept += 1 }
+        }
+        if spoken.contains(where: { negations[$0.key, default: 0] < $0.value.kept }) {
+            failures.insert(.droppedContentWord)
+        }
+        if negations.contains(where: { $0.value > spoken[$0.key]?.all ?? 0 }) {
             failures.insert(.addedWord)
         }
         // "14 days ... 1 year" must not become "1 year ... 14 days": numbers keep their order.
