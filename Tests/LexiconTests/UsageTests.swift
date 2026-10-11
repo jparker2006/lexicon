@@ -10,8 +10,8 @@ import Transcription
 import LexiconCore
 
 // What package tests look like: no mic, no keys, no network, no AX.
-// Each body calls a sketch stub, so each test stays disabled until its ticket
-// lands; `scripts/check.sh` still compiles every one.
+// A test whose body calls a sketch stub stays disabled until its ticket lands;
+// `scripts/check.sh` still compiles every one.
 
 @Test(.disabled("lands with #53")) func holdPastThresholdIsPushToTalk() {
     var gesture = FnGesture(holdThreshold: .milliseconds(300), doubleTapWindow: .milliseconds(250))
@@ -56,8 +56,8 @@ import LexiconCore
     #expect(!HistoryStore.admits(.transcribing, from: nil))
 }
 
-@Test(.disabled("lands with #41")) func unfinishedIndexIsGeneratedFromTheEnum() {
-    #expect(HistorySchema.derivedIndexes[0].hasSuffix("('recording', 'transcribing', 'waiting')"))
+@Test func unfinishedIndexIsGeneratedFromTheEnum() {
+    #expect(HistorySchema.derivedIndexes[0].hasSuffix("('recording', 'transcribing', 'waiting', 'ready')"))
 }
 
 @Test(.disabled("lands with #74")) func structuralCheckRejectsChangedNumbers() {

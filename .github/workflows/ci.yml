@@ -1,7 +1,8 @@
 name: CI
 
-# Every push and every PR, one check named CI. A push run already reports on
-# any PR whose head is that commit; a pull_request trigger would report it twice.
+# Every push, one check named CI. A push run also reports on any PR from this
+# repo whose head is that commit; adding pull_request would report it twice.
+# PRs from forks get no run (there are none).
 on: push
 
 jobs:

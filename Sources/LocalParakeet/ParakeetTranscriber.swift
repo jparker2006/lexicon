@@ -2,10 +2,8 @@ import Foundation
 public import LexiconDomain
 public import Transcription
 
-// The real adapter imports FluidAudio here and nowhere else:
-//   import FluidAudio
-// Package.swift adds `.product(name: "FluidAudio", package: "FluidAudio")` to this
-// target only. The sketch has no external dependencies, so the bodies are empty.
+// The real adapter imports FluidAudio here and nowhere else (#47). Package.swift
+// already declares it for this target only; the bodies are still empty.
 
 /// Parakeet Unified 0.6B (English) on the Neural Engine via FluidAudio (#9).
 /// ~80 ms per clip of 6 s or less, ~130 MB resident when loaded, warm load
