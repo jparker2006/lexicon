@@ -71,6 +71,8 @@ final class OneShot<Value: Sendable>: Sendable {
 
     /// The value if settled, without waiting.
     var current: Value? { state.withLock { $0.value } }
+    /// Settled, possibly with nil.
+    var isSettled: Bool { state.withLock { $0.settled } }
 
     /// First call wins; later calls are ignored.
     func settle(_ value: Value?) {
@@ -110,22 +112,66 @@ final class OneShot<Value: Sendable>: Sendable {
     }
 }
 
-/// Decides when the tail after fn-up may end. Pure.
+/// Where the tail after fn-up ends: at the first 40 ms of quiet, never past
+/// 200 ms after fn-up. Pure: fed the 16 kHz samples in capture order, before
+/// and after the release, so it can be tested without a mic or a clock.
 ///
 /// Why adaptive: #4 says keep capturing ~200 ms after release so the last word
 /// is never cut; #8 says send finalize the instant fn comes up. A fixed 200 ms
 /// tail would add 200 ms to every Dictation's lag. So the tail ends as soon as
-/// the signal after release is quiet, and 200 ms is only the cap. Values are #18's.
-struct TailPolicy: Sendable {
+/// the signal is quiet, and 200 ms is only the cap. Values are #18's.
+///
+/// The cap is counted in audio, not on a clock: the mic delivers audio in real
+/// time, so the two agree, and a stalled device is the capture's problem (it
+/// has a wall-clock backstop), not this policy's.
+struct Tail: Sendable {
     var cap: Duration = .milliseconds(200)
     var quietWindow: Duration = .milliseconds(40)
-    var quietBelowDBFS: Float = -45
+    var quietBelowDBFS: Double = -45
 
-    enum Verdict: Sendable { case keepCapturing, stop }
+    /// Quiet is judged per 10 ms block.
+    static let blockSamples = PCM16k.sampleRate / 100
 
-    func verdict(sinceRelease: Duration, recentLevelsDBFS: [Float]) -> Verdict {
-        // TODO: stop if sinceRelease >= cap, or if the last `quietWindow` of levels are all below threshold.
-        fatalError("not implemented")
+    private(set) var isOver = false
+    /// Samples the tail may still take. nil until fn-up.
+    private var budget: Int?
+    private var quietRun = 0
+    private var blockFill = 0
+    private var blockEnergy: Double = 0
+
+    /// Before fn-up keeps everything. After it, returns how many of `samples`
+    /// belong to the tail: fewer than given means the tail just ended.
+    mutating func keep(_ samples: UnsafeBufferPointer<Int16>) -> Int {
+        var kept = 0
+        while kept < samples.count, !isOver {
+            let take = min(Self.blockSamples - blockFill, samples.count - kept, budget ?? .max)
+            for sample in samples[kept..<kept + take] { blockEnergy += Double(sample) * Double(sample) }
+            blockFill += take
+            kept += take
+            if let budget { self.budget = budget - take }
+            if blockFill == Self.blockSamples { closeBlock() }
+            if let budget, budget == 0 || quietRun >= Self.samples(quietWindow) { isOver = true }
+        }
+        return kept
+    }
+
+    /// fn-up was `late` ago: the cap counts from fn-up, not from this call.
+    mutating func release(late: Duration) {
+        let budget = max(0, Self.samples(cap) - Self.samples(late))
+        self.budget = budget
+        isOver = budget == 0 || quietRun >= Self.samples(quietWindow)
+    }
+
+    private mutating func closeBlock() {
+        let rms = (blockEnergy / Double(Self.blockSamples)).squareRoot()
+        let quiet = 20 * log10(max(rms, 1e-9) / 32_768) < quietBelowDBFS
+        quietRun = quiet ? quietRun + Self.blockSamples : 0
+        blockFill = 0
+        blockEnergy = 0
+    }
+
+    private static func samples(_ duration: Duration) -> Int {
+        Int((duration / .seconds(1) * Double(PCM16k.sampleRate)).rounded())
     }
 }
 
