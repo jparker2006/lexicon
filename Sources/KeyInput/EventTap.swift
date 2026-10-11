@@ -90,7 +90,7 @@ final class EventTapThread: @unchecked Sendable {
         guard let key = KeyInput(event, secureInput: { IsSecureEventInputEnabled() }, now: .now()) else { return pass }
         feed(key)
         switch key {
-        case .fnDown(let at, _): logDelivery("down", at: at)
+        case .fnDown(let at, _, _): logDelivery("down", at: at)
         case .fnUp(let at): logDelivery("up", at: at)
         default: break
         }
@@ -148,7 +148,8 @@ extension KeyInput {
         case .flagsChanged:
             guard event.getIntegerValueField(.keyboardEventKeycode) == Self.fnKeyCode else { return nil }
             let at = HostTime(eventTimestamp: event.timestamp, now: now)
-            self = event.flags.contains(.maskSecondaryFn) ? .fnDown(at, secureInput: secureInput()) : .fnUp(at)
+            self = event.flags.contains(.maskSecondaryFn)
+                ? .fnDown(at, secureInput: secureInput(), id: DictationID()) : .fnUp(at)
         case .keyDown:
             self = .otherKey(HostTime(eventTimestamp: event.timestamp, now: now))
         default:

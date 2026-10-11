@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import AudioCapture
 @testable import KeyInput
@@ -18,7 +19,7 @@ func loneTapLeavesNoHistoryRowAndNoAudioFile() async throws {
     let rig = try FnRig()
     var events = await rig.conductor.events().makeAsyncIterator()
 
-    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false), .fnUp(fnAt(90))]))
+    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false, id: DictationID()), .fnUp(fnAt(90))]))
     let started = await awaitStart(&events)
     let id = try #require(started)
     await settleFn(rig)
@@ -34,7 +35,7 @@ func shortcutWithinTheThresholdLeavesNothing() async throws {
     var events = await rig.conductor.events().makeAsyncIterator()
 
     // fn+arrow: the key lands inside the hold threshold, so the tap is discarded.
-    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false), .otherKey(fnAt(120)), .fnUp(fnAt(400))]))
+    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false, id: DictationID()), .otherKey(fnAt(120)), .fnUp(fnAt(400))]))
     let started = await awaitStart(&events)
     let id = try #require(started)
     await settleFn(rig)
@@ -49,7 +50,7 @@ func holdTypesTheTextAndKeepsTheRow() async throws {
     let rig = try FnRig()
     var events = await rig.conductor.events().makeAsyncIterator()
 
-    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false), .deadline(fnAt(300)), .fnUp(fnAt(600))]))
+    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false, id: DictationID()), .deadline(fnAt(300)), .fnUp(fnAt(600))]))
     // Confirmed and stopped are sent before the run announces itself, so read from the first event.
     let seen = await eventsUntilFinished(&events)
     let started = startedID(in: seen)
@@ -75,7 +76,7 @@ func secureInputFnDownStartsNoDictation() async throws {
     let rig = try FnRig()
     var events = await rig.conductor.events().makeAsyncIterator()
 
-    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: true), .fnUp(fnAt(600))]))
+    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: true, id: DictationID()), .fnUp(fnAt(600))]))
     await settleFn(rig)
     #expect(await rig.conductor.inFlight.isEmpty)
     #expect(try cafFiles(in: rig.history).isEmpty)
@@ -88,6 +89,81 @@ func secureInputFnDownStartsNoDictation() async throws {
     #expect(started == next.id)
 }
 
+@Test(.timeLimit(.minutes(1)))
+func aCommandForAnotherPressNeverEndsTheRecording() async throws {
+    let rig = try FnRig()
+    var events = await rig.conductor.events().makeAsyncIterator()
+    let held = DictationID(), stray = DictationID()
+
+    await rig.conductor.handle(.dictationBegan(held, at: fnAt(0)))
+    #expect(await awaitStart(&events) == held)
+    // A press the Conductor never started (its begin came while `held` was recording) ends nothing.
+    await rig.conductor.handle(.dictationBegan(stray, at: fnAt(400)))
+    await rig.conductor.handle(.dictationDiscarded(stray))
+    await rig.conductor.handle(.dictationStopped(stray, at: fnAt(450)))
+    await rig.conductor.handle(.dictationConfirmed(held, .hold))
+    await rig.conductor.handle(.dictationStopped(held, at: fnAt(900)))
+    await settleFn(rig)
+
+    let row = try #require(await rig.history.dictation(held))
+    #expect(row.status == .inserted)
+    #expect(await rig.history.dictation(stray) == nil)
+    #expect(try cafFiles(in: rig.history).count == 1)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func sleepWithTheNextPressStillQueuedKeepsThatDictation() async throws {
+    // The Reviewer's case on #123: the Mac sleeps while fn-up of one hold and
+    // fn-down of the next sit in the command stream, unread. The next press must
+    // still be its own Dictation, and a later lone tap must not delete it.
+    let keys = ScriptedKeys()
+    let rig = try FnRig(keyboard: keys.keyboard)
+    var events = await rig.conductor.events().makeAsyncIterator()
+    var commands = keys.keyboard.commands.makeAsyncIterator()
+    let first = DictationID(), second = DictationID(), tap = DictationID()
+
+    keys.press(.fnDown(fnAt(0), secureInput: false, id: first), .deadline(fnAt(300)))
+    for _ in 0..<2 { await rig.conductor.handle(try #require(await commands.next())) }
+    #expect(await awaitStart(&events) == first)
+
+    keys.press(.fnUp(fnAt(600)), .fnDown(fnAt(700), secureInput: false, id: second))
+    await rig.conductor.systemWillSleep()
+    keys.press(.fnUp(fnAt(1_500)), .fnDown(fnAt(1_800), secureInput: false, id: tap), .fnUp(fnAt(1_850)))
+    keys.end()
+    while let command = await commands.next() { await rig.conductor.handle(command) }
+    await settleFn(rig)
+
+    #expect(try #require(await rig.history.dictation(first)).status == .inserted)
+    let kept = try #require(await rig.history.dictation(second))
+    #expect(kept.versions?.model == "Ship it")
+    #expect(await rig.history.dictation(tap) == nil)
+    #expect(try cafFiles(in: rig.history).count == 2)
+}
+
+/// The real recognizer behind a `Keyboard`, fed by the test instead of the fn tap.
+private final class ScriptedKeys: Sendable {
+    let keyboard: Keyboard
+    private let continuation: AsyncStream<KeyCommand>.Continuation
+
+    init() {
+        let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
+        let gesture = Gesture()
+        keyboard = Keyboard(commands: commands, feed: { input in
+            for command in gesture.handle(input) { continuation.yield(command) }
+        })
+        self.continuation = continuation
+    }
+
+    func press(_ inputs: KeyInput...) { for input in inputs { keyboard.feed(input) } }
+    func end() { continuation.finish() }
+}
+
+/// One recognizer behind a lock, so the test and the Conductor can both feed it.
+private final class Gesture: Sendable {
+    private let gesture = Mutex(FnGesture(holdThreshold: KeyboardConfig().holdThreshold))
+    func handle(_ input: KeyInput) -> [KeyCommand] { gesture.withLock { $0.handle(input).commands } }
+}
+
 /// The real Conductor on a fake mic, a scripted model and a recording destination,
 /// with History and its audio under a throwaway folder.
 private struct FnRig {
@@ -96,7 +172,7 @@ private struct FnRig {
     let destination: HeadlessDestination
     let conductor: Conductor<HeadlessDestination>
 
-    init() throws {
+    init(keyboard: Keyboard? = nil) throws {
         let paths = AppPaths.temporary()
         let recorder = Recorder(hardware: FakeMic().hardware)
         let history = try HistoryStore(paths: paths)
@@ -108,7 +184,7 @@ private struct FnRig {
             recorder: recorder, speech: SpeechEngine(local: ScriptedTranscriber(text: "Ship it")), cleanup: Cleanup(),
             lexicon: try Lexicon(paths: paths), history: history, destination: destination,
             preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
-            keyboard: nil, fixes: nil, jev: nil)
+            keyboard: keyboard, fixes: nil, jev: nil)
     }
 }
 
