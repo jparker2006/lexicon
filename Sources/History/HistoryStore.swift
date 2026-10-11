@@ -118,6 +118,36 @@ public final class HistoryStore: @unchecked Sendable {
     /// second time. See RecoveryPlan.
     public func recover() async -> [UnfinishedDictation] { fatalError("not implemented") }
 
+    /// Audio retention (see `Retention`). Rows keep their text; their audio reads
+    /// `.expired`. Marks every expiring row in one commit, then unlinks the files,
+    /// as Delete does, so a crash in between leaves files recovery deletes, never
+    /// orphans it would adopt and transcribe again.
+    public func sweepAudio(now: Date) async {
+        do {
+            try await read { [self] db in
+                let expired = try db.transaction { db in
+                    try Retention.expire(in: db, now: now, bytes: { Self.bytes(at: audioURL(for: $0)) })
+                }
+                for id in expired {
+                    // One file that won't go must not strand the rest; launch recovery unlinks it later.
+                    do {
+                        try removeAudioFile(id)
+                    } catch {
+                        log.error("Retention left an audio file: \(String(describing: error), privacy: .private)")
+                    }
+                    changed.yield(id)
+                }
+            }
+        } catch {
+            log.error("Audio retention failed: \(String(describing: error), privacy: .private)")
+        }
+    }
+
+    /// 0 for a missing file: it takes no space, and its row can still be marked.
+    private static func bytes(at url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
+
     /// RAM copy of a Dictation's audio, for retry. nil once retention removed it.
     public func clip(_ id: DictationID) async -> AudioClip? { fatalError("not implemented") }
 
@@ -169,13 +199,18 @@ public final class HistoryStore: @unchecked Sendable {
     /// so a crash from here on leaves a file recovery deletes (`deleteGarbage`),
     /// never an orphan it would adopt and transcribe again.
     private func dropAudio(_ id: DictationID) throws {
-        do {
-            try FileManager.default.removeItem(at: audioURL(for: id))
-        } catch CocoaError.fileNoSuchFile {}
+        try removeAudioFile(id)
         try db.transaction {
             try $0.execute("DELETE FROM dictation WHERE id = ? AND audio_storage = ?",
                            [.text(id.description), .text(AudioStorage.deleted.rawValue)])
         }
+    }
+
+    /// Already gone is fine: every caller has committed the row's mark first.
+    private func removeAudioFile(_ id: DictationID) throws {
+        do {
+            try FileManager.default.removeItem(at: audioURL(for: id))
+        } catch CocoaError.fileNoSuchFile {}
     }
 }
 
