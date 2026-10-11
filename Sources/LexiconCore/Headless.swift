@@ -50,13 +50,15 @@ public final class HeadlessSystem: Sendable {
     public let conductor: Conductor<HeadlessDestination>
     public let history: HistoryStore
 
-    /// `clock` times the local model's idle unload; tests pass a fake one.
+    /// `cloud`: real providers, used only when `preferences` name a cloud model
+    /// and the environment holds its key; tests pass a scripted link.
+    /// `clock` times the race deadline and the local model's idle unload; tests pass a fake one.
     public static func make(paths: AppPaths, context: AppContext, preferences: Preferences,
-                            local: (any LocalTranscriber)?,
+                            local: (any LocalTranscriber)?, cloud: CloudLink = .network,
                             clock: any Clock<Duration> = ContinuousClock()) throws -> HeadlessSystem {
         let history = try HistoryStore(paths: paths)
         let conductor = Conductor(
-            recorder: Recorder(), speech: SpeechEngine(local: local, clock: clock), cleanup: Cleanup(),
+            recorder: Recorder(), speech: SpeechEngine(local: local, cloud: cloud, clock: clock), cleanup: Cleanup(),
             lexicon: try Lexicon(paths: paths), history: history, destination: HeadlessDestination(context: context),
             preferences: PreferencesStore(fixed: preferences), secrets: Secrets(.environment),
             keyboard: nil, fixes: nil, jev: nil)

@@ -41,9 +41,19 @@ extension Conductor {
         }
         let context = await contextValue
         // Granted once the app is known: an always-private app gets no access (#5).
-        // TODO: while this Dictation runs, Private mode turned on -> access?.revoke(.privateModeOn);
-        // focus moving into an always-private app -> access?.revoke(.alwaysPrivateApp).
+        // TODO(#68): focus moving into an always-private app -> access?.revoke(.alwaysPrivateApp).
         let access = CloudAccess.granted(by: start.preferences, app: context, keys: secrets.lookup)
+        // Private mode turned on while Jake talks cuts the stream at once; local finishes (#5).
+        let privacyWatch = access.map { access in
+            let store = preferences
+            let changes = store.changes()
+            return Task {
+                // Also catches a switch between the fn-down snapshot and subscribing.
+                if store.snapshot().privacy == .private { return access.revoke(.privateModeOn) }
+                for await now in changes where now.privacy == .private { return access.revoke(.privateModeOn) }
+            }
+        }
+        defer { privacyWatch?.cancel() }
         history.record(.began(id, origin: start.origin, purpose: start.purpose, at: Date(), app: context))
         emit(.started(id))
 
