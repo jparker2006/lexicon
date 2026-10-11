@@ -33,48 +33,64 @@ public struct AudioLevel: Sendable { public let rms: Float }
 /// Captures audio for one Dictation at a time.
 ///
 /// Hides (#4): AVAudioEngine plus AVAudioSinkNode (10.7 ms buffers on the
-/// real-time thread, which only memcpys into `SPSCRing`), the writer queue that
-/// drains every ~50-100 ms, AVAudioConverter (MinimumPhase, .max) to 16 kHz mono
+/// real-time thread, which only copies into `SPSCRing`), the writer queue that
+/// drains every 100 ms, AVAudioConverter (MinimumPhase, .max) to 16 kHz mono
 /// Int16, `AudioFileWritePackets` into a CAF whose data size stays -1 while open,
 /// F_FULLFSYNC every 1 s off the audio thread, device pinning, engine rebuild on
 /// a configuration change (same file keeps growing, gap logged), the disk-low
-/// and write-error fallback to RAM, all-zero-input detection, and the adaptive tail.
+/// and write-error fallback to RAM, and the adaptive tail.
 /// Never touches outputNode or mainMixerNode.
 ///
-/// Threads: the Core Audio IO thread (sink node) and one serial writer queue.
-/// All engine and file state is confined to the writer queue.
+/// Threads: the Core Audio IO thread (sink node), the microphone's engine
+/// queue, and one serial writer queue for every file and converter.
 public final class Recorder: Sendable {
     /// The one serial writer queue: drains, converts, writes, syncs, closes.
     private let writerQueue = DispatchQueue(label: "lexicon.audio.writer", qos: .userInitiated)
+    let microphone: Microphone
+    let policy: FlushPolicy
 
-    public init() {}
-
-    /// At launch and after every stop, so `start` only has to start hardware.
-    public func prepare(_ input: AudioInput) {
-        // A file has nothing to warm up. TODO(#52): prepare the engine for the microphone.
+    public convenience init() {
+        self.init(hardware: .system, policy: FlushPolicy())
     }
 
-    /// fn-down. Starts the engine, then (on the writer queue, not in front of the
-    /// hardware start) creates `file`. Returns as soon as capture is running.
+    /// Tests swap in fake mic hardware (no mic) or a flush policy (a full disk).
+    init(hardware: MicHardware = .system, policy: FlushPolicy = FlushPolicy()) {
+        microphone = Microphone(hardware: hardware)
+        self.policy = policy
+    }
+
+    /// At launch, so the first `start` only has to start hardware. After every
+    /// stop the microphone prepares the next engine itself. A file has nothing to warm up.
+    public func prepare(_ input: AudioInput) {
+        guard case .microphone(let uid) = input else { return }
+        microphone.prepare(deviceUID: uid)
+    }
+
+    /// fn-down at `keyDown`. Starts the engine, then (on the writer queue, not in
+    /// front of the hardware start) creates `file`. Returns as soon as capture is
+    /// running. The summary's start gap counts from `keyDown`.
     ///
     /// Ownership handoff: while the LiveCapture is open, this module is the only
     /// writer of `file`. After `stop`, the file belongs to History (#4).
     /// fn never waits (#18): if the previous LiveCapture is still in its tail, its
     /// tail ends now and the new capture starts at once.
-    public func start(_ input: AudioInput, writingTo file: URL) async throws(RecorderError) -> LiveCapture {
+    public func start(_ input: AudioInput, writingTo file: URL,
+                      since keyDown: HostTime = .now()) async throws(RecorderError) -> LiveCapture {
+        let source: any CaptureSource
+        var policy = policy
         switch input {
-        case .microphone:
-            fatalError("not implemented: lands with #52")
+        case .microphone(let uid):
+            source = try await microphone.start(deviceUID: uid, keyDown: keyDown)
         case .file(let url, let pace):
-            let source = try FileSource(url: url, pace: pace)
-            var policy = FlushPolicy()
+            source = try FileSource(url: url, pace: pace)
             if pace == .asFastAsPossible { policy.drainEvery = .milliseconds(5) }
-            guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue) else {
-                throw .engineFailed("no converter from \(source.sampleRate) Hz to 16 kHz")
-            }
-            core.begin()
-            return LiveCapture(core: core)
         }
+        guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue, startedAt: keyDown) else {
+            source.stop()
+            throw .engineFailed("no converter from \(source.firstSegment.rate) Hz to 16 kHz")
+        }
+        core.begin()
+        return LiveCapture(core: core)
     }
 
     /// Returns once every stopped or dropped capture's file is synced and closed.
@@ -89,7 +105,7 @@ public final class Recorder: Sendable {
 
 /// How a LiveCapture ends.
 public enum Ending: Sendable, Hashable {
-    /// Jake released fn at this time: capture the adaptive tail (TailPolicy), then stop.
+    /// Jake released fn at this time: capture the adaptive tail (`Tail`), then stop.
     case released(at: HostTime)
     /// Cancel, discard, sleep: stop now, no tail.
     case immediately
@@ -147,10 +163,10 @@ public struct LiveCapture: ~Copyable, Sendable {
     /// Returns once the last packet is written and `feed` has finished. The
     /// F_FULLFSYNC and close (which writes the real size) run after, on the
     /// writer queue, in parallel with transcription (`Recorder.settle` waits).
+    /// `.released` keeps capturing until the last word is in: 40 ms of quiet,
+    /// at most 200 ms after fn-up. A file read to its end has no tail left.
     public consuming func stop(_ ending: Ending) async -> Take {
-        // TODO(#52): for .released on the microphone, keep capturing until TailPolicy says stop (cap 200 ms).
-        // A file has no tail: its release is the end of the file.
-        await core.stop()
+        await core.stop(ending)
     }
 
     deinit { core.dropped() }

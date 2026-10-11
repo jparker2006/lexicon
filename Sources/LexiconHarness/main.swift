@@ -12,12 +12,24 @@ import TestHooks
 
 let usage = """
     usage: lexicon-harness check
-           lexicon-harness hook status | dictate <wav> | indicator <state>
+           lexicon-harness hook status | dictate <wav> | indicator <state> [message] | sound <cue>
+           lexicon-harness hook capture <seconds> [prepared[=<idle s>]] [change] [device=<uid>]
+           lexicon-harness pill [--shots <dir>]
            lexicon-harness history [search word]
 
       check   launch Lexicon Dev with test hooks, find its status item by identifier,
               list its windows, open the target field, read it and clear it
       hook    send one test hook to the running Lexicon Dev and print the reply
+              states: hidden held handsfree warning finishing landed paste error
+              cues:   start stop warning error
+              capture: record from the mic and measure the start gap, tail, file
+              and mic release; `prepared` prepares the engine first and waits
+              0.3 s (or the idle seconds given) before fn-down, else it is built
+              cold on fn-down; `change` rebuilds the engine halfway as a device
+              change would
+      pill    show each indicator state on Lexicon Dev and check the pill, the menu bar
+              icon and the focus; then play each sound and time it. --shots <dir> saves
+              a picture of the pill and the menu bar icon for each state
       history open the History window from the menu bar and time it, click to copy,
               search, close, and compare memory before and after
     """
@@ -27,6 +39,13 @@ func ok(_ line: String) { print("ok    \(line)") }
 func fail(_ message: String, code: Int32 = 1) -> Never {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
     exit(code)
+}
+
+/// A duration in milliseconds, one decimal place.
+func milliseconds(_ duration: Duration) -> String {
+    let parts = duration.components
+    let ms = Double(parts.seconds) * 1_000 + Double(parts.attoseconds) / 1_000_000_000_000_000
+    return String(format: "%.1f", ms)
 }
 
 @MainActor
@@ -51,20 +70,63 @@ func check() async throws {
 }
 
 func hook(_ arguments: [String]) async throws {
-    let command: TestHookCommand = switch (arguments.first, arguments.dropFirst().first, arguments.count) {
-    case ("status", _, 1): .status
-    case ("dictate", let wav?, 2): .dictate(wav: URL(filePath: wav).standardizedFileURL.path)
-    case ("indicator", let state?, 2): .indicator(state: state)
-    default: fail(usage, code: 64)
-    }
-    switch try await DevApp.hooks.send(command, timeout: .seconds(10)) {
+    let command = hookCommand(arguments)
+    var timeout = Duration.seconds(10)
+    if case .capture(let seconds, let idle, _, _) = command { timeout += .seconds(seconds + (idle ?? 0)) }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    switch try await DevApp.hooks.send(command, timeout: timeout) {
     case .status(let status):
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         print(String(decoding: try encoder.encode(status), as: UTF8.self))
+    case .done:
+        print("ok")
+    case .soundPlayed(let latency):
+        print("played in \(milliseconds(latency)) ms")
+    case .capture(let measurement):
+        print(String(decoding: try encoder.encode(measurement), as: UTF8.self))
     case .failed(let reason):
         fail("FAIL  \(reason)")
     }
+}
+
+/// The command a `hook` line asks for. A bad line prints the usage.
+func hookCommand(_ arguments: [String]) -> TestHookCommand {
+    switch arguments.first ?? "" {
+    case "status" where arguments.count == 1:
+        return .status
+    case "dictate" where arguments.count == 2:
+        return .dictate(wav: URL(filePath: arguments[1]).standardizedFileURL.path)
+    case "indicator" where arguments.count == 2 || arguments.count == 3:
+        guard let state = indicatorState(named: arguments[1], message: arguments.count == 3 ? arguments[2] : nil) else {
+            fail(usage, code: 64)
+        }
+        return .indicator(state)
+    case "capture" where arguments.count >= 2:
+        return capture(seconds: arguments[1], options: arguments.dropFirst(2))
+    case "sound" where arguments.count == 2:
+        guard let cue = SoundCue(rawValue: arguments[1]) else { fail(usage, code: 64) }
+        return .sound(cue)
+    default:
+        fail(usage, code: 64)
+    }
+}
+
+func capture(seconds: String, options: ArraySlice<String>) -> TestHookCommand {
+    guard let seconds = Double(seconds), seconds > 0 else { fail(usage, code: 64) }
+    var change = false
+    var prepared, device: String?
+    for option in options {
+        switch option {
+        case "prepared": prepared = "0.3"
+        case _ where option.hasPrefix("prepared="): prepared = String(option.dropFirst("prepared=".count))
+        case "change": change = true
+        case _ where option.hasPrefix("device="): device = String(option.dropFirst("device=".count))
+        default: fail(usage, code: 64)
+        }
+    }
+    let idle = prepared.map { Double($0) }
+    if idle == .some(nil) { fail(usage, code: 64) }
+    return .capture(seconds: seconds, preparedIdle: idle ?? nil, deviceChange: change, deviceUID: device)
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -72,6 +134,7 @@ do {
     switch arguments.first {
     case "check": try await check()
     case "hook": try await hook(Array(arguments.dropFirst()))
+    case "pill": try await pill(Array(arguments.dropFirst()))
     case "history": try await HistoryCheck.run(search: arguments.dropFirst().first)
     case TargetField.mode: TargetField.serve(text: arguments.dropFirst().first ?? "")
     default: fail(usage, code: 64)

@@ -7,4 +7,6 @@ public enum AccessibilityID {
     public static let historySearch = "lexicon.history.search"
     /// The menu bar icon's button.
     public static let statusItem = "lexicon.statusItem"
+    /// The recording pill's panel.
+    public static let indicator = "lexicon.indicator"
 }

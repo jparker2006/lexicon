@@ -12,7 +12,7 @@ import TestHooks
 /// 1. `AppPaths.forBundle(id:)`; create the data folder.
 /// 2. `LexiconSystem.live(...)`: opens SQLite, starts the event tap. If
 ///    Accessibility is missing, show onboarding instead (relaunch after grant). (#56, #57)
-/// 3. Status item (now), then `AppUI.start()` with the indicator (#55).
+/// 3. Status item and the indicator (now); `AppUI.start()` makes them follow the Conductor (#56).
 /// 4. `Task { await system.run() }`: recovery, key loop, inbox loop, mic prepare. (#56)
 /// 5. `SMAppService.mainApp.register()` when `startAtLogin` (no helper app). (#57)
 /// 6. NSWorkspace will-sleep -> `conductor.systemWillSleep()`. (#56)
@@ -22,6 +22,7 @@ import TestHooks
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var system: LexiconSystem?
     var statusItem: StatusItemController?
+    var indicator: DictationIndicator?
     var history: HistoryWindowPresenter?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     #if DEBUG
@@ -40,13 +41,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let appName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lexicon"
+        // TODO(#56): the system's store, once `LexiconSystem.live` builds one.
+        let preferences = PreferencesStore()
         let history = HistoryWindowPresenter(paths: paths)
         self.history = history
-        statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle),
-                                          extraItems: { [history.menuItem()] + Permissions.menuItems() })
+        let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
+            [history.menuItem()] + Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
+        }
+        let indicator = DictationIndicator(statusItem: statusItem, preferences: preferences)
+        self.statusItem = statusItem
+        self.indicator = indicator
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
         #if DEBUG
-        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths)
+        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator)
         #endif
 
         let permissions = Permissions.summary

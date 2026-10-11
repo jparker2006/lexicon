@@ -2,10 +2,14 @@
 # harness: build and run lexicon-harness, which drives the installed Lexicon Dev
 # through test hooks and the Accessibility API (#45).
 #
-#   scripts/dev-run.sh -- --test-hooks     install and launch the dev app with hooks on
-#   scripts/harness.sh check               status item, windows, the target field
-#   scripts/harness.sh hook status         one test hook, reply printed as JSON
-#   scripts/harness.sh history [word]      History window: open time, copy, search, close
+#   scripts/dev-run.sh -- --test-hooks       install and launch the dev app with hooks on
+#   scripts/harness.sh check                 status item, windows, the target field
+#   scripts/harness.sh hook status           one test hook, reply printed as JSON
+#   scripts/harness.sh hook dictate <wav>    dictate a WAV through the live path
+#   scripts/harness.sh hook indicator <state> [message]   show one pill state
+#   scripts/harness.sh hook sound <cue>      play one sound, reply with its latency
+#   scripts/harness.sh pill [--shots <dir>]  every pill state checked, sounds timed
+#   scripts/harness.sh history [word]        History window: open time, copy, search, close
 #
 # The live-app lane: one builder at a time. The harness reads other apps, so it
 # needs Accessibility, which it inherits from the terminal or agent app that runs
