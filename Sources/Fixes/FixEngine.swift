@@ -39,7 +39,7 @@ public enum RespeakOutcome: Sendable, Hashable {
 /// insert, Re-speak span resolution (Lexicon phonetics + Jev) and replacement.
 ///
 /// Writes Fixes only through `HistoryStore.record(.fixRecorded)` and Rules only
-/// through `Lexicon.addRule`. Owns nothing durable itself; its only state is the
+/// through `Lexicon.add`. Owns nothing durable itself; its only state is the
 /// in-memory watch windows.
 public actor FixEngine {
     public init(history: HistoryStore, lexicon: Lexicon, text: TargetApp, jev: JevClient, prompter: any FixPrompter) {
