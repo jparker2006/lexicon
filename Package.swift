@@ -96,7 +96,10 @@ let package = Package(
         ),
 
         // `lexicon-eval`: headless pipeline on WAV files for the scorer (#15). Dev only, never shipped.
-        .executableTarget(name: "LexiconEval", dependencies: ["LexiconDomain", "LexiconCore", "History", "LocalParakeet"]),
+        .executableTarget(
+            name: "LexiconEval",
+            dependencies: ["LexiconDomain", "LexiconCore", "AudioCapture", "Transcription", "History", "LocalParakeet"]
+        ),
 
         // Test hooks: the request and reply wire between a harness and the running
         // dev app (#45). Every file is `#if DEBUG`, so release builds hold none of it.
@@ -110,7 +113,7 @@ let package = Package(
             name: "LexiconTests",
             dependencies: [
                 "LexiconDomain", "KeyInput", "AudioCapture", "Transcription", "Cleanup", "WordStore", "History",
-                "AppText", "LexiconCore", "LexiconUI", "TestHooks",
+                "AppText", "LexiconCore", "LexiconUI", "TestHooks", "LexiconEval",
             ]
         ),
     ],
