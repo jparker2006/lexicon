@@ -66,7 +66,7 @@ Deliberately not used:
 5. **Build** (builder): the implement-ticket skill, from claim to a PR ready for review, then the next approved unblocked ticket. It stops for a real blocker, an unresolved decision or the end of its sequence.
 6. **Review and merge** (Reviewer): every PR says `Refs #N` and never a closing keyword. The Reviewer merges as below.
 7. **Install** (Reviewer, only after Jake says "install").
-8. **Jake closes the issue** once he has used the change in his daily copy.
+8. **Closing.** Plumbing tickets (build, docs, workflow, stores, scorers, anything Jake can't feel in the app) are closed as soon as they merge; the orchestrator closes them. Tickets Jake can feel (fn, paste, the pill, setup, Cleanup quality, Re-speak) stay open until **Jake closes them** after using the change in his daily copy.
 
 ## Merging
 

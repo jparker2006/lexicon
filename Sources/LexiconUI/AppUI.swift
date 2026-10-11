@@ -26,18 +26,6 @@ public final class AppUI {
     public func showSettings() { fatalError("not implemented") }
 }
 
-/// NSStatusItem with a template image; left click opens History, the menu has
-/// Settings, Private mode, Quit. `AXIdentifier` "lexicon.statusItem" for the
-/// end-to-end harness (#14). Dictation state shown by swapping the image.
-@MainActor
-final class StatusItemController: NSObject {
-    let item: NSStatusItem
-    init(onOpenHistory: @escaping @MainActor () -> Void, onSettings: @escaping @MainActor () -> Void) {
-        fatalError("not implemented")
-    }
-    func render(_ event: ConductorEvent) { fatalError("not implemented") }
-}
-
 /// The Dictation indicator: a borderless NSPanel with `.nonactivatingPanel`,
 /// `ignoresMouseEvents`, `canBecomeKey == false`, joins all Spaces and full-screen
 /// apps. It must never take focus: focus is where the text will be pasted.
