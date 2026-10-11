@@ -44,7 +44,9 @@ final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextF
         window.setFrameAutosaveName("Setup")
 
         stack.orientation = .vertical
-        stack.alignment = .width
+        // Leading plus explicit widths (`fill`): with `.width` alignment, a label
+        // hugged its text and sat against the right margin (live check).
+        stack.alignment = .leading
         stack.spacing = SetupLayout.spacing
         stack.edgeInsets = NSEdgeInsets(top: SetupLayout.inset, left: SetupLayout.inset,
                                         bottom: SetupLayout.inset, right: SetupLayout.inset)
@@ -58,6 +60,7 @@ final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextF
         tryField.delegate = self
         tryField.isEnabled = false
         rows[.tryFn]?.column.addArrangedSubview(tryField)
+        rows[.tryFn].map { tryField.fill($0.column) }
 
         let separator = NSBox()
         separator.boxType = .separator
@@ -73,6 +76,7 @@ final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextF
         globe.orientation = .vertical
         globe.alignment = .leading
         stack.addArrangedSubview(globe)
+        globeDetail.fill(globe)
 
         let done = NSButton(title: "Done", target: self, action: #selector(doneClicked(_:)))
         done.bezelStyle = .rounded
@@ -80,6 +84,9 @@ final class SetupWindowController: NSWindowController, NSWindowDelegate, NSTextF
         let footer = NSStackView()
         footer.addView(done, in: .trailing)
         stack.addArrangedSubview(footer)
+        for view in stack.arrangedSubviews {
+            view.widthAnchor.constraint(equalToConstant: SetupLayout.contentWidth).isActive = true
+        }
 
         window.contentView = stack
     }
@@ -213,14 +220,13 @@ private final class SetupRowView: NSStackView {
         progress.isHidden = true
 
         column.orientation = .vertical
-        column.alignment = .width
+        column.alignment = .leading
         column.spacing = 6
-        // A fixed width: left to the stack, rows with only labels came out right-aligned
-        // (live check), while the Try it row's field stretched its column.
         column.widthAnchor.constraint(equalToConstant: SetupLayout.textWidth).isActive = true
-        column.addArrangedSubview(header)
-        column.addArrangedSubview(detail)
-        column.addArrangedSubview(progress)
+        for view in [header, detail, progress] {
+            column.addArrangedSubview(view)
+            view.fill(column)
+        }
 
         addArrangedSubview(icon)
         addArrangedSubview(column)
@@ -252,6 +258,13 @@ private final class SetupRowView: NSStackView {
         button.isEnabled = row.state == .current
         progress.isHidden = row.progress == nil
         progress.doubleValue = row.progress ?? 0
+    }
+}
+
+private extension NSView {
+    /// As wide as `stack`, whose alignment would otherwise let it hug its content.
+    func fill(_ stack: NSStackView) {
+        widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 }
 
