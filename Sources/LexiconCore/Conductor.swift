@@ -122,8 +122,14 @@ public actor Conductor<Destination: TextDestination> {
         case .pasteLast:
             Task { await self.pasteLast() }
         case .justFixed:
-            let access = CloudAccess.granted(by: preferences.snapshot(), app: .unknown, keys: secrets.lookup)
-            if let fixes { Task { await fixes.justFixed(access: access) } }
+            // The fix is in the frontmost app, so the always-private list applies to it.
+            if let fixes {
+                Task {
+                    let app = await destination.context()
+                    await fixes.justFixed(access: CloudAccess.granted(by: preferences.snapshot(), for: .app(app),
+                                                                      keys: secrets.lookup))
+                }
+            }
         }
     }
 

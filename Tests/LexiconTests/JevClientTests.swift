@@ -44,7 +44,7 @@ private final class FakeJev: Sendable {
 
     func access(_ preferences: Preferences = .defaults) -> CloudAccess? {
         let key = key
-        return CloudAccess.granted(by: preferences, app: .unknown) { $0 == .jev ? key : nil }
+        return CloudAccess.granted(by: preferences, for: .app(.unknown)) { $0 == .jev ? key : nil }
     }
 
     func receive(_ request: Request) -> (status: Int, body: Data)? {
@@ -198,7 +198,7 @@ private let generous: Duration = .seconds(60)
 
 @Test func noKeyOrABadReplyFallsBack() async {
     let noKey = await JevClient()
-        .decide(question, access: CloudAccess.granted(by: .defaults, app: .unknown) { _ in nil }, fallback: soundRanking)
+        .decide(question, access: CloudAccess.granted(by: .defaults, for: .app(.unknown)) { _ in nil }, fallback: soundRanking)
     #expect(noKey.source == .fallback(.noKey))
 
     for reply in [(500, answer(["c1": 1])), (200, Data("not json".utf8)), (200, answer(["unknown": 1]))] {

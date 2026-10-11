@@ -16,6 +16,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 scripts/live-lane.sh check
+. scripts/lib/fn-listeners.sh
+warn_fn_listeners
 
 RELEASE=
 if [ "${1:-}" = --release ]; then RELEASE=--release; shift; fi

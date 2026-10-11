@@ -76,9 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             [history.menuItem()] + (self?.lexiconPage.map { [$0.menuItem()] } ?? [])
                 + (self?.systemError.map { [Permissions.status($0)] } ?? [])
                 + Permissions.fnOffItems(self?.system?.fnOff) + Permissions.menuItems()
-                + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
+                + (self?.indicator.map { [$0.privateModeMenuItem(), $0.soundsMenuItem()] } ?? [])
         }
-        let indicator = DictationIndicator(statusItem: statusItem, preferences: system?.preferences ?? PreferencesStore())
+        let preferences = system?.preferences ?? PreferencesStore()
+        let indicator = DictationIndicator(statusItem: statusItem, preferences: preferences)
         // The system's Lexicon, the one every Dictation reads, so the page's edits reach the next fn-down.
         lexiconPage = system.map { LexiconWindowPresenter(lexicon: $0.lexicon) }
         self.statusItem = statusItem
@@ -95,7 +96,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
         #if DEBUG
-        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator, system: system)
+        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator, system: system,
+                                       preferences: preferences)
         #endif
 
         let permissions = Permissions.summary

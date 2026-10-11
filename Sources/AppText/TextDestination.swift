@@ -14,6 +14,11 @@ public protocol TextDestination: Sendable {
     /// fn-down: frontmost app and window, for Lexicon term selection. No screenshots (D5).
     func context() async -> AppContext
 
+    /// The frontmost app now, then each app that comes to the front. While a
+    /// Dictation is in flight the Conductor revokes its `CloudAccess` the moment
+    /// focus moves into an always-private app (#5).
+    func appChanges() async -> AsyncStream<AppContext>
+
     /// At stop: the focused field plus an input mark. nil when nothing can take text.
     func target() async -> Target?
 

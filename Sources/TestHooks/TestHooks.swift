@@ -34,6 +34,9 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     /// would at fn-up: capture the focused field after `delay` seconds (time to
     /// click into the field), then insert.
     case insert(text: String, delay: Double)
+    /// Turn Private mode on or off. A non-nil `alwaysPrivateApps` replaces the
+    /// always-private list: nil leaves it as it is, [] clears it. Replies with the status.
+    case privacy(PrivacyMode, alwaysPrivateApps: [String]?)
 }
 
 public enum TestHookReply: Codable, Sendable, Equatable {
@@ -56,13 +59,19 @@ public struct TestHookStatus: Codable, Sendable, Equatable {
     public let accessibility: Bool
     /// "granted", "denied" or "undetermined".
     public let microphone: String
+    public let privacy: PrivacyMode
+    /// Sorted, so two replies for the same settings are equal.
+    public let alwaysPrivateApps: [String]
 
-    public init(bundleID: String, version: String, pid: Int32, accessibility: Bool, microphone: String) {
+    public init(bundleID: String, version: String, pid: Int32, accessibility: Bool, microphone: String,
+                privacy: PrivacyMode, alwaysPrivateApps: [String]) {
         self.bundleID = bundleID
         self.version = version
         self.pid = pid
         self.accessibility = accessibility
         self.microphone = microphone
+        self.privacy = privacy
+        self.alwaysPrivateApps = alwaysPrivateApps
     }
 }
 
@@ -145,24 +154,58 @@ public struct TestHookChannel: Sendable {
 
     /// Harness side: post one command and wait for its reply.
     public func send(_ command: TestHookCommand, timeout: Duration) async throws -> TestHookReply {
-        let files = FileManager.default
-        try files.createDirectory(at: requests, withIntermediateDirectories: true)
+        try await reply(to: post(command), timeout: timeout)
+    }
+
+    /// Writes one request. Its file name names its reply too.
+    func post(_ command: TestHookCommand) throws -> String {
+        try FileManager.default.createDirectory(at: requests, withIntermediateDirectories: true)
         let name = "\(UUID().uuidString).json"
+        try JSONEncoder().encode(command).write(to: requests.appending(path: name), options: .atomic)
+        return name
+    }
+
+    /// Waits for the reply to request `name`, woken by the replies folder
+    /// changing rather than a poll, and on no reply takes the request back.
+    func reply(to name: String, timeout: Duration) async throws -> TestHookReply {
+        let files = FileManager.default
         let request = requests.appending(path: name)
         let reply = replies.appending(path: name)
-        try JSONEncoder().encode(command).write(to: request, options: .atomic)
-
-        let clock = ContinuousClock()
-        let deadline = clock.now + timeout
-        while clock.now < deadline {
-            if let data = try? Data(contentsOf: reply) {
-                try? files.removeItem(at: reply)
-                return try JSONDecoder().decode(TestHookReply.self, from: data)
-            }
-            try await Task.sleep(for: .milliseconds(10))
+        try? files.createDirectory(at: replies, withIntermediateDirectories: true)
+        let folder = open(replies.path, O_EVTONLY)
+        guard folder >= 0 else {
+            try? files.removeItem(at: request)
+            throw CocoaError(.fileReadNoPermission)
         }
-        try? files.removeItem(at: request)
-        throw TestHookError.noReply
+        let queue = DispatchQueue(label: "dev.jparker.lexicon.test-hooks.reply")
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: folder, eventMask: .write, queue: queue)
+        // Every way the wait ends cancels the source, and its cancel handler runs
+        // once: it reads the reply a last time, so one that landed by the deadline
+        // counts however late this task wakes. The deadline is a Dispatch timer for
+        // the same reason: under load a task can wake long after it asked to.
+        let data: Data? = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                source.setCancelHandler {
+                    close(folder)
+                    continuation.resume(returning: try? Data(contentsOf: reply))
+                }
+                source.setEventHandler { if FileManager.default.fileExists(atPath: reply.path) { source.cancel() } }
+                source.resume()
+                // Dispatch registers the source before `queue` runs anything queued after
+                // resume(), so this check runs with the watch live: a reply is either
+                // here now or raises an event.
+                queue.async { if FileManager.default.fileExists(atPath: reply.path) { source.cancel() } }
+                queue.asyncAfter(deadline: .now() + timeout / .seconds(1)) { source.cancel() }
+            }
+        } onCancel: {
+            source.cancel()
+        }
+        guard let data else {
+            try? files.removeItem(at: request)
+            throw TestHookError.noReply
+        }
+        try? files.removeItem(at: reply)
+        return try JSONDecoder().decode(TestHookReply.self, from: data)
     }
 }
 
@@ -189,7 +232,10 @@ public final class TestHookServer {
         source.setEventHandler { Self.drain(channel, handle) }
         source.setCancelHandler { close(folder) }
         source.resume()
-        // Requests written before the watch started raise no event.
+        // Requests written before the watch started raise no event. Dispatch
+        // registers the source before `queue` runs anything queued after resume(),
+        // so this drain runs with the watch live: once init returns, the server
+        // has seen or will see every request, whenever it was written.
         queue.sync { Self.drain(channel, handle) }
     }
 
