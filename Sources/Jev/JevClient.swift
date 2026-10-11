@@ -28,17 +28,13 @@ public struct JevClient: Sendable {
     public init(session: URLSession = .shared) { self.session = session }
 
     /// fn-down: open the TLS connection so a later decision skips the cold start
-    /// (measured 359 ms cold vs 150 ms warm). A HEAD carries no text and isn't a
-    /// model call; URLSession keeps the connection for the next request. The key
-    /// is read inside the task: a first Keychain read can wait on a prompt, and
-    /// the Conductor calls this on the fn-down path.
+    /// (measured 359 ms cold vs 150 ms warm). A HEAD with no text and no key: the
+    /// rejection still leaves URLSession a warm connection for the next request,
+    /// and keys are never read at fn-down (a first Keychain read can wait on a prompt).
     public func prewarm(_ access: CloudAccess?) {
-        guard let access else { return }
+        guard let access, access.revoked == nil else { return }
         let session = session
-        Task {
-            guard let key = access.key(.jev) else { return }
-            _ = try? await session.data(for: Self.request("HEAD", key: key, body: nil))
-        }
+        Task { _ = try? await session.data(for: Self.request("HEAD", key: nil, body: nil)) }
     }
 
     public func decide<Answer: Sendable>(
@@ -61,6 +57,7 @@ public struct JevClient: Sendable {
         // First to finish wins; the others are cancelled, which cancels the request.
         return await withTaskGroup(of: Decision<Answer>.self) { group in
             group.addTask {
+                guard access.revoked == nil else { return fallingBack(.privateMode) }
                 guard let (data, response) = try? await session.data(for: request),
                       (response as? HTTPURLResponse)?.statusCode == 200,
                       let (answer, probability) = question.decode(data)
@@ -82,10 +79,10 @@ public struct JevClient: Sendable {
         }
     }
 
-    private static func request(_ method: String, key: String, body: Data?) -> URLRequest {
+    private static func request(_ method: String, key: String?, body: Data?) -> URLRequest {
         var request = URLRequest(url: endpoint, timeoutInterval: 5)
         request.httpMethod = method
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        if let key { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
@@ -97,7 +94,7 @@ public struct JevClient: Sendable {
 /// A typed question. Built only from the factories below, which own the prompt
 /// wording; the TypeSafe wire shape stays internal to this module.
 public struct JevQuestion<Answer: Sendable>: Sendable {
-    /// Every piece of Jake's text in `body`, for the Secret guard.
+    /// Every string in `body` that came from the caller, for the Secret guard.
     let sent: String
     /// The whole request body: model, state and every question about that state.
     let body: Data
@@ -147,14 +144,16 @@ extension JevQuestion where Answer == [RespeakPick] {
     /// Re-speak fix (M4): which candidate span did the re-spoken word replace?
     /// Sends only each candidate plus `contextWords` words either side of it,
     /// never the rest of `recent`. Candidates outside `recent` or longer than 3
-    /// words are skipped. The answer lists every option, most likely first.
+    /// words are skipped; nil when none is left, so there is nothing to ask.
+    /// The answer lists every option, most likely first, ties in candidate order.
     public static func respeakTarget(spoken: String, spokenPhonetic: String, recent: String,
-                                     candidates: [RespeakCandidate]) -> JevQuestion<[RespeakPick]> {
+                                     candidates: [RespeakCandidate]) -> JevQuestion<[RespeakPick]>? {
         let words = recent.split(whereSeparator: \.isWhitespace).map(String.init)
         let usable = candidates.enumerated().filter { _, candidate in
             !candidate.words.isEmpty && candidate.words.count <= 3
                 && candidate.words.lowerBound >= 0 && candidate.words.upperBound <= words.count
         }.prefix(maxCandidates)
+        if usable.isEmpty { return nil }
 
         var options: [String: Int] = [:]
         var state = RespeakState(respoken: spoken, respokenPhonetic: spokenPhonetic, candidates: [:])
@@ -178,9 +177,9 @@ extension JevQuestion where Answer == [RespeakPick] {
                 + "`respoken_phonetic` with each candidate's `phonetic`.",
             criteria: criteria)
 
-        let sent = ([spoken] + state.candidates.keys.sorted().flatMap { option in
+        let sent = ([spoken, spokenPhonetic] + state.candidates.keys.sorted().flatMap { option in
             let c = state.candidates[option]!
-            return [c.before, c.text, c.after]
+            return [c.before, c.text, c.after, c.phonetic]
         }).joined(separator: "\n")
 
         let candidateFor = options
@@ -191,7 +190,10 @@ extension JevQuestion where Answer == [RespeakPick] {
             let picks = probabilities.compactMap { option, p -> RespeakPick? in
                 if option == "none" { return RespeakPick(candidate: nil, probability: p) }
                 return candidateFor[option].map { RespeakPick(candidate: $0, probability: p) }
-            }.sorted { $0.probability > $1.probability }
+            }.sorted { a, b in
+                if a.probability != b.probability { return a.probability > b.probability }
+                return (a.candidate ?? .max) < (b.candidate ?? .max)
+            }
             guard let top = picks.first else { return nil }
             return (picks, top.probability)
         }

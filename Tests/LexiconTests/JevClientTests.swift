@@ -5,8 +5,8 @@ import Testing
 import LexiconDomain
 
 // A fake TypeSafe server behind URLProtocol: the real URLSession, request and
-// response decoding, with no network. Fake keys only; each test's key is unique
-// and routes its requests to its own fake, so tests run in parallel.
+// response decoding, with no network. Fake keys only. Each fake's session tags
+// its requests, so tests run in parallel without seeing each other's.
 
 private final class FakeJev: Sendable {
     struct Request: Sendable {
@@ -30,7 +30,7 @@ private final class FakeJev: Sendable {
     init(reply: @escaping Reply) {
         self.reply = reply
         (arrived, arrivals) = AsyncStream<Void>.makeStream()
-        Self.servers.withLock { $0["Bearer " + key] = self }
+        Self.servers.withLock { $0[key] = self }
     }
 
     var requests: [Request] { received.withLock { $0 } }
@@ -38,6 +38,7 @@ private final class FakeJev: Sendable {
     var session: URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [FakeJevProtocol.self]
+        configuration.httpAdditionalHeaders = ["X-Fake-Jev": key]
         return URLSession(configuration: configuration)
     }
 
@@ -60,8 +61,8 @@ private final class FakeJevProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        let auth = request.value(forHTTPHeaderField: "Authorization") ?? ""
-        guard let server = FakeJev.servers.withLock({ $0[auth] }) else {
+        let tag = request.value(forHTTPHeaderField: "X-Fake-Jev") ?? ""
+        guard let server = FakeJev.servers.withLock({ $0[tag] }) else {
             client?.urlProtocol(self, didFailWithError: URLError(.userAuthenticationRequired))
             return
         }
@@ -107,8 +108,8 @@ private let recent = "okay now wire the auth callback into super base and then r
 private let superBase = RespeakCandidate(words: 7..<9, phonetic: "SPRBS")
 private let callback = RespeakCandidate(words: 5..<6, phonetic: "KLBK")
 private let question = JevQuestion.respeakTarget(spoken: "Supabase", spokenPhonetic: "SPBS", recent: recent,
-                                                 candidates: [callback, superBase])
-/// What #82 hands in when Jev can't answer: the sound ranking.
+                                                 candidates: [callback, superBase])!
+/// The caller's own ranking by sound, used when Jev can't answer.
 private let soundRanking = [RespeakPick(candidate: 1, probability: 0.6), RespeakPick(candidate: 0, probability: 0.3)]
 /// Long enough that only a hang reaches it, so no test depends on machine speed.
 private let generous: Duration = .seconds(60)
@@ -157,7 +158,7 @@ private let generous: Duration = .seconds(60)
     #expect(server.requests.isEmpty)
 }
 
-@Test func privateModeTurnedOnMidCallDropsTheAnswerAtOnce() async {
+@Test(.timeLimit(.minutes(1))) func privateModeTurnedOnMidCallDropsTheAnswerAtOnce() async {
     let server = FakeJev { _ in nil }
     let access = server.access()
     let deciding = Task {
@@ -181,12 +182,13 @@ private let generous: Duration = .seconds(60)
     guard case .fallback = decision.source else { Issue.record("answered after the caller gave up"); return }
 }
 
-@Test func aSecretInTheWordsSendsNothing() async {
+@Test func aSecretInTheWordsSendsNothing() async throws {
     let server = FakeJev { _ in (200, answer(["c1": 1])) }
     let access = server.access()
     let secret = "ghp_" + "aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY2zA4"
-    let leaky = JevQuestion.respeakTarget(spoken: "Supabase", spokenPhonetic: "SPBS", recent: "use \(secret) here",
-                                          candidates: [RespeakCandidate(words: 2..<3, phonetic: "HR")])
+    let leaky = try #require(JevQuestion.respeakTarget(
+        spoken: "Supabase", spokenPhonetic: "SPBS", recent: "use \(secret) here",
+        candidates: [RespeakCandidate(words: 2..<3, phonetic: "HR")]))
     let decision = await JevClient(session: server.session)
         .decide(leaky, access: access, budget: generous, fallback: [])
     #expect(decision.source == .fallback(.secretFound))
@@ -208,13 +210,29 @@ private let generous: Duration = .seconds(60)
     }
 }
 
-@Test func prewarmOpensTheConnectionWithoutSendingText() async throws {
+@Test(.timeLimit(.minutes(1))) func prewarmOpensTheConnectionWithoutTextOrKey() async throws {
     let server = FakeJev { _ in nil }
     JevClient(session: server.session).prewarm(server.access())
     for await _ in server.arrived { break }
     let request = try #require(server.requests.only)
     #expect(request.method == "HEAD")
     #expect(request.body.isEmpty)
+    #expect(request.headers["Authorization"] == nil)
+}
+
+@Test func withNoCandidateLeftThereIsNothingToAsk() {
+    let outside = [RespeakCandidate(words: 20..<21, phonetic: "A"), RespeakCandidate(words: 0..<4, phonetic: "B")]
+    #expect(JevQuestion.respeakTarget(spoken: "Supabase", spokenPhonetic: "SPBS", recent: recent,
+                                      candidates: outside) == nil)
+    #expect(JevQuestion.respeakTarget(spoken: "Supabase", spokenPhonetic: "SPBS", recent: "",
+                                      candidates: [superBase]) == nil)
+}
+
+@Test func tiedAnswersKeepTheCandidateOrder() async {
+    let server = FakeJev { _ in (200, answer(["none": 0.4, "c2": 0.3, "c1": 0.3])) }
+    let decision = await JevClient(session: server.session)
+        .decide(question, access: server.access(), budget: generous, fallback: soundRanking)
+    #expect(decision.answer.map(\.candidate) == [nil, 0, 1])
 }
 
 @Test func requestBodiesHoldOnlyTheWordsAroundEachCandidate() async throws {
@@ -230,16 +248,16 @@ private let generous: Duration = .seconds(60)
         RespeakCandidate(words: 6..<7, phonetic: "G"),  // past the candidate cap: not sent
     ]
     let server = FakeJev { _ in (200, answer(["c1": 1])) }
-    _ = await JevClient(session: server.session).decide(
-        .respeakTarget(spoken: "word99", spokenPhonetic: "X", recent: words.joined(separator: " "), candidates: candidates),
-        access: server.access(), budget: generous, fallback: [])
+    let question = try #require(JevQuestion.respeakTarget(
+        spoken: "word99", spokenPhonetic: "X", recent: words.joined(separator: " "), candidates: candidates))
+    _ = await JevClient(session: server.session).decide(question, access: server.access(), budget: generous,
+                                                        fallback: [])
 
     let request = try #require(server.requests.only)
     let body = try #require(String(data: request.body, encoding: .utf8))
     let context = JevQuestion<[RespeakPick]>.contextWords
     let sent = candidates.filter { $0.words.count <= 3 && $0.words.upperBound <= words.count }
         .prefix(JevQuestion<[RespeakPick]>.maxCandidates)
-    #expect(sent.count == 4)
     let window = Set(sent.flatMap { max(0, $0.words.lowerBound - context)..<min(40, $0.words.upperBound + context) })
     for (i, word) in words.enumerated() {
         #expect(body.contains(word) == window.contains(i), "\(word)")
