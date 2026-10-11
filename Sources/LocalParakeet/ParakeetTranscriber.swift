@@ -95,9 +95,14 @@ public actor ParakeetTranscriber: LocalTranscriber {
     }
 
     /// Model install (onboarding or `scripts/install-model.sh` until it exists):
-    /// downloads the offline int8 tier into `<root>/models/`, then the one-time
-    /// CoreML compile (about 27 s). Never on the Dictation path. Takes a
-    /// `CloudAccess` like every network use: Private mode blocks downloads too (#5).
+    /// downloads the offline int8 tier into `<root>/models/` and loads it once.
+    /// Never on the Dictation path. Takes a `CloudAccess` like every network
+    /// use: Private mode blocks downloads too (#5).
+    ///
+    /// The Neural Engine compile that first load does (about 25 s) is cached
+    /// per executable and per macOS build, under
+    /// `~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache/`, so a compile
+    /// here does not warm another process: the app compiles on its own first load.
     public static func install(paths: AppPaths, access: CloudAccess,
                                progress: @escaping @Sendable (Double) -> Void) async throws {
         guard access.revoked == nil else { throw CancellationError() }

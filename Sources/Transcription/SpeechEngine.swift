@@ -160,8 +160,9 @@ public struct SpeechText: Sendable {
 public protocol LocalTranscriber: Sendable {
     var model: LocalModel { get }
     var isResident: Bool { get async }
-    /// Warm load 0.4-0.6 s. The one-time CoreML compile (~27 s) happens at model
-    /// install, never here.
+    /// Warm load 0.2-0.6 s. The first load in a new executable or after a macOS
+    /// update also compiles for the Neural Engine (about 25 s), so the app must
+    /// warm the model at launch, not on a Dictation.
     func load() async throws
     func unload() async
     /// ~80 ms for a clip of 6 s or less. `terms` may be ignored: FluidAudio
