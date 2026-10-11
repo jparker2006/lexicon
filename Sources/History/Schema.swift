@@ -1,4 +1,5 @@
 import LexiconDomain
+import SQLiteKit
 
 /// history.sqlite. Append-only migrations. Enum-valued columns store the Swift
 /// enum's rawValue; there are deliberately no CHECK lists to keep in sync, and
@@ -79,6 +80,18 @@ enum HistorySchema {
             // What launch recovery scans: every status that is not terminal.
             "CREATE INDEX dictation_unfinished ON dictation(status) WHERE status IN (\(sqlList(\.isTerminal, is: false)))",
         ]
+    }
+
+    /// Recreates every derived index whose stored SQL differs from what the enum
+    /// generates now. Run at open, inside one transaction.
+    static func syncDerivedIndexes(in db: Database) throws {
+        for sql in derivedIndexes {
+            let name = sql.split(separator: " ")[2]
+            let stored = try db.query("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?", [.text(String(name))])
+            guard stored.first?.text(0) != sql else { continue }
+            try db.execute("DROP INDEX IF EXISTS \(name)")
+            try db.execute(sql)
+        }
     }
 
     /// `'recording', 'transcribing', ...` for every status where `property` equals `value`.
