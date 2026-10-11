@@ -72,6 +72,23 @@ import LexiconDomain
     #expect(await model.isResident)
 }
 
+@Test(.timeLimit(.minutes(1))) func privateModeTurnedOnMidDictationKeepsTheModelLoaded() async throws {
+    let model = FakeModel()
+    let clock = TestClock()
+    let engine = SpeechEngine(local: model, clock: clock)
+    let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
+    var privateMode = tenMinuteLinger
+    privateMode.privacy = .private
+
+    let attempt = await engine.begin(feed: finishedFeed(), plan: plan)
+    await engine.preferencesChanged(privateMode)
+    _ = await attempt.finish(AudioClip(samples: [1, 2, 3]))
+
+    // The fn-down snapshot said standard; Private mode came after it.
+    #expect(await engine.residency?.unloadScheduled == false)
+    #expect(await model.isResident)
+}
+
 @Test(.timeLimit(.minutes(1))) func aBrokenLocalModelIsItsOwnReasonNotTheNetwork() async throws {
     let engine = SpeechEngine(local: FakeModel(failure: ModelBroke()))
     let plan = SpeechPlan.make(preferences: .defaults, access: nil, terms: [])

@@ -215,7 +215,7 @@ final class AttemptCore: Sendable {
         let (segments, ended) = AsyncStream<SpeechSegment>.makeStream()
         ended.finish()
         self.segments = segments
-        warmUp = Task { [residency = self.residency] in await residency?.dictationBegan() }
+        warmUp = Task { [residency = self.residency] in await residency?.dictationBegan(plan.residency) }
         drain = Task { for await _ in feed {} }
     }
 
@@ -223,7 +223,7 @@ final class AttemptCore: Sendable {
         guard let local else { return .unavailable(.noModel) }
         await warmUp.value
         let outcome = await transcribe(clip, with: local)
-        await residency?.dictationEnded(plan.residency)
+        await residency?.dictationEnded()
         return outcome
     }
 
@@ -246,9 +246,9 @@ final class AttemptCore: Sendable {
     func cancel() {
         drain.cancel()
         // Ends this attempt's hold on the model once its fn-down load is done.
-        Task { [warmUp, residency, policy = plan.residency] in
+        Task { [warmUp, residency] in
             await warmUp.value
-            await residency?.dictationEnded(policy)
+            await residency?.dictationEnded()
         }
     }
 }

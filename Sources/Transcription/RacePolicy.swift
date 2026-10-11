@@ -65,7 +65,15 @@ actor LocalResidency {
     let clock: any Clock<Duration>
     /// Dictations between fn-down and their text. The model never unloads under one.
     private var dictating = 0
+    /// From `policyChanged`, the live settings. Once fed, it wins over every
+    /// fn-down snapshot, which can be older (Private mode turned on mid-Dictation).
+    private var fed: ResidencyPolicy?
+    /// The latest fn-down snapshot: the only policy when nothing feeds changes (headless runs).
+    private var snapshot: ResidencyPolicy?
+    private var policy: ResidencyPolicy? { fed ?? snapshot }
     private var unloadTimer: Task<Void, Never>?
+
+    var unloadScheduled: Bool { unloadTimer != nil }
 
     init(transcriber: any LocalTranscriber, clock: any Clock<Duration>) {
         self.transcriber = transcriber
@@ -73,7 +81,8 @@ actor LocalResidency {
     }
 
     /// fn-down: stop the unload timer and load if not resident.
-    func dictationBegan() async {
+    func dictationBegan(_ policy: ResidencyPolicy) async {
+        snapshot = policy
         dictating += 1
         unloadTimer?.cancel()
         unloadTimer = nil
@@ -83,26 +92,27 @@ actor LocalResidency {
     }
 
     /// The Dictation has its text (or was cancelled): start the idle timer.
-    func dictationEnded(_ policy: ResidencyPolicy) {
+    func dictationEnded() {
         dictating -= 1
-        armUnload(policy)
+        armUnload()
     }
 
     /// Private mode toggled or reachability changed (SpeechEngine feeds this).
     func policyChanged(_ policy: ResidencyPolicy) async {
+        fed = policy
         if policy.unloadAfter == nil {
             unloadTimer?.cancel()
             unloadTimer = nil
             if !(await transcriber.isResident) { try? await transcriber.load() }
         } else {
-            armUnload(policy)
+            armUnload()
         }
     }
 
-    private func armUnload(_ policy: ResidencyPolicy) {
+    private func armUnload() {
         unloadTimer?.cancel()
         unloadTimer = nil
-        guard dictating == 0, let linger = policy.unloadAfter else { return }
+        guard dictating == 0, let linger = policy?.unloadAfter else { return }
         let clock = clock
         unloadTimer = Task {
             do { try await clock.sleep(for: linger) } catch { return }
