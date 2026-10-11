@@ -169,6 +169,8 @@ public actor Conductor<Destination: TextDestination> {
     }
 
     func endCapture(_ end: RunEnd) {
+        // The stop sound marks fn-up itself, not the end of the adaptive tail after it.
+        if let id = capturingID, end.isStop { emit(.stopped(id)) }
         captureEnd?.yield(end)
         captureEnd?.finish()
         captureEnd = nil
@@ -235,6 +237,14 @@ enum RunEnd: Sendable {
     case stop(at: HostTime)
     case cancel
     case discard
+
+    /// A recording that ends in a transcription, as opposed to a dropped tap.
+    var isStop: Bool {
+        switch self {
+        case .stop, .cancel: true
+        case .discard: false
+        }
+    }
 }
 
 struct RunStart: Sendable {
@@ -271,6 +281,10 @@ public enum ConductorEvent: Sendable {
     /// First real audio arrived: show "listening" now (#4).
     case listening(DictationID)
     case confirmed(DictationID, DictationMode)
+    /// The 19-minute mark: one minute until the cap stops the Dictation. (#58 emits it.)
+    case oneMinuteLeft(DictationID)
+    /// fn-up, Esc or sleep ended the recording. Not sent for a discarded tap, which was never confirmed.
+    case stopped(DictationID)
     case transcribing(DictationID)
     case finished(DictationID, DictationStatus)
     case notice(Notice)
