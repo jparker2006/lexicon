@@ -1,0 +1,101 @@
+default: available
+permissive: available
+== 2026-10-10 19:45:56 start rules-text-whole-lead0 runs=10
+Now drawing from 'AC Power'
+ lowpowermode         1
+availability (rules-text): available
+warm-up done (3 runs)
+  rules-text whole: 25 rows, run 1, l01, elapsed 54 s
+  rules-text whole: 50 rows, run 2, t01, elapsed 106 s
+  rules-text whole: 75 rows, run 2, l02, elapsed 156 s
+  rules-text whole: 100 rows, run 3, t02, elapsed 225 s
+  rules-text whole: 125 rows, run 3, l03, elapsed 292 s
+  rules-text whole: 150 rows, run 4, t03, elapsed 348 s
+  rules-text whole: 175 rows, run 4, l04, elapsed 414 s
+  rules-text whole: 200 rows, run 5, t04, elapsed 467 s
+  rules-text whole: 225 rows, run 5, n01, elapsed 510 s
+  rules-text whole: 250 rows, run 6, t05, elapsed 559 s
+  rules-text whole: 275 rows, run 6, n02, elapsed 599 s
+  rules-text whole: 300 rows, run 7, t06, elapsed 650 s
+  rules-text whole: 325 rows, run 7, n03, elapsed 692 s
+  rules-text whole: 350 rows, run 8, t07, elapsed 739 s
+  rules-text whole: 375 rows, run 8, n04, elapsed 778 s
+  rules-text whole: 400 rows, run 9, t08, elapsed 827 s
+  rules-text whole: 425 rows, run 9, r01, elapsed 874 s
+  rules-text whole: 450 rows, run 10, t09, elapsed 918 s
+  rules-text whole: 475 rows, run 10, q01, elapsed 983 s
+done: rules-text whole, 490 new rows, 1017 s
+== 2026-10-10 20:03:06 end rules-text-whole-lead0 (exit 0)
+Now drawing from 'AC Power'
+ lowpowermode         1
+== 2026-10-10 20:03:06 start examples-text-whole-lead0 runs=10
+Now drawing from 'AC Power'
+ lowpowermode         1
+availability (examples-text): available
+warm-up done (3 runs)
+  examples-text whole: 25 rows, run 1, l01, elapsed 66 s
+  examples-text whole: 50 rows, run 2, t01, elapsed 122 s
+  examples-text whole: 75 rows, run 2, l02, elapsed 178 s
+  examples-text whole: 100 rows, run 3, t02, elapsed 227 s
+  examples-text whole: 125 rows, run 3, l03, elapsed 287 s
+  examples-text whole: 150 rows, run 4, t03, elapsed 358 s
+  examples-text whole: 175 rows, run 4, l04, elapsed 419 s
+  examples-text whole: 200 rows, run 5, t04, elapsed 481 s
+  examples-text whole: 225 rows, run 5, n01, elapsed 534 s
+  examples-text whole: 250 rows, run 6, t05, elapsed 582 s
+  examples-text whole: 275 rows, run 6, n02, elapsed 642 s
+  examples-text whole: 300 rows, run 7, t06, elapsed 690 s
+  examples-text whole: 325 rows, run 7, n03, elapsed 743 s
+  examples-text whole: 350 rows, run 8, t07, elapsed 795 s
+  examples-text whole: 375 rows, run 8, n04, elapsed 852 s
+  examples-text whole: 400 rows, run 9, t08, elapsed 906 s
+  examples-text whole: 425 rows, run 9, r01, elapsed 970 s
+  examples-text whole: 450 rows, run 10, t09, elapsed 1023 s
+  examples-text whole: 475 rows, run 10, q01, elapsed 1072 s
+done: examples-text whole, 490 new rows, 1094 s
+== 2026-10-10 20:21:31 end examples-text-whole-lead0 (exit 0)
+Now drawing from 'Battery Power'
+ lowpowermode         0
+== 2026-10-10 20:21:31 start rules-text-tail-lead0 runs=10
+Now drawing from 'Battery Power'
+ lowpowermode         0
+availability (rules-text): available
+warm-up done (3 runs)
+  rules-text tail: 25 rows, run 1, l01, elapsed 29 s
+  rules-text tail: 50 rows, run 2, t01, elapsed 61 s
+== 2026-10-10 20:23:36 battery-only reduced runs (power switched to battery during examples-text whole; runner stopped to spare battery)
+Now drawing from 'Battery Power'
+availability (rules-text): available
+warm-up done (3 runs)
+  rules-text tail: 25 rows, run 1, l01, elapsed 49 s
+  rules-text tail: 50 rows, run 2, t01, elapsed 84 s
+  rules-text tail: 75 rows, run 2, l02, elapsed 128 s
+  rules-text tail: 100 rows, run 3, t02, elapsed 162 s
+  rules-text tail: 125 rows, run 3, l03, elapsed 207 s
+done: rules-text tail, 147 new rows, 238 s
+availability (examples-text): available
+warm-up done (3 runs)
+  examples-text tail: 25 rows, run 1, l01, elapsed 37 s
+  examples-text tail: 50 rows, run 2, t01, elapsed 63 s
+  examples-text tail: 75 rows, run 2, l02, elapsed 91 s
+  examples-text tail: 100 rows, run 3, t02, elapsed 116 s
+  examples-text tail: 125 rows, run 3, l03, elapsed 144 s
+done: examples-text tail, 147 new rows, 165 s
+availability (rules-generable): available
+warm-up done (3 runs)
+  rules-generable whole: 25 rows, run 1, l01, elapsed 22 s
+  rules-generable whole: 50 rows, run 2, t01, elapsed 47 s
+  rules-generable whole: 75 rows, run 2, l02, elapsed 69 s
+done: rules-generable whole, 98 new rows, 93 s
+availability (examples-generable): available
+warm-up done (3 runs)
+  examples-generable whole: 25 rows, run 1, l01, elapsed 21 s
+  examples-generable whole: 50 rows, run 2, t01, elapsed 46 s
+  examples-generable whole: 75 rows, run 2, l02, elapsed 67 s
+done: examples-generable whole, 98 new rows, 90 s
+availability (examples-text-permissive): available
+warm-up done (3 runs)
+  examples-text-permissive whole: 25 rows, run 1, l01, elapsed 30 s
+done: examples-text-permissive whole, 49 new rows, 50 s
+== 2026-10-10 20:34:39 battery-only reduced runs done
+Now drawing from 'Battery Power'
