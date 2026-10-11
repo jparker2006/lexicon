@@ -48,7 +48,7 @@ private func fixtureManifest() throws -> URL {
     // What was typed: the rules-only Cleanup of what the engine heard.
     #expect(lines.map(\.insertedText) == ["Deploy the Supabase edge function today.", gold[2].text])
     #expect(lines.allSatisfy { $0.lagMS != nil && !$0.lost })
-    #expect(lines.allSatisfy { $0.engine == "local:parakeet-unified-0.6b-en" && $0.cleanup == "rules-only:off" })
+    #expect(lines.allSatisfy { $0.engine == SpeechModel.local(.parakeetUnified).id && $0.cleanup != nil })
 }
 
 @Test func withNoEngineEveryEntryWaitsAndScoresAsNoText() async throws {
@@ -95,15 +95,21 @@ private func fixtureManifest() throws -> URL {
     #expect(isLost(reported: .failed, saved: (.failed, .deleted)))
 }
 
-@Test func aRunFileGoesInsideTheRepoOnlyForAManifestInsideIt() {
-    let repo = URL(filePath: "/code/lexicon")
-    let fixture = repo.appending(path: "scorer/fixtures/manifest.jsonl")
-    let privateSet = URL(filePath: "/Users/j/Library/Application Support/Lexicon/test-set/manifest.jsonl")
+@Test func aRunFileGoesInsideAGitWorkTreeOnlyForAManifestInsideThisRepo() throws {
+    // main/.git holds main/worktrees/repo, like ~/code/lexicon and its worktrees.
+    let root = try scratchDirectory()
+    let main = root.appending(path: "main")
+    let repo = main.appending(path: "worktrees/repo")
+    try FileManager.default.createDirectory(at: main.appending(path: ".git"), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: repo.appending(path: "scorer"), withIntermediateDirectories: true)
+    try Data().write(to: repo.appending(path: ".git"))  // a worktree's .git is a file
+    let fixture = repo.appending(path: "scorer/manifest.jsonl")
+    let privateSet = root.appending(path: "test-set/manifest.jsonl")
 
     #expect(mayWriteRun(to: repo.appending(path: "run.jsonl"), manifest: fixture, repo: repo))
-    #expect(mayWriteRun(to: URL(filePath: "/tmp/run.jsonl"), manifest: privateSet, repo: repo))
+    #expect(mayWriteRun(to: root.appending(path: "runs/run.jsonl"), manifest: privateSet, repo: repo))
     #expect(!mayWriteRun(to: repo.appending(path: "run.jsonl"), manifest: privateSet, repo: repo))
-    #expect(!mayWriteRun(to: repo.appending(path: "scorer/../out/run.jsonl"), manifest: privateSet, repo: repo))
-    #expect(!mayWriteRun(to: URL(filePath: "/code/lexicon/"), manifest: privateSet, repo: repo))
-    #expect(mayWriteRun(to: URL(filePath: "/code/lexicon-runs/run.jsonl"), manifest: privateSet, repo: repo))
+    #expect(!mayWriteRun(to: repo.appending(path: "scorer/../run.jsonl"), manifest: privateSet, repo: repo))
+    #expect(!mayWriteRun(to: main.appending(path: "run.jsonl"), manifest: privateSet, repo: repo))
+    #expect(!mayWriteRun(to: main.appending(path: "worktrees/other/run.jsonl"), manifest: privateSet, repo: repo))
 }

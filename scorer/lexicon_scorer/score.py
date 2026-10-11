@@ -79,7 +79,7 @@ def term_counts(text: str, terms) -> Counter:
     counts = Counter()
     for term in {unicodedata.normalize("NFC", t) for t in terms}:
         if not term.strip() or term != term.strip():
-            raise ValueError(f"Term {term!r} is empty or has spaces at its ends")
+            raise ValueError("a Term is empty or has spaces at its ends")  # never the Term: it may be private
         n = _occurrences(term, text)
         if n:
             counts[term] = n
@@ -212,23 +212,65 @@ def paired_bootstrap(a: list[EntryScore], b: list[EntryScore], *, seed: int,
             else:
                 draws[i].append(d)
     out = {}
-    tail = (1 - confidence) / 2
     for i, (name, (_, den)) in enumerate(METRICS.items()):
         whole = [sum(s[i][j] for s in sessions) for j in range(3)]
-        values = sorted(draws[i])
-        if not values:
-            out[name] = {"diff": None, "low": None, "high": None, "verdict": "no_data", "skipped": skipped[i]}
-            continue
-        low, high = _quantile(values, tail), _quantile(values, 1 - tail)
-        if n < MIN_SESSIONS:
-            verdict = "too_few_sessions"
-        elif skipped[i] > MAX_SKIPPED * resamples:
-            verdict = "too_few_refs"
-        else:
-            verdict = "a_lower" if high < 0 else "b_lower" if low > 0 else "tie"
-        out[name] = {"diff": _diff(whole, den), "low": low, "high": high,
-                     "verdict": verdict, "skipped": skipped[i]}
+        out[name] = _interval(_diff(whole, den), draws[i], skipped[i],
+                              n_sessions=n, resamples=resamples, confidence=confidence)
     return out
+
+
+def _interval(diff, draws: list[float], skipped: int, *, n_sessions: int, resamples: int,
+              confidence: float) -> dict:
+    """The percentile interval of the resampled differences, with its verdict. Shared by
+    paired_bootstrap and lag_bootstrap, so both give the same verdicts."""
+    if not draws:
+        return {"diff": None, "low": None, "high": None, "verdict": "no_data", "skipped": skipped}
+    values = sorted(draws)
+    tail = (1 - confidence) / 2
+    low, high = _quantile(values, tail), _quantile(values, 1 - tail)
+    if n_sessions < MIN_SESSIONS:
+        verdict = "too_few_sessions"
+    elif skipped > MAX_SKIPPED * resamples:
+        verdict = "too_few_refs"
+    else:
+        verdict = "a_lower" if high < 0 else "b_lower" if low > 0 else "tie"
+    return {"diff": diff, "low": low, "high": high, "verdict": verdict, "skipped": skipped}
+
+
+# The lag quantiles that lag_bootstrap compares, by output name.
+LAG_QUANTILES = {"lag_p50_ms": 0.5, "lag_p95_ms": 0.95}
+
+
+def _lag_diff(pairs: list[tuple[float, float]], q: float) -> float:
+    return _quantile(sorted(a for a, _ in pairs), q) - _quantile(sorted(b for _, b in pairs), q)
+
+
+def lag_bootstrap(pairs_by_session: dict[str, list[tuple[float, float]]], *, seed: int,
+                  resamples: int = 10_000, confidence: float = 0.95) -> dict:
+    """Run lag minus baseline lag at p50 and p95. Each pair is (run lag, baseline lag)
+    for one entry, grouped by session. A resample draws whole sessions exactly as
+    paired_bootstrap does (same seed, same draws) and pools their pairs. A resample
+    whose sessions hold no pairs gives no quantile and is counted in "skipped"."""
+    if resamples < 1:
+        raise ValueError("resamples must be at least 1")
+    sessions = [pairs_by_session[k] for k in sorted(pairs_by_session)]
+    n = len(sessions)
+    rng = random.Random(seed)
+    draws = {name: [] for name in LAG_QUANTILES}
+    skipped = 0
+    for _ in range(resamples):
+        pooled = []
+        for _ in range(n):
+            pooled.extend(sessions[rng.randrange(n)])
+        if not pooled:
+            skipped += 1
+            continue
+        for name, q in LAG_QUANTILES.items():
+            draws[name].append(_lag_diff(pooled, q))
+    everything = [p for s in sessions for p in s]
+    return {name: _interval(_lag_diff(everything, q) if everything else None, draws[name], skipped,
+                            n_sessions=n, resamples=resamples, confidence=confidence)
+            for name, q in LAG_QUANTILES.items()}
 
 
 def _diff(acc, den):

@@ -27,8 +27,8 @@ import LexiconCore
 // History and audio go to temporary folders deleted after each Dictation, never
 // to an app's data folder.
 
-/// This checkout. The scorer lives here, and run files from a private manifest
-/// may never be written inside it.
+/// This checkout: the scorer lives here, and only a manifest inside it is public
+/// (`mayWriteRun`).
 let repo = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
 struct Line: Encodable {
@@ -46,7 +46,7 @@ func runEval(arguments: [String]) async -> Int32 {
         switch argument {
         case "--scripted-gold": scriptedGold = true
         case "--scripted", "--manifest", "--split", "--baseline", "--out":
-            guard let value = rest.popFirst() else { return usage() }
+            guard let value = rest.popFirst(), options[argument] == nil else { return usage() }
             options[argument] = value
         default:
             guard !argument.hasPrefix("--") else { return usage() }
@@ -85,8 +85,12 @@ func evalFile(_ wav: URL, scripted: String?) async -> Int32 {
 }
 
 func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, scriptedGold: Bool) async -> Int32 {
-    if let out, !mayWriteRun(to: out, manifest: manifest, repo: repo) {
-        return fail("--out is inside the repo but the manifest is not; Test set text never goes in the repo")
+    if let out {
+        guard mayWriteRun(to: out, manifest: manifest, repo: repo) else {
+            return fail("--out is inside a git repo but the manifest is not public; Test set text never goes in a repo")
+        }
+        // Never over a manifest, a baseline or another run: they may be Jake's data.
+        guard !FileManager.default.fileExists(atPath: out.path()) else { return fail("--out already exists") }
     }
     let lines: [RunLine]
     do {

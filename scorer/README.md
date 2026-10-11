@@ -37,8 +37,8 @@ scorer/score report --gold gold.jsonl --run run.jsonl [--baseline wispr.jsonl] [
 `report` summarizes one run and, with `--baseline`, compares it with an earlier run on the same gold (a previous Lexicon run, or Wispr's scores from its logs). It prints one JSON object:
 
 - `run` and `baseline`: the `score` totals, `lag_ms` (p50, p95, count), `lost`, and counts of `statuses`, `cleanup` and `engines`. A null status counts as `nothing`; a line with no status key is left out.
-- `run_minus_baseline`: the same paired-bootstrap intervals and verdicts as `compare`, with `better` and `worse` naming the run's side. `sessions`, `seed` and `resamples` are echoed.
-- `worse`: the metrics whose verdict is `worse`, then `lost` if the run lost more Dictations than the baseline. Always `[]` without `--baseline`.
+- `run_minus_baseline`: the same paired-bootstrap intervals and verdicts as `compare`, with `better` and `worse` naming the run's side. It also has `lag_p50_ms` and `lag_p95_ms`: run lag minus baseline lag at p50 and p95, pooled over the entries with a lag in both runs and resampled by session the same way. `sessions`, `seed` and `resamples` are echoed.
+- `worse`: the metrics whose verdict is `worse` (the lag quantiles included), then `lost` if the run lost more Dictations than the baseline. Always `[]` without `--baseline`.
 
 Exit codes: 0 when `worse` is empty, 3 when it is not (the report prints first), 1 for a bad input.
 

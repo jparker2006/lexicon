@@ -68,7 +68,7 @@ class Report(unittest.TestCase):
         self.assertGreater(out["baseline"]["wer"], 0)
         self.assertEqual(out["sessions"], 12)
         self.assertEqual(out["resamples"], 1000)
-        for metric in ("wer", "term_error_rate"):
+        for metric in ("wer", "term_error_rate", "lag_p50_ms", "lag_p95_ms"):
             with self.subTest(metric):
                 v = out["run_minus_baseline"][metric]
                 self.assertLess(v["diff"], 0)
@@ -94,6 +94,28 @@ class Report(unittest.TestCase):
         self.assertEqual(code, 3)
         self.assertEqual(out["worse"], ["lost"])
         self.assertEqual(out["run"]["lost"], 1)
+
+    def test_lag_ten_times_the_baseline_is_flagged_worse(self):
+        slow = perfect(self.everyday)
+        for r in slow:
+            r["lag_ms"] *= 10
+        path = self.write("slow.jsonl", slow)
+        code, text = run_report("--gold", MANIFEST, "--run", path, "--baseline", self.run,
+                                "--split", "everyday", "--resamples", "1000")
+        out = json.loads(text)
+        self.assertEqual(code, 3)
+        self.assertIn("lag_p50_ms", out["worse"])
+        self.assertIn("lag_p95_ms", out["worse"])
+        self.assertNotIn("wer", out["worse"])
+
+    def test_identical_lags_are_a_tie(self):
+        code, text = run_report("--gold", MANIFEST, "--run", self.run, "--baseline", self.run,
+                                "--split", "everyday", "--resamples", "1000")
+        out = json.loads(text)
+        self.assertEqual(code, 0)
+        self.assertEqual(out["run_minus_baseline"]["lag_p50_ms"]["verdict"], "tie")
+        self.assertEqual(out["run_minus_baseline"]["lag_p95_ms"]["verdict"], "tie")
+        self.assertEqual(out["worse"], [])
 
     def test_without_a_baseline_there_is_no_comparison(self):
         code, text = run_report("--gold", MANIFEST, "--run", self.run, "--split", "everyday")

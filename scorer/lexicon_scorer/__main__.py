@@ -35,7 +35,7 @@ import sys
 import unicodedata
 from collections import Counter
 
-from .score import METRICS, _quantile, paired_bootstrap, score_entry, term_counts, totals
+from .score import _quantile, lag_bootstrap, paired_bootstrap, score_entry, term_counts, totals
 
 
 def _lines(path: str) -> list[str]:
@@ -95,7 +95,8 @@ def _score_run(gold: dict, run: dict[str, dict], run_path: str, lexicon: list[st
             raise SystemExit(f"gold entry {id}: {e}")
         unfound = sorted({unicodedata.normalize("NFC", t) for t in said} - set(found))
         if unfound:
-            raise SystemExit(f"gold entry {id}: terms not found in its text: {unfound}")
+            # The count, not the Terms: the gold is the private Test set when run for real.
+            raise SystemExit(f"gold entry {id}: {len(unfound)} terms not found in its text")
         scores.append(score_entry(
             id=id, session=g.get("session"), gold=g["text"],
             speech_text=r["speech_text"], inserted_text=r["inserted_text"],
@@ -146,6 +147,17 @@ def _summary(path: str, scores: list, rows: list[dict]) -> dict:
     }
 
 
+def _lag_pairs(run, run_rows: dict, base_rows: dict) -> dict[str, list[tuple[float, float]]]:
+    """(run lag, baseline lag) for each scored entry with a lag in both runs, by session.
+    A null lag is a Dictation that was never typed; its empty text already shows in wer."""
+    pairs = {e.session: [] for e in run}
+    for e in run:
+        a, b = run_rows[e.id].get("lag_ms"), base_rows[e.id].get("lag_ms")
+        if a is not None and b is not None:
+            pairs[e.session].append((a, b))
+    return pairs
+
+
 def _report(args, gold: dict, lexicon: list[str]) -> dict:
     run_rows = _jsonl(args.run)
     run = _score_run(gold, run_rows, args.run, lexicon)
@@ -157,12 +169,15 @@ def _report(args, gold: dict, lexicon: list[str]) -> dict:
     base = _score_run(gold, base_rows, args.baseline, lexicon)
     try:
         interval = paired_bootstrap(run, base, seed=args.seed, resamples=args.resamples)
+        lag = lag_bootstrap(_lag_pairs(run, run_rows, base_rows), seed=args.seed, resamples=args.resamples)
     except ValueError as e:
         raise SystemExit(str(e))
     # Lower is better for every metric, so the bootstrap's "a_lower" (run A) reads as "better".
     names = {"a_lower": "better", "b_lower": "worse"}
-    interval = {m: {**v, "verdict": names.get(v["verdict"], v["verdict"])} for m, v in interval.items()}
-    worse = [m for m in METRICS if interval[m]["verdict"] == "worse"]
+    interval = {m: {**v, "verdict": names.get(v["verdict"], v["verdict"])}
+                for m, v in {**interval, **lag}.items()}
+    # In the order of the word and Term metrics, then the lag quantiles.
+    worse = [m for m in interval if interval[m]["verdict"] == "worse"]
     base_summary = _summary(args.baseline, base, list(base_rows.values()))
     if run_summary["lost"] > base_summary["lost"]:
         worse.append("lost")

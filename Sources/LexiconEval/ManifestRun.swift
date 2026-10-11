@@ -139,15 +139,23 @@ func isLost(reported: DictationStatus?, saved: (status: DictationStatus, audio: 
     return !saved.status.hasText && saved.audio != .onDisk
 }
 
-/// Run files hold text from the Test set, so one may go inside the repo only
-/// when the manifest is inside it too (the public fixtures). Paths compare by
+/// Run files hold text from the Test set, so one may go inside a git work tree
+/// (this checkout, the main one that holds the worktrees, any other) only when
+/// the manifest is inside this repo too: the public fixtures. Paths compare by
 /// component, case-insensitively, since APFS is.
 func mayWriteRun(to out: URL, manifest: URL, repo: URL) -> Bool {
     func components(_ url: URL) -> [String] {
-        url.standardizedFileURL.resolvingSymlinksInPath().pathComponents.filter { $0 != "/" }.map { $0.lowercased() }
+        url.absoluteURL.standardizedFileURL.resolvingSymlinksInPath().pathComponents.map { $0.lowercased() }
     }
-    func inside(_ url: URL) -> Bool { components(url).starts(with: components(repo)) }
-    return !inside(out) || inside(manifest)
+    func inGitWorkTree(_ url: URL) -> Bool {
+        var folder = url.absoluteURL.standardizedFileURL.resolvingSymlinksInPath()
+        while folder.pathComponents.count > 1 {
+            folder = folder.deletingLastPathComponent()
+            if FileManager.default.fileExists(atPath: folder.appending(path: ".git").path()) { return true }
+        }
+        return false
+    }
+    return !inGitWorkTree(out) || components(manifest).starts(with: components(repo))
 }
 
 private func label(_ outcome: CleanupOutcome) -> String {
