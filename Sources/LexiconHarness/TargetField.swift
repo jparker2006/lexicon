@@ -79,6 +79,14 @@ final class TargetField {
         window.initialFirstResponder = textView
         window.center()
         if focused {
+            // AppKit sends Cmd-V to the text view through the Edit menu's Paste item.
+            let edit = NSMenu(title: "Edit")
+            edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+            let editItem = NSMenuItem()
+            editItem.submenu = edit
+            app.mainMenu = NSMenu()
+            app.mainMenu?.addItem(NSMenuItem())  // the app menu's slot
+            app.mainMenu?.addItem(editItem)
             app.activate()
             window.makeKeyAndOrderFront(nil)
             window.makeFirstResponder(textView)

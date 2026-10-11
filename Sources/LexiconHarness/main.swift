@@ -68,6 +68,13 @@ func pasteCheck() async throws {
     // Cmd-V goes to the focused field of the frontmost app, so the target must take focus.
     let target = try await TargetField.open(text: "", focused: true)
     defer { target.close() }
+    // Activation is cooperative: an app started in the background can't take focus
+    // from the frontmost one by itself, so System Events brings it forward.
+    let raise = Process()
+    raise.executableURL = URL(filePath: "/usr/bin/osascript")
+    raise.arguments = ["-e", "tell application \"System Events\" to set frontmost of (first process whose unix id is \(target.process.processIdentifier)) to true"]
+    try raise.run()
+    raise.waitUntilExit()
     let focusDeadline = ContinuousClock.now + .seconds(2)
     while NSWorkspace.shared.frontmostApplication?.processIdentifier != target.process.processIdentifier {
         guard ContinuousClock.now < focusDeadline else { throw HarnessError("the target field did not become the frontmost app within 2 s, so Cmd-V would not reach it") }
@@ -76,7 +83,19 @@ func pasteCheck() async throws {
     ok("target field is frontmost")
 
     // A sentinel on the clipboard: after the paste, Lexicon must have put it back.
+    // Whatever Jake had copied is put back when the check ends, never printed.
     let pasteboard = NSPasteboard.general
+    let jakes = (pasteboard.pasteboardItems ?? []).map { item in
+        item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
+    }
+    defer {
+        pasteboard.clearContents()
+        pasteboard.writeObjects(jakes.map { entries in
+            let item = NSPasteboardItem()
+            for (type, data) in entries { item.setData(data, forType: type) }
+            return item
+        })
+    }
     let sentinel = "lexicon-harness clipboard \(UUID().uuidString.prefix(8))"
     pasteboard.clearContents()
     pasteboard.setString(sentinel, forType: .string)
