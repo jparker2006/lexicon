@@ -634,9 +634,20 @@ final class RowCell: NSTableCellView {
 
     /// The icon, its tooltip and what VoiceOver and the harness read.
     static func set(_ button: NSButton, symbol: String, label: String) {
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        button.image = image(symbol)
         button.toolTip = label
         button.setAccessibilityLabel(label)
+    }
+
+    /// Each symbol looked up once: every row on screen draws three, and opening the
+    /// window has a 100 ms budget. The button carries the label, so the image needs none.
+    private static var images: [String: NSImage] = [:]
+
+    private static func image(_ symbol: String) -> NSImage? {
+        if let image = images[symbol] { return image }
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        images[symbol] = image
+        return image
     }
 }
 
