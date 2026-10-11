@@ -2,7 +2,9 @@
 import AppKit
 import os
 import LexiconDomain
+import AppText
 import AudioCapture
+import KeyInput
 import LexiconUI
 import TestHooks
 
@@ -42,6 +44,8 @@ enum AppTestHooks {
             }
         case .capture(let seconds, let preparedIdle, let deviceChange, let deviceUID):
             await capture(seconds: seconds, preparedIdle: preparedIdle, deviceChange: deviceChange, deviceUID: deviceUID)
+        case .insert(let text, let delay):
+            await insert(text, after: delay)
         }
     }
 
@@ -60,6 +64,49 @@ enum AppTestHooks {
         // A steady level, so the recording states show their bars the way speech does.
         indicator.show(state, level: 0.6)
         return .done
+    }
+
+    /// The live paste path with no fn tap yet: one `TargetApp`, as `LexiconSystem`
+    /// will own, and the same target-then-insert a Dictation makes.
+    private static var text: TargetApp?
+
+    private static func insert(_ text: String, after delay: Double) async -> TestHookReply {
+        let app = self.text ?? TargetApp(input: InputClock())
+        self.text = app
+        try? await Task.sleep(for: .seconds(max(0, min(delay, 20))))
+        let before = access()
+        let bundleID = await app.context().bundleID
+        let clock = ContinuousClock()
+        let start = clock.now
+        guard let target = await app.target() else { return .failed("nothing has keyboard focus") }
+        let targetTime = clock.now - start
+        let delivery = await app.insert(text, for: DictationID(), at: target)
+        let receipt: InsertionReceipt? = if case .inserted(let receipt) = delivery { receipt } else { nil }
+        let outcome = switch delivery {
+        case .inserted: "inserted"
+        case .notInserted(let reason): reason.rawValue
+        case .historyOnly: "historyOnly"
+        }
+        return .inserted(TestHookInsertion(
+            bundleID: bundleID, outcome: outcome, targetMicros: micros(targetTime),
+            pasteWorkMicros: await app.lastPasteWork.map(micros), hasFingerprint: receipt?.fieldFingerprint != nil,
+            caretAfter: receipt?.caretAfter, contextBeforeCount: receipt?.contextBefore.count ?? 0,
+            contextAfterCount: receipt?.contextAfter.count ?? 0, clipboardAccessBefore: before,
+            clipboardAccessAfter: access()))
+    }
+
+    private static func access() -> String {
+        switch NSPasteboard.general.accessBehavior {
+        case .default: "default"
+        case .ask: "ask"
+        case .alwaysAllow: "alwaysAllow"
+        case .alwaysDeny: "alwaysDeny"
+        @unknown default: "unknown"
+        }
+    }
+
+    private static func micros(_ duration: Duration) -> Int {
+        Int(duration.components.seconds) * 1_000_000 + Int(duration.components.attoseconds / 1_000_000_000_000)
     }
 }
 #endif

@@ -3,10 +3,11 @@ import AppKit
 
 /// The known text field Lexicon types into: a small window with one text area,
 /// run by this same binary as a child process (`lexicon-harness target-field
-/// <text>`). Background only, so it never becomes the active app: a target that
-/// activated at launch (as a regular or even an accessory app run this way
-/// does) takes whatever Jake is typing. A paste check will need a deliberate
-/// way to give it focus.
+/// <text>`). Background by default, so it never becomes the active app: a target
+/// that activated at launch (as a regular or even an accessory app run this way
+/// does) takes whatever Jake is typing. The focused mode (`<text> focused`) exists
+/// for the paste check: it is a regular app that takes keyboard focus on purpose,
+/// for the few seconds that check needs it.
 @MainActor
 final class TargetField {
     static let mode = "target-field"
@@ -20,11 +21,12 @@ final class TargetField {
         self.field = field
     }
 
-    /// Starts the window with `text` already in the field.
-    static func open(text: String) async throws -> TargetField {
+    /// Starts the window with `text` already in the field. `focused` starts the
+    /// child in the mode that takes keyboard focus (see the type comment).
+    static func open(text: String, focused: Bool = false) async throws -> TargetField {
         let process = Process()
         process.executableURL = Bundle.main.executableURL
-        process.arguments = [mode, text]
+        process.arguments = [mode, text] + (focused ? ["focused"] : [])
         try process.run()
         let app = AX.app(process.processIdentifier)
         let deadline = ContinuousClock.now + .seconds(5)
@@ -55,7 +57,7 @@ final class TargetField {
 
     /// The child: show the window and run until terminated, or until the
     /// harness that started it exits, so a crashed harness leaves nothing behind.
-    static func serve(text: String) -> Never {
+    static func serve(text: String, focused: Bool) -> Never {
         let parent = getppid()
         let parentGone = DispatchSource.makeProcessSource(identifier: parent, eventMask: .exit, queue: .main)
         parentGone.setEventHandler { exit(0) }
@@ -64,7 +66,7 @@ final class TargetField {
         if parent == 1 || kill(parent, 0) != 0 { exit(0) }
 
         let app = NSApplication.shared
-        app.setActivationPolicy(.prohibited)  // see the type comment: never activate
+        app.setActivationPolicy(focused ? .regular : .prohibited)  // see the type comment: never activate unless focused
 
         let scroll = NSTextView.scrollableTextView()
         let textView = scroll.documentView as! NSTextView
@@ -76,7 +78,21 @@ final class TargetField {
         window.contentView = scroll
         window.initialFirstResponder = textView
         window.center()
-        window.orderFrontRegardless()
+        if focused {
+            // AppKit sends Cmd-V to the text view through the Edit menu's Paste item.
+            let edit = NSMenu(title: "Edit")
+            edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+            let editItem = NSMenuItem()
+            editItem.submenu = edit
+            app.mainMenu = NSMenu()
+            app.mainMenu?.addItem(NSMenuItem())  // the app menu's slot
+            app.mainMenu?.addItem(editItem)
+            app.activate()
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(textView)
+        } else {
+            window.orderFrontRegardless()
+        }
         withExtendedLifetime(parentGone) { app.run() }
         exit(0)
     }
