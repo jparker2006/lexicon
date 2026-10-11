@@ -15,7 +15,7 @@ Decided in [App architecture and stack](https://github.com/jparker2006/lexicon/i
 | fn | Hold 0.30 s or more for push-to-talk; second fn-down within 0.25 s of the first fn-up for hands-free. fn only: no Fn+Space, no fallback hotkey. |
 | Speech | M0 and M1: local Parakeet only. From M2, Meta Muse streams while Jake talks and races local; the cloud wins only if its final text arrives within 300 ms after recording stops. |
 | Cleanup | Rules-only until M3. Then AI cleanup with a structural check and a deadline of about 450 ms after the speech final, falling back to rules-only text. Private mode and offline are rules only. |
-| Current repo | The repo under `~/code` with the most recent file change. No hooks. |
+| Current repo | The repo under `~/code` with the most recent file change (not counting `.git`), from FSEvents; at launch, a week of FSEvents history picks it. No hooks. |
 | Inbox | The app watches `<data>/inbox/` for JSON messages (hook prompts, only if hooks come back). Prompts older than 60 s are dropped. |
 | Test hooks | Debug builds only (`#if DEBUG`; `scripts/bundle.sh` fails a release binary that has them), on for the dev bundle ID launched with `--test-hooks`. `lexicon-harness` writes a request under `<data>/test-hooks/requests/` and reads the reply from `replies/`, and reads the app's status item, windows and a target text field through Accessibility. One builder at a time. |
 | Local model | Loaded on fn-down when not resident, unloaded after 10 idle minutes; always loaded while Private mode is on or the network is down. |
@@ -72,7 +72,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 | `Transcription` | One adapter file per cloud provider (Muse from M2), sockets, keywords, finalize, retry, local race, residency, reachability | Domain |
 | `LocalParakeet` | The FluidAudio adapter (Parakeet Unified; Ultra or v3 as the multilingual pick), model install and compile. No word boosting; Rules in code instead. The only FluidAudio importer | Domain, Transcription |
 | `Cleanup` | Rules, the AI cleanup stage (OpenRouter, from M3), the structural check, the rules-only fallback | Domain |
-| `WordStore` | The Lexicon: Terms, Rules, folding, code Terms (names only), `lexicon.sqlite`, per-Dictation selection | Domain, SQLiteKit |
+| `WordStore` | The Lexicon: Terms, Rules, folding, `lexicon.sqlite`, per-Dictation selection. `CodeTerms`: code Terms (names only) and the current repo, scanned at launch and followed with FSEvents on `~/code` and the skill folders | Domain, SQLiteKit |
 | `History` | Every durable fact about a Dictation: `history.sqlite`, `audio/`, recovery, retention, the window's reader | Domain, SQLiteKit, AudioCapture |
 | `AppText` | Everything done to other apps' text: focus capture, `InsertGuard`, paste and restore, read, watch, replace | Domain, KeyInput |
 | `Jev` | TypeSafe direct calls, `jev-1.13.0` pinned, one request per state with all its questions, for Re-speak and Hand fixes only; every call carries a local fallback | Domain |
