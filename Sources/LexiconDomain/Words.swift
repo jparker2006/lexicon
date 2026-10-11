@@ -28,7 +28,8 @@ public struct Rule: Sendable, Hashable, Codable {
 ///
 /// Matching semantics live here and only here. Words are split by whitespace,
 /// or by a hyphen between letters or digits. Punctuation at a word's edges stays
-/// where it is; punctuation or a line break between two words ends a match.
+/// where it is, and so does a possessive "'s"; punctuation or a line break
+/// between two words ends a match.
 ///   - A Rule matches its `heard` words, case-insensitively and whole words
 ///     only, and writes `written` exactly.
 ///   - A Term matches any run of words that spells it once case, spaces,
@@ -114,10 +115,7 @@ public struct RuleSet: Sendable {
     /// written side. Later passes must not change its case.
     public func isWritten(_ word: some StringProtocol) -> Bool {
         guard !written.isEmpty else { return false }
-        var core = Substring(word)
-        while core.first?.isEdgePunctuation == true { core.removeFirst() }
-        while core.last?.isEdgePunctuation == true { core.removeLast() }
-        return written.contains(String(core))
+        return written.contains(String(Self.core(of: Substring(word))))
     }
 
     /// Every lowercased, letters-only word that a variant of `terms` can
@@ -177,11 +175,22 @@ public struct RuleSet: Sendable {
     ]
 
     struct Word {
-        /// The word without its edge punctuation. Empty for a piece that is all punctuation.
+        /// The word without its edge punctuation or possessive. Empty for a piece that is all punctuation.
         let core: Range<String.Index>
         let lower: String
         /// Only spaces, tabs or one hyphen sit between this core and the next word's.
         var joinsNext = false
+    }
+
+    /// `piece` without its edge punctuation or a final possessive: "(Supabase's)." -> "Supabase".
+    static func core(of piece: Substring) -> Substring {
+        var core = piece
+        while core.first?.isEdgePunctuation == true { core.removeFirst() }
+        while core.last?.isEdgePunctuation == true { core.removeLast() }
+        for possessive in ["'s", "\u{2019}s"] where core.count > 2 && core.hasSuffix(possessive) {
+            core.removeLast(2)
+        }
+        return core
     }
 
     static func words(in text: String) -> [Word] {
@@ -194,10 +203,8 @@ public struct RuleSet: Sendable {
         func close(_ end: String.Index) {
             guard let start = pieceStart else { return }
             pieceStart = nil
-            var lower = start
-            while lower < end, text[lower].isEdgePunctuation { lower = text.index(after: lower) }
-            var upper = end
-            while upper > lower, text[text.index(before: upper)].isEdgePunctuation { upper = text.index(before: upper) }
+            let core = Self.core(of: text[start..<end])
+            let (lower, upper) = (core.startIndex, core.endIndex)
             if !words.isEmpty {
                 words[words.count - 1].joinsNext = startJoins && lastCoreEndsPiece && lower == start && upper > lower
             }

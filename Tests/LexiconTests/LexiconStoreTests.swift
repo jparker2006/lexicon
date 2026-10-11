@@ -34,6 +34,7 @@ private func apply(_ text: String, _ store: Lexicon) async -> String {
         ("Explain it E L I five", "Explain it ELI5"),
         ("Read (G stack), then claude.md.", "Read (gstack), then CLAUDE.md."),
         ("gstack and ELI5 stay", "gstack and ELI5 stay"),
+        ("Fix G stack's config", "Fix gstack's config"),
     ]
     for (raw, gold) in cases {
         #expect(await apply(raw, store) == gold, "\(raw)")
@@ -57,6 +58,7 @@ private func apply(_ text: String, _ store: Lexicon) async -> String {
     #expect(await apply("Wire auth into super base.", store) == "Wire auth into Supabase.")
     #expect(await apply("Wire auth into super-base", store) == "Wire auth into Supabase")
     #expect(await apply("Run slash review now", store) == "Run /review now")
+    #expect(await apply("Check super base\u{2019}s logs", store) == "Check Supabase\u{2019}s logs")
     // Whole words only: "codecsx" is a different word, and so is "super, base".
     #expect(await apply("The codecsx file and super, base stay", store) == "The codecsx file and super, base stay")
 }
