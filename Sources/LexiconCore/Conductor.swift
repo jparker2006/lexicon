@@ -129,7 +129,7 @@ public actor Conductor<Destination: TextDestination> {
         fatalError("not implemented")
     }
 
-    /// Test hook (dev app, "dictate this WAV" via the inbox) and `lexicon-eval`:
+    /// The dev app's "dictate this WAV" test hook and `lexicon-eval`:
     /// the same run as a live Dictation, audio from a file, stop at end of file.
     /// In the dev app the text is typed into the focused field; headless it is recorded.
     public func dictate(file: URL, pace: FilePace, purpose: DictationPurpose = .type) async -> DictationResult {

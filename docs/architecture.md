@@ -6,7 +6,7 @@ Decided in [App architecture and stack](https://github.com/jparker2006/lexicon/i
 
 | Question | Decision |
 |---|---|
-| Processes | One AppKit menu bar app (`LSUIElement`, `SMAppService.mainApp` login item). Plus dev-only `lexicon-eval` (the scorer's headless pipeline). No XPC, no helper agent. A `lexicon` hook CLI in the bundle is built only if the after-M1 grill wants hooks. |
+| Processes | One AppKit menu bar app (`LSUIElement`, `SMAppService.mainApp` login item). Plus dev-only `lexicon-eval` (the scorer's headless pipeline) and `lexicon-harness` (live-app checks; it runs a target text field as its own child process). No XPC, no helper agent. A `lexicon` hook CLI in the bundle is built only if the after-M1 grill wants hooks. |
 | UI | AppKit for every surface. SwiftUI is never imported. |
 | Toolchain | Command Line Tools 26.6, SwiftPM only, `scripts/bundle.sh` assembles and signs `Lexicon.app` with the self-signed "Lexicon Dev" certificate. No Xcode, no XcodeGen. |
 | Platform | macOS 26 and up. Swift 6 language mode, strict concurrency. |
@@ -16,7 +16,8 @@ Decided in [App architecture and stack](https://github.com/jparker2006/lexicon/i
 | Speech | M0 and M1: local Parakeet only. From M2, Meta Muse streams while Jake talks and races local; the cloud wins only if its final text arrives within 300 ms after recording stops. |
 | Cleanup | Rules-only until M3. Then AI cleanup with a structural check and a deadline of about 450 ms after the speech final, falling back to rules-only text. Private mode and offline are rules only. |
 | Current repo | The repo under `~/code` with the most recent file change. No hooks. |
-| Inbox | The app watches `<data>/inbox/` for JSON messages (test hooks now; hook prompts only if hooks come back). Prompts older than 60 s are dropped. |
+| Inbox | The app watches `<data>/inbox/` for JSON messages (hook prompts, only if hooks come back). Prompts older than 60 s are dropped. |
+| Test hooks | Debug builds only (`#if DEBUG`; `scripts/bundle.sh` fails a release binary that has them), on for the dev bundle ID launched with `--test-hooks`. `lexicon-harness` writes a request under `<data>/test-hooks/requests/` and reads the reply from `replies/`, and reads the app's status item, windows and a target text field through Accessibility. One builder at a time. |
 | Local model | Loaded on fn-down when not resident, unloaded after 10 idle minutes; always loaded while Private mode is on or the network is down. |
 | Lifecycle owner | One `Conductor` actor decides what happens to every Dictation. Each piece of state has one other owner. |
 
@@ -31,8 +32,7 @@ The app shell is the only composition:
 ```swift
 let paths = AppPaths.forBundle(id: bundleID)                 // "Lexicon" or "Lexicon Dev"
 let system = try LexiconSystem.live(paths: paths, bundleID: bundleID,
-                                    local: ParakeetTranscriber(paths: paths), prompter: prompter,
-                                    testHooks: isDevBuild && args.contains("--test-hooks"))
+                                    local: ParakeetTranscriber(paths: paths), prompter: prompter)
 AppUI(system: system, prompter: prompter).start()            // status item + hidden indicator panel
 Task { await system.run() }                                  // recovery, key loop, inbox loop, mic prepare
 ```
@@ -65,7 +65,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 
 | Module | Owns | May import |
 |---|---|---|
-| `LexiconDomain` | Shared values only: `DictationID`, `DictationStatus` (with `canMove`, `isInFlight`, `needsAudio`), `TextVersions`, `SpeechSegment`, `InsertionReceipt`, `Term`/`Rule`/`RuleSet`, `Preferences`, `CloudAccess`, `AppPaths` (root only) | Foundation |
+| `LexiconDomain` | Shared values only: `DictationID`, `DictationStatus` (with `canMove`, `isInFlight`, `needsAudio`), `TextVersions`, `SpeechSegment`, `InsertionReceipt`, `Term`/`Rule`/`RuleSet`, `Preferences`, `CloudAccess`, `AppPaths` (root only), `AccessibilityID` (identifiers the harness finds the UI by) | Foundation |
 | `SQLiteKit` | One connection to system SQLite, WAL, migrations | SQLite3 |
 | `KeyInput` | Event tap thread, `FnGesture`, hotkeys, `InputClock` (single writer) | Domain |
 | `AudioCapture` | Engine, sink node, ring, converter, CAF writer, `F_FULLFSYNC` every 1 s and at stop, device rebuild, adaptive tail | Domain |
@@ -78,9 +78,10 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 | `Jev` | TypeSafe direct calls, `jev-1.13.0` pinned, one request per state with all its questions, for Re-speak and Hand fixes only; every call carries a local fallback | Domain |
 | `Fixes` | Re-speak resolution and saving each Re-speak fix to the Test set; Hand fix watching and any Rules learned from Fixes, as the after-M1 grill decides | Domain, History, WordStore, AppText, Jev |
 | `Inbox` | Inbox file format, writer, watcher | Domain |
+| `TestHooks` | Debug builds only: the test-hook commands and replies, the harness's sender and the app's server | Domain |
 | `LexiconCore` | `Conductor`, `LexiconSystem`, `HeadlessSystem`, `PreferencesStore`, Keychain | all above except LocalParakeet |
 | `LexiconUI` | Status item, indicator pill and sounds, History window, Lexicon page, Settings, Re-speak pill | Domain, History, AudioCapture, Fixes, Core |
-| `LexiconApp`, `lexicon`, `lexicon-eval` | App shell; hook CLI only if the after-M1 grill wants hooks (Domain and Inbox only, about 300 KB); scorer | as declared |
+| `LexiconApp`, `lexicon`, `lexicon-eval`, `lexicon-harness` | App shell; hook CLI only if the after-M1 grill wants hooks (Domain and Inbox only, about 300 KB); scorer; the live-app harness (dev only, `scripts/harness.sh`) | as declared |
 
 ### Who owns what
 
@@ -139,7 +140,8 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 - `audio/<id>.caf`: 16 kHz mono 16-bit, kept a rolling 14 days or 1 GB (whichever first), never deleted while a Dictation needs it, pinned audio kept forever.
 - `lexicon.sqlite`: Terms and Rules (each Rule with a source field: added or learned), owned by WordStore. Code Terms are held in memory, not stored.
 - `models/`: Parakeet weights (about 609 MB), never in the bundle.
-- `inbox/`: test-hook messages, and hook messages only if hooks come back.
+- `inbox/`: hook messages, only if hooks come back.
+- `test-hooks/`: dev builds only, the harness's requests and the app's replies.
 - Keychain: one item per cloud credential (Meta, OpenRouter, TypeSafe), service = bundle ID. `lexicon-eval` reads environment variables instead.
 - UserDefaults: one `Preferences` value, owned by `PreferencesStore`.
 

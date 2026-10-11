@@ -16,9 +16,6 @@ public import LexiconDomain
 public enum InboxMessage: Sendable, Codable, Hashable {
     /// Claude Code / Codex UserPromptSubmit hook: the exact prompt Jake sent (#13).
     case promptSubmitted(SubmittedPrompt)
-    /// Dev test hook (#14): "dictate this WAV" through the full live path,
-    /// typing into whatever field has focus. Ignored unless test hooks are on.
-    case dictateFile(path: String)
 }
 
 /// For a short-lived writer process. Foundation only, starts in milliseconds.

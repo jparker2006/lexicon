@@ -26,6 +26,7 @@ let package = Package(
         .library(name: "LocalParakeet", targets: ["LocalParakeet"]),
         .executable(name: "LexiconApp", targets: ["LexiconApp"]),
         .executable(name: "lexicon-eval", targets: ["LexiconEval"]),
+        .executable(name: "lexicon-harness", targets: ["LexiconHarness"]),
     ],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio", exact: "0.17.4", traits: []),
@@ -89,16 +90,27 @@ let package = Package(
 
         // The app shell. scripts/bundle.sh assembles and signs Lexicon.app from the
         // SwiftPM products (ADR 0003): bundle, Info.plist, entitlements, signing (#14).
-        .executableTarget(name: "LexiconApp", dependencies: ["LexiconDomain", "LexiconCore", "LexiconUI", "LocalParakeet"]),
+        .executableTarget(
+            name: "LexiconApp",
+            dependencies: ["LexiconDomain", "LexiconCore", "LexiconUI", "LocalParakeet", "TestHooks"]
+        ),
 
         // `lexicon-eval`: headless pipeline on WAV files for the scorer (#15). Dev only, never shipped.
         .executableTarget(name: "LexiconEval", dependencies: ["LexiconDomain", "LexiconCore", "History", "LocalParakeet"]),
+
+        // Test hooks: the request and reply wire between a harness and the running
+        // dev app (#45). Every file is `#if DEBUG`, so release builds hold none of it.
+        .target(name: "TestHooks", dependencies: ["LexiconDomain"]),
+
+        // `lexicon-harness`: drives Lexicon Dev through test hooks and the
+        // Accessibility API, plus a target text field to type into (#45). Dev only.
+        .executableTarget(name: "LexiconHarness", dependencies: ["LexiconDomain", "TestHooks"]),
 
         .testTarget(
             name: "LexiconTests",
             dependencies: [
                 "LexiconDomain", "KeyInput", "AudioCapture", "Transcription", "Cleanup", "WordStore", "History",
-                "AppText", "LexiconCore",
+                "AppText", "LexiconCore", "TestHooks",
             ]
         ),
     ],
