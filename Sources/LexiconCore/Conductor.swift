@@ -46,6 +46,8 @@ public actor Conductor<Destination: TextDestination> {
     var capturingID: DictationID?
     /// Dictations past stop that still need text (transcribing), and recovered ones being transcribed.
     var inFlight: [DictationID: Task<DictationResult, Never>] = [:]
+    /// The `inFlight` entries that are launch recovery, not a live or file Dictation.
+    var recovering: Set<DictationID> = []
     /// Waiting Dictations, each trying again until it has text (`retryWhenReady`).
     var waiting: [DictationID: Task<Void, Never>] = [:]
     /// Live Dictations in fn-down order. A Dictation inserts only when every
@@ -167,7 +169,8 @@ public actor Conductor<Destination: TextDestination> {
     /// at fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
     /// A waiting Dictation keeps its audio and is picked up at the next launch.
     public func idle() async {
-        while let run = inFlight.values.first { _ = await run.value }
+        // Launch recovery is not waited for: its text is never typed, and the next launch recovers it again.
+        while let run = inFlight.first(where: { !recovering.contains($0.key) })?.value { _ = await run.value }
         await history.flush()
         await recorder.settle()
     }

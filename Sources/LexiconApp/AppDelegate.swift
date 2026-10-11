@@ -13,11 +13,11 @@ import TestHooks
 /// 0. `LaunchGuard` (in main.swift): not launched by launchd -> message and exit, no event tap.
 /// 1. `startSystem()` (main.swift, before AppKit): the data folder, then
 ///    `LexiconSystem.live` (the fn tap first, then History, the Lexicon, AppText),
-///    then `system.run()`: the key loop, mic prepare and the local model's load.
+///    then `system.run()`: the key loop, crash recovery, mic prepare and the local model's load.
 /// 2. `applicationDidFinishLaunching`: the status item and the indicator, which
 ///    follows the Conductor's events and the mic's levels.
 /// 3. NSWorkspace will-sleep -> `conductor.systemWillSleep()`; Quit waits for `conductor.idle()`.
-/// Not yet: crash recovery at launch (#59) and start at login (#57).
+/// Not yet: start at login (#57).
 ///
 /// Test hooks (debug builds only) answer when the dev bundle id is launched with `--test-hooks`.
 @MainActor

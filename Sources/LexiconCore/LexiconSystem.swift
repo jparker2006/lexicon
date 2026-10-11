@@ -74,8 +74,9 @@ public final class LexiconSystem: Sendable {
 
     /// Everything that runs for the life of the app, all at once:
     /// 1. key commands -> `conductor.follow`, first, so fn works while the rest starts
-    /// 2. `recorder.prepare`, so the first fn-down only starts the hardware
-    /// 3. the local model loads in the background (the first load of a new build
+    /// 2. crash recovery (never typed), then the audio retention sweep
+    /// 3. `recorder.prepare`, so the first fn-down only starts the hardware
+    /// 4. the local model loads in the background (the first load of a new build
     ///    compiles for about 25 s), then follows the settings (Private mode, idle unload)
     public func run() async {
         let launched = preferences.snapshot()
@@ -83,6 +84,10 @@ public final class LexiconSystem: Sendable {
         let changes = preferences.changes()
         await withDiscardingTaskGroup { group in
             if let keyboard { group.addTask { await self.conductor.follow(keyboard.commands) } }
+            group.addTask {
+                await self.conductor.recover()
+                await self.history.sweepAudio(now: Date())
+            }
             group.addTask { self.recorder.prepare(.microphone(deviceUID: launched.microphoneUID)) }
             group.addTask {
                 await self.speech.warmUp(launched)
