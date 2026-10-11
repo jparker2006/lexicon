@@ -69,6 +69,8 @@ struct PasteboardContents: Sendable, Equatable {
     private var serial = 0
     private var waiters: [PasteID: [CheckedContinuation<Bool, Never>]] = [:]
     private var receipts: [PasteID: Bool] = [:]
+    /// After each read of the current paste: the deadline may have moved.
+    var onRead: (@MainActor () -> Void)?
 
     init(pasteboard: any Clipboard, now: @escaping @MainActor () -> Instant = { .now }) {
         self.pasteboard = pasteboard
@@ -128,6 +130,7 @@ struct PasteboardContents: Sendable, Equatable {
         guard current?.id == id else { return }  // withdrawn or superseded
         current?.lastRead = now()
         if receipts[id] == nil { resolve(id, true) }
+        onRead?()
     }
 
     private func restore(_ current: Current) {

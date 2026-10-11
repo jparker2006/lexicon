@@ -42,18 +42,28 @@ enum PasteKey {
         return nil
     }
 
-    /// Posts Cmd-V. The flags are set outright, so a fn (or ⌃) still held, as
-    /// when a hands-free stop is a fn-down, never reaches the target as part of
-    /// the chord. False when the events could not be made.
-    static func post(_ code: CGKeyCode) -> Bool {
-        guard let source = CGEventSource(stateID: .privateState),
-              let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false) else { return false }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-        return true
+    /// Cmd-V on `code`, made before the pasteboard is touched so that nothing
+    /// can fail between the write and the keys. The flags are set outright, so
+    /// a fn (or ⌃) still held, as when a hands-free stop is a fn-down, never
+    /// reaches the target as part of the chord.
+    struct Chord: @unchecked Sendable {  // CGEvent: immutable once made here; posted once
+        let down: CGEvent
+        let up: CGEvent
+
+        init?(_ code: CGKeyCode) {
+            guard let source = CGEventSource(stateID: .privateState),
+                  let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false) else { return nil }
+            down.flags = .maskCommand
+            up.flags = .maskCommand
+            self.down = down
+            self.up = up
+        }
+
+        func post() {
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+        }
     }
 }
 
