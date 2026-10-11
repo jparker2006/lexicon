@@ -10,11 +10,12 @@
 #   scripts/harness.sh hook sound <cue>      play one sound, reply with its latency
 #   scripts/harness.sh pill [--shots <dir>]  every pill state checked, sounds timed
 #
-# The live-app lane: one builder at a time. The harness reads other apps, so it
-# needs Accessibility, which it inherits from the terminal or agent app that runs
-# it. It never touches the daily copy.
+# Only the live-app lane's holder runs this (scripts/live-lane.sh). The harness
+# reads other apps, so it needs Accessibility, which it inherits from the
+# terminal or agent app that runs it. It never touches the daily copy.
 set -eu
 cd "$(dirname "$0")/.."
+scripts/live-lane.sh check
 
 # The same debug flags as scripts/check.sh and scripts/bundle.sh, so this reuses
 # their build products. Sourced inside a function: it replaces "$@".
