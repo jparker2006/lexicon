@@ -1,0 +1,14 @@
+{"id": "f01", "speech_text": "deploy the super base edge function with kubectl once test pass", "inserted_text": "Deploy the super base edge function with kubectl once test pass.", "lag_ms": 1240}
+{"id": "f02", "speech_text": "fix the use effect cleanup app tsx to stop leaking timers", "inserted_text": "Fix the use effect cleanup app tsx to stop leaking timers.", "lag_ms": 980}
+{"id": "f03", "speech_text": "run the swift pm tests in a fresh work tree before merge", "inserted_text": "Run the swift pm tests in a fresh work tree before merge.", "lag_ms": 1630}
+{"id": "f04", "speech_text": "ask codecs to review the diff and list any changes", "inserted_text": "Ask codecs to review the diff and list any changes.", "lag_ms": 760}
+{"id": "f05", "speech_text": "push the fluid audio update to get hub once it finished building", "inserted_text": "Push the fluid audio update to get hub once it finished building.", "lag_ms": 1410}
+{"id": "f06", "speech_text": "convert the next js config to type script and remove loaders", "inserted_text": "Convert the next js config to type script and remove loaders.", "lag_ms": 1085}
+{"id": "f07", "speech_text": "para keet keeps the audio on this mac and ever sends it out", "inserted_text": "Para keet keeps the audio on this Mac and ever sends it out.", "lag_ms": 870}
+{"id": "f08", "speech_text": "add a regression test for the work tree path bugs in SwiftPM", "inserted_text": "Add a regression test for the work tree path bugs in SwiftPM.", "lag_ms": 1755}
+{"id": "f09", "speech_text": "check whether kube control can reach staging cluster from Codex", "inserted_text": "Check whether kube control can reach staging cluster from Codex.", "lag_ms": 640}
+{"id": "f10", "speech_text": "rename the use effect hook in App.tsx to match our name rules", "inserted_text": "Rename the use effect hook in App.tsx to match our name rules.", "lag_ms": 1320}
+{"id": "f11", "speech_text": "tell codecs to keep the super base schema migration in order", "inserted_text": "Tell codecs to keep the super base schema migration in order.", "lag_ms": 1190}
+{"id": "f12", "speech_text": "use fluid audio for speakers diarization then send the segments to Parakeet", "inserted_text": "Use fluid audio for speakers diarization, then send the segments to Parakeet.", "lag_ms": 905}
+{"id": "f13", "speech_text": "open a pull request on git hub that links the issue and waits for review", "inserted_text": "Open a pull request on git hub that links the issue and waits for review.", "lag_ms": 1500}
+{"id": "f14", "speech_text": "rewrite the type script types to handle kube control output and error", "inserted_text": "Rewrite the type script types to handle kube control output and error.", "lag_ms": 1010}
