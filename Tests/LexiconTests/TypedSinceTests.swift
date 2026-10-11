@@ -42,11 +42,9 @@ private let field = FocusSnapshot(pid: 42, fieldFingerprint: "field")
 private func dictation(between events: [CGEvent]) async -> InsertDecision {
     let input = InputClock()
     let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
-    let tap = EventTapThread(gesture: FnGesture(holdThreshold: .milliseconds(300)), input: input,
-                             continuation: continuation)
-    let down = modifier(63, .maskSecondaryFn, from: keyboard)
-    down.timestamp = HostTime.now().nanoseconds - 500_000_000  // held for half a second
-    _ = tap.handle(.flagsChanged, down)
+    // A zero threshold makes every press a hold, whatever the machine's speed.
+    let tap = EventTapThread(gesture: FnGesture(holdThreshold: .zero), input: input, continuation: continuation)
+    _ = tap.handle(.flagsChanged, modifier(63, .maskSecondaryFn, from: keyboard))
     // Stricter than the app, which marks once the stop comes out after fn-up.
     let mark = input.mark()
     _ = tap.handle(.flagsChanged, modifier(63, [], from: keyboard))

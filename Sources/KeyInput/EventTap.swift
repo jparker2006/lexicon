@@ -19,8 +19,9 @@ import LexiconDomain
 ///
 /// `@unchecked Sendable` is safe because `gesture` and `deadline` are touched
 /// only on the tap thread (the callback, the timer and `perform`'s blocks all
-/// run on its run loop), and `tap` and `runLoop` are written once in `start()`
-/// before it returns, ordered by the semaphore.
+/// run on its run loop; tests call `handle` on one thread with no tap), and `tap`
+/// and `runLoop` are written once in `start()` before it returns, ordered by the
+/// semaphore.
 final class EventTapThread: @unchecked Sendable {
     private var gesture: FnGesture
     private var deadline: CFRunLoopTimer?
