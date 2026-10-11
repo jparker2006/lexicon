@@ -6,6 +6,8 @@
   --line: #d9d9de;
   --panel: #ffffff;
   --accent: #0a64d8;
+  --on-accent: #ffffff;
+  --rule-bg: #e6effb;
   --diff: #fff0b3;
   --mark: #c4291c;
   --ok: #1f7a3a;
@@ -20,7 +22,10 @@
     --line: #34343a;
     --panel: #1f1f23;
     --accent: #5aa2ff;
-    --diff: #4a3f12;
+    /* White text on this blue is under 3:1; dark text reads. */
+    --on-accent: #0b0b0d;
+    --rule-bg: #17283d;
+    --diff: #6b5512;
     --mark: #ff6b5e;
     --ok: #5cc97c;
     --warn-bg: #3a2a10;
@@ -28,6 +33,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Rules with their own display (.tour, .warning) would otherwise beat the hidden attribute. */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -36,67 +43,144 @@ body {
   font: 16px/1.45 -apple-system, system-ui, sans-serif;
 }
 
-header { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--line); }
-.top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 24px; }
+header {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+header p.rule {
+  margin: 0; padding: 10px 24px;
+  font-size: 18px; font-weight: 600; line-height: 1.4;
+  background: var(--rule-bg);
+}
+.rule em { font-style: italic; font-weight: 700; }
+.top {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 10px 24px; font-size: 14px;
+}
+#left { color: var(--muted); }
+.saved { margin-left: auto; color: var(--muted); font-size: 13px; }
 .bar { height: 3px; background: var(--line); }
 #done { height: 3px; width: 0; background: var(--ok); }
 
-main { max-width: 980px; margin: 0 auto; padding: 16px 24px 120px; }
+main { max-width: 980px; margin: 0 auto; padding: 16px 24px 140px; }
 
-.chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
-.chip:empty { display: none; }
-.chip.held { color: var(--mark); border-color: var(--mark); }
-#reasons { color: var(--muted); font-size: 13px; }
-.saved { margin-left: auto; color: var(--muted); font-size: 13px; }
-
-.player { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; color: var(--muted); }
 button {
   font: inherit; color: var(--fg); background: var(--panel);
   border: 1px solid var(--line); border-radius: 6px; padding: 4px 14px; cursor: pointer;
+}
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+kbd {
+  font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 5px; margin-right: 2px; background: var(--panel); color: var(--fg);
+}
+
+.player {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 12px;
+  color: var(--muted);
+}
+#play { font-size: 17px; padding: 8px 18px; }
+/* The pulse says "press Space": playback was blocked and the page needs a key. */
+#play.nudge { border-color: var(--accent); animation: nudge 1.6s ease-out infinite; }
+@keyframes nudge {
+  from { box-shadow: 0 0 0 0 var(--accent); }
+  to { box-shadow: 0 0 0 6px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #play.nudge { animation: none; }
 }
 
 section.candidate, section.gold {
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   padding: 10px 16px; margin-bottom: 10px;
 }
-section.candidate.picked { border-color: var(--ok); }
-section.candidate.cursor { border-color: var(--accent); }
+/* The 2px states take 1px from the padding so the card does not move when picked. */
+section.candidate.picked { border: 2px solid var(--ok); padding: 9px 15px; }
+section.candidate.cursor { border: 2px solid var(--accent); padding: 9px 15px; }
 
 .label { font-size: 13px; color: var(--muted); }
-kbd {
-  font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
-  border-radius: 4px; padding: 0 5px; margin-right: 2px; background: var(--panel); color: var(--fg);
+.letter { font-size: 22px; font-weight: 700; color: var(--fg); }
+.picked-tag {
+  display: none; margin-left: 6px; padding: 1px 8px; border-radius: 10px;
+  border: 1px solid var(--ok); color: var(--ok); font-size: 12px; font-weight: 600;
 }
+section.candidate.picked .picked-tag { display: inline-block; }
 
 .words, #gold-text { font-size: 21px; margin: 4px 0; overflow-wrap: anywhere; }
 /* A long clip's texts scroll in place, so A, B and the gold stay on one screen. */
 .words, #gold-text { max-height: 24vh; overflow-y: auto; }
-.words span { cursor: pointer; border-radius: 3px; padding: 0 1px; }
-.words span:hover { outline: 1px solid var(--line); }
-.words span.diff { background: var(--diff); }
+.words span { cursor: default; border-radius: 3px; padding: 0 1px; }
+.words span.diff { background: var(--diff); font-weight: 600; padding: 0 3px; }
 .words span.marked { color: var(--mark); text-decoration: line-through; text-decoration-thickness: 2px; }
-.words span.at { outline: 2px solid var(--accent); }
 .empty { color: var(--muted); font-style: italic; }
 
-.hints { font-size: 13px; color: var(--muted); }
-.hints:empty { display: none; }
+/* Words only respond to clicks while marking wrong words. */
+body.marking .words span { cursor: pointer; outline: 1px dashed var(--line); }
+body.marking .words span:hover { outline: 1px solid var(--line); }
+body.marking .words span.at { outline: 2px solid var(--accent); }
 
-section.hint { margin: 4px 2px 14px; font-size: 15px; }
-section.hint > div { margin: 2px 0; }
-#jake-edit { font-weight: 600; }
+section.choices { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
+section.choices button {
+  flex: 1; min-width: 180px; font-size: 18px; padding: 14px 10px;
+  border-radius: 8px; border: 2px solid var(--line);
+}
+section.choices button:hover { border-color: var(--accent); }
+#neither { border-style: dashed; }
+section.choices button.chosen { border-color: var(--ok); }
 
+.marking-note {
+  margin-bottom: 10px; padding: 6px 12px; border-radius: 6px; font-size: 14px;
+  background: var(--rule-bg); border: 1px solid var(--accent);
+}
+
+#editor { border: 2px solid var(--accent); padding: 9px 15px; }
 #typed {
-  width: 100%; font: 21px/1.4 -apple-system, system-ui, sans-serif; color: var(--fg);
+  display: block; width: 100%; margin: 4px 0 6px;
+  font: 21px/1.4 -apple-system, system-ui, sans-serif; color: var(--fg);
   background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; padding: 8px;
 }
 .small { font-size: 12px; color: var(--muted); }
+.chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+.chip:empty { display: none; }
+
+details#hints { margin: 8px 2px; font-size: 15px; }
+details#hints summary { font-size: 13px; color: var(--muted); cursor: pointer; }
+details#hints > div { margin: 2px 0; }
+#jake-edit { font-weight: 700; }
 
 .warning { background: var(--warn-bg); border-radius: 6px; padding: 6px 10px; margin-top: 6px; font-size: 14px; }
 .error { background: var(--mark); color: #fff; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
 
+.tour {
+  position: fixed; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(0, 0, 0, .45);
+}
+.tour .card {
+  width: 100%; max-width: 460px; padding: 20px 24px; border-radius: 12px;
+  background: var(--panel); box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
+}
+#tour-text { font-size: 18px; line-height: 1.5; margin: 8px 0 16px; }
+.tour-buttons { display: flex; justify-content: flex-end; gap: 10px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
 footer {
-  position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 1px solid var(--line);
-  padding: 8px 24px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 16px;
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
+  max-height: 40vh; overflow-y: auto;
+  padding: 8px 24px; font-size: 13px; color: var(--muted);
+  background: var(--bg); border-top: 1px solid var(--line);
+}
+footer .keys { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+details#more-keys summary { font-size: 13px; cursor: pointer; }
+/* Open, the list takes its own row under the summary. */
+details#more-keys[open] { flex-basis: 100%; }
+details#more-keys .keys { margin-top: 6px; }
+
+@media (max-width: 600px) {
+  header p.rule { padding: 10px 16px; font-size: 17px; }
+  .top { padding: 8px 16px; }
+  main { padding: 12px 16px 140px; }
+  footer { padding: 8px 16px; }
 }
 
-body.marking .words span { outline: 1px dashed var(--line); }
+.same-note { margin: 0 2px 10px; font-size: 14px; color: var(--muted); }
