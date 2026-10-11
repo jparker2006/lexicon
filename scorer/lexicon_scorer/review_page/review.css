@@ -69,6 +69,8 @@ kbd {
 }
 
 .words, #gold-text { font-size: 21px; margin: 4px 0; overflow-wrap: anywhere; }
+/* A long clip's texts scroll in place, so A, B and the gold stay on one screen. */
+.words, #gold-text { max-height: 24vh; overflow-y: auto; }
 .words span { cursor: pointer; border-radius: 3px; padding: 0 1px; }
 .words span:hover { outline: 1px solid var(--line); }
 .words span.diff { background: var(--diff); }

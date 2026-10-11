@@ -17,6 +17,7 @@ let error = "";
 // second key never lands on the wrong clip or undoes the first.
 let busy = false;
 let moves = Promise.resolve();
+let difference = -1; // which difference D last jumped to, on this clip
 const audio = new Audio();
 const blobs = new Map(); // clip id -> Promise of an object URL
 
@@ -133,6 +134,7 @@ function go(index) {
   at = index;
   mode = "normal";
   cursor = { model: "parakeet", word: 0 };
+  difference = -1;
   // One at a time, so the server keeps the last clip, not whichever arrived last.
   const id = clips[at].id;
   moves = moves.then(() => save("/api/position", { id }));
@@ -257,6 +259,9 @@ function render() {
     : "";
 
   $("editor").hidden = mode !== "edit";
+  const pointed = document.querySelector(".words span.at");
+  if (pointed) pointed.scrollIntoView({ block: "nearest" });
+
   const e = $("error");
   e.hidden = !error;
   e.textContent = error;
@@ -266,6 +271,23 @@ function render() {
 
 function seek(seconds) {
   audio.currentTime = Math.max(0, Math.min((audio.duration || 0), audio.currentTime + seconds));
+}
+
+// Plays from just before the next place A and B differ. There are no word
+// timings, so the place is estimated from the word's share of the text: a long
+// clip need not be heard whole.
+function nextDifference() {
+  const clip = clips[at];
+  const diff = differing(clip.words.parakeet, clip.words.wispr);
+  const model = diff.parakeet.size ? "parakeet" : "wispr";
+  const list = [...diff[model]].sort((a, b) => a - b);
+  const starts = list.filter((i, k) => k === 0 || list[k - 1] !== i - 1);
+  if (starts.length === 0 || !Number.isFinite(audio.duration)) return;
+  difference = (difference + 1) % starts.length;
+  audio.currentTime = Math.max(0, (starts[difference] / clip.words[model].length) * audio.duration - 1.5);
+  audio.play().catch(() => {});
+  const word = $(`row-${model}`).querySelector(`[data-word="${starts[difference]}"]`);
+  if (word) word.scrollIntoView({ block: "nearest" });
 }
 
 function setRate(step) {
@@ -280,10 +302,13 @@ function togglePlay() {
   else audio.pause();
 }
 
+// Letters work with Caps Lock or Shift on too.
+const letter = (event) => (event.key.length === 1 ? event.key.toLowerCase() : event.key);
+
 function markKeys(event) {
   const clip = clips[at];
   const size = clip.words[cursor.model].length;
-  switch (event.key) {
+  switch (letter(event)) {
     case "ArrowLeft": cursor.word = Math.max(0, cursor.word - 1); break;
     case "ArrowRight": cursor.word = Math.min(size - 1, cursor.word + 1); break;
     case "ArrowUp": case "ArrowDown": {
@@ -316,8 +341,9 @@ function editKeys(event) {
 function normalKeys(event) {
   const clip = clips[at];
   const mine = answers[clip.id];
-  switch (event.key) {
+  switch (letter(event)) {
     case " ": togglePlay(); break;
+    case "d": nextDifference(); break;
     case "r": audio.currentTime = 0; audio.play().catch(() => {}); break;
     case "ArrowLeft": seek(-2); break;
     case "ArrowRight": seek(2); break;
