@@ -272,11 +272,12 @@ private func current(_ terms: CodeTerms, is repo: String?) async -> Bool {
     let fixture = try Fixture()
     try fixture.write("code/zentrik/main.rs")
     try fixture.write("code/quaxly/main.py")
-    try fixture.write("code/zentrik/main.rs", "fn main() {}")
-    // Nothing changes after launch, so only the replay of recent history can make zentrik current.
+    try fixture.write("code/vexmo/main.go")
+    try fixture.write("code/quaxly/main.py", "print()")
+    // Nothing changes after launch, so only the replay of recent history can make quaxly current.
     let (terms, lexicon) = try await fixture.start()
-    #expect(await current(terms, is: "zentrik"))
-    #expect(await lexicon.codeTerms.first?.text == "zentrik")
+    #expect(await current(terms, is: "quaxly"))
+    #expect(await lexicon.codeTerms.first?.text == "quaxly")
     await fixture.finish(terms)
 }
 
