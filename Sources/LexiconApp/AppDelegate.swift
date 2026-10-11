@@ -35,10 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bundle = Bundle.main
         guard let bundleID = bundle.bundleIdentifier else { fatalError("Lexicon runs only as an app bundle") }
         let log = Logger(subsystem: bundleID, category: "launch")
-        // First, before any UI: the budget is fn working within 150 ms of process start.
-        // TODO(#56): delete `startKeyboard`, `keyboard` and the drain; `LexiconSystem.live` starts the tap
-        // and `run()` hands its commands to `conductor.follow` (docs/architecture.md, Implementation reconciliation).
-        keyboard = Self.startKeyboard(log: log)
         let paths = AppPaths.forBundle(id: bundleID)
         do {
             try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
@@ -97,7 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The fn tap. Until #56 wires the Conductor, its commands go only to the
     /// tap's own log (`log stream --predicate 'subsystem == "Lexicon" && category == "fn"'`).
-    static func startKeyboard(log: Logger) -> Keyboard? {
+    static func startKeyboard() -> Keyboard? {
+        let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "launch")
         let started = HostTime.now()
         do {
             let keyboard = try Keyboard.start(KeyboardConfig(), input: InputClock())
