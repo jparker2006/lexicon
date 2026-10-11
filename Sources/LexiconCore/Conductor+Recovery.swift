@@ -19,12 +19,16 @@ extension Conductor {
     /// Safe to call twice (History.recover is idempotent; ids already in flight are skipped).
     public func recover() async {
         for item in await history.recover() where inFlight[item.id] == nil && waiting[item.id] == nil {
+            recovering.insert(item.id)
             inFlight[item.id] = Task { await self.recover(item) }
         }
     }
 
     private func recover(_ item: UnfinishedDictation) async -> DictationResult {
-        defer { inFlight[item.id] = nil }
+        defer {
+            inFlight[item.id] = nil
+            recovering.remove(item.id)
+        }
         let id = item.id
         guard let clip = await Self.read(item.audio) else {
             history.record(.failed(id, reason: "audio unreadable"))

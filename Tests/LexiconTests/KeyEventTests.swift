@@ -37,16 +37,19 @@ private func feed(_ event: CGEvent, at now: HostTime, into gesture: inout FnGest
     return gesture.handle(key).commands
 }
 
+/// fn-down at `at`, whatever Dictation id it minted.
+private func isFnDown(_ key: KeyInput?, at: HostTime, secureInput: Bool) -> Bool {
+    if case .fnDown(at, secureInput, _)? = key { true } else { false }
+}
+
 @Test func fnDownWithoutAPasswordFieldIsFnDown() {
     let now = at(0)
-    #expect(KeyInput(flagsChanged(63, [.maskSecondaryFn]), secureInput: { false }, now: now)
-        == KeyInput.fnDown(now, secureInput: false))
+    #expect(isFnDown(KeyInput(flagsChanged(63, [.maskSecondaryFn]), secureInput: { false }, now: now), at: now, secureInput: false))
 }
 
 @Test func fnDownInAPasswordFieldIsFnDownWithSecureInput() {
     let now = at(0)
-    #expect(KeyInput(flagsChanged(63, [.maskSecondaryFn]), secureInput: { true }, now: now)
-        == KeyInput.fnDown(now, secureInput: true))
+    #expect(isFnDown(KeyInput(flagsChanged(63, [.maskSecondaryFn]), secureInput: { true }, now: now), at: now, secureInput: true))
 }
 
 @Test func fnUpIsFnUp() {
@@ -64,8 +67,7 @@ private func feed(_ event: CGEvent, at now: HostTime, into gesture: inout FnGest
 
 @Test func shiftHeldWhenFnGoesDownIsStillFnDown() {
     let now = at(0)
-    #expect(KeyInput(flagsChanged(63, [.maskShift, .maskSecondaryFn]), secureInput: { false }, now: now)
-        == KeyInput.fnDown(now, secureInput: false))
+    #expect(isFnDown(KeyInput(flagsChanged(63, [.maskShift, .maskSecondaryFn]), secureInput: { false }, now: now), at: now, secureInput: false))
 }
 
 @Test func fnUpWhileShiftIsStillHeldIsFnUp() {
@@ -120,22 +122,29 @@ private func feed(_ event: CGEvent, at now: HostTime, into gesture: inout FnGest
     #expect(asked == 1)
 }
 
-@Test func shiftWithFnNeverCancelsAHoldFromTheEvents() {
+@Test func shiftWithFnNeverCancelsAHoldFromTheEvents() throws {
     var gesture = FnGesture(holdThreshold: .milliseconds(300))
     var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
     commands += feed(flagsChanged(56, [.maskShift, .maskSecondaryFn]), at: at(50), into: &gesture)
     commands += gesture.handle(.deadline(at(300))).commands
     commands += feed(flagsChanged(63, [.maskShift]), at: at(1_500), into: &gesture)
-    #expect(commands == [.dictationBegan(at: at(0)), .dictationConfirmed(.hold), .dictationStopped(at: at(1_500))])
+    let id = try #require(beganID(commands))
+    #expect(commands == [.dictationBegan(id, at: at(0)), .dictationConfirmed(id, .hold), .dictationStopped(id, at: at(1_500))])
 }
 
-@Test func shiftWithFnThenArrowWithinTheThresholdCancelsTheHold() {
+@Test func shiftWithFnThenArrowWithinTheThresholdCancelsTheHold() throws {
     var gesture = FnGesture(holdThreshold: .milliseconds(300))
     var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
     commands += feed(flagsChanged(56, [.maskShift, .maskSecondaryFn]), at: at(50), into: &gesture)
     commands += feed(keyEvent(124, flags: [.maskShift, .maskSecondaryFn]), at: at(200), into: &gesture)
     commands += feed(flagsChanged(63, [.maskShift]), at: at(1_500), into: &gesture)
-    #expect(commands == [.dictationBegan(at: at(0)), .dictationDiscarded])
+    let id = try #require(beganID(commands))
+    #expect(commands == [.dictationBegan(id, at: at(0)), .dictationDiscarded(id)])
+}
+
+/// The id the first fn-down minted.
+private func beganID(_ commands: [KeyCommand]) -> DictationID? {
+    if case .dictationBegan(let id, _)? = commands.first { id } else { nil }
 }
 
 @Test func unstampedEventIsTakenAsNow() {

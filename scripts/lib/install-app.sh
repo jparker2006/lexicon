@@ -9,8 +9,9 @@
 # there (and the new one) carries that flavor's bundle id.
 #
 # Order, so a failure never leaves Jake without a working copy: stage and verify
-# the new copy, then quit the old one, swap, launch, and keep the old copy until
-# the new one is running. If it doesn't start, the old one goes back and relaunches.
+# the new copy, then quit the old one, swap, launch. If the new one doesn't start,
+# the old one goes back and relaunches. Once it has started, the old copy stays
+# beside it (`<app>.old`) until the next install, for a build that fails later on.
 set -eu
 cd "$(dirname "$0")/../.."
 . scripts/lib/flavor.sh
@@ -52,7 +53,7 @@ if [ -e "$APP_PATH" ] && [ "$(bundle_id_of "$APP_PATH")" != "$BUNDLE_ID" ]; then
 fi
 
 mkdir -p "$(dirname "$APP_PATH")"
-rm -rf "$STAGED" "$OLD"
+rm -rf "$STAGED"
 ditto "$NEW" "$STAGED"
 [ "$(bundle_id_of "$STAGED")" = "$BUNDLE_ID" ] || die "$NEW is not $BUNDLE_ID"
 codesign --verify --strict "$STAGED" || die "$NEW is not validly signed"
@@ -73,19 +74,23 @@ while pid=$(running_pid); [ -n "$pid" ]; do
     [ "$ticks" -lt 12600 ] || die "$NAME is still running after 21 minutes; nothing was replaced"
 done
 
-[ ! -e "$APP_PATH" ] || mv "$APP_PATH" "$OLD"
+# The running copy is the last one that started: it replaces any older spare.
+if [ -e "$APP_PATH" ]; then
+    rm -rf "$OLD"
+    mv "$APP_PATH" "$OLD"
+fi
 if ! mv "$STAGED" "$APP_PATH"; then
     [ ! -e "$OLD" ] || mv "$OLD" "$APP_PATH"
     die "could not move the new $NAME into place; the old one is back"
 fi
 
 if launch "$@"; then
-    rm -rf "$OLD" "$NEW"
-    echo "$NAME running from $APP_PATH (pid $pid)"
+    rm -rf "$NEW"
+    echo "$NAME running from $APP_PATH (pid $pid); the previous copy stays at $OLD"
     exit 0
 fi
 [ -e "$OLD" ] || die "the new $NAME did not start, and there is no old copy to go back to"
 rm -rf "$APP_PATH"
 mv "$OLD" "$APP_PATH"
-launch "$@" || true
+launch "$@" || die "the new $NAME did not start; the old one is back in place but did not start either"
 die "the new $NAME did not start; the old one is back"

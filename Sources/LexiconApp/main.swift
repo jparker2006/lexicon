@@ -12,9 +12,7 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     // Before AppKit starts: the tap runs on its own thread, and the budget is fn
     // working within 150 ms of process start.
-    // TODO(#56): delete `startKeyboard`, `keyboard` and the drain; `LexiconSystem.live` starts the tap
-    // and `run()` hands its commands to `conductor.follow` (docs/architecture.md, Implementation reconciliation).
-    delegate.startKeyboard()
+    delegate.startSystem()
     NSApplication.shared.delegate = delegate
     NSApplication.shared.setActivationPolicy(.accessory)
     withExtendedLifetime(delegate) { NSApplication.shared.run() }
