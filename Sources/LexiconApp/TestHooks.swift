@@ -31,7 +31,6 @@ enum AppTestHooks {
 
     static func handle(_ command: TestHookCommand, indicator: DictationIndicator,
                        system: LexiconSystem?) async -> TestHookReply {
-        guard let system else { return .failed("the app did not open its History, so nothing runs") }
         return switch command {
         case .status:
             .status(TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
@@ -39,7 +38,7 @@ enum AppTestHooks {
                                    accessibility: Permissions.accessibility,
                                    microphone: Permissions.microphoneName))
         case .dictate(let wav):
-            await dictate(URL(filePath: wav), on: system)
+            if let system { await dictate(URL(filePath: wav), on: system) } else { closed }
         case .indicator(let state):
             showing(state, on: indicator)
         case .sound(let cue):
@@ -51,7 +50,7 @@ enum AppTestHooks {
         case .capture(let seconds, let preparedIdle, let deviceChange, let deviceUID):
             await capture(seconds: seconds, preparedIdle: preparedIdle, deviceChange: deviceChange, deviceUID: deviceUID)
         case .insert(let text, let delay):
-            await insert(text, after: delay, into: system.text)
+            if let system { await insert(text, after: delay, into: system.text) } else { closed }
         }
     }
 
@@ -72,9 +71,16 @@ enum AppTestHooks {
         return .done
     }
 
+    private static let closed = TestHookReply.failed("the app did not open its History, so nothing runs")
+
     /// The live path on a WAV: the same run as fn, typed into the focused field at
-    /// the end of the file, at the speed of speech.
+    /// the end of the file, at the speed of speech. Test fixtures only: a file in a
+    /// `fixtures` folder or the temporary folder, so a hook can never feed the Test
+    /// set's audio (or anything else of Jake's) into a field.
     private static func dictate(_ wav: URL, on system: LexiconSystem) async -> TestHookReply {
+        guard isFixture(wav) else {
+            return .failed("dictate takes a test fixture: a WAV in a fixtures folder or the temporary folder")
+        }
         let result = await system.conductor.dictate(file: wav, pace: .realtime)
         return .dictated(TestHookDictation(status: result.status?.rawValue, lagMillis: result.lag.map { micros($0) / 1_000 },
                                            model: result.model?.id, characters: result.versions?.cleaned.count))
@@ -103,6 +109,17 @@ enum AppTestHooks {
             caretAfter: receipt?.caretAfter, contextBeforeCount: receipt?.contextBefore.count ?? 0,
             contextAfterCount: receipt?.contextAfter.count ?? 0, clipboardAccessBefore: before,
             clipboardAccessAfter: access()))
+    }
+
+    static func isFixture(_ url: URL) -> Bool {
+        let components = { (url: URL) in url.resolvingSymlinksInPath().standardizedFileURL.pathComponents }
+        let path = components(url)
+        let inside = { (folder: [String]) in Array(path.prefix(folder.count)) == folder }
+        // Never a data folder, whatever it is called: that is where the Test set lives.
+        let data = [AppPaths.dailyBundleID, AppPaths.devBundleID].map { components(AppPaths.forBundle(id: $0).root) }
+        guard !data.contains(where: inside) else { return false }
+        return path.dropLast().contains("fixtures") || inside(components(FileManager.default.temporaryDirectory))
+            || inside(["/", "private", "tmp"])
     }
 
     private static func access() -> String {
