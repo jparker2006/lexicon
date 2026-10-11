@@ -43,18 +43,10 @@ extension Conductor {
         }
         let context = await contextValue
         // Granted once the app is known: an always-private app gets no access (#5).
-        // TODO(#68): focus moving into an always-private app -> access?.revoke(.alwaysPrivateApp).
-        let access = CloudAccess.granted(by: start.preferences, app: context, keys: secrets.lookup)
-        // Private mode turned on while Jake talks cuts the stream at once; local finishes (#5).
-        let privacyWatch = access.map { access in
-            let store = preferences
-            let changes = store.changes()
-            return Task {
-                // Also catches a switch between the fn-down snapshot and subscribing.
-                if store.snapshot().privacy == .private { return access.revoke(.privateModeOn) }
-                for await now in changes where now.privacy == .private { return access.revoke(.privateModeOn) }
-            }
-        }
+        let access = CloudAccess.granted(by: start.preferences, for: .app(context), keys: secrets.lookup)
+        // Private mode turned on, or focus moving into an always-private app, cuts the stream at once;
+        // local finishes (#5).
+        let privacyWatch = access.map { revokeWhenDenied($0, in: context, followingFocus: true) }
         defer { privacyWatch?.cancel() }
         history.record(.began(id, origin: start.origin, purpose: start.purpose, at: Date(), app: context))
         emit(.started(id))
@@ -183,6 +175,41 @@ extension Conductor {
         }
     }
 
+    /// Revokes `access` the moment the settings or, `followingFocus`, the frontmost
+    /// app deny it (`Preferences.cloudDenied`). Cancel the task when the work that
+    /// holds `access` ends. Not following focus, `app` stays the Dictation's own app.
+    func revokeWhenDenied(_ access: CloudAccess, in app: AppContext, followingFocus: Bool) -> Task<Void, Never> {
+        let store = preferences
+        let destination = destination
+        // Now, before the caller's first use: the grant read the fn-down snapshot,
+        // and Private mode may have been turned on since.
+        if let reason = store.snapshot().cloudDenied(for: .app(app)) { access.revoke(reason) }
+        return Task {
+            // Subscribed before the first check, so no change falls between the two.
+            let settingsChanges = store.changes()
+            let focusChanges = followingFocus ? await destination.appChanges() : nil
+            let (changes, post) = AsyncStream<AccessChange>.makeStream()
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { for await now in settingsChanges { post.yield(.settings(now)) } }
+                if let focusChanges {
+                    group.addTask { for await now in focusChanges { post.yield(.focus(now)) } }
+                }
+                defer { group.cancelAll() }
+                // Again once subscribed: a switch between the check above and here counts too.
+                var settings = store.snapshot()
+                var app = app
+                if let reason = settings.cloudDenied(for: .app(app)) { return access.revoke(reason) }
+                for await change in changes {
+                    switch change {
+                    case .settings(let now): settings = now
+                    case .focus(let now): app = now
+                    }
+                    if let reason = settings.cloudDenied(for: .app(app)) { return access.revoke(reason) }
+                }
+            }
+        }
+    }
+
     /// The disk was nearly full or a write failed: the Dictation finishes from
     /// RAM as normal, and Jake is told its audio was not saved (#4).
     func noteStorage(_ summary: AudioSummary) {
@@ -203,4 +230,10 @@ extension Conductor {
             return await group.next() ?? .stop(at: .now())
         }
     }
+}
+
+/// What `revokeWhenDenied` re-checks the privacy rule on.
+private enum AccessChange: Sendable {
+    case settings(Preferences)
+    case focus(AppContext)
 }
