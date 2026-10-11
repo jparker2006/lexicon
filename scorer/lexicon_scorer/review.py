@@ -5,10 +5,12 @@ scorer/testset update).
     scripts/test-set.sh review     (scorer/testset review [--no-open])
 
 Serves one page from 127.0.0.1 until Ctrl-C and opens it in the default
-browser. For each clip Jake plays the audio, sees both speech texts with his own
-edit of Wispr's text as a hint, and picks one or types the right words; he can
-also mark wrong words in either speech text. Every change is saved as it is
-made, and the page reopens where he left off.
+browser. For each clip the audio plays, the page shows both speech texts with
+the words that differ highlighted, and Jake picks the one with the words he
+said or fixes one; what he typed or fixed into Wispr sits behind a toggle, since
+it is what he wanted typed, not what he said. He can also mark wrong words in
+either speech text. Every change is saved as it is made, and the page reopens
+where he left off. A three-step tour shows on the first visit.
 
 What it writes, all owner-only, under the Test set folder and nowhere else:
 
@@ -21,7 +23,7 @@ What it writes, all owner-only, under the Test set folder and nowhere else:
 - `marks.jsonl`: one Test set entry per run of marked words: the clip, its
   audio, session and split, which speech text, the words heard and the words
   said (from his gold, once he has given it).
-- `review-state.json`: the clip he was on.
+- `review-state.json`: the clip he was on, and whether he has seen the tour.
 
 `manifest.jsonl` and `marks.jsonl` are rebuilt from `review.jsonl` at every save
 and at start, so a crash between writes is repaired on the next open.
@@ -57,6 +59,7 @@ PAGE = Path(__file__).parent / "review_page"
 MODELS = ("parakeet", "wispr")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/review.js": ("review.js", "text/javascript; charset=utf-8"),
+         "/review_logic.js": ("review_logic.js", "text/javascript; charset=utf-8"),
          "/review.css": ("review.css", "text/css; charset=utf-8")}
 # The page may load its own script and style and fetch from this server; audio
 # plays from blobs it fetched. Anything else (another host, an inline script, a
@@ -153,7 +156,9 @@ class Review:
             raise TestSetError(f"{missing} disagreements have no manifest entry; run scripts/test-set.sh first")
         self.answers = {a["id"]: a for a in _read_jsonl(root / "review.jsonl") if a["id"] in self.by_id}
         state = root / "review-state.json"
-        self.position = json.loads(state.read_text(encoding="utf-8")).get("position") if state.exists() else None
+        saved = json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
+        self.position = saved.get("position")
+        self.toured = saved.get("toured", False)
         self._apply()
 
     # What the page reads
@@ -171,6 +176,7 @@ class Review:
             } for c in self.clips],
             "answers": {i: self._answer_view(a) for i, a in self.answers.items()},
             "position": self.position if self.position in self.by_id else None,
+            "toured": self.toured,
         }
 
     def _answer_view(self, answer: dict) -> dict:
@@ -229,11 +235,11 @@ class Review:
     def move(self, clip_id: str) -> None:
         self._clip(clip_id)
         self.position = clip_id
-        temp = self.root / ".review-state.json.tmp"
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"position": clip_id}, f)
-        os.replace(temp, self.root / "review-state.json")
+        self._save_state()
+
+    def tour_seen(self) -> None:
+        self.toured = True
+        self._save_state()
 
     def _clip(self, clip_id) -> dict:
         if not isinstance(clip_id, str) or clip_id not in self.by_id:
@@ -241,6 +247,13 @@ class Review:
         return self.by_id[clip_id]
 
     # Disk
+
+    def _save_state(self) -> None:
+        temp = self.root / ".review-state.json.tmp"
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"position": self.position, "toured": self.toured}, f)
+        os.replace(temp, self.root / "review-state.json")
 
     def _save(self) -> None:
         # Answers first: the manifest and marks are rebuilt from them, so a
@@ -416,6 +429,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._json(review.mark(body.get("id"), body.get("marks")))
                 if path == "/api/position":
                     review.move(body.get("id"))
+                    return self._json({})
+                if path == "/api/toured":
+                    review.tour_seen()
                     return self._json({})
         except ReviewError as e:
             return self._send(400, str(e).encode())
