@@ -90,7 +90,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 ### Invariants the compiler enforces
 
 - Recovered and retried text is never typed: `TextDestination.Target` has no public initializer, and only a live fn-up or a test file run produces one.
-- No cloud call in Private mode, and no LLM Cleanup with "AI cleanup" off: speech, Jev and Cleanup take a `CloudAccess`, whose only constructor returns nil in those modes.
+- `CloudAccess` is the only door to the network: speech, Cleanup's LLM, Jev and model downloads all take one. Its only constructor returns nil in Private mode or for an always-private app, and Cleanup withholds it when "AI cleanup" is off.
 - Every Jev call has a local fallback: `decide(_:access:budget:fallback:)` has no other form.
 - A capture is stopped, and an attempt finished, at most once: both are `~Copyable` with `consuming` methods.
 - One list each, compiler-checked: providers, statuses (index predicates and retention derive from the enum), key commands, inbox messages, History events.
@@ -120,6 +120,13 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 | Speech and Cleanup actors, URLSession | Sockets, the race, LLM calls |
 | History writer queue | Every `history.sqlite` write, FIFO, never awaited on the hot path |
 | `LocalTranscriber` | One job at a time; live work preempts recovery and retry |
+
+### Privacy (from [Private mode, keys, and what leaves the Mac](https://github.com/jparker2006/lexicon/issues/5))
+
+- One `CloudAccess` per Dictation, granted at fn-down once the active app is known. Turning Private mode on, or focus moving into an always-private app, revokes it mid-Dictation: every key lookup returns nil, the speech stream is cut at once, and the local model, already racing, finishes the text.
+- The Secret guard is a pure check in `LexiconDomain`. Calls that send text get their key through `access.key(_:sending:)`, which runs the guard first; a match revokes access for the rest of the Dictation. Transcription also checks each finalized segment, so a secret spoken early cuts the rest of the stream. Limit: audio streams while Jake talks, so a spoken secret has already reached the speech provider before any text exists. The guard protects text calls and later audio, not audio already sent.
+- fn-down while macOS secure input is on (a password field) starts nothing.
+- No analytics or crash reporting; Dictation text and keys are never logged. Keys are read from the Keychain once and kept in memory.
 
 ### Data
 
@@ -196,6 +203,7 @@ Builders record accepted deviations here, with who accepted them, and update the
 - [fn and recording behavior](https://github.com/jparker2006/lexicon/issues/18): the 200 ms tail (#4) vs finalize at fn-up (#8). The sketch supports an adaptive tail capped at 200 ms. Also: does Esc-cancel keep the audio? Recommended: keep it, status cancelled, retryable.
 - [Speech pipeline](https://github.com/jparker2006/lexicon/issues/19): the p95 lag sum above, and whether to keep a speech socket pre-opened (a cold TLS connect is up to 635 ms and can miss a very short Dictation before M2).
 - [Hand fix](https://github.com/jparker2006/lexicon/issues/24): who installs the Claude Code and Codex hook config, a Settings button or Jake by hand.
+- [Private mode, keys, and what leaves the Mac](https://github.com/jparker2006/lexicon/issues/5) (closed): the Secret guard can't stop audio already streamed; and "losing wifi behaves like Private mode, nothing queued" (#5) vs "cloud fails: waiting, retry when the network returns" (#4). The sketch keeps the waiting branch for when no local model is available yet (before M2).
 
 ## Next implementation step
 
