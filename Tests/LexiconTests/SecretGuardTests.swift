@@ -11,7 +11,7 @@ import LexiconDomain
     "sk_live_" + "51HxQ2eL8mVn3Kp7RtYw0Zs4Ab",
     "rk_test_" + "9Qw2Er4Ty6Ui8Op0As3Df5Gh",
     "ghp_" + "aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY2zA4",
-    "github_pat_" + "11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz",
+    "github_pat_" + "11AQ7XW3PLM0Zt9Rb4Vn_Kd8sYhF6gJ0eAuX2cW5mN7pL1qT",
     "xoxb-" + "2048-4096-Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2",
     "AKIA" + "Q7XW3PLMZ9TR4VNB",
     "AIza" + "SyB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY2z",
@@ -22,6 +22,8 @@ import LexiconDomain
     "x9Kq2mVb7RtL4wZp8NcY3hJd6FsA1gUe",
     "3f9a1c7e5b2d8f4a6c0e9b1d7f3a5c8e2b4d6f0a",
     "-----BEGIN OPENSSH " + "PRIVATE KEY-----",
+    "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY",
+    "a7Kp2Lm9Qr4Ts1Vw8Xb_" + "3Nc6Hd0Jf5Gz7Yu2Ei",
 ])
 func knownKeyShapesMatch(_ secret: String) {
     #expect(SecretGuard.matches(secret))
@@ -34,6 +36,12 @@ func knownKeyShapesMatch(_ secret: String) {
     "OK so the passcode's 4821, write that down",
     "passphrase: tangerine",
     "Password = Swordfish99",
+    "the password for the server is hunter2",
+    "The password I use for GitHub is tr0ub4dor&3",
+    "the password equals hunter2",
+    "passwd is hunter2",
+    "The client secret is 9fK2mLp7Qr4Tz1Xc",
+    "my PIN is 4821",
 ])
 func passwordPhrasesMatch(_ text: String) {
     #expect(SecretGuard.matches(text))
@@ -51,6 +59,17 @@ func passwordPhrasesMatch(_ text: String) {
     "My password is wrong again, can you reset it?",
     "The password is stored in the Keychain, not in the env file.",
     "Is the passcode required on the second screen?",
+    "Make sure the password's column is nullable.",
+    "The password's hash is stored in the users table.",
+    "The password is not in the repo, so use the Keychain.",
+    "The password is read from the environment and is no longer valid after a day.",
+    "let password = keychain.read()",
+    "Add a password: String field to the User struct, and if password == null return early.",
+    "The secret is to keep the token short, about 3 words.",
+    "Reset my password. It is 2026 after all.",
+    "Rename AVAudioEngineInputNodeTap16kHz and NSURLSessionDataTaskV2Request.",
+    "Try sk-architecture-review-2026, xai-grok-code-fast-1 and hf_whisper_large_v3_turbo_mlx.",
+    "Push feature/issue-65-keys-and-cloud-access and claude_issue_65_keys_cloud_access_v2.",
     "Supercalifragilisticexpialidocious, internationalization, and antidisestablishmentarianism.",
     "Commit e3aad6c fixed the race; the next one is 98b609a.",
     "I'll get 2x the throughput with 16 kHz mono at 48000 samples per 3 seconds.",
