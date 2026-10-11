@@ -44,7 +44,7 @@ private func cues(_ events: [ConductorEvent]) -> [SoundCue] { follow(events).com
 }
 
 @Test func theStopSoundPlaysOnceWhetherStoppedOrTranscribingComesFirst() {
-    // A file Dictation has no fn-up: `transcribing` is its first sign of the end.
+    // Either order counts once; `stopped` comes first from fn-up, `transcribing` after the tail.
     #expect(cues([.confirmed(a, .hold), .transcribing(a), .stopped(a)]) == [.start, .stop])
     #expect(cues([.confirmed(a, .hold), .stopped(a), .transcribing(a)]) == [.start, .stop])
 }
@@ -65,7 +65,7 @@ private func cues(_ events: [ConductorEvent]) -> [SoundCue] { follow(events).com
 @Test func aWaitingDictationSaysItIsSaved() {
     let events: [ConductorEvent] = [.confirmed(a, .hold), .stopped(a), .notice(.waitingForNetwork(a)),
                                     .finished(a, .waiting)]
-    guard case .error = states(events).last else { Issue.record("expected an error state"); return }
+    #expect(states(events).last == .error("Saved. No text yet"))
     #expect(cues(events) == [.start, .stop, .error])
 }
 
@@ -93,6 +93,14 @@ private func cues(_ events: [ConductorEvent]) -> [SoundCue] { follow(events).com
 }
 
 @Test func pasteLastWithNothingToPasteSaysSo() {
-    guard case .error = states([.notice(.nothingToPaste)]).last else { Issue.record("expected an error state"); return }
-    guard case .error = states([.notice(.noFieldToPaste)]).last else { Issue.record("expected an error state"); return }
+    #expect(states([.notice(.nothingToPaste)]).last == .error("Nothing to paste yet"))
+    #expect(states([.notice(.noFieldToPaste)]).last == .error("Click a text field, then press \u{2303}\u{2318}V"))
+}
+
+@Test func aNoticeWhileJakeIsTalkingLeavesTheRecordingShowing() {
+    // An error would hide itself after a moment, with fn still down.
+    let events: [ConductorEvent] = [.confirmed(a, .hold), .notice(.nothingToPaste), .notice(.microphoneSilent),
+                                    .oneMinuteLeft(a)]
+    #expect(states(events).last == .recording(.hold, minuteLeft: true))
+    #expect(cues(events) == [.start, .warning])
 }

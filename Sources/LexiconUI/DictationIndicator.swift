@@ -32,7 +32,7 @@ public final class DictationIndicator {
 
     public func handle(_ event: ConductorEvent) {
         // fn-down: the start sound may come once the hold is confirmed.
-        if case .started = event { sounds.warm() }
+        if case .started = event, soundsOn { sounds.warm() }
         let before = follower.state
         let cue = follower.apply(event)
         if let cue { play(cue) }
@@ -49,7 +49,7 @@ public final class DictationIndicator {
         pill.show(state)
         statusItem.render(state)
         switch state {
-        case .recording, .finishing: sounds.setActive(true)
+        case .recording, .finishing: sounds.setActive(soundsOn)
         case .hidden, .landed, .pasteLast, .error: sounds.setActive(false)
         }
         // How long each passing state stays. Landed is gone by about 0.45 s: 0.15 s, then a 0.3 s fade.
@@ -78,7 +78,7 @@ public final class DictationIndicator {
     /// Test hooks: plays `cue` and waits until its first sample reaches the output.
     /// nil when Sounds is off, or the sound never played within a second.
     public func playAndMeasure(_ cue: SoundCue) async -> Duration? {
-        guard preferences.snapshot().soundsOn else { return nil }
+        guard soundsOn else { return nil }
         sounds.play(cue)
         for _ in 0..<200 {
             if let latency = sounds.lastLatency { return latency }
@@ -87,18 +87,21 @@ public final class DictationIndicator {
         return nil
     }
 
-    /// The "Sounds" line for the menu bar menu, with a check while on.
+    /// The "Sounds on" line for the menu bar menu, with a check while on.
     public func soundsMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Sounds", action: #selector(SoundsToggle.toggle), keyEquivalent: "")
+        let item = NSMenuItem(title: "Sounds on", action: #selector(SoundsToggle.toggle), keyEquivalent: "")
         item.target = toggle
-        item.state = preferences.snapshot().soundsOn ? .on : .off
+        item.state = soundsOn ? .on : .off
         return item
     }
 
     private lazy var toggle = SoundsToggle(preferences: preferences)
 
+    /// Read each time: the engine never runs while Sounds is off, since a running one keeps the Mac awake.
+    private var soundsOn: Bool { preferences.snapshot().soundsOn }
+
     private func play(_ cue: SoundCue) {
-        if preferences.snapshot().soundsOn { sounds.play(cue) }
+        if soundsOn { sounds.play(cue) }
     }
 
     private func hide(after delay: TimeInterval, fade: TimeInterval) {

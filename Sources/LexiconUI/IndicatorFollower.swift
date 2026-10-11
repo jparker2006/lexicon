@@ -12,7 +12,6 @@ public struct IndicatorFollower: Sendable {
     public private(set) var state: IndicatorState = .hidden
     private var current: DictationID?
     private var stopSounded = false
-    private var waitingForNetwork = false
 
     public init() {}
 
@@ -26,7 +25,6 @@ public struct IndicatorFollower: Sendable {
             if sounds {
                 current = id
                 stopSounded = false
-                waitingForNetwork = false
             }
             state = .recording(mode, minuteLeft: false)
             return sounds ? .start : nil
@@ -59,7 +57,8 @@ public struct IndicatorFollower: Sendable {
         case .failed:
             return fail("No speech heard")
         case .waiting:
-            return fail(waitingForNetwork ? "Saved. Waiting for the network" : "Saved. No speech model yet")
+            // Not "waiting for the network": a local model that failed waits too.
+            return fail("Saved. No text yet")
         case .notInserted, .recovered:
             // A live Dictation that was not typed already showed paste-last (`readyToPaste` comes first).
             if state != .pasteLast { state = .hidden }
@@ -71,16 +70,18 @@ public struct IndicatorFollower: Sendable {
     }
 
     /// Exhaustive: a new notice fails the build here until it has its line.
+    /// While Jake is talking the pill keeps showing the recording: a notice
+    /// then would hide it after a moment with fn still down.
     private mutating func show(_ notice: Notice) -> SoundCue? {
+        if isRecording { return nil }
         switch notice {
         case .readyToPaste(let id):
-            guard id == current, !isRecording else { return nil }
+            guard id == current else { return nil }
             state = .pasteLast
             return .error
-        case .waitingForNetwork(let id):
-            if id == current { waitingForNetwork = true }
-            return nil
-        // These come with no Dictation, or with one that is now useless: say so whatever is showing.
+        case .waitingForNetwork:
+            return nil  // `finished(.waiting)` follows and says it
+        // These come with no Dictation, or with one that is now useless: say so whatever else is showing.
         case .microphoneUnavailable: return fail("Microphone unavailable")
         case .microphoneSilent: return fail("No sound from the microphone")
         case .microphoneMuted: return fail("Microphone is muted")

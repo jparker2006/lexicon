@@ -33,8 +33,8 @@ func pill(_ arguments: [String]) async throws {
         let reply = try await DevApp.hooks.send(.indicator(state), timeout: .seconds(5))
         guard case .done = reply else { throw unexpected(reply, to: "indicator \(expectation.name)") }
 
-        // Landed clears itself by about 0.45 s, so it is read early here and again at 700 ms.
-        try await Task.sleep(for: state == .landed ? .milliseconds(100) : .milliseconds(300))
+        // Landed clears itself from 150 ms (gone by about 0.45 s), so it is read at once and again at 700 ms.
+        try await Task.sleep(for: state == .landed ? .milliseconds(20) : .milliseconds(300))
         try checkPill(expectation, state: state, app: app)
         try checkMenuBar(expectation, item: item)
         try checkFocus(expectation, app: app, focus: focus)

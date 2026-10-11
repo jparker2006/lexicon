@@ -108,8 +108,13 @@ extension Sounds {
                     AudioUnitSetProperty(unit, kAudioDevicePropertyBufferFrameSize, kAudioUnitScope_Global, 0,
                                          &frames, UInt32(MemoryLayout<UInt32>.size))
                 }
-                try? engine.start()  // no sound is better than a crash; the next use tries again
-                voice.presentationLatency = engine.outputNode.presentationLatency
+                do {
+                    try engine.start()
+                    voice.presentationLatency = engine.outputNode.presentationLatency
+                } catch {
+                    // No sound is better than a crash, and a late one is worse than none: the next use tries again.
+                    voice.clear()
+                }
             }
             return generation
         }
@@ -161,6 +166,8 @@ final class SynthVoice: Sendable {
         let nanos = latencyNanos.load(ordering: .acquiring)
         return nanos < 0 ? nil : .nanoseconds(nanos)
     }
+
+    func clear() { state.withLock { $0.notes.removeAll() } }
 
     func schedule(_ notes: [Sounds.Note]) {
         let now = mach_absolute_time()

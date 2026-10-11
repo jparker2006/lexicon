@@ -68,7 +68,7 @@ import LexiconDomain
     #expect(PreferencesStore(defaults: suite).snapshot() == Preferences.defaults)
 }
 
-@Test func changesYieldTheNewValue() async {
+@Test(.timeLimit(.minutes(1))) func changesYieldTheNewValue() async {
     let name = "lexicon.tests.\(UUID())"
     let suite = UserDefaults(suiteName: name)!
     defer { suite.removePersistentDomain(forName: name) }
