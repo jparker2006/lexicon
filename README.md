@@ -26,3 +26,19 @@ Command Line Tools only (no Xcode), macOS 26. Builds are signed with a self-sign
 | `scripts/install.sh` | Builds a release of "Lexicon" (`dev.jparker.lexicon`), swaps it into `~/Applications/Lexicon.app` and relaunches it, after any Dictation in progress. The daily copy's only update command. |
 
 The two apps have separate bundle IDs and data folders (`~/Library/Application Support/Lexicon Dev/` and `.../Lexicon/`); neither command touches the other's. Launch Lexicon with these scripts or `open`, never by running the binary: a binary run from a shell inherits the shell's Accessibility trust, so Lexicon refuses to start that way.
+
+## Keys
+
+Cloud keys live in the login Keychain, one item per key, with the app's bundle ID as the service. Until the Settings window lands, add one with this command; it asks for the key twice, so the key never lands in your shell history. This is for the dev app; for the daily app use `dev.jparker.lexicon`.
+
+```sh
+security add-generic-password -U -s dev.jparker.lexicon.dev -a cleanup.openrouter -w
+```
+
+| Key | Account (`-a`) | `lexicon-eval` environment variable |
+|---|---|---|
+| Meta (Muse speech) | `speech.meta.muse-voice-transcribe-1.0` | `LEXICON_KEY_SPEECH_META_MUSE_VOICE_TRANSCRIBE_1_0` |
+| OpenRouter (AI cleanup) | `cleanup.openrouter` | `LEXICON_KEY_CLEANUP_OPENROUTER` |
+| TypeSafe (Jev) | `jev` | `LEXICON_KEY_JEV` |
+
+Lexicon reads each key once and keeps it in memory, so quit and reopen the app after adding one. The first time it reads a key added this way, macOS asks for your login password: choose Always Allow. `lexicon-eval` reads the environment variables instead. Lexicon has no analytics or crash reporting, and never logs a key or Dictation text.

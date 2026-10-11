@@ -1,5 +1,6 @@
 public import Foundation
 public import LexiconDomain
+import Security
 import Synchronization
 
 /// Sole owner of UserDefaults. Modules never read settings themselves: the
@@ -23,13 +24,16 @@ public final class PreferencesStore: Sendable {
 }
 
 /// API keys in the Keychain (#8): generic passwords, service = bundle id,
-/// account = `CredentialID.account`. Read once, cached in memory.
+/// account = `CredentialID.account`. Each key is read once, on first use, and
+/// kept in memory (a missing key too, until `set` stores one).
 /// Headless runs (`lexicon-eval`) read `LEXICON_KEY_<ACCOUNT>` environment
 /// variables instead, since the Keychain item's ACL belongs to the app.
+/// Nothing here logs: a key never reaches a log, an error message or History.
 public final class Secrets: Sendable {
     public enum Source: Sendable { case keychain(service: String), environment }
 
     let source: Source
+    private let cache = Mutex<[CredentialID: String?]>([:])
 
     public init(_ source: Source) { self.source = source }
 
@@ -37,7 +41,14 @@ public final class Secrets: Sendable {
     /// call needs its key, never at fn-down.
     public var lookup: @Sendable (CredentialID) -> String? {
         switch source {
-        case .keychain: { _ in fatalError("not implemented") }
+        case .keychain(let service): { [self] id in
+            if let known = cache.withLock({ $0[id] }) { return known }
+            // Read outside the lock: the first read can wait on a Keychain prompt.
+            // Two racing first reads both read the same item, which is harmless.
+            let key = Keychain.read(service: service, account: id.account)
+            cache.withLock { $0[id] = key }
+            return key
+        }
         case .environment: { ProcessInfo.processInfo.environment[Secrets.environmentName(for: $0)] }
         }
     }
@@ -48,5 +59,56 @@ public final class Secrets: Sendable {
         "LEXICON_KEY_" + String(id.account.uppercased().map { $0.isLetter || $0.isNumber ? $0 : "_" })
     }
 
-    public func set(_ value: String?, for id: CredentialID) throws { fatalError("not implemented") }
+    /// Settings: stores `value` in the Keychain, or deletes the item for nil, and
+    /// the next lookup returns it without a restart.
+    public func set(_ value: String?, for id: CredentialID) throws(KeychainError) {
+        guard case .keychain(let service) = source else { throw .readOnly }
+        try Keychain.write(value, service: service, account: id.account)
+        cache.withLock { $0[id] = value }
+    }
+}
+
+public enum KeychainError: Error, Equatable {
+    /// `lexicon-eval`'s keys come from its environment.
+    case readOnly
+    /// The Security framework's status code, never the key.
+    case failed(OSStatus)
+}
+
+/// Login Keychain generic passwords. The only Security importer (scripts/check-imports.swift).
+private enum Keychain {
+    static func read(service: String, account: String) -> String? {
+        var query = item(service: service, account: account)
+        query[kSecReturnData] = true
+        query[kSecMatchLimit] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else {
+            return nil
+        }
+        let key = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty ? nil : key
+    }
+
+    /// Updates in place when the item exists, so the apps Jake already allowed
+    /// to read it (Keychain "Always Allow") keep reading it without a prompt.
+    static func write(_ value: String?, service: String, account: String) throws(KeychainError) {
+        let query = item(service: service, account: account)
+        guard let value else {
+            let status = SecItemDelete(query as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw .failed(status) }
+            return
+        }
+        let data = Data(value.utf8)
+        var status = SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var add = query
+            add[kSecValueData] = data
+            status = SecItemAdd(add as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw .failed(status) }
+    }
+
+    private static func item(service: String, account: String) -> [CFString: Any] {
+        [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account]
+    }
 }
