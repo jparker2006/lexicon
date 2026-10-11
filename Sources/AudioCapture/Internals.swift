@@ -9,6 +9,10 @@ import LexiconDomain
 ///
 /// `head` and `tail` count frames ever written and read, so they never wrap;
 /// the slot is `count % capacity`.
+///
+/// `@unchecked Sendable`: one producer and one consumer by contract. Each side
+/// writes only its own counter and the slots between them, published with
+/// release and read with acquire.
 final class SPSCRing: @unchecked Sendable {
     let capacity: Int
     private let storage: UnsafeMutableBufferPointer<Float>
@@ -88,8 +92,8 @@ final class OneShot<Value: Sendable>: Sendable {
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 let ready = state.withLock { state -> (Bool, Value?) in
-                    if state.settled { return (true, state.value) }
                     if state.cancelled.remove(id) != nil { return (true, nil) }
+                    if state.settled { return (true, state.value) }
                     state.waiters[id] = continuation
                     return (false, nil)
                 }

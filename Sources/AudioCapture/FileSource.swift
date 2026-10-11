@@ -7,6 +7,9 @@ import LexiconDomain
 /// thread reads 512-frame blocks at the file's rate, mixes them to mono and
 /// pushes them into the ring. From the ring on, a file runs the exact path the
 /// mic uses (converter, CAF writer, feed).
+///
+/// `@unchecked Sendable`: `file` is read only by the reader thread once `start`
+/// runs; every other stored property is immutable, atomic or a semaphore.
 final class FileSource: @unchecked Sendable {
     static let blockFrames: AVAudioFrameCount = 512
 
@@ -43,13 +46,15 @@ final class FileSource: @unchecked Sendable {
         thread.start()
     }
 
-    /// Blocks until the reader thread has exited, so nothing writes the ring after.
+    /// Waits for the reader thread to exit, so nothing writes the ring after.
+    /// The thread checks for stop at every 512-frame block, so this is one block
+    /// read at most; the deadline only guards against a file read that hangs.
     /// Call at most once.
     func stop() {
         guard started.load(ordering: .relaxed) else { return }
         stopRequested.store(true, ordering: .relaxed)
         wake.signal()
-        exited.wait()
+        _ = exited.wait(timeout: .now() + .seconds(1))
     }
 
     private var stopping: Bool { stopRequested.load(ordering: .relaxed) }
@@ -63,7 +68,6 @@ final class FileSource: @unchecked Sendable {
         var framesRead = 0
 
         while !stopping {
-            guard file.framePosition < file.length else { return HostTime.now() }
             guard (try? file.read(into: buffer, frameCount: Self.blockFrames)) != nil else { return nil }
             let count = Int(buffer.frameLength)
             guard count > 0 else { return HostTime.now() }
@@ -75,13 +79,16 @@ final class FileSource: @unchecked Sendable {
                     mono[frame] = sum / Float(channels)
                 }
             }
-            mono.withUnsafeBufferPointer { mixed in
+            let pushed = mono.withUnsafeBufferPointer { mixed in
                 let block = channels > 1 ? UnsafeBufferPointer(rebasing: mixed[0..<count])
                                          : UnsafeBufferPointer(start: data[0], count: count)
-                push(block, into: ring)
+                return push(block, into: ring)
             }
+            guard pushed else { return nil }
             if framesRead == 0 { firstAudio(HostTime.now()) }
             framesRead += count
+            // The end is the end even if a stop arrives during the last paced sleep.
+            if file.framePosition >= file.length { return HostTime.now() }
             if pace == .realtime, !stopping {
                 let due = began + .nanoseconds(Int(Double(framesRead) / sampleRate * 1e9))
                 _ = wake.wait(timeout: due)
@@ -91,11 +98,13 @@ final class FileSource: @unchecked Sendable {
     }
 
     /// Unlike the mic, a file can wait for room instead of dropping frames.
-    private func push(_ block: UnsafeBufferPointer<Float>, into ring: SPSCRing) {
+    /// False if a stop cut the block short.
+    private func push(_ block: UnsafeBufferPointer<Float>, into ring: SPSCRing) -> Bool {
         var offset = 0
         while offset < block.count, !stopping {
             offset += ring.write(UnsafeBufferPointer(rebasing: block[offset...]))
             if offset < block.count { _ = wake.wait(timeout: .now() + .milliseconds(2)) }
         }
+        return offset == block.count
     }
 }

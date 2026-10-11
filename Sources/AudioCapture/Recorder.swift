@@ -43,7 +43,7 @@ public struct AudioLevel: Sendable { public let rms: Float }
 ///
 /// Threads: the Core Audio IO thread (sink node) and one serial writer queue.
 /// All engine and file state is confined to the writer queue.
-public final class Recorder: @unchecked Sendable {
+public final class Recorder: Sendable {
     /// The one serial writer queue: drains, converts, writes, syncs, closes.
     private let writerQueue = DispatchQueue(label: "lexicon.audio.writer", qos: .userInitiated)
 

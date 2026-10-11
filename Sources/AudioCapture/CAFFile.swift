@@ -62,7 +62,7 @@ public enum CAFFile {
         while pread(descriptor, &header, 12, offset) == 12 {
             let size = Int64(bitPattern: header[4..<12].reduce(UInt64(0)) { $0 << 8 | UInt64($1) })
             if header[0..<4].elementsEqual("data".utf8) { return (offset, size) }
-            guard size >= 0 else { return nil }
+            guard size >= 0, size <= Int64.max - 12 - offset else { return nil }  // a damaged header
             offset += 12 + size
         }
         return nil

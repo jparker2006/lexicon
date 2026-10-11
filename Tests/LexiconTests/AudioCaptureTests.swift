@@ -31,9 +31,10 @@ import LexiconDomain
     #expect(try CAFFile.read(caf).samples == source)
 }
 
-@Test func killingTheWriterMidWriteLeavesAFileThatReadsBackBitExact() async throws {
-    // The child writes at the speed of speech and is SIGKILLed from another
-    // thread while its writer queue is still writing: no stop, no close.
+@Test func killingTheWriterMidRecordingLeavesAFileThatReadsBackBitExact() async throws {
+    // The child records at the speed of speech and is SIGKILLed from another
+    // thread at an arbitrary moment while its reader and writer queue are still
+    // running: no stop, no close. (Not timed to land inside a write() call.)
     let result = try #require(await #expect(processExitsWith: .signal(SIGKILL), observing: [\.standardOutputContent]) {
         let dir = try scratchDirectory()
         let wav = try writeWAV(syntheticSamples(count: 48_000), rate: 16_000, in: dir)  // 3 s
@@ -63,11 +64,20 @@ import LexiconDomain
     #expect(survived.count < source.count)
     #expect(survived == Array(source.prefix(survived.count)))
 
-    // Recovery's half (#59 calls it): finalizing writes the real size and changes no sample.
-    try CAFFile.finalize(caf)
-    #expect(CAFFile.state(of: caf) == .closed)
-    #expect(try CAFFile.read(caf).samples == survived)
-    try CAFFile.finalize(caf)  // idempotent
+    // Recovery's half (#59 calls it): finalizing writes the real size and changes
+    // no sample, and a power cut's torn last packet (here, one stray byte) is cut off.
+    let torn = caf.deletingLastPathComponent().appending(path: "torn.caf")
+    try FileManager.default.copyItem(at: caf, to: torn)
+    let handle = try FileHandle(forWritingTo: torn)
+    try handle.seekToEnd()
+    try handle.write(contentsOf: [0x7F])
+    try handle.close()
+    for file in [caf, torn] {
+        try CAFFile.finalize(file)
+        #expect(CAFFile.state(of: file) == .closed)
+        #expect(try CAFFile.read(file).samples == survived)
+        try CAFFile.finalize(file)  // idempotent
+    }
 }
 
 @Test func fortyEightKilohertzIsResampledToSixteen() async throws {
@@ -115,15 +125,21 @@ import LexiconDomain
 
 @Test func aDroppedCaptureStillClosesItsFile() async throws {
     let dir = try scratchDirectory()
-    let wav = try writeWAV(syntheticSamples(count: 16_000), rate: 16_000, in: dir)
+    let source = syntheticSamples(count: 48_000)
+    let wav = try writeWAV(source, rate: 16_000, in: dir)
     let caf = dir.appending(path: "dropped.caf")
 
     let recorder = Recorder()
-    _ = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: caf)
+    do {
+        let capture = try await recorder.start(.file(wav, pace: .realtime), writingTo: caf)
+        _ = await capture.signals.firstAudio()
+    }  // dropped here, mid-file, without stop
     await recorder.settle()
 
     #expect(CAFFile.state(of: caf) == .closed)
-    #expect(throws: Never.self) { try CAFFile.read(caf) }
+    let kept = try CAFFile.read(caf).samples
+    #expect(!kept.isEmpty && kept.count < source.count)
+    #expect(kept == Array(source.prefix(kept.count)))
 }
 
 @Test func whenTheFileCannotBeWrittenTheAudioStaysInRAM() async throws {

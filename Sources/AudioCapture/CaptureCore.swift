@@ -9,6 +9,9 @@ import LexiconDomain
 /// A chunk is yielded only after it was handed to the file, so anything a
 /// consumer sees survives an app crash. F_FULLFSYNC every `fullSyncEvery`.
 /// On a write error the file is closed and the capture carries on in RAM.
+///
+/// `@unchecked Sendable`: every `var` is touched only on `queue` (all entry
+/// points dispatch onto it); the `let`s are immutable or thread-safe themselves.
 final class CaptureCore: @unchecked Sendable {
     let feed: AudioFeed
     let signals: CaptureSignals
@@ -102,7 +105,7 @@ final class CaptureCore: @unchecked Sendable {
         if let take { return take }
         timer?.cancel()
         timer = nil
-        source.stop()  // the producer has exited: nothing writes the ring after this
+        source.stop()  // the producer writes nothing more after this
         drain()
         resampler.flush(emit: emit)
         feedContinuation.finish()
