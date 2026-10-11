@@ -22,6 +22,10 @@ import WordStore
 //       downloads the local model into `<data folder>/models/`
 //       (`scripts/install-model.sh` runs it until onboarding exists)
 //
+//   swift run lexicon-eval --import-lexicon <file> --into <data folder>
+//       imports a Lexicon file into `<data folder>/lexicon.sqlite`, as the
+//       page's Import does (`scripts/import-lexicon.sh` runs it at install)
+//
 // `lag_ms` is end of audio to text typed (the recording destination's "paste").
 // `--scripted` stands in a fake engine that hears <text>, and `--scripted-gold`
 // one that hears each entry's gold text, to check the pipeline on a Mac with no
@@ -45,7 +49,8 @@ import WordStore
 //
 // Keys come from LEXICON_KEY_* environment variables (Secrets(.environment)).
 // History and audio go to temporary folders deleted after each Dictation, never
-// to an app's data folder.
+// to an app's data folder. Only `--install-model` and `--import-lexicon` write
+// into one, the folder they are given.
 
 /// This checkout: the scorer lives here, and only a manifest inside it is public
 /// (`mayWriteRun`).
@@ -65,7 +70,8 @@ func runEval(arguments: [String]) async -> Int32 {
     while let argument = rest.popFirst() {
         switch argument {
         case "--scripted-gold": scriptedGold = true
-        case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model", "--transcribe", "--lexicon":
+        case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model", "--transcribe", "--lexicon",
+             "--import-lexicon", "--into":
             guard let value = rest.popFirst(), options[argument] == nil else { return usage() }
             options[argument] = value
         default:
@@ -76,6 +82,10 @@ func runEval(arguments: [String]) async -> Int32 {
     if let folder = options["--install-model"] {
         guard options.count == 1, files.isEmpty, !scriptedGold else { return usage() }
         return await installModel(into: URL(filePath: folder, directoryHint: .isDirectory))
+    }
+    if let file = options["--import-lexicon"] {
+        guard let folder = options["--into"], options.count == 2, files.isEmpty, !scriptedGold else { return usage() }
+        return await importLexicon(URL(filePath: file), into: URL(filePath: folder, directoryHint: .isDirectory))
     }
     if let manifest = options["--transcribe"] {
         guard let out = options["--out"], files.isEmpty, !scriptedGold,
@@ -201,6 +211,24 @@ struct PinnedModel: LocalTranscriber {
 
 let parakeet = PinnedModel(parakeet: ParakeetTranscriber(paths: .forBundle(id: AppPaths.devBundleID)))
 
+/// The page's Import, from a shell: the same store call, so a second run adds
+/// nothing. Prints counts only, never an entry: the file may be Jake's starter
+/// Lexicon. A running app reads the Lexicon at launch, so import before
+/// `scripts/install.sh` relaunches it.
+func importLexicon(_ file: URL, into folder: URL) async -> Int32 {
+    let counts: ImportCounts
+    do {
+        counts = try await Lexicon(paths: AppPaths(root: folder)).add(contentsOf: file)
+    } catch {
+        return fail("import failed: \(error.localizedDescription)")
+    }
+    print("""
+        lexicon-eval: imported \(counts.terms) Terms and \(counts.rules) Rules; \
+        \(counts.duplicates) already in the Lexicon; \(counts.unreadable) \(counts.unreadable == 1 ? "line" : "lines") not read
+        """)
+    return 0
+}
+
 func installModel(into folder: URL) async -> Int32 {
     guard let access = CloudAccess.granted(by: .defaults, app: .unknown, keys: { _ in nil }) else { return 1 }
     do {
@@ -259,6 +287,7 @@ func usage() -> Int32 {
                             [--out <run.jsonl>] [--scripted-gold] [--lexicon <file>]
                lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
                lexicon-eval --install-model <data folder>
+               lexicon-eval --import-lexicon <file> --into <data folder>
 
         """.utf8))
     return 2

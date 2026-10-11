@@ -241,3 +241,18 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
         "Zorblax", "QuuxKit", "flimDB", "snorp-ctl", "Vexmo", "Trellium.md", "Frobnicate", "/zap", "kubenector",
     ])
 }
+
+@Test func importLexiconAddsTheFileToADataFolderOnceAndNeedsTheFolder() async throws {
+    let folder = try scratchDirectory()
+    let path = sample.path(percentEncoded: false)
+    let arguments = ["lexicon-eval", "--import-lexicon", path, "--into", folder.path(percentEncoded: false)]
+
+    #expect(await runEval(arguments: arguments) == 0)
+    #expect(await runEval(arguments: arguments) == 0)
+
+    let lexicon = try Lexicon(paths: AppPaths(root: folder))
+    #expect(await lexicon.terms.count == 6)
+    #expect(await lexicon.rules.count == 4)
+    #expect(await runEval(arguments: ["lexicon-eval", "--import-lexicon", path]) == 2)
+    #expect(await runEval(arguments: arguments + ["--scripted", "x"]) == 2)
+}
