@@ -1,3 +1,4 @@
+import Foundation
 import LexiconDomain
 import SQLiteKit
 
@@ -123,18 +124,47 @@ enum RecoveryPlan {
         // TODO:
         // - for each file: no row -> [finalize if open, adoptOrphan, transcribe]
         // - row.audio == .deleted && file exists -> deleteGarbage
+        // - row.audio == .expired (retention; the row keeps its text): file exists -> unlink the file only;
+        //   its missing audio is never a reason to markFailed (a .ready row still becomes notInserted)
         // - row whose status is not terminal (!status.isTerminal):
         //     file open -> finalize + transcribe; closed -> transcribe; missing/unreadable -> markFailed
         fatalError("not implemented")
     }
 }
 
-/// Audio retention (#4): rolling 14 days or 1 GB, oldest unpinned first; never a
-/// Dictation whose status `needsAudio`; pinned audio kept forever and not counted
-/// against the 1 GB. Mark the row deleted, commit, then unlink.
+/// Audio retention (#4): audio older than 14 days goes, then the oldest until
+/// what is left fits in 1 GB. Text is kept forever. Never touched, and not
+/// counted against the 1 GB: a Dictation whose status `needsAudio` (it still
+/// waits for text, or for a manual Retry) and pinned audio (the Test set's).
 enum Retention {
     static let window: Duration = .seconds(14 * 24 * 3600)
     static let byteCap: Int64 = 1_000_000_000
     /// Generated, never hand-listed: the sweep's `WHERE status NOT IN (...)`.
     static var skippedStatuses: String { HistorySchema.sqlList(\.needsAudio, is: true) }
+
+    /// Marks the audio that goes as `.expired` and returns its ids, oldest first.
+    /// A `.ramOnly` row counts too: its capture left a partial file on disk.
+    /// The caller unlinks the files once this commits.
+    static func expire(in db: Database, now: Date, bytes: (DictationID) -> Int64) throws -> [DictationID] {
+        let candidates = try db.query("""
+            SELECT id, started_at FROM dictation
+            WHERE audio_storage IN (?, ?) AND pinned = 0 AND status NOT IN (\(skippedStatuses))
+            ORDER BY started_at, id
+            """, [.text(AudioStorage.onDisk.rawValue), .text(AudioStorage.ramOnly.rawValue)]).compactMap { row -> (id: DictationID, startedAt: Int64, bytes: Int64)? in
+            guard let id = row.text(0).flatMap(DictationID.init(column:)) else { return nil }
+            return (id, row.int(1) ?? 0, bytes(id))
+        }
+        let cutoff = now.unixMs - window.ms
+        var total = candidates.reduce(0) { $0 + $1.bytes }
+        var expired: [DictationID] = []
+        for candidate in candidates where candidate.startedAt < cutoff || total > byteCap {
+            expired.append(candidate.id)
+            total -= candidate.bytes
+        }
+        for id in expired {
+            try db.execute("UPDATE dictation SET audio_storage = ? WHERE id = ?",
+                           [.text(AudioStorage.expired.rawValue), .text(id.description)])
+        }
+        return expired
+    }
 }

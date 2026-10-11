@@ -192,8 +192,10 @@ public enum AudioStorage: String, Sendable, Codable, CaseIterable {
     case onDisk
     /// Disk nearly full or a write failed: audio lives only in RAM until text lands (#4).
     case ramOnly
-    /// Removed by retention or by Delete.
+    /// Removed by Delete; the row goes too.
     case deleted
+    /// Removed by retention; the row keeps its text, but play and Retry have nothing to use.
+    case expired
 }
 
 /// A prompt Claude Code or Codex reports through its UserPromptSubmit hook (#13).
