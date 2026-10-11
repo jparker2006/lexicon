@@ -1,0 +1,6 @@
+#!/bin/sh
+# Grow the private Test set from Wispr's history (#50), with the scorer's pinned
+# Python and packages. scripts/test-set.sh builds lexicon-eval and runs this;
+# see lexicon_scorer/testset.py for usage.
+dir="$(cd "$(dirname "$0")" && pwd)"
+PYTHONSAFEPATH=1 PYTHONPATH="$dir" exec uv run --quiet --locked --project "$dir" python -m lexicon_scorer.testset "$@"

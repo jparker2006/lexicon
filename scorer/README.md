@@ -47,3 +47,27 @@ The baseline covers every split, so before scoring, its rows for ids outside the
 `report` never prints text: no ids, speech, inserted text or Terms, only numbers and labels.
 
 Tests use public synthetic examples only. Never point them at the private Test set. `scorer/fixtures/` holds a public example for the tests, and for the CI smoke run that will use it.
+
+## The Test set
+
+```sh
+scripts/test-set.sh
+```
+
+Builds and grows Jake's private Test set from his Wispr history (#50): weekly until Wispr is switched off, since Wispr keeps only about two weeks of audio. It builds `lexicon-eval` and runs `scorer/testset update`, which:
+
+1. Copies Wispr's database and its WAL into a private work folder (SQLite never opens Wispr's own files), and writes every clip with audio that no earlier batch holds into a new `wispr-YYYY-MM-DD/` batch: `audio/<id>.wav` and `manifest-audio.jsonl` with Wispr's logged fields. The copy is deleted after.
+2. Has local Parakeet hear each clip it has not heard yet, through `lexicon-eval --transcribe`: the real pipeline, as fast as it runs, in Private mode, with no key in its environment.
+3. Adds each new clip to the Test set. Lines already there are never changed, so the split and Jake's reviewed gold stay.
+
+Everything lives under `~/Library/Application Support/Lexicon/test-set/`, owner-only, never in a git work tree:
+
+- `manifest.jsonl`: the Test set, NeMo-style: `id`, `audio_filepath` (relative to the folder), `duration`, `text` (gold), `gold`, `terms`, `speech_end` (Wispr's logged speech duration), `context` (the app's bundle ID), `session`, `split`.
+- `gold` is `agreed` where local Parakeet's text and Wispr's raw text agree: the same words after the normalizer, the same Lexicon words written the same way, no Rule's heard side and no Term in another case or spacing in either. Then `text` is Parakeet's text. Otherwise it is `review` and `text` is only a placeholder until Jake reviews it (#51): don't score on `review` entries.
+- `terms`: the Lexicon's written forms (its Terms and the written side of its Rules, from `starter-lexicon.txt`) found in `text`.
+- `session`: a run of Dictations at most 30 minutes apart. `split`: `held-back` (100 clips in whole sessions, drawn once with a fixed seed, never the latest session; milestone checks only) or `everyday`. Later clips join their session's split, or `everyday`.
+- `wispr-run.jsonl`: Wispr's run from its own logs (raw speech text, the text it pasted, its logged lag), the input for its baseline.
+- `disagreements.jsonl`: the `review` entries with both texts, what Wispr pasted, Jake's own edit as a hint, and why they disagree.
+- `parakeet.jsonl`: Parakeet's text for each clip, so a clip is heard once.
+
+It prints counts and paths only. Its tests (`tests/test_testset*.py`) use a synthetic Wispr database.
