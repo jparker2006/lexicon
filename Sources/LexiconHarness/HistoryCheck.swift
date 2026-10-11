@@ -42,7 +42,9 @@ enum HistoryCheck {
     /// Presses the menu bar item's History entry and waits for rows on screen.
     static func open(_ app: DevApp) async throws -> (window: AXUIElement, table: AXUIElement, elapsed: Duration) {
         let item = try await app.statusItem()
-        try press(item)
+        // Opening a menu tracks it modally, so the press may not reply before the timeout.
+        let opened = AXUIElementPerformAction(item, kAXPressAction as CFString)
+        guard opened == .success || opened == .cannotComplete else { throw HarnessError("opening the menu failed (AXError \(opened.rawValue))") }
         let entry = try await poll("the History menu item") {
             AX.elements(item, kAXChildrenAttribute).lazy
                 .flatMap { AX.elements($0, kAXChildrenAttribute) }
