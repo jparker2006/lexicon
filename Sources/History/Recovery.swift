@@ -39,6 +39,22 @@ extension HistoryStore {
         }
     }
 
+    /// A waiting Dictation still has no text: its row is unfinished (a `.waiting` write
+    /// SQLite dropped leaves it so). False once it is deleted or has text another way
+    /// (a manual Retry). A read that fails says nothing, so it counts as still owed:
+    /// giving up then would leave the Dictation without text until the next launch.
+    public func owesText(_ id: DictationID) async -> Bool {
+        do {
+            let status = try await read { db in
+                try db.query("SELECT status FROM dictation WHERE id = ?", [.text(id.description)]).first?.text(0)
+            }
+            guard let status = status.flatMap(DictationStatus.init(rawValue:)) else { return false }
+            return [.recording, .transcribing, .waiting].contains(status)
+        } catch {
+            return true
+        }
+    }
+
     private func recover(in db: Database) throws -> [UnfinishedDictation] {
         let opened = openedAt.unixMs
         // Every audio file an earlier run made. Its name is its Dictation's id. A file

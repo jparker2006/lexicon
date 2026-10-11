@@ -278,6 +278,32 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
     #expect(await relaunch.conductor.destination.delivered.isEmpty)  // recovered text is never typed
 }
 
+@Test(.timeLimit(.minutes(1))) func aWaitingDictationKeepsTryingThroughAHistoryReadError() async throws {
+    let wav = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: try scratchDirectory())
+    let clock = TestClock()
+    let model = InstallableModel()
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+                                         local: model, clock: clock)
+    let id = await system.conductor.dictate(file: wav, pace: .asFastAsPossible).id
+    await system.history.flush()
+
+    // The next read of its row fails (one SQLite error), and History is back by the time the text is made.
+    try await system.history.read { db in try db.execute("ALTER TABLE dictation RENAME TO dictation_away") }
+    await model.install(whileHearing: { [history = system.history] in
+        _ = try? await history.read { db in try db.execute("ALTER TABLE dictation_away RENAME TO dictation") }
+    })
+    let retry = try #require(await system.conductor.waiting[id])
+    await clock.waitForSleepers(2)
+    await clock.advance(by: SpeechEngine.retryInterval)
+    await retry.value
+    await system.history.flush()
+
+    #expect(await model.transcribed == 1)  // a failed read is not a deleted row
+    let row = try #require(await system.history.dictation(id))
+    #expect(row.status == .notInserted)
+    #expect(row.finalText == cleaned)
+}
+
 @Test(.timeLimit(.minutes(1))) func aDeletedWaitingDictationStopsTrying() async throws {
     let wav = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: try scratchDirectory())
     let clock = TestClock()
@@ -351,16 +377,22 @@ private actor InstallableModel: LocalTranscriber {
     private var installed = false
     private(set) var isResident = false
     private(set) var transcribed = 0
+    /// Runs inside `transcribe`, while the text is being made.
+    private var whileHearing: (@Sendable () async -> Void)?
 
-    func install() { installed = true }
+    func install(whileHearing: (@Sendable () async -> Void)? = nil) {
+        installed = true
+        self.whileHearing = whileHearing
+    }
     func load() throws {
         guard installed else { throw LocalModelNotInstalled(model) }
         isResident = true
     }
     func unload() { isResident = false }
-    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String {
         guard installed else { throw LocalModelNotInstalled(model) }
         transcribed += 1
+        await whileHearing?()
         return crashHeard
     }
 }

@@ -68,7 +68,7 @@ extension Conductor {
         while true {
             await speech.untilRetry(after: reason)
             if Task.isCancelled { return }  // a cancelled sleep returns at once: never spin
-            guard await stillWaiting(run.id) else { return }
+            guard await history.owesText(run.id) else { return }
             var clip = run.clip
             if clip == nil { clip = await Self.read(audio) }
             guard let clip else { continue }
@@ -87,7 +87,7 @@ extension Conductor {
                 continue
             }
             // Deleted while it was being heard: nothing left to save it to.
-            guard await stillWaiting(run.id) else { return }
+            guard await history.owesText(run.id) else { return }
             let cleanupPlan = CleanupPlan.make(preferences: preferences, access: access, terms: words.terms,
                                                rules: words.rules, app: run.context)
             let late = DictationRun(id: run.id, origin: run.origin, purpose: run.purpose, context: run.context,
@@ -97,13 +97,6 @@ extension Conductor {
             _ = await land(outcome, late)
             return
         }
-    }
-
-    /// Still owed text. A `.waiting` write SQLite dropped leaves the row unfinished,
-    /// which counts; a deleted row, or one given text another way (a manual Retry), does not.
-    private func stillWaiting(_ id: DictationID) async -> Bool {
-        guard let status = await history.dictation(id)?.status else { return false }
-        return [.recording, .transcribing, .waiting].contains(status)
     }
 
     /// Off the Conductor's actor: a long Dictation's file takes a while, and fn-down must not wait on it.
