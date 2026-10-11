@@ -72,7 +72,14 @@ public actor Conductor<Destination: TextDestination> {
 
     // MARK: Commands
 
-    /// Every key command, one exhaustive switch. The single consumer of `Keyboard.commands`.
+    /// The key loop: every command from the fn tap, in order, for the life of the
+    /// app (`LexiconSystem.run` passes `Keyboard.commands`). One consumer, one
+    /// actor hop per command, so fn-down and fn-up are never reordered.
+    public func follow(_ commands: AsyncStream<KeyCommand>) async {
+        for await command in commands { handle(command) }
+    }
+
+    /// Every key command, one exhaustive switch.
     public func handle(_ command: KeyCommand) {
         switch command {
         case .dictationBegan(let at):
@@ -145,7 +152,10 @@ public actor Conductor<Destination: TextDestination> {
     }
 
     /// Lid close or sleep is a normal stop (#4).
-    public func systemWillSleep() { endCapture(.stop(at: .now())) }
+    public func systemWillSleep() {
+        endCapture(.stop(at: .now()))
+        keyboard?.endDictation()  // or a hold through sleep would ignore the next fn press
+    }
 
     /// UI, logs. Each call returns a new stream (any number of observers).
     public func events() -> AsyncStream<ConductorEvent> {

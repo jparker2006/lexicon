@@ -14,6 +14,9 @@ import Transcription
 //       [--baseline <run.jsonl>] [--out <run.jsonl>] [--scripted-gold]
 //       the report from `scorer/score report` (see scorer/README.md)
 //
+//   swift run lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
+//       the speech text of every entry, as draft gold (see below)
+//
 //   swift run lexicon-eval --install-model <data folder>
 //       downloads the local model into `<data folder>/models/`
 //       (`scripts/install-model.sh` runs it until onboarding exists)
@@ -29,6 +32,12 @@ import Transcription
 // what a later run's `--baseline` reads), then passes it to the scorer and exits
 // with the scorer's code: 0, or 3 when a score got worse than the baseline.
 // The quick run is `--split everyday`; the full run is `--split held-back`.
+//
+// `--transcribe` makes the draft gold for the Test set (scorer/testset): local
+// Parakeet's speech text for every entry, so the manifest needs no `text`. No
+// gold is read and no scorer runs. Only the text matters there, so entries run
+// at fast pace and carry no `lag_ms`: it would not be a measurement. It runs in
+// Private mode, so nothing leaves the Mac even with keys set.
 //
 // Keys come from LEXICON_KEY_* environment variables (Secrets(.environment)).
 // History and audio go to temporary folders deleted after each Dictation, never
@@ -52,7 +61,7 @@ func runEval(arguments: [String]) async -> Int32 {
     while let argument = rest.popFirst() {
         switch argument {
         case "--scripted-gold": scriptedGold = true
-        case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model":
+        case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model", "--transcribe":
             guard let value = rest.popFirst(), options[argument] == nil else { return usage() }
             options[argument] = value
         default:
@@ -63,6 +72,11 @@ func runEval(arguments: [String]) async -> Int32 {
     if let folder = options["--install-model"] {
         guard options.count == 1, files.isEmpty, !scriptedGold else { return usage() }
         return await installModel(into: URL(filePath: folder, directoryHint: .isDirectory))
+    }
+    if let manifest = options["--transcribe"] {
+        guard let out = options["--out"], files.isEmpty, !scriptedGold,
+              options.keys.allSatisfy({ $0 == "--transcribe" || $0 == "--out" }) else { return usage() }
+        return await transcribe(URL(filePath: manifest), out: URL(filePath: out))
     }
     if let manifest = options["--manifest"] {
         guard files.isEmpty, options["--scripted"] == nil else { return usage() }
@@ -101,12 +115,12 @@ func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, sc
             return fail("--out is inside a git repo but the manifest is not public; Test set text never goes in a repo")
         }
         // Never over a manifest, a baseline or another run: they may be Jake's data.
-        guard !FileManager.default.fileExists(atPath: out.path()) else { return fail("--out already exists") }
+        guard !FileManager.default.fileExists(atPath: out.path(percentEncoded: false)) else { return fail("--out already exists") }
     }
     let lines: [RunLine]
     do {
         lines = try await runManifest(manifest, split: split, pace: .realtime) { entry in
-            scriptedGold ? ScriptedTranscriber(text: entry.text) as any LocalTranscriber : parakeet
+            scriptedGold ? ScriptedTranscriber(text: entry.text ?? "") as any LocalTranscriber : parakeet
         } progress: { done, total in
             FileHandle.standardError.write(Data("lexicon-eval: \(done)/\(total)\r".utf8))
         }
@@ -117,25 +131,33 @@ func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, sc
 
     let runFile = out ?? FileManager.default.temporaryDirectory.appending(path: "lexicon-run-\(UUID().uuidString).jsonl")
     defer { if out == nil { try? FileManager.default.removeItem(at: runFile) } }
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-    do {
-        let body = try lines.map { String(decoding: try encoder.encode($0), as: UTF8.self) + "\n" }.joined()
-        try body.write(to: runFile, atomically: true, encoding: .utf8)
-    } catch {
-        return fail("cannot write the run file: \(error.localizedDescription)")
-    }
+    do { try writeRun(lines, to: runFile) } catch { return fail("\(error)") }
 
-    var arguments = [repo.appending(path: "scorer/score").path(), "report", "--gold", manifest.path(),
-                     "--run", runFile.path()]
+    var arguments = [repo.appending(path: "scorer/score").path(percentEncoded: false), "report", "--gold", manifest.path(percentEncoded: false),
+                     "--run", runFile.path(percentEncoded: false)]
     if let split { arguments += ["--split", split] }
-    if let baseline { arguments += ["--baseline", baseline.path()] }
+    if let baseline { arguments += ["--baseline", baseline.path(percentEncoded: false)] }
     let scorer = Process()
     scorer.executableURL = URL(filePath: "/bin/sh")
     scorer.arguments = arguments
     do { try scorer.run() } catch { return fail("cannot start the scorer: \(error.localizedDescription)") }
     scorer.waitUntilExit()
     return scorer.terminationStatus
+}
+
+func transcribe(_ manifest: URL, out: URL) async -> Int32 {
+    guard mayWriteRun(to: out, manifest: manifest, repo: repo) else {
+        return fail("--out is inside a git repo but the manifest is not public; Test set text never goes in a repo")
+    }
+    do {
+        try await transcribeManifest(manifest, to: out) { _ in parakeet } progress: { done, total in
+            FileHandle.standardError.write(Data("lexicon-eval: \(done)/\(total)\r".utf8))
+        }
+    } catch {
+        return fail("\(error)")
+    }
+    FileHandle.standardError.write(Data("\n".utf8))
+    return 0
 }
 
 /// Local Parakeet, loaded once and kept for the whole run. Every Dictation here
@@ -177,6 +199,7 @@ func usage() -> Int32 {
         usage: lexicon-eval <wav> [--scripted <text>]
                lexicon-eval --manifest <manifest.jsonl> [--split <name>] [--baseline <run.jsonl>]
                             [--out <run.jsonl>] [--scripted-gold]
+               lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
                lexicon-eval --install-model <data folder>
 
         """.utf8))

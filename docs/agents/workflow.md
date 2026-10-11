@@ -7,6 +7,7 @@ Lexicon is built by Claude Code sessions running locally on Jake's Mac. No cloud
 - **Jake** answers grills, approves, and says "install". He is the bottleneck on purpose: keep his decisions small, clear and few.
 - **Orchestrator** (one long-running Claude Code session, Opus high, in its own worktree): keeps the map of issues, grills Jake on cross-cutting work, writes specs, tickets and builder prompts, and starts builders. It never merges and never installs.
 - **Builders** (Claude Code, Opus high, each in its own worktree): build one ticket, or an approved sequence from one spec in dependency order, with the implement-ticket skill. A ticket boundary does not need a fresh session. A builder ends at an open PR and a Ready comment; it never merges.
+- **Live checks** (one Claude Code session, Opus high, in its own worktree): the only session that builds, launches or drives Lexicon Dev, and the only one that asks Jake to do something physical (press fn, focus a field). It holds the live-app lane, runs builders' checklists on their branches as [Live checks](#live-checks) says, and posts the results on their issues. It never commits to a builder's branch, fixes what fails, or merges.
 - **Reviewer** (one Claude Code session, Opus high, in the main checkout `~/code/lexicon`): Jake starts it there, with no worktree, when PRs need review; the orchestrator writes its prompt. It reviews every green PR against [review.md](review.md) and gives one verdict per PR: merge, merge with notes, or don't merge. It is the only one who merges, one PR at a time, as [Merging](#merging) says, and it merges its own merge verdicts without waiting for Jake. It never merges a "don't merge" and holds what Jake says to hold. It names the merge order, resolves trivial conflicts without force-pushing, and puts non-blocking notes on the parent spec's Later list. There is no Deployer: on Jake's "install", the Reviewer runs the install command, as [Installing](#installing) says. Past about 1,500 messages, or when it slows down, it hands off with `/orchestrator-handoff reviewer`.
 
 The guard hook (`.claude/hooks/guard.mjs`) backs this up: it refuses every push to `main`, and refuses a merge from any session not started in the main checkout. That is why builders and the orchestrator always run in worktrees, and only the Reviewer runs in `~/code/lexicon`.
@@ -29,8 +30,8 @@ pstack is poteto's skill set, installed as a Claude Code plugin. The Matt Pocock
 | `/pstack:architect` | Orchestrator | Before it writes or starts a ticket that touches 3 or more modules, and when builders keep working around the design. A builder that hits the scrap rule in `docs/architecture.md` stops and hands back as implement-ticket's Need Jake says, so the rerun goes through the orchestrator. |
 | `/pstack:blast-radius` | Reviewer | On high-risk PRs that touch audio capture, History, insertion, network access or private data. It looks for what the change breaks outside the diff and proves the one fact it is safe because of by running code. |
 | `/pstack:benchmark-checklist` | Whoever reports a lag, memory or speed number | Before the number goes into a PR, an issue or a decision. |
-| `/pstack:create-verification-skill` | One builder in the live-app lane, once | After the test hooks and Accessibility harness ([#45](https://github.com/jparker2006/lexicon/issues/45)) land. It writes the repo's skill for driving Lexicon Dev the way Jake does. |
-| `/pstack:maintain-verification-skill` | The builder the orchestrator gives the live-app lane | At the end of each milestone after that, to keep the verification skill true. Its live pass drives the app, so it needs the lane. |
+| `/pstack:create-verification-skill` | The Live checks session, once | After the test hooks and Accessibility harness ([#45](https://github.com/jparker2006/lexicon/issues/45)) land. It writes the repo's skill for driving Lexicon Dev the way Jake does. |
+| `/pstack:maintain-verification-skill` | The Live checks session | At the end of each milestone after that, to keep the verification skill true. Its live pass drives the app, so it needs the lane. |
 | `/pstack:correct`, `/pstack:reflect` | Jake and the orchestrator | At the end of each milestone, in its retro (M0's is [#88](https://github.com/jparker2006/lexicon/issues/88)). `correct` turns mistakes agents keep repeating into checks that catch them; `reflect` turns a session's lessons into edits on existing skills. |
 | `/pstack:unslop` | Whoever writes it | On text Jake reads: UI copy, notices, onboarding, the README. |
 | `/pstack:how`, `/pstack:why` | Anyone | Investigation: `how` traces how code runs, `why` digs through history for the reasons behind its shape. |
@@ -52,8 +53,20 @@ Deliberately not used:
 
 - Up to 8 builders at once, raised only if disk, memory and the CI queue hold up. GitHub runs at most 5 macOS CI jobs at once on this repo.
 - Builders that edit the same files don't run side by side. The orchestrator checks this before starting one.
-- **One live-app lane.** Only one builder at a time drives the live app: fn, the mic, paste, Accessibility, the Lexicon Dev window. The orchestrator says in the builder prompt which builder holds the lane. Everyone else stays headless (the real pipeline on a WAV, no mic, keys or network).
+- **One live-app lane, held by the Live checks session.** Only it drives the live app: fn, the mic, paste, Accessibility, the Lexicon Dev window. Everyone else stays headless (the real pipeline on a WAV, no mic, keys or network).
 - Worktrees share SwiftPM's one dependency cache. Each has its own `.build/`. Once a ticket merges, its worktree and build folder are deleted.
+
+## Live checks
+
+The lane is a lock: `scripts/live-lane.sh take "Live checks"` writes `~/Library/Application Support/Lexicon Dev/live-lane.lock` with the holder's name and its session's PID. `scripts/dev-run.sh` and `scripts/harness.sh` refuse to run for any other session, naming the holder. A lock whose process has ended is stale and cleared on the next read. `status` shows the holder; `release` gives the lane back.
+
+A builder whose ticket needs the live app sends the Live checks session one request once its branch is pushed, with `SendMessage` to the session named `Live checks` (`ListAgents` shows it):
+
+- the issue, branch, PR (or "no PR yet") and head sha;
+- a numbered checklist, one observable behavior per item, each with its pass bar ("3. Paste into TextEdit's empty document: the text lands at the cursor and the clipboard is restored");
+- anything Jake must do by hand, so the Live checks session can batch it with other asks.
+
+The Live checks session takes requests in arrival order (the orchestrator's critical path first). For each, it checks out that sha detached in its own worktree, launches it with `scripts/dev-run.sh -- --test-hooks`, runs each item with the harness, and posts one comment on the builder's issue headed `Live checks: <branch> @ <sha>`: pass or fail per item, the numbers, and screenshot paths. A failure comes with the evidence, not a fix; the builder fixes it and sends a new request. The PR cites that comment as its live-app evidence.
 
 ## The loop
 
@@ -62,7 +75,7 @@ Deliberately not used:
    - The orchestrator grills work that spans areas, decides priorities, or changes the architecture.
    - A builder grills a self-contained issue it will build next, posts the decisions on the issue and **waits for Jake's OK** before building.
 3. **Spec and tickets** (orchestrator): small vertical slices, each `ready-for-agent`, each naming its test seam, modules and blockers. The spec issue itself gets no triage label.
-4. **Builder prompt** (orchestrator): "Build issue #N with the implement-ticket skill.", plus the exact scope, the files other builders own right now, and whether this builder holds the live-app lane. Keep linear tickets in one builder; use separate builders for independent work.
+4. **Builder prompt** (orchestrator): "Build issue #N with the implement-ticket skill.", plus the exact scope, the files other builders own right now, and which acceptance criteria need the Live checks session. Keep linear tickets in one builder; use separate builders for independent work.
 5. **Build** (builder): the implement-ticket skill, from claim to a PR ready for review, then the next approved unblocked ticket. It stops for a real blocker, an unresolved decision or the end of its sequence.
 6. **Review and merge** (Reviewer): every PR says `Refs #N` and never a closing keyword. The Reviewer merges as below.
 7. **Install** (Reviewer, only after Jake says "install").
@@ -91,4 +104,4 @@ Jake says "install" and the Reviewer runs the install command for one commit on 
 
 ## Dev builds
 
-Builders run **Lexicon Dev**: its own bundle ID and data folder (`~/Library/Application Support/Lexicon Dev/`), signed with the "Lexicon Dev" certificate so its permissions persist across rebuilds, installed at `~/Applications/Lexicon Dev.app` and launched with `open`. They never touch the daily copy or its permissions.
+The Live checks session runs **Lexicon Dev**: its own bundle ID and data folder (`~/Library/Application Support/Lexicon Dev/`), signed with the "Lexicon Dev" certificate so its permissions persist across rebuilds, installed at `~/Applications/Lexicon Dev.app` and launched with `open`. It never touches the daily copy or its permissions.

@@ -17,7 +17,7 @@ Decided in [App architecture and stack](https://github.com/jparker2006/lexicon/i
 | Cleanup | Rules-only until M3. Then AI cleanup with a structural check and a deadline of about 450 ms after the speech final, falling back to rules-only text. Private mode and offline are rules only. |
 | Current repo | The repo under `~/code` with the most recent file change (not counting `.git`), from FSEvents; at launch, a week of FSEvents history picks it. No hooks. |
 | Inbox | The app watches `<data>/inbox/` for JSON messages (hook prompts, only if hooks come back). Prompts older than 60 s are dropped. |
-| Test hooks | Debug builds only (`#if DEBUG`; `scripts/bundle.sh` fails a release binary that has them), on for the dev bundle ID launched with `--test-hooks`. `lexicon-harness` writes a request under `<data>/test-hooks/requests/` and reads the reply from `replies/`, and reads the app's status item, windows and a target text field through Accessibility. One builder at a time. |
+| Test hooks | Debug builds only (`#if DEBUG`; `scripts/bundle.sh` fails a release binary that has them), on for the dev bundle ID launched with `--test-hooks`. `lexicon-harness` writes a request under `<data>/test-hooks/requests/` and reads the reply from `replies/`, and reads the app's status item, windows and a target text field through Accessibility. Only the live-app lane's holder, the Live checks session, runs it (`scripts/live-lane.sh`). |
 | Local model | Loaded on fn-down when not resident, unloaded after 10 idle minutes; always loaded while Private mode is on or, with a cloud model set, the network is down. |
 | Lifecycle owner | One `Conductor` actor decides what happens to every Dictation. Each piece of state has one other owner. |
 
@@ -206,6 +206,9 @@ Rejected: Sonnet's three-process split (see ADR 0001); always-resident local mod
 ## Implementation reconciliation
 
 Builders record accepted deviations here, with who accepted them, and update the usage, signatures and ownership above before the next unit starts. Architect's scrap rule applies: if the same workaround shows up across unrelated code, if types need escape hatches (`@unchecked Sendable`, casts, always-set optionals), or if two independent deviations share a shape, stop and re-run `/pstack:architect` instead of bolting fixes on.
+
+- **The app shell starts the fn tap until #56** ([#53](https://github.com/jparker2006/lexicon/issues/53), proposed by its builder, for the Reviewer to accept). `LexiconSystem.live` doesn't exist yet, so `main.swift` starts `Keyboard` through `AppDelegate.startKeyboard`, before AppKit, and drains its commands, which reach only the `fn` log. #56 deletes `startKeyboard`, the `keyboard` property and the drain, starts the tap in `LexiconSystem.live`, and passes `Keyboard.commands` to `Conductor.follow`. The same `InputClock` goes to both `Keyboard` and `TargetApp`, or the late-text rule never sees typing.
+- **The fn tap is listen-only in M0** ([#53](https://github.com/jparker2006/lexicon/issues/53), proposed by its builder, for the Reviewer to accept). The spec says one active tap. Measured live, keys reached apps 26 to 74 ms after they were pressed with an active tap and 2 to 12 ms with listen-only, and M0 swallows nothing. The tap starts only when `CGPreflightListenEventAccess()` is already true (it reads true with Accessibility alone, Input Monitoring unlisted), so it never raises a prompt. M1's Esc needs swallowing: an active tap for key-downs, enabled only while recording.
 
 ## Hand-offs
 

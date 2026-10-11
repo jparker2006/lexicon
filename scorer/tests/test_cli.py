@@ -94,6 +94,15 @@ class Cli(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run("score", "--gold", self.gold, "--run", short)
 
+    def test_gold_still_awaiting_review_is_never_scored(self):
+        # A Test set entry the two speech models disagreed on holds only a draft
+        # until Jake reviews it (#50, #51); scoring it would favor one model.
+        gold = write(Path(self.tmp.name), "draft.jsonl", [{**GOLD[0], "gold": "agreed"}, {**GOLD[1], "gold": "review"}])
+        with self.assertRaises(SystemExit):
+            run("score", "--gold", gold, "--run", self.a)
+        reviewed = write(Path(self.tmp.name), "reviewed.jsonl", [{**GOLD[0], "gold": "agreed"}, {**GOLD[1], "gold": "reviewed"}])
+        self.assertEqual(run("score", "--gold", reviewed, "--run", self.a)["totals"]["entries"], 2)
+
     def test_split_scores_only_that_split(self):
         gold = write(Path(self.tmp.name), "split.jsonl",
                      [{**GOLD[0], "split": "dev"}, {**GOLD[1], "split": "holdout"}])
