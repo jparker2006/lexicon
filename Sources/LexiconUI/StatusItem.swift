@@ -1,10 +1,11 @@
 public import AppKit
+import LexiconDomain
 import LexiconCore
 
 /// The menu bar icon: the logo drawn in code as a template image. Clicking it
 /// opens the menu: name and version, whatever the shell adds, then Quit. The menu
 /// is rebuilt each time it opens, so its lines are always current.
-/// `AXIdentifier` "lexicon.statusItem" is how the end-to-end harness finds it (#45).
+/// Its `AXIdentifier` (`AccessibilityID.statusItem`) is how `lexicon-harness` finds it.
 ///
 /// Still to come: History on left click and Settings (#63, #69), Private mode
 /// and the outlined logo (#68), start at login and the warning dot (#57).
@@ -24,7 +25,7 @@ public final class StatusItemController: NSObject, NSMenuDelegate {
         super.init()
         if let button = item.button {
             button.image = LogoMark.templateImage()
-            button.setAccessibilityIdentifier("lexicon.statusItem")
+            button.setAccessibilityIdentifier(AccessibilityID.statusItem)
         }
         let menu = NSMenu()
         menu.delegate = self
