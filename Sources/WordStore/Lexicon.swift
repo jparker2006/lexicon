@@ -1,4 +1,4 @@
-import Foundation
+public import Foundation
 public import LexiconDomain
 import SQLiteKit
 
@@ -64,6 +64,15 @@ public actor Lexicon {
     public func remove(_ rule: Rule) throws {
         try database.execute("DELETE FROM rule WHERE heard = ?", [.text(Self.heard(of: rule))])
         try reload()
+    }
+
+    /// The page's Import: reads the file here, off the main thread (a file in
+    /// iCloud may have to download first), then adds it as below.
+    public func add(contentsOf url: URL) throws -> ImportCounts {
+        let file = try LexiconFile(contentsOf: url)
+        var counts = try add(file.entries)
+        counts.unreadable = file.unreadable
+        return counts
     }
 
     /// Import: every entry the Lexicon doesn't have yet, in one transaction and

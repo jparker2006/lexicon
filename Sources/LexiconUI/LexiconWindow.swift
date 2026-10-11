@@ -269,13 +269,11 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
         Task {
             let alert = NSAlert()
             do {
-                // Off the main thread: a file in iCloud may have to download first.
-                let file = try await Task.detached(priority: .userInitiated) { try LexiconFile(contentsOf: url) }.value
-                let counts = try await lexicon.add(file.entries)
-                (alert.messageText, alert.informativeText) = LexiconText.summary(of: counts, unreadable: file.unreadable)
+                let counts = try await lexicon.add(contentsOf: url)
+                (alert.messageText, alert.informativeText) = LexiconText.summary(of: counts)
                 log.notice("""
                     imported \(counts.terms, privacy: .public) Terms and \(counts.rules, privacy: .public) Rules; \
-                    \(counts.duplicates, privacy: .public) already there, \(file.unreadable, privacy: .public) lines not read
+                    \(counts.duplicates, privacy: .public) already there, \(counts.unreadable, privacy: .public) lines not read
                     """)
             } catch {
                 alert.alertStyle = .warning

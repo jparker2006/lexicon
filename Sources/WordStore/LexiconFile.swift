@@ -44,15 +44,18 @@ public struct LexiconFile: Sendable, Equatable {
     }
 }
 
-/// What an import added: Terms and Rules new to the Lexicon, and entries it
-/// already had (in any case), which an import leaves as they are.
+/// What an import added: Terms and Rules new to the Lexicon, entries it
+/// already had (in any case), which an import leaves as they are, and the
+/// file's lines that were not read.
 public struct ImportCounts: Sendable, Equatable {
     public var terms = 0
     public var rules = 0
     public var duplicates = 0
-    public init(terms: Int = 0, rules: Int = 0, duplicates: Int = 0) {
+    public var unreadable = 0
+    public init(terms: Int = 0, rules: Int = 0, duplicates: Int = 0, unreadable: Int = 0) {
         self.terms = terms
         self.rules = rules
         self.duplicates = duplicates
+        self.unreadable = unreadable
     }
 }

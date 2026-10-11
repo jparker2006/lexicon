@@ -44,12 +44,11 @@ private func parsed(_ text: String) -> [LexiconEntry] { LexiconFile(parsing: tex
 
 @Test func importingTheSampleCreatesItsTermsAndRules() async throws {
     let store = try Lexicon(paths: .temporary())
-    let file = try LexiconFile(contentsOf: sample)
-    #expect(file.unreadable == 1)
 
-    let added = try await store.add(file.entries)
+    // The page's Import button runs exactly this.
+    let added = try await store.add(contentsOf: sample)
 
-    #expect(added == ImportCounts(terms: 6, rules: 4, duplicates: 1))
+    #expect(added == ImportCounts(terms: 6, rules: 4, duplicates: 1, unreadable: 1))
     #expect(await store.terms.map(\.text) == ["Zorblax", "QuuxKit", "flimDB", "snorp-ctl", "Vexmo", "Trellium.md"])
     #expect(await store.rules == [
         Rule(heard: "frob nicate", written: "Frobnicate"), Rule(heard: "quux kit", written: "QuuxKit"),
@@ -62,13 +61,12 @@ private func parsed(_ text: String) -> [LexiconEntry] { LexiconFile(parsing: tex
 
 @Test func importingTwiceCreatesNoDuplicates() async throws {
     let store = try Lexicon(paths: .temporary())
-    let file = try LexiconFile(contentsOf: sample)
-    _ = try await store.add(file.entries)
+    _ = try await store.add(contentsOf: sample)
     let (terms, rules) = (await store.terms, await store.rules)
 
-    let again = try await store.add(file.entries)
+    let again = try await store.add(contentsOf: sample)
 
-    #expect(again == ImportCounts(terms: 0, rules: 0, duplicates: 11))
+    #expect(again == ImportCounts(terms: 0, rules: 0, duplicates: 11, unreadable: 1))
     #expect(await store.terms == terms)
     #expect(await store.rules == rules)
 }
@@ -87,14 +85,16 @@ private func parsed(_ text: String) -> [LexiconEntry] { LexiconFile(parsing: tex
 
 @Test func anImportSurvivesAReopen() async throws {
     let paths = AppPaths.temporary()
-    _ = try await Lexicon(paths: paths).add(try LexiconFile(contentsOf: sample).entries)
+    _ = try await Lexicon(paths: paths).add(contentsOf: sample)
     let reopened = try Lexicon(paths: paths)
     #expect(await reopened.terms.count == 6)
     #expect(await reopened.rules.count == 4)
 }
 
-@Test func aMissingFileIsAnError() {
-    #expect(throws: (any Error).self) {
-        try LexiconFile(contentsOf: sample.deletingLastPathComponent().appending(path: "no-such-lexicon.txt"))
+@Test func aMissingFileIsAnErrorAndAddsNothing() async throws {
+    let store = try Lexicon(paths: .temporary())
+    await #expect(throws: (any Error).self) {
+        try await store.add(contentsOf: sample.deletingLastPathComponent().appending(path: "no-such-lexicon.txt"))
     }
+    #expect(await store.entries.isEmpty)
 }

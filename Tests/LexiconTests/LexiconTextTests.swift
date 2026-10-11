@@ -81,31 +81,31 @@ import WordStore
 }
 
 @Test func aMixedImportSaysWhatWasAddedAndWhatWasLeftAlone() {
-    let summary = LexiconText.summary(of: ImportCounts(terms: 6, rules: 4, duplicates: 1), unreadable: 1)
+    let summary = LexiconText.summary(of: ImportCounts(terms: 6, rules: 4, duplicates: 1, unreadable: 1))
     #expect(summary.message == "Imported 6 Terms and 4 Rules")
     #expect(summary.detail == "1 already in the Lexicon. 1 line not read: a Rule needs both sides, heard -> written.")
 }
 
 @Test func aSingleTermOrRuleIsSingularAndHasNoDetail() {
-    let term = LexiconText.summary(of: ImportCounts(terms: 1), unreadable: 0)
+    let term = LexiconText.summary(of: ImportCounts(terms: 1))
     #expect(term.message == "Imported 1 Term")
     #expect(term.detail == "")
-    let rule = LexiconText.summary(of: ImportCounts(rules: 1), unreadable: 0)
+    let rule = LexiconText.summary(of: ImportCounts(rules: 1))
     #expect(rule.message == "Imported 1 Rule")
     #expect(rule.detail == "")
 }
 
 @Test func anImportThatAddsNothingSaysSoAndCountsWhatWasAlreadyThere() {
-    let summary = LexiconText.summary(of: ImportCounts(duplicates: 11), unreadable: 0)
+    let summary = LexiconText.summary(of: ImportCounts(duplicates: 11))
     #expect(summary.message == "Nothing new to import")
     #expect(summary.detail == "11 already in the Lexicon.")
 }
 
 @Test func unreadableLinesAreCountedInTheDetailAndOneLineIsSingular() {
-    let one = LexiconText.summary(of: ImportCounts(), unreadable: 1)
+    let one = LexiconText.summary(of: ImportCounts(unreadable: 1))
     #expect(one.message == "Nothing new to import")
     #expect(one.detail == "1 line not read: a Rule needs both sides, heard -> written.")
-    let two = LexiconText.summary(of: ImportCounts(), unreadable: 2)
+    let two = LexiconText.summary(of: ImportCounts(unreadable: 2))
     #expect(two.message == "Nothing new to import")
     #expect(two.detail == "2 lines not read: a Rule needs both sides, heard -> written.")
 }

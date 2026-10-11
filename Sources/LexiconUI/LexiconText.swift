@@ -54,7 +54,8 @@ enum LexiconText {
     }
 
     /// The import alert: what was added, then what was left as it was.
-    static func summary(of counts: ImportCounts, unreadable: Int) -> (message: String, detail: String) {
+    static func summary(of counts: ImportCounts) -> (message: String, detail: String) {
+        let unreadable = counts.unreadable
         let added = [counted(counts.terms, "Term"), counted(counts.rules, "Rule")].compactMap { $0 }
         let message = added.isEmpty ? "Nothing new to import" : "Imported " + added.joined(separator: " and ")
         let detail = [
