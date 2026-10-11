@@ -157,6 +157,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 | fn-down to first audio | 60 ms or less, logged per Dictation |
 | Lexicon's own work, fn-up to Cmd-V | 10 ms or less |
 | fn-up to text on screen | p50 700 ms or less, p95 1 s or less (the lag part of the pass mark) |
+| Jev call (Re-speak) | 250 ms, then the fallback decides: measured warm p95 215 ms, inside the 0.5 s release-to-fix target with the speech final and the replace |
 | fn-up to text, p95 ceiling | adaptive tail (up to 200 ms) + cloud cutoff (300 ms after recording stops) + Cleanup deadline (about 450 ms) + 10 ms = about 960 ms |
 
 The p95 ceiling sits inside 1 s, against Wispr's own logged lag on Jake's Mac (p50 740 ms, p95 1,671 ms). It assumes the local text is ready by the cloud cutoff (local Parakeet measured about 80 ms for clips of 6 s or less; long hands-free Dictations are an M0 measurement) and that paste itself is fast (about 12 ms in a native field; slow apps unmeasured), so the margin is thin. The p50 estimate, roughly 500 to 550 ms, is an assumption until M0 and M2 measure it.
