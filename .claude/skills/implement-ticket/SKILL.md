@@ -26,7 +26,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 
 - `git fetch origin`, then branch from `origin/main` as `claude/issue-N`, in your own worktree. A continuation fetches its branch and carries on from it.
 - Red before green, at the seam the issue names; that seam is the agreed one. Test through the highest public seam (the headless pipeline on a WAV, then the pure seams), never by reading source. A bug fix starts with a test that fails before the fix. One vertical slice at a time; use the `tdd` skill when you have it. Docs-only work needs no test.
-- Fan the work out to Haiku helpers as `CLAUDE.md` sizes it. Run every commit, push, GitHub write and heavy command (the check script, `lexicon-eval`, the bundle script) yourself, once.
+- Fan the work out to Haiku helpers as `CLAUDE.md` sizes it. When the work splits into parallel pieces, fan out with `/pstack:swarm`. Run every commit, push, GitHub write and heavy command (the check script, `lexicon-eval`, the bundle script) yourself, once.
 - Live-app work (fn, the mic, paste, Accessibility, the indicator) only if your prompt gives you the lane: build Lexicon Dev, launch it with `open`, and never touch the daily copy or its permissions.
 - Commit small, only your own files, with explicit paths: `type(scope): what changed (#N)`, with `Refs #N` in the body.
 

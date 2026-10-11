@@ -16,8 +16,37 @@ A role session posts a finding on its issue before asking Jake about it, and ask
 ## Models and helpers
 
 - The orchestrator, builders and the Reviewer run Opus at high effort.
-- Each fans its work out to Haiku 5.5 helpers at xhigh effort (`.claude/agents/`): `Explore` scouts, `editor` changes its own disjoint files, `critic` reviews one review.md section, `verifier` tries to disprove one finding. Size the swarm to the work, up to about 15 on a hard ticket. Helpers may start their own helpers. Use a Sonnet or Opus subagent where judgment matters.
+- Each fans its work out to Haiku 5.5 helpers at xhigh effort (`.claude/agents/`): `Explore` scouts, `editor` changes its own disjoint files, `critic` reviews one review.md section, `verifier` tries to disprove one finding. Size single helpers to the work, up to about 15 on a hard ticket; a `/pstack:swarm` run goes much wider (see pstack below). Helpers may start their own helpers. Use a Sonnet or Opus subagent where judgment matters.
 - The session itself runs every commit, push, GitHub write and heavy build (the check script, `lexicon-eval`), once.
+
+## pstack
+
+pstack is poteto's skill set, installed as a Claude Code plugin. The Matt Pocock skills run the loop below; a pstack skill is a tool for one job inside it and runs only when someone calls it by name. Its session routing hook stays off (`session hook: off` in `~/.claude/pstack-models.md`, which also sets the model for each pstack role).
+
+| Tool | Who | When |
+|---|---|---|
+| `/pstack:swarm` | Builders | The default way to fan out when a task splits into parallel pieces: Haiku workers at xhigh, each with a standalone brief, drained into one report. Go wide (below). |
+| `/pstack:architect` | Orchestrator | Before it writes or starts a ticket that touches 3 or more modules, and when builders keep working around the design. A builder that hits the scrap rule in `docs/architecture.md` stops and hands back as implement-ticket's Need Jake says, so the rerun goes through the orchestrator. |
+| `/pstack:blast-radius` | Reviewer | On high-risk PRs that touch audio capture, History, insertion, network access or private data. It looks for what the change breaks outside the diff and proves the one fact it is safe because of by running code. |
+| `/pstack:benchmark-checklist` | Whoever reports a lag, memory or speed number | Before the number goes into a PR, an issue or a decision. |
+| `/pstack:create-verification-skill` | One builder in the live-app lane, once | After the test hooks and Accessibility harness ([#45](https://github.com/jparker2006/lexicon/issues/45)) land. It writes the repo's skill for driving Lexicon Dev the way Jake does. |
+| `/pstack:maintain-verification-skill` | The builder the orchestrator gives the live-app lane | At the end of each milestone after that, to keep the verification skill true. Its live pass drives the app, so it needs the lane. |
+| `/pstack:correct`, `/pstack:reflect` | Jake and the orchestrator | At the end of each milestone, in its retro (M0's is [#88](https://github.com/jparker2006/lexicon/issues/88)). `correct` turns mistakes agents keep repeating into checks that catch them; `reflect` turns a session's lessons into edits on existing skills. |
+| `/pstack:unslop` | Whoever writes it | On text Jake reads: UI copy, notices, onboarding, the README. |
+| `/pstack:how`, `/pstack:why` | Anyone | Investigation: `how` traces how code runs, `why` digs through history for the reasons behind its shape. |
+
+**Swarms go wide.** Workers run on Haiku because it is cheap and fast, and that only pays off in numbers. Ask for at least 10 workers, normally 20 to 40, up to about 50. Cut the work fine: one file, one function, one test case, one review lens or one Term per worker. When the pieces run out before the count does, race several workers on the same brief and declare `best-of` or `rank all` up front. Only a job with fewer than about 5 pieces that can't be cut finer goes to single `editor` helpers instead. The step 4 review keeps its `critic` and `verifier` helpers.
+
+- The worker model comes from the `swarm workers` line in `~/.claude/pstack-models.md`, set to `haiku @xhigh`. If that line goes missing, pstack falls back to Opus.
+- pstack gives workers every tool, so each brief carries the helper rules: no commits, pushes, GitHub writes, check script, `lexicon-eval` or bundle script; no live app; no private data; write only your own files or output folder.
+- Worker results are leads, like any helper's: the builder reviews every diff, and a finding counts only after a verifier or the builder's own read confirms it.
+
+Deliberately not used:
+
+- `poteto-mode` and the routing hook: they take over the session and would replace the Matt Pocock flow.
+- `babysit` and `fix-merge-conflicts`: `babysit` shepherds a PR to mergeable and `fix-merge-conflicts` resolves conflicts on its own terms. Merging is the Reviewer's alone, and builders bring `main` in as implement-ticket step 5 says.
+- `interrogate`: left out for now. The grill dropped it because it needed the Codex and Grok CLIs; the installed version (0.9.81) runs Claude subagents instead, so it can come back if `blast-radius` proves too narrow.
+- pstack's `tdd`: Matt Pocock's `tdd` skill already covers test-first.
 
 ## Concurrency
 

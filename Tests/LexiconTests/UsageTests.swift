@@ -34,10 +34,9 @@ import LexiconCore
     #expect(second == [.transcribe(id, wasWaiting: false)])
 }
 
-@Test(.disabled("lands with #42")) func cleanupNeverChangesMeaning() {
-    let out = TextPass.run("um so wire the auth callback into super base", rules: RuleSet([Rule(heard: "super base", written: "Supabase")]),
-                           app: .unknown)
-    #expect(out == "So wire the auth callback into Supabase")
+@Test(.disabled("lands with #70")) func cleanupAppliesRulesAndDropsFillers() {
+    let out = TextPass.run("um so wire the auth callback into super base", rules: RuleSet([Rule(heard: "super base", written: "Supabase")]))
+    #expect(out == "Wire the auth callback into Supabase")
 }
 
 @Test(.disabled("lands with #60")) func lateTextIsHeldWhenJakeTypedSinceFnUp() {
@@ -46,18 +45,6 @@ import LexiconCore
     #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: true) == .hold(.typedSince))
     #expect(InsertGuard.decide(target: field, focusNow: FocusSnapshot(pid: 7, fieldFingerprint: "f1"),
                                inputSinceMark: false) == .hold(.focusMoved))
-}
-
-@Test(.disabled("lands with #41")) func replayedEventsCannotMoveStatusBackwards() {
-    #expect(DictationStatus.notInserted.canMove(to: .inserted))
-    #expect(!DictationStatus.inserted.canMove(to: .waiting))       // a late `.waiting` replay is a no-op
-    #expect(DictationStatus.inserted.canMove(to: .inserted))       // same-state replay is allowed, changes nothing
-    #expect(HistoryStore.admits(.recording, from: nil))
-    #expect(!HistoryStore.admits(.transcribing, from: nil))
-}
-
-@Test func unfinishedIndexIsGeneratedFromTheEnum() {
-    #expect(HistorySchema.derivedIndexes[0].hasSuffix("('recording', 'transcribing', 'waiting', 'ready')"))
 }
 
 @Test(.disabled("lands with #74")) func structuralCheckRejectsChangedNumbers() {

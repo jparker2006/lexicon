@@ -6,7 +6,7 @@ A review ends in one verdict: **merge**, **merge with notes**, or **don't merge*
 
 ## Risk tiers
 
-- **High:** anything that touches audio capture, History or its recovery, inserting text, the network (`CloudAccess`, any provider, model downloads), private data, keys, the Secret guard, Private mode, the fn tap, permissions, signing, the bundle or install scripts, the guard hook or `.claude/`. The Reviewer reads the full diff itself.
+- **High:** anything that touches audio capture, History or its recovery, inserting text, the network (`CloudAccess`, any provider, model downloads), private data, keys, the Secret guard, Private mode, the fn tap, permissions, signing, the bundle or install scripts, the guard hook or `.claude/`. The Reviewer reads the full diff itself. When it touches audio capture, History, insertion, network access or private data, it also runs `/pstack:blast-radius` on it.
 - **Low:** copy, docs, tests, and contained fixes outside those paths. The Reviewer checks the riskiest hunk and the tests, then decides.
 - When unsure, it's high.
 
@@ -41,6 +41,7 @@ A review ends in one verdict: **merge**, **merge with notes**, or **don't merge*
 - FluidAudio is the only third-party package in the app, and only `LocalParakeet` imports it. A new package needs Jake's yes, named at the top of the review.
 - Copied code comes only from MIT, Apache or BSD projects, with their copyright lines kept. GPL code (VoiceInk, FluidVoice) is never copied.
 - The change stays within budget, or the PR says by how much it moves: app binary 4 MB or less without FluidAudio, bundle 12 MB or less with it, idle memory 30 MB or less with the model unloaded, launch to fn working 150 ms or less, fn-down to first audio 60 ms or less, Lexicon's own fn-up to Cmd-V work 10 ms or less.
+- Every lag, memory or speed number in the PR went through `/pstack:benchmark-checklist` before it was reported.
 - One owner per thing, as `docs/architecture.md` says. A new piece of shared mutable state, a lock, or a second writer to History is a blocker unless the PR argues it.
 - When the PR contradicts an ADR, it says so and why.
 
