@@ -1,8 +1,9 @@
 public import AppKit
+import AVFAudio
 import os
 public import LexiconDomain
 import History
-import LexiconCore
+public import LexiconCore
 
 /// Opens the History window from the menu bar, or when Lexicon is reopened from
 /// Spotlight or Finder. One window at a time; a second open brings it forward.
@@ -11,11 +12,14 @@ import LexiconCore
 @MainActor
 public final class HistoryWindowPresenter: NSObject {
     private let paths: AppPaths
+    /// Pin, Retry and Delete go through it. nil when it did not open: History stays readable.
+    private let system: LexiconSystem?
     private var controller: HistoryWindowController?
     private let log = Logger(subsystem: "Lexicon", category: "History")
 
-    public init(paths: AppPaths) {
+    public init(paths: AppPaths, system: LexiconSystem?) {
         self.paths = paths
+        self.system = system
     }
 
     /// The menu bar menu's "History" line.
@@ -36,7 +40,8 @@ public final class HistoryWindowPresenter: NSObject {
         }
         let clock = ContinuousClock()
         let opened = clock.now
-        let controller = HistoryWindowController(reader: HistoryReader(paths: paths), pasteboard: .general) { [weak self] in
+        let controller = HistoryWindowController(reader: HistoryReader(paths: paths), system: system,
+                                                  pasteboard: .general) { [weak self] in
             self?.controller = nil
         }
         self.controller = controller
@@ -70,12 +75,14 @@ public final class HistoryWindowPresenter: NSObject {
 /// index to (day section, offset) and fetches pages of 50 from `HistoryReader`.
 ///
 /// Row: time, full final text, grey line (model, lag, status for waiting /
-/// recovered / not inserted / failed). Clicking a row copies the final text and
-/// flashes "Copied". The search field filters with a plain-text match.
+/// recovered / not inserted / failed), then play, the Test set pin and a ⋯ menu
+/// (Retry with a model picker, Show Versions, Delete). Clicking a row copies the
+/// final text and flashes "Copied". The search field filters with a plain-text match.
 @MainActor
 final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate,
     NSToolbarDelegate {
     let reader: HistoryReader
+    let system: LexiconSystem?
     let pasteboard: NSPasteboard
     let onClose: @MainActor () -> Void
     let table = HistoryTable()
@@ -92,6 +99,11 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     var rowCount = 0
     var pages: [Page: [HistoryRow]] = [:]
     var version = 0
+    /// The one clip playing, and whose it is.
+    var player: AVAudioPlayer?
+    var playing: DictationID?
+    /// Rows being retried: they say "Retrying…" until the new text is in History.
+    var retrying: Set<DictationID> = []
     static let pageSize = 50
     /// Rows read at a time. Reading, and handing the table, a year of rows
     /// costs more than the whole open budget, so the window starts with the
@@ -108,8 +120,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         case row(section: Int, offset: Int)
     }
 
-    init(reader: HistoryReader, pasteboard: NSPasteboard, onClose: @escaping @MainActor () -> Void) {
+    init(reader: HistoryReader, system: LexiconSystem?, pasteboard: NSPasteboard,
+         onClose: @escaping @MainActor () -> Void) {
         self.reader = reader
+        self.system = system
         self.pasteboard = pasteboard
         self.onClose = onClose
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 680),
@@ -221,7 +235,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         guard let text = historyRow(at: row)?.finalText else { return }
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RowCell)?.flashCopied()
+        (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RowCell)?.flash("Copied")
     }
 
     /// Binary search over the headers: the table asks for every row it lays out.
@@ -264,7 +278,10 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
             return cell
         case .row:
             let cell = tableView.makeView(withIdentifier: RowCell.identifier, owner: nil) as? RowCell ?? RowCell()
-            cell.show(historyRow(at: row))
+            cell.owner = self
+            let shown = historyRow(at: row)
+            cell.show(shown, actions: shown.map { RowActions($0, canWrite: system != nil) },
+                      playing: shown != nil && shown?.id == playing, retrying: shown.map { retrying.contains($0.id) } ?? false)
             return cell
         case nil:
             return nil
@@ -278,8 +295,9 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if reader.version != version { reload() }
     }
 
-    /// Closing drops the controller, the reader and its connection.
+    /// Closing drops the controller, the reader and its connection, and stops playing.
     func windowWillClose(_ notification: Notification) {
+        stopPlaying()
         onClose()
     }
 
@@ -294,6 +312,140 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         itemIdentifier == search.itemIdentifier ? search : nil
+    }
+}
+
+// MARK: Row actions
+
+extension HistoryWindowController: AVAudioPlayerDelegate {
+    /// Play toggles: the same row stops it, another row's play replaces it.
+    func togglePlay(_ row: HistoryRow) {
+        let again = playing == row.id
+        stopPlaying()
+        guard !again else { return }
+        guard let url = reader.audioURL(row.id), let player = try? AVAudioPlayer(contentsOf: url) else {
+            // Aged out or deleted since the row was drawn.
+            return reload()
+        }
+        player.delegate = self
+        guard player.play() else { return }
+        self.player = player
+        playing = row.id
+        redrawRows()
+    }
+
+    func stopPlaying() {
+        guard player != nil else { return }
+        player?.stop()
+        player = nil
+        playing = nil
+        redrawRows()
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        let finished = ObjectIdentifier(player)
+        Task { @MainActor in
+            if self.player.map(ObjectIdentifier.init) == finished { self.stopPlaying() }
+        }
+    }
+
+    /// The Test set pin: its audio is kept forever. History refuses a pin with no audio to keep.
+    func togglePin(_ row: HistoryRow) {
+        guard let system else { return }
+        system.history.record(.pinned(row.id, !row.pinned))
+        Task {
+            await system.history.flush()
+            reload()
+        }
+    }
+
+    func showMenu(for row: HistoryRow, from button: NSButton) {
+        let actions = RowActions(row, canWrite: system != nil)
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let models = NSMenu()
+        models.autoenablesItems = false
+        for (model, enabled) in RowActions.retryModels {
+            let item = NSMenuItem(title: model.displayName, action: #selector(retryPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = (row.id, model)
+            item.isEnabled = enabled && actions.retry
+            models.addItem(item)
+        }
+        let retry = menu.addItem(withTitle: "Retry with", action: nil, keyEquivalent: "")
+        retry.submenu = models
+        retry.isEnabled = actions.retry
+        let versions = menu.addItem(withTitle: "Show Versions", action: #selector(versionsPicked(_:)), keyEquivalent: "")
+        versions.target = self
+        versions.representedObject = row
+        menu.addItem(.separator())
+        let delete = menu.addItem(withTitle: "Delete…", action: #selector(deletePicked(_:)), keyEquivalent: "")
+        delete.target = self
+        delete.representedObject = row
+        delete.isEnabled = actions.delete
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
+    }
+
+    /// Never typed: the new text replaces the old in History, and a failed Dictation becomes not inserted.
+    @objc func retryPicked(_ sender: NSMenuItem) {
+        guard let system, let (id, model) = sender.representedObject as? (DictationID, SpeechModel),
+              retrying.insert(id).inserted else { return }
+        redrawRows()
+        Task {
+            let result = await system.conductor.retry(id, with: model)
+            await system.history.flush()
+            retrying.remove(id)
+            reload()
+            cell(for: id)?.flash(result.versions == nil ? "No text" : "Retried")
+        }
+    }
+
+    @objc func versionsPicked(_ sender: NSMenuItem) {
+        guard let window, let row = sender.representedObject as? HistoryRow, let detail = reader.detail(row.id) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Versions"
+        let sections = HistoryText.versions(detail)
+        if sections.isEmpty {
+            alert.informativeText = "This Dictation has no text yet."
+        } else {
+            alert.accessoryView = VersionsView.make(sections)
+        }
+        alert.addButton(withTitle: "Done")
+        alert.beginSheetModal(for: window)
+    }
+
+    /// Asks first: the text and audio are gone for good.
+    @objc func deletePicked(_ sender: NSMenuItem) {
+        guard let window, let system, let row = sender.representedObject as? HistoryRow else { return }
+        let alert = NSAlert()
+        alert.messageText = "Delete this Dictation?"
+        alert.informativeText = "Its text and audio are removed from History. This can't be undone."
+        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            // History refuses it while the Dictation is in flight; the row then stays.
+            system.history.record(.deleted(row.id))
+            Task { @MainActor in
+                if self?.playing == row.id { self?.stopPlaying() }
+                await system.history.flush()
+                self?.reload()
+            }
+        }
+    }
+
+    /// Redraws the rows on screen (play state, "Retrying…") without reading History again.
+    func redrawRows() {
+        let visible = table.rows(in: table.visibleRect)
+        table.reloadData(forRowIndexes: IndexSet(integersIn: visible.lowerBound..<visible.upperBound), columnIndexes: [0])
+    }
+
+    func cell(for id: DictationID) -> RowCell? {
+        let visible = table.rows(in: table.visibleRect)
+        guard let row = (visible.lowerBound..<visible.upperBound).first(where: { historyRow(at: $0)?.id == id }) else {
+            return nil
+        }
+        return table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RowCell
     }
 }
 
@@ -328,14 +480,20 @@ final class HeaderCell: NSTableCellView {
 }
 
 /// One Dictation: time on the left, the full final text wrapped (never cut
-/// off), the grey line under it.
+/// off), the grey line under it with the row's buttons at its end.
 final class RowCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("row")
     let time = NSTextField(labelWithString: "")
-    let copied = NSTextField(labelWithString: "Copied")
+    /// "Copied", "Retrying…", "Retried": a word under the time.
+    let note = NSTextField(labelWithString: "")
     let text = NSTextField(wrappingLabelWithString: "")
     let details = NSTextField(labelWithString: "")
-    /// Which flash may hide "Copied": a newer click keeps it up.
+    let play = RowCell.button(AccessibilityID.historyPlay)
+    let pin = RowCell.button(AccessibilityID.historyPin)
+    let more = RowCell.button(AccessibilityID.historyMore, symbol: "ellipsis.circle", label: "More")
+    weak var owner: HistoryWindowController?
+    var row: HistoryRow?
+    /// Which flash may hide the note: a newer one keeps it up.
     private var flashes = 0
 
     init() {
@@ -343,16 +501,22 @@ final class RowCell: NSTableCellView {
         identifier = Self.identifier
         time.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         time.textColor = .secondaryLabelColor
-        copied.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
-        copied.textColor = .controlAccentColor
-        copied.isHidden = true
+        note.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        note.textColor = .controlAccentColor
+        note.isHidden = true
         text.font = .systemFont(ofSize: NSFont.systemFontSize)
         // Selectable text would take the click, and a click on a row copies it.
         text.isSelectable = false
         details.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         details.textColor = .tertiaryLabelColor
         details.lineBreakMode = .byTruncatingTail
-        for view in [time, copied, text, details] {
+        play.action = #selector(playPressed)
+        pin.action = #selector(pinPressed)
+        more.action = #selector(morePressed)
+        let buttons = NSStackView(views: [play, pin, more])
+        buttons.spacing = 6
+        for button in [play, pin, more] { button.target = self }
+        for view in [time, note, text, details, buttons] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -361,37 +525,115 @@ final class RowCell: NSTableCellView {
             time.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             time.firstBaselineAnchor.constraint(equalTo: text.firstBaselineAnchor),
             time.widthAnchor.constraint(equalToConstant: 64),
-            copied.leadingAnchor.constraint(equalTo: time.leadingAnchor),
-            copied.topAnchor.constraint(equalTo: time.bottomAnchor, constant: 2),
+            note.leadingAnchor.constraint(equalTo: time.leadingAnchor),
+            note.topAnchor.constraint(equalTo: time.bottomAnchor, constant: 2),
             text.leadingAnchor.constraint(equalTo: time.trailingAnchor, constant: 8),
             text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             text.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             details.leadingAnchor.constraint(equalTo: text.leadingAnchor),
-            details.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
-            details.topAnchor.constraint(equalTo: text.bottomAnchor, constant: 2),
+            details.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -8),
+            details.topAnchor.constraint(equalTo: text.bottomAnchor, constant: 4),
             details.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            buttons.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            buttons.centerYAnchor.constraint(equalTo: details.centerYAnchor),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
 
-    func show(_ row: HistoryRow?) {
+    /// `actions` nil (a row that did not load): every button is off.
+    func show(_ row: HistoryRow?, actions: RowActions?, playing: Bool, retrying: Bool) {
         flashes += 1
-        copied.isHidden = true
+        self.row = row
+        note.stringValue = "Retrying…"
+        note.isHidden = !retrying
         time.stringValue = row?.startedAt.formatted(date: .omitted, time: .shortened) ?? ""
         text.stringValue = row?.finalText ?? ""
         text.placeholderString = row?.finalText == nil ? "No text" : nil
         details.stringValue = row.map(HistoryText.details) ?? ""
+        Self.set(play, symbol: playing ? "stop.fill" : "play.fill", label: playing ? "Stop" : "Play")
+        play.isEnabled = actions?.play ?? false
+        let pinned = row?.pinned ?? false
+        Self.set(pin, symbol: pinned ? "flag.fill" : "flag",
+                 label: pinned ? "Unpin from the Test set" : "Pin to the Test set (keeps its audio)")
+        pin.contentTintColor = pinned ? .controlAccentColor : .secondaryLabelColor
+        pin.isEnabled = actions?.pin ?? false
+        more.isEnabled = row != nil
     }
 
-    func flashCopied() {
+    func flash(_ word: String) {
         flashes += 1
         let flash = flashes
-        copied.isHidden = false
+        note.stringValue = word
+        note.isHidden = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard let self, flashes == flash else { return }
-            copied.isHidden = true
+            note.isHidden = true
         }
+    }
+
+    @objc func playPressed() {
+        if let row { owner?.togglePlay(row) }
+    }
+
+    @objc func pinPressed() {
+        if let row { owner?.togglePin(row) }
+    }
+
+    @objc func morePressed() {
+        if let row { owner?.showMenu(for: row, from: more) }
+    }
+
+    static func button(_ identifier: String, symbol: String? = nil, label: String? = nil) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.contentTintColor = .secondaryLabelColor
+        button.setAccessibilityIdentifier(identifier)
+        if let symbol, let label { set(button, symbol: symbol, label: label) }
+        return button
+    }
+
+    /// The icon, its tooltip and what VoiceOver and the harness read.
+    static func set(_ button: NSButton, symbol: String, label: String) {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+    }
+}
+
+/// Show Versions: each version under its label, selectable so any of them can be
+/// copied, scrolling once a long hands-free Dictation would outgrow the sheet.
+enum VersionsView {
+    static let width: CGFloat = 440
+
+    static func make(_ sections: [(label: String, text: String)]) -> NSView {
+        let shown = NSMutableAttributedString()
+        let label: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        let body: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize), .foregroundColor: NSColor.labelColor,
+        ]
+        for (index, section) in sections.enumerated() {
+            shown.append(NSAttributedString(string: (index == 0 ? "" : "\n\n") + section.label + "\n", attributes: label))
+            shown.append(NSAttributedString(string: section.text, attributes: body))
+        }
+        let scroll = NSTextView.scrollableTextView()
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        guard let text = scroll.documentView as? NSTextView else { return scroll }
+        text.isEditable = false
+        text.isSelectable = true
+        text.drawsBackground = false
+        text.textContainerInset = .zero
+        text.textStorage?.setAttributedString(shown)
+        let height = shown.boundingRect(with: NSSize(width: width - 16, height: .greatestFiniteMagnitude),
+                                        options: [.usesLineFragmentOrigin, .usesFontLeading]).height
+        scroll.frame = NSRect(x: 0, y: 0, width: width, height: min(ceil(height) + 8, 420))
+        return scroll
     }
 }
 

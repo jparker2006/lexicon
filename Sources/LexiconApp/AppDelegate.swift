@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lexicon"
         // TODO(#56): the system's store, once `LexiconSystem.live` builds one.
         let preferences = PreferencesStore()
-        let history = HistoryWindowPresenter(paths: paths)
+        let history = HistoryWindowPresenter(paths: paths, system: system)
         self.history = history
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
             [history.menuItem()] + Permissions.fnOffItems(self?.fnOff) + Permissions.menuItems() + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])

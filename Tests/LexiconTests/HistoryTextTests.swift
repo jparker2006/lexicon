@@ -36,3 +36,54 @@ private let parakeet = SpeechModel.local(.parakeetUnified)
     #expect(HistoryText.details(row(.waiting, cleanup: nil, model: nil, lag: nil)) == "waiting")
     #expect(HistoryText.details(row(.failed, cleanup: nil, model: nil, lag: nil)) == "failed")
 }
+
+@Test(arguments: DictationStatus.allCases)
+func playAndRetryAreGreyedOutOnceTheAudioAgedOut(status: DictationStatus) {
+    func row(audio: Bool, pinned: Bool = false) -> HistoryRow {
+        HistoryRow(id: DictationID(), startedAt: Date(), finalText: "Text.", status: status, cleanup: nil, model: parakeet,
+                   lag: nil, pinned: pinned, hasAudio: audio)
+    }
+    let agedOut = RowActions(row(audio: false), canWrite: true)
+    #expect(!agedOut.play)
+    #expect(!agedOut.retry)
+    #expect(!agedOut.pin)  // nothing left to keep
+    #expect(RowActions(row(audio: false, pinned: true), canWrite: true).pin)  // but a pin can always come off
+
+    let kept = RowActions(row(audio: true), canWrite: true)
+    #expect(kept.play == (status != .recording))
+    #expect(kept.retry == !status.isInFlight)
+    #expect(kept.delete == !status.isInFlight)  // never while recording, transcribing or ready
+}
+
+@Test func withoutTheRunningSystemOnlyPlayWorks() {
+    let row = HistoryRow(id: DictationID(), startedAt: Date(), finalText: "Text.", status: .inserted, cleanup: nil,
+                         model: parakeet, lag: nil, pinned: true, hasAudio: true)
+    let actions = RowActions(row, canWrite: false)
+    #expect(actions.play)
+    #expect(!actions.pin && !actions.retry && !actions.delete)
+}
+
+@Test func theRetryPickerOffersLocalModelsUntilTheCloudRaceLands() {
+    let models = RowActions.retryModels
+    #expect(models.map(\.model) == SpeechModel.allCases)
+    #expect(models.filter(\.enabled).map(\.model) == LocalModel.allCases.map(SpeechModel.local))
+}
+
+@Test func showVersionsListsModelCleanedAndFinalTextThenAnyEngineThatLost() {
+    let row = HistoryRow(id: DictationID(), startedAt: Date(), finalText: "Ship the useAuth hook.", status: .inserted,
+                         cleanup: .rulesOnly(.rejected(.droppedContentWord)), model: parakeet, lag: nil, pinned: false,
+                         hasAudio: true)
+    let won = AttemptRecord(model: parakeet, result: .won, text: "ship the use auth hook", latency: .milliseconds(80),
+                            error: nil)
+    let lost = AttemptRecord(model: .cloud(.museVoice), result: .timedOut, text: nil, latency: nil, error: "no final")
+    let detail = HistoryDetail(row: row, versions: TextVersions(model: "ship the use auth hook", cleaned: "Ship the use auth hook."),
+                               attempts: [won, lost])
+
+    let sections = HistoryText.versions(detail)
+    #expect(sections.map(\.label) == ["Model: Parakeet (on this Mac)", "Cleaned (cleanup rejected)", "Final",
+                                      "Meta Muse Voice: timed out"])
+    #expect(sections.map(\.text) == ["ship the use auth hook", "Ship the use auth hook.", "Ship the useAuth hook.", "no final"])
+
+    let failed = HistoryDetail(row: row, versions: nil, attempts: [])
+    #expect(HistoryText.versions(failed).isEmpty)
+}
