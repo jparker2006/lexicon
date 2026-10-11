@@ -95,7 +95,7 @@ public enum DictationStatus: String, Sendable, Codable, CaseIterable {
         if self == next { return true }
         switch self {
         case .recording:
-            // notInserted and recovered only via launch recovery, which re-marks origin first.
+            // notInserted and recovered: launch recovery's moves (a crash mid-recording).
             return [.transcribing, .waiting, .failed, .notInserted, .recovered].contains(next)
         case .transcribing: return [.ready, .waiting, .failed, .notInserted, .recovered].contains(next)
         case .waiting: return [.ready, .failed, .notInserted, .recovered].contains(next)  // late text (#4)

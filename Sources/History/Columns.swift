@@ -62,8 +62,8 @@ extension DictationRecord {
         guard let id = row.text(0).flatMap(DictationID.init(column:)),
               let origin = row.text(2).flatMap(DictationOrigin.init(rawValue:)),
               let status = row.text(5).flatMap(DictationStatus.init(rawValue:)) else { return nil }
-        // A Re-speak whose Dictation was deleted keeps no target (respeak_of went NULL).
-        let purpose: DictationPurpose = if row.text(3) == "respeak", let of = row.text(4).flatMap(DictationID.init(column:)) {
+        // A Re-speak whose Dictation was deleted has no target left (respeak_of went NULL), so it reads as `.type`.
+        let purpose: DictationPurpose = if row.text(3) == DictationPurpose.respeak(of: id).column, let of = row.text(4).flatMap(DictationID.init(column:)) {
             .respeak(of: of)
         } else {
             .type

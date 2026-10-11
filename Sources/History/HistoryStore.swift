@@ -62,9 +62,11 @@ public struct UnfinishedDictation: Sendable {
 /// (FIFO, so events about one Dictation apply in order). The fn-up path never
 /// waits on SQLite. Reads that the Conductor needs are async on the same queue;
 /// the History window reads through its own connection (`HistoryReader`).
+///
+/// `@unchecked Sendable`: the only mutable state is `db`, touched only on `queue`
+/// after init returns; everything else is immutable or itself Sendable.
 public final class HistoryStore: @unchecked Sendable {
     private let audioFolder: URL
-    /// The writer queue. `db` is touched only on it, which is what makes the class Sendable.
     private let queue = DispatchQueue(label: "lexicon.history.writer", qos: .userInitiated)
     private let db: Database
     private let changeStream: AsyncStream<DictationID>
@@ -89,8 +91,9 @@ public final class HistoryStore: @unchecked Sendable {
         audioFolder.appending(path: "\(id).caf", directoryHint: .notDirectory)
     }
 
-    /// Non-blocking, ordered, idempotent. Lost only if the app dies before the
-    /// queue drains, which recovery handles because the audio file is the truth.
+    /// Non-blocking, ordered, idempotent. An event is lost if the app dies before
+    /// the queue drains, or if SQLite fails it (disk full, I/O error: logged, not
+    /// retried). Recovery covers both, because the audio file is the truth.
     public func record(_ event: DictationEvent) {
         queue.async { [self] in
             do {
@@ -98,7 +101,7 @@ public final class HistoryStore: @unchecked Sendable {
                 if applied.dropAudio { try dropAudio(applied.id) }
                 if applied.changed { changed.yield(applied.id) }
             } catch {
-                // No text in the log: the event's name and SQLite's code only.
+                // No Dictation text in the log: the event's name, and SQLite's error privately.
                 let name = Mirror(reflecting: event).children.first?.label ?? "event"
                 log.error("History dropped .\(name, privacy: .public): \(String(describing: error), privacy: .private)")
             }
@@ -232,10 +235,13 @@ extension HistoryStore {
         /// then sets `fields` too. Clears the reason whenever the status changes.
         func move(to next: DictationStatus, setting fields: [(String, SQLValue)] = []) throws -> Bool {
             guard let stored, Self.admits(next, from: stored.status) else { return false }
-            let assignments = ["status = ?", "status_reason = CASE WHEN status = ? THEN status_reason END"]
-                + fields.map { "\($0.0) = ?" }
-            try db.execute("UPDATE dictation SET \(assignments.joined(separator: ", ")) WHERE id = ?",
-                           [.text(next.rawValue), .text(next.rawValue)] + fields.map(\.1) + [key])
+            var assignments = fields
+            if !fields.contains(where: { $0.0 == "status_reason" }) {
+                assignments.append(("status_reason", stored.status == next ? .optional(stored.reason) : .null))
+            }
+            assignments.append(("status", .text(next.rawValue)))
+            try db.execute("UPDATE dictation SET \(assignments.map { "\($0.0) = ?" }.joined(separator: ", ")) WHERE id = ?",
+                           assignments.map(\.1) + [key])
             return true
         }
 
@@ -275,7 +281,9 @@ extension HistoryStore {
 
         case .textReady(_, let versions, let cleanup, let model, let typing):
             guard let stored else { return nil }
-            let next = DictationStatus.afterTextReady(typing: typing, origin: stored.origin, previous: stored.status)
+            // Recovered audio is never typed, whatever the caller says (#4).
+            let next = DictationStatus.afterTextReady(typing: typing && stored.origin != .recovered,
+                                                      origin: stored.origin, previous: stored.status)
             if try move(to: next, setting: [
                 ("model_text", .text(versions.model)),
                 ("cleaned_text", .text(versions.cleaned)),
@@ -289,6 +297,8 @@ extension HistoryStore {
         case .delivered(_, let receipt, let lag):
             // Latest insertion wins; paste-last (lag nil) keeps the live insert's lag.
             if try move(to: .inserted, setting: lag.map { [("lag_ms", .int($0.ms))] } ?? []) {
+                let insertion = "SELECT * FROM insertion WHERE dictation_id = ?"
+                let previous = try db.query(insertion, [key])
                 try db.execute("""
                     INSERT OR REPLACE INTO insertion
                       (dictation_id, app_bundle_id, field_fingerprint, caret_after, context_before, context_after, inserted_at)
@@ -296,7 +306,7 @@ extension HistoryStore {
                     """, [key, .optional(receipt.appBundleID), .optional(receipt.fieldFingerprint),
                           .optional(receipt.caretAfter.map(Int64.init)), .text(receipt.contextBefore),
                           .text(receipt.contextAfter), .int(receipt.insertedAt.unixMs)])
-                wroteChild = db.changes > 0
+                wroteChild = try db.query(insertion, [key]) != previous  // REPLACE always counts a change
             }
 
         case .notInserted(_, let reason):
@@ -376,16 +386,20 @@ extension HistoryStore {
     }
 
     /// First half of a delete: commit the mark before the file goes (see `dropAudio`).
+    /// The text goes now too, so a crash before the row is dropped leaves no text behind.
     private static func markAudioDeleted(_ key: SQLValue, in db: Database) throws -> Bool {
-        try db.execute("UPDATE dictation SET audio_storage = ? WHERE id = ?", [.text(AudioStorage.deleted.rawValue), key])
+        try db.execute("""
+            UPDATE dictation SET audio_storage = ?, model_text = NULL, cleaned_text = NULL, final_text = NULL WHERE id = ?
+            """, [.text(AudioStorage.deleted.rawValue), key])
         return true
     }
 }
 
-/// The two columns every status move is decided from.
+/// The columns every status move is decided from.
 private struct Stored {
     let status: DictationStatus
     let origin: DictationOrigin
+    let reason: String?
 
     /// From `SELECT *`: column order is the migration's.
     init?(row: Row) {
@@ -393,5 +407,6 @@ private struct Stored {
               let origin = row.text(3).flatMap(DictationOrigin.init(rawValue:)) else { return nil }
         self.status = status
         self.origin = origin
+        self.reason = row.text(7)
     }
 }

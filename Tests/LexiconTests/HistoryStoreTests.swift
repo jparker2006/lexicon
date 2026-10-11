@@ -234,20 +234,21 @@ func deleteIsRefusedWhileInFlight(stored: DictationStatus) async throws {
     #expect(row.pinned)
 }
 
-@Test func changesNamesEveryRowThatMoved() async throws {
+@Test(.timeLimit(.minutes(1))) func changesNamesEveryRowThatMoved() async throws {
     let (store, _) = try makeStore()
     let a = try begin(store)
     let b = try begin(store)
     store.record(.audioEnded(a, audio))
     store.record(.audioEnded(a, audio))  // replay: nothing changed, no notice
-    store.record(.pinned(b, true))
+    for event in path(to: .inserted, b) { store.record(event) }
+    store.record(.delivered(b, receipt, lag: .milliseconds(420)))  // replay: no notice
     await store.flush()
     var seen: [DictationID] = []
     for await changed in store.changes {
         seen.append(changed)
-        if seen.count == 4 { break }
+        if seen.count == 6 { break }
     }
-    #expect(seen == [a, b, a, b])
+    #expect(seen == [a, b, a, b, b, b])
 }
 
 @Test func derivedIndexesAreRebuiltWhenTheirSQLChanges() async throws {
@@ -264,22 +265,42 @@ func deleteIsRefusedWhileInFlight(stored: DictationStatus) async throws {
     #expect(try await indexSQL(reopened) == HistorySchema.derivedIndexes)
 }
 
-@Test func enqueuingAnEventTakesUnderAMillisecond() async throws {
+@Test func enqueuingAnEventNeverWaitsOnTheWriter() async throws {
     let (store, _) = try makeStore()
     let ids = try (0..<200).map { _ in try begin(store) }
     await store.flush()
 
-    // Hold the writer busy so every `record` below lands behind real work.
+    // Hold the writer queue: if `record` waited on SQLite, this test would hang.
+    let release = DispatchSemaphore(value: 0)
+    var held: Task<Void, any Error>!
+    await withCheckedContinuation { started in
+        held = Task { try await store.read { _ in started.resume(); release.wait() } }
+    }
+
     var costs: [Duration] = []
     let clock = ContinuousClock()
     for _ in 0..<5 {
         for id in ids {
-            let event = DictationEvent.pinned(id, Bool.random())
+            let event = DictationEvent.pinned(id, true)
             costs.append(clock.measure { store.record(event) })
         }
     }
+    release.signal()
+    try await held.value
     await store.flush()
+
     costs.sort()
+    // Enqueueing is a few microseconds; the 1 ms budget leaves wide headroom on a loaded runner.
     let p99 = costs[costs.count * 99 / 100]
     #expect(p99 < .milliseconds(1), "p99 \(p99), max \(costs.last!)")
+    #expect(await store.dictation(ids[0])?.pinned == true)
+}
+
+@Test func recoveredTextIsNeverTypedEvenIfACallerAsks() async throws {
+    let (store, _) = try makeStore()
+    let id = try begin(store, origin: .recovered)
+    store.record(.audioEnded(id, audio))
+    store.record(.textReady(id, text, cleanup: .rulesOnly(.off), model: parakeet, typing: true))
+    await store.flush()
+    #expect(await store.dictation(id)?.status == .recovered)
 }

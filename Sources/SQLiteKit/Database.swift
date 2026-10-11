@@ -30,12 +30,12 @@ public final class Database {
         try execute("PRAGMA journal_mode = WAL")
         try execute("PRAGMA synchronous = NORMAL")
 
-        let applied = Int(try query("PRAGMA user_version").first?.int(0) ?? 0)
-        guard applied < migrations.count else { return }
+        // Read the version under the write lock, so two processes opening one file migrate once.
         try exec("BEGIN IMMEDIATE")
         do {
-            for migration in migrations[applied...] { try exec(migration) }
-            try exec("PRAGMA user_version = \(migrations.count)")
+            let applied = Int(try query("PRAGMA user_version").first?.int(0) ?? 0)
+            for migration in migrations[min(applied, migrations.count)...] { try exec(migration) }
+            if applied < migrations.count { try exec("PRAGMA user_version = \(migrations.count)") }
             try exec("COMMIT")
         } catch {
             try? exec("ROLLBACK")
