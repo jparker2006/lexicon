@@ -39,3 +39,7 @@ _Avoid_: Eval set, benchmark, dataset
 **Private mode**:
 A mode in which nothing leaves the Mac.
 _Avoid_: Offline mode, local mode
+
+**Secret guard**:
+A check on the Mac that keeps any Dictation containing a key, token or password from leaving the Mac.
+_Avoid_: Redaction, filter
