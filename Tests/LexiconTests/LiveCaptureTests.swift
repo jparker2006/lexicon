@@ -168,13 +168,19 @@ final class FakeMic: Sendable {
     /// Engines, by the order they are made, whose start blocks its thread until `unwedge`.
     private let wedgesAtStart: Set<Int>
     private let gate = DispatchSemaphore(value: 0)
+    private let unwedged = Atomic(false)
     private let clock: any Clock<Duration>
+    /// macOS's Allow prompt is up until `answerPrompt`.
+    private let asking: Atomic<Bool>
 
-    init(diesAtStart: Set<Int> = [], wedgesAtStart: Set<Int> = [], clock: any Clock<Duration> = ContinuousClock()) {
+    /// The default clock never moves: no start hits the limit because the machine is slow.
+    init(diesAtStart: Set<Int> = [], wedgesAtStart: Set<Int> = [], clock: any Clock<Duration> = TestClock(),
+         askingPermission: Bool = false) {
         (made, continuation) = AsyncStream.makeStream()
         self.diesAtStart = diesAtStart
         self.wedgesAtStart = wedgesAtStart
         self.clock = clock
+        asking = Atomic(askingPermission)
     }
 
     var hardware: MicHardware {
@@ -187,11 +193,14 @@ final class FakeMic: Sendable {
                                     wedge: wedgesAtStart.contains(index) ? gate : nil)
             continuation.yield(engine)
             return engine
-        }, permission: { .granted }, clock: clock)
+        }, permission: { [self] in asking.load(ordering: .relaxed) ? .undetermined : .granted }, clock: clock)
     }
 
-    /// Lets every wedged start return, as a Core Audio call that was stuck finally does.
+    func answerPrompt() { asking.store(false, ordering: .relaxed) }
+
+    /// Lets every wedged start return, as a Core Audio call that was stuck finally does. Once.
     func unwedge() {
+        guard !unwedged.exchange(true, ordering: .relaxed) else { return }
         for _ in wedgesAtStart { gate.signal() }
     }
 }

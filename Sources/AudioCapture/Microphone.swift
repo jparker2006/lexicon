@@ -50,8 +50,11 @@ protocol InputEngine: AnyObject, Sendable {
 /// a new lane with its own queue. Whatever the old lane finishes later is
 /// stopped and dropped.
 final class Microphone: Sendable {
-    /// A cold start takes 74 to 212 ms (#52). Ten times that is not a slow start.
+    /// A cold start takes 74 to 212 ms (#52). About ten times that is not a slow start.
     static let startLimit: Duration = .seconds(2)
+    /// macOS holds the first start after a permission reset until Jake answers
+    /// its Allow prompt; the limit waits on him this long before it counts.
+    static let promptLimit: Duration = .seconds(60)
 
     let hardware: MicHardware
     private let lane: Mutex<MicLane>
@@ -71,7 +74,8 @@ final class Microphone: Sendable {
         lane.queue.async { lane.prepareNow(deviceUID: deviceUID) }
     }
 
-    /// Throws `.startTimedOut` once `startLimit` passes without the engine started.
+    /// Throws `.startTimedOut` once `startLimit` passes without the engine
+    /// started, not counting time the Allow prompt is up (up to `promptLimit`).
     func start(deviceUID: String?, keyDown: HostTime) async throws(RecorderError) -> MicSource {
         let lane = lane.withLock { $0 }
         let started = await withCheckedContinuation { (done: CheckedContinuation<Result<MicSource, RecorderError>, Never>) in
@@ -83,7 +87,11 @@ final class Microphone: Sendable {
                 return true
             }
             let deadline = Task { [hardware] in
-                try? await hardware.clock.sleep(for: Self.startLimit)
+                var waited = Duration.zero
+                repeat {
+                    try? await hardware.clock.sleep(for: Self.startLimit)
+                    waited += Self.startLimit
+                } while !Task.isCancelled && hardware.permission() == .undetermined && waited < Self.promptLimit
                 guard !Task.isCancelled, answer(.failure(.startTimedOut)) else { return }
                 self.abandon(lane)
             }

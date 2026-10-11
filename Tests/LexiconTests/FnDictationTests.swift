@@ -208,6 +208,7 @@ func aMicStartThatNeverReturnsEndsTheDictationAndTheNextOneRecords() async throw
     // block the mic's queue for good (#142). The first engine's start does.
     let clock = TestClock()
     let mic = FakeMic(wedgesAtStart: [0], clock: clock)
+    defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
     let rig = try FnRig(hardware: mic.hardware)
     var events = await rig.conductor.events().makeAsyncIterator()
     var engines = mic.made.makeAsyncIterator()
@@ -233,7 +234,7 @@ func aMicStartThatNeverReturnsEndsTheDictationAndTheNextOneRecords() async throw
     #expect(seen.contains(where: { event in
         if case .stopped(let who) = event { who == stuck } else { false }
     }))
-    await rig.conductor.handle(.dictationStopped(stuck, at: fnAt(500)))  // its fn-up, after the limit: nothing to end
+    await rig.conductor.handle(.dictationStopped(stuck, at: fnAt(500)))  // its fn-up, after the notice: nothing to end
 
     // The next fn-down gets a fresh engine, though the first is still stuck.
     for command: KeyCommand in [.dictationBegan(next, at: fnAt(700)), .dictationConfirmed(next, .hold),
@@ -259,9 +260,40 @@ func aMicStartThatNeverReturnsEndsTheDictationAndTheNextOneRecords() async throw
 }
 
 @Test(.timeLimit(.minutes(1)))
+func aStartHeldByTheMicPermissionPromptWaitsForJakesAnswer() async throws {
+    // macOS holds the first start after a permission reset until Jake answers its Allow prompt.
+    let clock = TestClock()
+    let mic = FakeMic(wedgesAtStart: [0], clock: clock, askingPermission: true)
+    defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
+    let rig = try FnRig(hardware: mic.hardware)
+    var events = await rig.conductor.events().makeAsyncIterator()
+    let id = DictationID()
+
+    await rig.conductor.handle(.dictationBegan(id, at: fnAt(0)))
+    await rig.conductor.handle(.dictationConfirmed(id, .hold))
+    for _ in 1...3 {  // the prompt stays up past the start limit, three times over
+        await clock.waitForSleepers(1)
+        await clock.advance(by: Microphone.startLimit)
+    }
+    await clock.waitForSleepers(1)
+    mic.answerPrompt()
+    mic.unwedge()
+    await rig.conductor.handle(.dictationStopped(id, at: fnAt(600)))
+    let seen = await eventsUntilFinished(&events)
+
+    #expect(seen.contains(where: { event in
+        if case .finished(let who, .inserted) = event { who == id } else { false }
+    }))
+    #expect(!seen.contains(where: { event in
+        if case .notice(.microphoneUnavailable) = event { true } else { false }
+    }))
+}
+
+@Test(.timeLimit(.minutes(1)))
 func aStrayTapOnAStuckMicLeavesNoRowButSaysTheMicIsStuck() async throws {
     let clock = TestClock()
     let mic = FakeMic(wedgesAtStart: [0], clock: clock)
+    defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
     let rig = try FnRig(hardware: mic.hardware)
     var events = await rig.conductor.events().makeAsyncIterator()
     let tap = DictationID()
@@ -281,13 +313,13 @@ func aStrayTapOnAStuckMicLeavesNoRowButSaysTheMicIsStuck() async throws {
 
     #expect(noticed)
     #expect(await rig.history.dictation(tap) == nil)
-    mic.unwedge()
 }
 
 @Test(.timeLimit(.minutes(1)))
 func quitWithFnDownOnAStuckMicReturnsAtTheStartLimit() async throws {
     let clock = TestClock()
     let mic = FakeMic(wedgesAtStart: [0], clock: clock)
+    defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
     let rig = try FnRig(hardware: mic.hardware)
     let id = DictationID()
 
@@ -299,7 +331,6 @@ func quitWithFnDownOnAStuckMicReturnsAtTheStartLimit() async throws {
     await quitting.value  // fn never came up
 
     #expect(await rig.history.dictation(id)?.status == .failed)
-    mic.unwedge()
 }
 
 /// The real recognizer behind a `Keyboard`, fed by the test instead of the fn tap.
