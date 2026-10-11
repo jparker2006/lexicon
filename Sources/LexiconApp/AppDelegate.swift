@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: StatusItemController?
     var indicator: DictationIndicator?
     var history: HistoryWindowPresenter?
+    /// Nil until the Lexicon has opened, just after launch; its menu line appears then.
+    var lexiconPage: LexiconWindowPresenter?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     var sleepObserver: (any NSObjectProtocol)?
     #if DEBUG
@@ -71,11 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let history = HistoryWindowPresenter(paths: paths)
         self.history = history
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
-            [history.menuItem()] + (self?.systemError.map { [Permissions.status($0)] } ?? [])
+            [history.menuItem()] + (self?.lexiconPage.map { [$0.menuItem()] } ?? [])
+                + (self?.systemError.map { [Permissions.status($0)] } ?? [])
                 + Permissions.fnOffItems(self?.system?.fnOff) + Permissions.menuItems()
                 + (self?.indicator.map { [$0.soundsMenuItem()] } ?? [])
         }
         let indicator = DictationIndicator(statusItem: statusItem, preferences: system?.preferences ?? PreferencesStore())
+        // The system's Lexicon, the one every Dictation reads, so the page's edits reach the next fn-down.
+        lexiconPage = system.map { LexiconWindowPresenter(lexicon: $0.lexicon) }
         self.statusItem = statusItem
         self.indicator = indicator
         if let system {

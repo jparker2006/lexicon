@@ -4,7 +4,7 @@ public import KeyInput
 public import AudioCapture
 public import Transcription
 import Cleanup
-import WordStore
+public import WordStore
 public import History
 public import AppText
 
@@ -19,6 +19,8 @@ public final class LexiconSystem: Sendable {
     public let history: HistoryStore
     public let preferences: PreferencesStore
     public let recorder: Recorder
+    /// The one Lexicon: every Dictation reads it at fn-down, and the Lexicon page edits it.
+    public let lexicon: Lexicon
     /// Where Dictations are typed. The test hooks paste through the same one.
     public let text: TargetApp
     /// Why fn is off (no Accessibility, or no listen access); nil while it works.
@@ -59,16 +61,19 @@ public final class LexiconSystem: Sendable {
             history: history, destination: text, preferences: preferences,
             secrets: Secrets(.keychain(service: bundleID)), keyboard: keyboard, fixes: nil, jev: nil)
         return LexiconSystem(paths: paths, conductor: conductor, history: history, preferences: preferences,
-                             recorder: recorder, text: text, fnOff: fnOff, keyboard: keyboard, speech: speech)
+                             recorder: recorder, lexicon: lexicon, text: text, fnOff: fnOff, keyboard: keyboard,
+                             speech: speech)
     }
 
     init(paths: AppPaths, conductor: LiveConductor, history: HistoryStore, preferences: PreferencesStore,
-         recorder: Recorder, text: TargetApp, fnOff: KeyboardError?, keyboard: Keyboard?, speech: SpeechEngine) {
+         recorder: Recorder, lexicon: Lexicon, text: TargetApp, fnOff: KeyboardError?, keyboard: Keyboard?,
+         speech: SpeechEngine) {
         self.paths = paths
         self.conductor = conductor
         self.history = history
         self.preferences = preferences
         self.recorder = recorder
+        self.lexicon = lexicon
         self.text = text
         self.fnOff = fnOff
         self.keyboard = keyboard
