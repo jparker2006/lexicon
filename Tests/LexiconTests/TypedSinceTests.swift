@@ -2,11 +2,11 @@ import CoreGraphics
 import Foundation
 import Testing
 import LexiconDomain
-import AppText
+@testable import AppText
 @testable import KeyInput
 
-// "Typed since fn-up" through the real tap callback and the late-text guard
-// (#141). The events are built in-process and handed to the tap's handler, never
+// "Typed since fn-up" through the tap's real event handler and the late-text
+// guard (#141). The events are built in-process and handed to the handler, never
 // posted, so no Accessibility permission is needed.
 
 private let keyboard: Int64 = 0  // a key or click from the hardware itself
@@ -43,7 +43,8 @@ private func dictation(between events: [CGEvent]) async -> InsertDecision {
     let input = InputClock()
     let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
     // A zero threshold makes every press a hold, whatever the machine's speed.
-    let tap = EventTapThread(gesture: FnGesture(holdThreshold: .zero), input: input, continuation: continuation)
+    let tap = EventTapThread(gesture: FnGesture(holdThreshold: .zero), input: input, continuation: continuation,
+                             secureInput: { false })
     _ = tap.handle(.flagsChanged, modifier(63, .maskSecondaryFn, from: keyboard))
     // Stricter than the app, which marks once the stop comes out after fn-up.
     let mark = input.mark()
@@ -56,8 +57,12 @@ private func dictation(between events: [CGEvent]) async -> InsertDecision {
     return InsertGuard.decide(target: field, focusNow: field, inputSinceMark: input.hasInput(since: mark))
 }
 
-/// Cmd-V as `PasteKey.Chord` sends it: the V key down with Command set outright.
-private func paste(from pid: Int64) -> CGEvent { key(9, flags: .maskCommand, from: pid) }
+/// The key-down of the Cmd-V chord Lexicon posts, as the tap sees it from `pid`.
+private func paste(from pid: Int64) -> CGEvent {
+    let event = PasteKey.Chord(9)!.down
+    event.setIntegerValueField(.eventSourceUnixProcessID, value: pid)
+    return event
+}
 
 @Test func fnReleaseAndLexiconsOwnPasteAreNotTypedSince() async {
     // Lexicon's Cmd-V, plus a Command flag change in case macOS reports one for it.
