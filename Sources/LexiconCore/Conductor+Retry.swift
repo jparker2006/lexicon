@@ -11,12 +11,12 @@ import History
 
 extension Conductor {
     /// `model` nil = the normal plan; otherwise the picker's choice. Does nothing
-    /// (versions nil) while the Dictation is in flight or already being retried,
-    /// once its audio is gone, or when the retry hears nothing: the row keeps
-    /// what it had. A failed Dictation that gets text becomes not inserted
+    /// (versions nil) while the Dictation is in flight, already being retried
+    /// (here, or by the waiting loop, which keeps trying until it has text), once
+    /// its audio is gone, or when the retry hears nothing: the row keeps what it had. A failed Dictation that gets text becomes not inserted
     /// (recovered, if it came from a crash).
     public func retry(_ id: DictationID, with model: SpeechModel?) async -> DictationResult {
-        guard inFlight[id] == nil else { return .nothing(id) }
+        guard inFlight[id] == nil, waiting[id] == nil else { return .nothing(id) }
         // In `inFlight` like any Dictation being heard, so Quit waits for it to land.
         let task = Task { await self.retrying(id, with: model) }
         inFlight[id] = task

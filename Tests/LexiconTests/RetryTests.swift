@@ -13,19 +13,22 @@ import Transcription
 /// Hears `texts` in order, then the last one again.
 private actor ChangingTranscriber: LocalTranscriber {
     nonisolated let model = LocalModel.parakeetUnified
-    private var texts: [String]
+    private var texts: [String?]
 
-    init(_ texts: [String]) { self.texts = texts }
+    init(_ texts: [String?]) { self.texts = texts }
 
     var isResident: Bool { true }
     func load() {}
     func unload() {}
-    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String {
-        texts.count > 1 ? texts.removeFirst() : texts[0]
+    /// `nil` in `texts`: no model installed yet, so the Dictation waits.
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
+        let text = texts.count > 1 ? texts.removeFirst() : texts[0]
+        guard let text else { throw LocalModelNotInstalled(model) }
+        return text
     }
 }
 
-private func system(hearing texts: String...) throws -> HeadlessSystem {
+private func system(hearing texts: String?...) throws -> HeadlessSystem {
     try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
                             local: ChangingTranscriber(texts))
 }
@@ -74,20 +77,6 @@ private func wav() throws -> URL {
     let before = try #require(await system.history.dictation(first.id))
 
     let retried = await system.conductor.retry(first.id, with: nil)
-    await system.history.flush()
-
-    #expect(retried.versions == nil)
-    #expect(await system.history.dictation(first.id) == before)
-}
-
-@Test func aCloudModelCannotBePickedBeforeM2() async throws {
-    // Local only until the cloud race lands: a forced cloud model has no engine to run.
-    let system = try system(hearing: "kept text", "cloud text")
-    let first = await system.conductor.dictate(file: try wav(), pace: .asFastAsPossible)
-    await system.history.flush()
-    let before = try #require(await system.history.dictation(first.id))
-
-    let retried = await system.conductor.retry(first.id, with: .cloud(.museVoice))
     await system.history.flush()
 
     #expect(retried.versions == nil)
@@ -146,4 +135,20 @@ private func wav() throws -> URL {
         if case .finished = event { break }
     }
     #expect(!seen.contains { if case .notice(.readyToPaste) = $0 { true } else { false } })
+}
+
+@Test func aWaitingDictationIsLeftToItsOwnRetries() async throws {
+    // No model yet: it waits, and keeps trying by itself until it has text. The
+    // clock never moves, so its own next try never comes during the test.
+    let clock = TestClock()
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+                                         local: ChangingTranscriber([nil, "found it"]), clock: clock)
+    let first = await system.conductor.dictate(file: try wav(), pace: .asFastAsPossible)
+    #expect(first.status == .waiting)
+
+    let retried = await system.conductor.retry(first.id, with: nil)
+    await system.history.flush()
+
+    #expect(retried.versions == nil)
+    #expect(await system.history.dictation(first.id)?.status == .waiting)
 }
