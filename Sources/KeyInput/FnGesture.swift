@@ -46,10 +46,9 @@ enum KeyInput: Sendable, Hashable {
 /// not on when a timer happened to fire: fn-up or a key at 0.31 s still counts
 /// as a hold even if the 0.30 s deadline has not been delivered yet. Keys and
 /// timers share the tap thread, so a key stamped before a mark can be handled
-/// after the mark's timer. The two marks that end something, the double-tap
-/// window and the cap, act `lateKeyGrace` after their time; the cap's stop is
-/// still stamped at the cap, and a key stamped at or after the cap is handled
-/// after that stop. So a key gets one outcome whatever the handling order,
+/// after the mark's timer. Every mark (the double-tap window, the warning and
+/// the cap) acts `lateKeyGrace` after its time; the cap's stop is still stamped
+/// at the cap, and a key stamped at or after a mark is handled after it. So a key gets one outcome whatever the handling order,
 /// unless it is handled more than `lateKeyGrace` after its stamp. Past that
 /// bound, the cap remembers when it stopped, so a stop press stamped before it
 /// is not a new press.
@@ -93,7 +92,7 @@ struct FnGesture: Sendable {
     private var cappedAt: HostTime?
 
     /// How late a key may be handled after its own time and still count against the
-    /// double-tap window and the cap. Keys reached the focused app 2 to 12 ms after they
+    /// double-tap window, the warning and the cap. Keys reached the focused app 2 to 12 ms after they
     /// were pressed through this listen-only tap (ADR 0004); one handled later than this,
     /// behind a stalled tap thread, comes after the mark. Nobody hears a drop or a stop
     /// 50 ms late, and Quit waits at most this long past the cap for a lost fn-up
@@ -267,7 +266,7 @@ struct FnGesture: Sendable {
     private mutating func confirm(_ id: DictationID, _ mode: DictationMode, began: HostTime) -> Output {
         let recording = Recording(id: id, mode: mode, began: began)
         phase = .recording(recording)
-        return Output(commands: [.dictationConfirmed(id, mode)], wakeAt: warnAt(recording))
+        return Output(commands: [.dictationConfirmed(id, mode)], wakeAt: warnAt(recording).advanced(by: Self.lateKeyGrace))
     }
 
     /// The cap clock: stop at `began + cap`, warn once before it, and always say
@@ -275,8 +274,9 @@ struct FnGesture: Sendable {
     private mutating func capDeadline(_ recording: Recording, now: HostTime) -> Output {
         let acts = capAt(recording).advanced(by: Self.lateKeyGrace)
         if now >= acts { return stopAtCap(recording) }
-        guard !recording.warned, now >= warnAt(recording) else {
-            return Output(wakeAt: recording.warned ? acts : warnAt(recording))
+        let warns = warnAt(recording).advanced(by: Self.lateKeyGrace)
+        guard !recording.warned, now >= warns else {
+            return Output(wakeAt: recording.warned ? acts : warns)
         }
         var warned = recording
         warned.warned = true
