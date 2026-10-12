@@ -83,14 +83,15 @@ test_waiters_in_line_are_counted() {
     queue="$HOME/Library/Application Support/Lexicon Dev/heavy/queue"
     mkdir -p "$queue"
     # A live waiter, one whose process is gone, and one whose pid now names a
-    # process that started after it queued. The fake ps gives every process
-    # the same start time.
-    echo "Mon Oct 12 06:30:00 2026" > "$GH_FIXTURES/cmd/ps"
-    cp "$GH_FIXTURES/cmd/ps" "$queue/0000000001.$$"
+    # process that started after it queued. The fake ps says every process
+    # started 5 minutes ago.
+    echo "05:00" > "$GH_FIXTURES/cmd/ps"
+    : > "$queue/0000000001.$$"
     sh -c 'exit 0' & dead=$!
     wait "$dead"
-    cp "$GH_FIXTURES/cmd/ps" "$queue/0000000002.$dead"
-    echo "Mon Oct 12 06:00:00 2026" > "$queue/0000000003.$PPID"
+    : > "$queue/0000000002.$dead"
+    : > "$queue/0000000003.$PPID"
+    touch -t 202001010000 "$queue/0000000003.$PPID"
     : > "$GH_FIXTURES/cmd/lockf"
     run machine.sh
     expect_out "build slots 0 of 3 in use | queue: 1 waiting"

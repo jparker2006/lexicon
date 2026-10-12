@@ -29,9 +29,8 @@
 # ~/Library/Application Support/Lexicon Dev/heavy/: slot1 to slot3 (the files
 # lockf(1) holds, so a holder that dies frees its slot at once), each holder's
 # line in slotN.holder, and the line in queue/, one file per waiter named by
-# its number and pid, holding the time that process started. An entry drops out
-# as soon as that process is gone, even when another process has its pid, so a
-# crashed session never blocks the line.
+# its number and pid. An entry drops out as soon as that process is gone, even
+# when a newer process has its pid, so a crashed session never blocks the line.
 # scripts/machine.sh and scripts/status.sh read both through heavy_summary.
 #
 # A job that holds a slot (HEAVY_SLOT is set) runs the scripts it calls in that
@@ -64,21 +63,31 @@ heavy_holder() {
     cat "$HEAVY_DIR/slot$1.holder" 2>/dev/null || echo "an unknown job"
 }
 
-# When process $1 started, to the second. With its pid, it names one process:
-# a pid alone may be reused once the process is gone.
-heavy_started() { ps -o lstart= -p "$1" 2> /dev/null || true; }
+# When process $1 started, in seconds since 1970, or nothing if ps can't say.
+heavy_started() {
+    ps -o etime= -p "$1" 2> /dev/null | awk -v now="$(date +%s)" '{
+        d = 0; t = $1
+        if (t ~ /-/) { split(t, a, "-"); d = a[1]; t = a[2] }
+        n = split(t, p, ":"); s = p[n] + 60 * p[n - 1] + (n > 2 ? 3600 * p[n - 2] : 0)
+        print now - s - 86400 * d }' || true
+}
 
 # The line's live entries, first come first. With "prune", deletes the rest.
-# A start time ps couldn't read, then or now, never drops an entry whose pid is
-# alive: a moment without ps must not cost a job its place.
+# An entry is its waiter's while the pid is alive and started before the entry
+# was written (a pid is reused once its process is gone). A reading that fails
+# for a moment, of ps or of an entry the job ahead is deleting, keeps the entry:
+# a blip must not cost a job its place.
 heavy_queue() {
     for heavy_q in "$HEAVY_DIR"/queue/*; do
         [ -f "$heavy_q" ] || continue
         heavy_q_pid=${heavy_q##*.}
         if kill -0 "$heavy_q_pid" 2> /dev/null; then
-            heavy_q_then=$(cat "$heavy_q" 2> /dev/null)
-            heavy_q_now=$(heavy_started "$heavy_q_pid")
-            if [ -z "$heavy_q_then" ] || [ -z "$heavy_q_now" ] || [ "$heavy_q_then" = "$heavy_q_now" ]; then
+            heavy_q_written=$(stat -f %m "$heavy_q" 2> /dev/null) || {
+                [ -e "$heavy_q" ] || continue
+                heavy_q_written=
+            }
+            heavy_q_started=$(heavy_started "$heavy_q_pid")
+            if [ -z "$heavy_q_written" ] || [ -z "$heavy_q_started" ] || [ "$heavy_q_started" -le $((heavy_q_written + 1)) ]; then
                 echo "$heavy_q"
                 continue
             fi
@@ -226,13 +235,11 @@ case "${ZSH_EVAL_CONTEXT:-}:$0" in
         heavy_holding "$@"
         ;;
     --enqueue)
-        # Under queue.lock: the next number, then the entry, written whole
-        # before it shows in queue/ so no reader takes a half-written one for dead.
+        # Under queue.lock: the next number, then the entry.
         n=$(( $(cat "$HEAVY_DIR/queue.next" 2> /dev/null || echo 0) + 1 ))
         echo "$n" > "$HEAVY_DIR/queue.next"
         entry=$(printf '%s/queue/%010d.%s' "$HEAVY_DIR" "$n" "$2")
-        heavy_started "$2" > "$HEAVY_DIR/queue.new"
-        mv "$HEAVY_DIR/queue.new" "$entry"
+        : > "$entry"
         echo "$entry"
         ;;
     --quiet)
