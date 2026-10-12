@@ -20,10 +20,10 @@ public enum InsertDecision: Sendable, Hashable {
 }
 
 /// The late-text rule (#4), the single home of it: insert only if Jake is still
-/// in the same app and field he was in at fn-up and has not typed or clicked
-/// since the mark; in an app that exposes no field, the same app under 5 s. Applied to EVERY insert, fast or late: there is no grace
-/// window, so a quick cloud final after an app switch can never land in the
-/// wrong app. Every `TextDestination.insert` calls this first.
+/// in the same app and field he was in at fn-up (in an app that exposes no
+/// field: the same app, under 5 s) and has not typed or clicked since the mark.
+/// Applied to EVERY insert, fast or late: there is no grace window, so a quick
+/// cloud final after an app switch can never land in the wrong app. Every `TextDestination.insert` calls this first.
 ///
 /// Pure: unit-tested from values, no Accessibility.
 public enum InsertGuard {
@@ -32,10 +32,10 @@ public enum InsertGuard {
     /// A ceiling, not a grace window: it only ever holds text back.
     public static let fieldlessWindow: Duration = .seconds(5)
 
-    /// - target: the focus captured at fn-up (inside the destination's `Target`).
+    /// - target: the focus captured at fn-up, or at the ⌃⌘V press (inside the destination's `Target`).
     /// - focusNow: the focus right before the paste; nil when nothing can take text.
     /// - inputSinceMark: `InputClock.hasInput(since: target's mark)`.
-    /// - sinceFnUp: from fn-up to this check. No default, so no destination skips it.
+    /// - sinceFnUp: from the target's capture to this check. No default, so no destination skips it.
     public static func decide(target: FocusSnapshot, focusNow: FocusSnapshot?, inputSinceMark: Bool,
                               sinceFnUp: Duration) -> InsertDecision {
         guard let focusNow else { return .hold(.noField) }

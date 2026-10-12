@@ -237,13 +237,13 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 **44. Our own fn state machine, not Hex's code.** Spec: copy Hex's state machine and tests (MIT). Built: a smaller fn-only machine with Hex's test scenarios; no Hex code copied. #53's builder (PR #123).
 
-**70. The 5 s late-text fallback counts from fn-up, and late text keeps the "Not typed" pill.** Spec (History, retention, paste-last): where "same field" can't be detected, "same app and under 5 s", with no start named; held text shows "Dictation ready, paste-last to insert", while the spec's pill list says "Not typed. Press ⌃⌘V to paste it.". Built: the fallback applies when the app exposed no focused field when the target was captured (fn-up, just after the release); a paste checked 5 s or more after that is held for paste-last (reason `tooLate`), so a slow Dictation in such an app is not typed. ⌃⌘V captures its own target at the key press, so it is held only if its paste waits 5 s behind an earlier one (that wait ends within about 2 s). A held Dictation shows the pill list's line when it is the newest one and Jake isn't recording. #60's builder ([sketch](https://github.com/jparker2006/lexicon/issues/60#issuecomment-6124271421)).
+**74. The 5 s late-text fallback counts from fn-up, and late text keeps the "Not typed" pill.** Spec (History, retention, paste-last): where "same field" can't be detected, "same app and under 5 s", with no start named; held text shows "Dictation ready, paste-last to insert", while the spec's pill list says "Not typed. Press ⌃⌘V to paste it.". Built: the fallback applies when the app exposed no focused field when the target was captured (fn-up, just after the release); a paste checked 5 s or more after that is held for paste-last (reason `tooLate`), so a slow Dictation in such an app is not typed. The 5 s keeps counting while the Mac sleeps, so a lid closed mid-Dictation holds the text. ⌃⌘V captures its own target at the key press and waits at most about 2 s behind an earlier paste, so it is never held as too late. A held Dictation shows the pill list's line when it is the newest one and Jake isn't recording. #60's builder ([sketch](https://github.com/jparker2006/lexicon/issues/60#issuecomment-6124271421)).
 
 ### Moved to a later milestone
 
 - **45.** Long hands-free Dictations: a 20-minute Dictation waits 25 to 41 s at fn-up (#47); the switch to Parakeet's streaming mode is #117 (M1).
 - **46.** Quit and the clipboard restore: quitting right after a paste, or during item 26's 2 s hold, can leave Dictation text on the clipboard. #132 (M1).
-- **47.** The "same app and under 5 s" late-text fallback for apps whose field can't be detected: built in #60, as item 70 says.
+- **47.** The "same app and under 5 s" late-text fallback for apps whose field can't be detected: built in #60, as item 74 says.
 - **48.** The audio retention sweep runs at launch only, not on a rolling schedule. No ticket yet.
 
 ### Facts the spec got wrong
