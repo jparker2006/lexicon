@@ -7,13 +7,15 @@
 #   scripts/bench.sh <budget> <A.app> <B.app> [runs per side]   default 5
 #   scripts/bench.sh background [seconds]    measure the quiet Mac's load (default 60 s)
 #   scripts/bench.sh sample <file>           the load sampler alone, until stopped
+#   scripts/bench.sh seed <history.sqlite>   add the synthetic year to a History
 #   scripts/bench.sh report <budget> <A numbers> <B numbers> <load file> [same]
 #
 # Budgets, each with one reading and its exclusion rule, fixed before the first run:
 #   history-open  History window, open to first rows, every open, p95 100 ms or less.
 #                 Excludes nothing. Needs debug bundles: the harness opens it through test hooks.
-#                 Needs a History with older days to scroll to (the harness's history check
-#                 waits for them), such as the synthetic year Live checks seeds.
+#                 Reads a year of History: before the first run it seeds 36,500 synthetic
+#                 Dictations (100 a day) into the scratch data root a test-hooks run uses,
+#                 never Dev's own data. The harness's check scrolls to the oldest day.
 #   launch        process start to fn working, warm relaunch with `open`, p95 150 ms or less.
 #                 Excludes each install's first launch (macOS checks the new signature).
 #
@@ -35,6 +37,24 @@ BACKGROUND="$HOME/Library/Application Support/$NAME/live-lane/bench-background"
 APP="$APP_PATH"
 
 die() { echo "bench: $*" >&2; exit 1; }
+
+# The History a test-hooks run of Dev opens (AppPaths.scratch: the app's temporary folder).
+SCRATCH_HISTORY="$(getconf DARWIN_USER_TEMP_DIR)$NAME scratch/history.sqlite"
+YEAR=36500
+
+# Adds the synthetic year to History $1 (one statement; ids are fixed, so a
+# second run adds nothing) and prints how many of its rows are there. Every
+# row is an inserted Dictation whose audio has expired, so no file is needed.
+seed() {
+    sqlite3 "$1" "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $YEAR)
+        INSERT OR IGNORE INTO dictation (id, started_at, ended_at, origin, purpose, status, model_text,
+            cleaned_text, final_text, lag_ms, audio_ms, audio_storage, app_bundle_id, app_title)
+        SELECT printf('%08X-0000-4000-8000-%012X', i, i), now - i * 864000, now - i * 864000 + 3000,
+            'live', 'type', 'inserted', 'synthetic dictation ' || i, 'Synthetic dictation ' || i || '.',
+            'Synthetic dictation ' || i || '.', 600, 3000, 'expired', 'com.apple.TextEdit', 'TextEdit'
+        FROM n, (SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000 AS now);"
+    sqlite3 "$1" "SELECT count(*) FROM dictation WHERE id LIKE '%-0000-4000-8000-%'"
+}
 
 budget() {
     case "$1" in
@@ -119,6 +139,25 @@ report() {
 
 running_pid() { pgrep -f "^$APP/Contents/MacOS/" | head -1; }
 
+# Installs $1 with test hooks so the app creates its scratch History, quits it,
+# and seeds the synthetic year there.
+prepare_history() {
+    rm -rf "$OUT/stage.app"
+    ditto "$1" "$OUT/stage.app"
+    scripts/lib/install-app.sh dev "$OUT/stage.app" --test-hooks > /dev/null
+    ticks=0
+    until [ -s "$SCRATCH_HISTORY" ]; do
+        sleep 0.1
+        ticks=$((ticks + 1))
+        [ "$ticks" -lt 150 ] || die "$NAME made no History at $SCRATCH_HISTORY within 15 s of launch"
+    done
+    pid=$(running_pid)
+    [ -z "$pid" ] || { kill -TERM "$pid"; while kill -0 "$pid" 2>/dev/null; do sleep 0.1; done; }
+    rows=$(seed "$SCRATCH_HISTORY")
+    [ "$rows" -eq "$YEAR" ] || die "the synthetic year has $rows of $YEAR rows in $SCRATCH_HISTORY"
+    echo "History: the synthetic year, $YEAR Dictations, in $SCRATCH_HISTORY"
+}
+
 # Lines from Lexicon Dev's log since $1, category $2, matching sed expression $3.
 log_numbers() {
     /usr/bin/log show --start "$1" --style compact --predicate \
@@ -134,7 +173,7 @@ run() {
             scripts/lib/install-app.sh dev "$OUT/stage.app" --test-hooks > /dev/null
             since=$(date '+%Y-%m-%d %H:%M:%S')
             scripts/harness.sh history > "$OUT/harness.log" 2>&1 \
-                || die "the harness's History check failed on $3 (run $RUN), so no verdict: $(tail -1 "$OUT/harness.log"). It needs a History with older days to scroll to."
+                || die "the harness's History check failed on $3 (run $RUN), so no verdict: $(tail -1 "$OUT/harness.log")"
             log_numbers "$since" History 's/.*first rows drawn \([0-9][0-9]*\) ms after open.*/\1/p' >> "$2"
             ;;
         launch)
@@ -173,6 +212,10 @@ case "${1:-}" in
         [ $# -eq 2 ] || { echo "usage: bench.sh sample <file>" >&2; exit 64; }
         sample "$2"
         ;;
+    seed)
+        [ $# -eq 2 ] || { echo "usage: bench.sh seed <history.sqlite>" >&2; exit 64; }
+        seed "$2"
+        ;;
     report)
         [ $# -eq 5 ] || [ $# -eq 6 ] || { echo "usage: bench.sh report <budget> <A numbers> <B numbers> <load file> [same]" >&2; exit 64; }
         report "$2" "$3" "$4" "$5" "${6:-}"
@@ -198,6 +241,7 @@ case "${1:-}" in
         echo "reading: $READING; budget p95 $TARGET ms"
         echo "excluded: $EXCLUDES"
         echo "$(fn_listeners_line); $(power | sed 's/^# //'); samples in $OUT"
+        [ "$BUDGET" != history-open ] || prepare_history "$2"
         sample "$OUT/load.txt" &
         sampler=$!
         trap 'kill "$sampler" 2>/dev/null || true' EXIT
@@ -226,7 +270,7 @@ case "${1:-}" in
         report "$BUDGET" "$OUT/A.txt" "$OUT/B.txt" "$OUT/load.txt" $same
         ;;
     *)
-        echo "usage: bench.sh history-open|launch <A.app> <B.app> [runs] | background [s] | sample <file> | report ..." >&2
+        echo "usage: bench.sh history-open|launch <A.app> <B.app> [runs] | background [s] | sample <file> | seed <history.sqlite> | report ..." >&2
         exit 64
         ;;
 esac

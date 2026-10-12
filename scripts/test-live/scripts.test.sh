@@ -68,11 +68,28 @@ fake_listener "$HOME/Applications/Lexicon.app/Contents/MacOS/Lexicon"
 expect ok '^PROVISIONAL, no final verdict: fn listeners: the daily Lexicon' "no final verdict while another fn listener runs" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
 stop_listeners
 
-# A harness that fails (Dev's real History had no older days) stops the bench with its reason.
-mkdir -p "$T/A.app/Contents/MacOS" "$T/B.app/Contents/MacOS"
+# The synthetic year, seeded into a History with the app's dictation table: a
+# year of days to scroll to, and a second seed adds nothing.
+sqlite3 "$T/history.sqlite" "CREATE TABLE dictation (id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, ended_at INTEGER,
+    origin TEXT NOT NULL, purpose TEXT NOT NULL, respeak_of TEXT, status TEXT NOT NULL, status_reason TEXT, model_text TEXT,
+    cleaned_text TEXT, final_text TEXT, cleanup TEXT, model TEXT, lag_ms INTEGER, audio_ms INTEGER, audio_storage TEXT NOT NULL,
+    start_gap_ms INTEGER, device TEXT, app_bundle_id TEXT, app_title TEXT, pinned INTEGER NOT NULL DEFAULT 0)"
+expect ok '^36500$' "the seed adds a synthetic year of 36,500 Dictations" "$REPO/scripts/bench.sh" seed "$T/history.sqlite"
+expect ok '^36500$' "seeding again adds nothing" "$REPO/scripts/bench.sh" seed "$T/history.sqlite"
+expect ok '^36[56]$' "the year covers 365 days" sqlite3 "$T/history.sqlite" "SELECT count(DISTINCT started_at / 86400000) FROM dictation"
+expect ok '^inserted\|expired\|36500$' "every row is inserted with its audio expired" sqlite3 "$T/history.sqlite" "SELECT status, audio_storage, count(*) FROM dictation GROUP BY 1, 2"
+
+# history-open seeds the scratch History first; a harness that fails then stops the bench with its reason.
+mkdir -p "$TMPDIR/Lexicon Dev scratch"
+cp "$T/history.sqlite" "$TMPDIR/Lexicon Dev scratch/history.sqlite"
 printf '#!/bin/sh\necho "FAIL  timed out waiting for older days" >&2\nexit 1\n' > "$REPO/scripts/harness.sh"
 expect fail "the harness's History check failed on A \\(run 1\\), so no verdict: FAIL  timed out waiting for older days" \
     "a failed harness run stops the bench and says why" "$REPO/scripts/bench.sh" history-open "$T/A.app" "$T/B.app" 5
+expect fail "^History: the synthetic year, 36500 Dictations, in $TMPDIR/Lexicon Dev scratch/history.sqlite\$" \
+    "history-open seeds the test-hooks scratch History, not Dev's own data" "$REPO/scripts/bench.sh" history-open "$T/A.app" "$T/B.app" 5
+
+# Stopping the load sampler prints no shell job notice.
+absent 'Terminated' "bench background stops its sampler quietly" "$REPO/scripts/bench.sh" background 1
 
 # lag-report reads the sampler's file for the load its numbers were taken under.
 printf '#!/bin/sh\n' > "$T/bin/log"

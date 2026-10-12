@@ -56,6 +56,11 @@ for tool in lsappinfo osascript open; do
     chmod +x "$T/bin/$tool"
 done
 
+# The app's temporary folder (where a test-hooks run keeps its scratch data) is
+# the test's own TMPDIR, so nothing here reads or writes the real one.
+printf '#!/bin/sh\n[ "$1" = DARWIN_USER_TEMP_DIR ] && { echo "%s/"; exit 0; }\nexec /usr/bin/getconf "$@"\n' "$TMPDIR" > "$T/bin/getconf"
+chmod +x "$T/bin/getconf"
+
 pass() { echo "ok: $1"; }
 fail() { echo "FAIL: $1" >&2; FAILED=1; }
 
