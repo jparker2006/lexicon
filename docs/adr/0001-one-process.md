@@ -9,5 +9,5 @@ Lexicon runs as one AppKit menu bar process that owns the fn tap, the mic, speec
 
 ## Consequences
 
-- The local model lives in the app process, loaded on fn-down and unloaded after 10 idle minutes (kept loaded in Private mode or offline). The `LocalTranscriber` seam lets an out-of-process model host replace it later with no caller change, if memory ever demands it.
+- The local model lives in the app process, loaded at launch and on fn-down when not resident, and unloaded after 10 idle minutes (kept loaded in Private mode or offline). The `LocalTranscriber` seam lets an out-of-process model host replace it later with no caller change, if memory ever demands it.
 - The app refuses to install the fn tap unless launchd started it (`getppid() == 1`), because a binary run from an agent's shell inherits that shell's Accessibility trust.
