@@ -75,6 +75,16 @@ test_a_builder_sees_only_its_own_issue() {
 
 test_it_never_writes_to_github() {
     for n in 1 2 3; do poll watch-merged/$n; done
-    for n in 1 2 3 4 5 6; do poll watch-fixed/$n; done
+    for n in 1 2 3 4 5 6; do poll watch-fixed/$n reviewer; done
     ! grep -E '^gh (issue|pr) (comment|edit|create|merge|close)|^gh api .*(-X|--method)' "$GH_LOG" || fail "a write: $(cat "$GH_LOG")"
+}
+
+test_a_failed_poll_keeps_the_state() {
+    poll watch-ci/1
+    use_fixture watch-ci/2
+    rm "$GH_FIXTURES/runs.json"
+    run watch-events.sh --role orchestrator --once
+    [ "$status" -ne 0 ] || fail "a poll with no runs should fail"
+    poll watch-ci/2
+    expect_out "CI main e2c850b failure"
 }

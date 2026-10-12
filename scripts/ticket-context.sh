@@ -52,11 +52,13 @@ jq -r '([.comments[] | select(.body | test("^## Later"))] | last | .body) // "No
             $l[$i + 1:] | ((map(test("^## |^<details>")) | index(true)) as $e | if $e then .[:$e] else . end) | join("\n") end' \
         "$out/issue.json"
     echo
-    if waits=$(scripts/unblocked.sh --check "$n" 2>&1); then
-        echo "Every blocker is done (a blocker is done when its PR has merged)."
-    else
-        echo "Not done: ${waits#unblocked: }"
-    fi
+    st=0
+    waits=$(scripts/unblocked.sh --check "$n" 2>&1) || st=$?
+    case $st in
+        0) echo "Every blocker is done (a blocker is done when its PR has merged)." ;;
+        3) echo "Not done: ${waits#unblocked: }" ;;
+        *) echo "ticket-context: couldn't check #$n's blockers: $waits" >&2; exit 1 ;;
+    esac
 } > "$out/blockers.md"
 rm -f "$out/issue.json" "$out/spec.json"
 

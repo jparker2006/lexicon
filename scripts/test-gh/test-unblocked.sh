@@ -32,9 +32,22 @@ test_the_chip_copies_the_needs_line() {
 test_check_names_what_a_ticket_waits_on() {
     use_fixture frontier-1151
     run unblocked.sh --check 68
-    expect_status 1
+    expect_status 3
     expect_err "unblocked: #68 waits on #66 (open, no merged PR)"
     use_fixture frontier-1413
+    run unblocked.sh --check 68
+    expect_status 0
+}
+
+test_a_blocker_closed_as_not_planned_is_not_done() {
+    use_fixture frontier-1413
+    jq '(.[] | select(.number == 66)) |= (.state = "CLOSED" | .stateReason = "NOT_PLANNED")
+        | map(select(.number != 127))' "$GH_FIXTURES/issues.json" > "$TMP/i" && mv "$TMP/i" "$GH_FIXTURES/issues.json"
+    jq 'map(select(.number != 127))' "$GH_FIXTURES/prs.json" > "$TMP/p" && mv "$TMP/p" "$GH_FIXTURES/prs.json"
+    run unblocked.sh --check 68
+    expect_status 3
+    expect_err "#66 (closed as not planned)"
+    jq '(.[] | select(.number == 66)) |= (.stateReason = "COMPLETED")' "$GH_FIXTURES/issues.json" > "$TMP/i" && mv "$TMP/i" "$GH_FIXTURES/issues.json"
     run unblocked.sh --check 68
     expect_status 0
 }

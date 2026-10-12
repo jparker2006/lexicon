@@ -33,9 +33,31 @@ test_not_watched_without_a_watcher() {
     expect_out "NOT WATCHED"
     mkdir -p "$HOME/Library/Application Support/Lexicon Dev/watch"
     echo $$ > "$HOME/Library/Application Support/Lexicon Dev/watch/orchestrator.pid"
+    : > "$HOME/Library/Application Support/Lexicon Dev/watch/orchestrator.state"
     board status-0730 2026-10-11T07:30:00Z
     expect_out "Watching: orchestrator"
     expect_no_out "NOT WATCHED"
+}
+
+test_a_watcher_that_stopped_polling_is_not_watching() {
+    # Its pid is alive (a stalled gh, or a pid reused after a crash) but its
+    # state file is an hour old.
+    mkdir -p "$HOME/Library/Application Support/Lexicon Dev/watch"
+    echo $$ > "$HOME/Library/Application Support/Lexicon Dev/watch/reviewer.pid"
+    touch -t "$(date -v-1H +%Y%m%d%H%M)" "$HOME/Library/Application Support/Lexicon Dev/watch/reviewer.state"
+    board status-0730 2026-10-11T07:30:00Z
+    expect_out "NOT WATCHED"
+    expect_out "  no poll in 10 min from: reviewer"
+}
+
+test_the_lane_queue_is_unknown_without_a_queue_command() {
+    board status-0730 2026-10-11T07:30:00Z
+    expect_out "  queue: unknown"
+}
+
+test_a_spec_with_ready_for_agent_is_a_label_conflict() {
+    board status-0730 2026-10-11T07:30:00Z
+    expect_out "  #36 a spec with ready-for-agent"
 }
 
 test_a_dead_watcher_is_not_watching() {

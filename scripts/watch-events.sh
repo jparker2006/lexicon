@@ -64,17 +64,21 @@ cleanup() { rm -rf "$tmp"; [ -n "$once" ] || rm -f "$dir/$name.pid"; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+# Every step returns on failure: the loop calls poll where set -e is off, and a
+# poll that half-ran must leave the state as it was, or its events are lost.
 poll() {
-    gh issue list --state open --limit 500 --json number,comments > "$tmp/issues.json"
-    gh pr list --state open --limit 100 --json number,headRefName,headRefOid,body,comments > "$tmp/prs.json"
-    gh run list --limit 40 --json databaseId,attempt,headSha,headBranch,status,conclusion,updatedAt > "$tmp/runs.json"
+    gh issue list --state open --limit 500 --json number,comments > "$tmp/issues.json" || return 1
+    gh pr list --state open --limit 100 --json number,headRefName,headRefOid,body,comments > "$tmp/prs.json" || return 1
+    gh run list --limit 100 --json databaseId,attempt,headSha,headBranch,status,conclusion,updatedAt > "$tmp/runs.json" || return 1
     [ -f "$state" ] || echo null > "$state"
     # PRs that were open last time and aren't now: merged or closed.
     jq -r --slurpfile prs "$tmp/prs.json" '(.heads // {}) | keys[] as $n
-        | select([$prs[0][].number | tostring] | index($n) | not) | $n' "$state" > "$tmp/gone"
+        | select([$prs[0][].number | tostring] | index($n) | not) | $n' "$state" > "$tmp/gone" || return 1
+    : > "$tmp/gone.jsonl"
     while read -r n; do
-        gh pr view "$n" --json number,state,mergedAt,closedAt,mergeCommit,headRefName,body
-    done < "$tmp/gone" | jq -s . > "$tmp/gone.json"
+        gh pr view "$n" --json number,state,mergedAt,closedAt,mergeCommit,headRefName,body >> "$tmp/gone.jsonl" || return 1
+    done < "$tmp/gone"
+    jq -s . "$tmp/gone.jsonl" > "$tmp/gone.json" || return 1
 
     jq -n -r --slurpfile prev "$state" --slurpfile issues "$tmp/issues.json" --slurpfile prs "$tmp/prs.json" \
         --slurpfile runs "$tmp/runs.json" --slurpfile gone "$tmp/gone.json" \
@@ -120,8 +124,10 @@ poll() {
         | (.state | tojson) as $s
         | "STATE \($s)", (.events[] | "\(.at | when)\(if .at then " " else "" end)\(.text)"),
           (if .first then "watch-events: watching as \($who) from here; scripts/status.sh shows what is already open" else empty end)
-    ' > "$tmp/out"
-    sed -n 's/^STATE //p' "$tmp/out" > "$state.new" && mv "$state.new" "$state"
+    ' > "$tmp/out" || return 1
+    sed -n 's/^STATE //p' "$tmp/out" > "$state.new"
+    [ -s "$state.new" ] || return 1
+    mv "$state.new" "$state"
     grep -v '^STATE ' "$tmp/out" || true
 }
 

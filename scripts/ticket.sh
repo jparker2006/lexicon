@@ -36,8 +36,15 @@ claim() {
     issue=$(gh issue view "$n" --json number,title,state,labels,body,comments)
     labels=$(printf '%s' "$issue" | jq -r '[.labels[].name] | join(" ")')
     [ "$(printf '%s' "$issue" | jq -r .state)" = OPEN ] || die "#$n is closed"
-    case " $labels " in *" building "*) die "#$n is already claimed (it has building)" ;; esac
     held=$(printf '%s' "$issue" | first_lines | grep '^Building:' | tail -n 1 || true)
+    # The labels move first, so a claim cut off before its comment has building
+    # and no comment: finish it rather than lock the ticket out.
+    case " $labels " in *" building "*)
+        [ -z "$held" ] || die "#$n is already claimed (it has building)"
+        gh issue comment "$n" --body "Building: taking this (Claude)" > /dev/null
+        echo "ticket: finished the claim on #$n (it had building but no Building: comment)"
+        return 0 ;;
+    esac
     [ -z "$held" ] || die "#$n is already claimed: \"$held\""
     case " $labels " in *" ready-for-agent "*) ;; *) die "#$n has no ready-for-agent label" ;; esac
 
@@ -49,15 +56,20 @@ claim() {
                 if ($l | test("^<details>")) then .in = true
                 elif ($l | test("^</details>")) then .in = false
                 elif .in then . else .out += [$l] end) | .out | join("\n"))')
-    if printf '%s' "$scope" | grep -q -E 'settings\.json|\.claude/hooks/|guard hook'; then
+    # #37 never named the file: it said it wires "the guard hook", which lives
+    # in .claude/settings.json.
+    if printf '%s' "$scope" | grep -q -E 'settings\.json|guard hook'; then
         yes=$(printf '%s' "$issue" | jq -r '[.body, .comments[].body] | .[] | split("\n")[]
-            | select(test("^\\**Decision \\(Jake")) | select(test("settings\\.json"))' | head -n 1)
+            | select(test("^\\**Decision \\(Jake")) | select(test("settings\\.json|guard hook"))' | head -n 1)
         [ -n "$yes" ] || die "#$n changes .claude/settings.json (or the guard hook it wires), which auto mode can't write, and has no \"Decision (Jake, <date>): ...settings.json...\" yes. Post \"Jake: decide ...\" on #$n with waiting-on-jake instead of building."
     fi
-    waits=$(scripts/unblocked.sh --check "$n" 2>&1) || die "not claimed: ${waits#unblocked: }"
+    st=0
+    waits=$(scripts/unblocked.sh --check "$n" 2>&1) || st=$?
+    [ "$st" -ne 3 ] || die "not claimed: ${waits#unblocked: }"
+    [ "$st" -eq 0 ] || die "couldn't check #$n's blockers: $waits"
 
-    gh issue comment "$n" --body "Building: taking this (Claude)" > /dev/null
     gh issue edit "$n" --add-label building --remove-label ready-for-agent > /dev/null
+    gh issue comment "$n" --body "Building: taking this (Claude)" > /dev/null
     echo "ticket: claimed #$n ($(printf '%s' "$issue" | jq -r .title))"
 }
 
@@ -77,6 +89,8 @@ ready() {
     branch=$(git branch --show-current)
     pr=$(gh pr view --json number,headRefOid,state 2> /dev/null) || die "no open PR for $branch"
     m=$(printf '%s' "$pr" | jq -r .number)
+    # gh also answers with the branch's last merged or closed PR.
+    [ "$(printf '%s' "$pr" | jq -r .state)" = OPEN ] || die "PR #$m for $branch is $(printf '%s' "$pr" | jq -r .state | tr 'A-Z' 'a-z'), not open"
     head=$(git rev-parse HEAD)
     [ "$(printf '%s' "$pr" | jq -r .headRefOid)" = "$head" ] ||
         die "HEAD $(git rev-parse --short HEAD) isn't PR #$m's head on GitHub ($(printf '%s' "$pr" | jq -r '.headRefOid[:7]')); push first"
@@ -84,7 +98,9 @@ ready() {
     stamp=.build/check-stamp
     [ -f "$stamp" ] || die "no check stamp ($stamp); run scripts/check.sh"
     stamp_sha=$(sed -n 's/^sha=//p' "$stamp")
-    stamp_tree=$(sed -n 's/^tree=//p' "$stamp")
+    # check.sh writes tree=unknown when it can't read the content; then only
+    # the commit itself counts.
+    stamp_tree=$(sed -n 's/^tree=//p' "$stamp" | grep -v '^unknown$' || true)
     stamp_exit=$(sed -n 's/^exit=//p' "$stamp")
     [ "$stamp_exit" = 0 ] || die "the last check failed (check exit $stamp_exit); fix it and run scripts/check.sh"
     c=$head
@@ -98,7 +114,8 @@ ready() {
 
     sha7=$(git rev-parse --short=7 HEAD)
     line="Ready for review: PR #$m at $sha7, CI pending"
-    if gh issue view "$n" --json comments | first_lines | grep -q -F "Ready for review: PR #$m at $sha7"; then
+    comments=$(gh issue view "$n" --json comments)
+    if printf '%s' "$comments" | first_lines | grep -q -F "Ready for review: PR #$m at $sha7"; then
         echo "ticket: #$n already has \"Ready for review: PR #$m at $sha7\""
     else
         gh issue comment "$n" --body "$line" > /dev/null
@@ -119,14 +136,17 @@ ac() {
             *) die "bad mark '$arg': use <n>=met:<url>, <n>=waived:<decision url> or <n>=moved:#N" ;;
         esac
     done
-    body=$(gh issue view "$n" --json body | jq -r .body | tr -d '\r')
+    json=$(gh issue view "$n" --json body)
+    body=$(printf '%s' "$json" | jq -r .body | tr -d '\r')
     # Prints the new body, a line "@@problems", then one "unmarked <n> <text>" or
     # "unknown <n>" line per problem.
     result=$(printf '%s\n' "$body" | awk -v marks="$marks" '
         BEGIN { k = split(marks, m, " "); for (i = 1; i <= k; i++) if (m[i] != "") {
             split(m[i], p, "="); want[p[1]] = substr(m[i], index(m[i], "=") + 1); sub(/:/, ": ", want[p[1]]) } }
         /^## / { inAc = tolower($0) ~ /^## acceptance criteria/ }
-        inAc && /^- \[[ xX]\] / {
+        /^<details>/ { details = 1 }
+        /^<\/details>/ { details = 0 }
+        inAc && !details && /^- \[[ xX]\] / {
             n++
             if (n in want) { sub(/ *\((met|waived|moved): [^)]*\)$/, ""); $0 = $0 " (" want[n] ")"; delete want[n] }
             if ($0 ~ /\((met|waived|moved): [^)]+\)$/) sub(/^- \[[ ]\]/, "- [x]")
@@ -158,10 +178,21 @@ later() {
         *) usage ;;
     esac
     title=$(printf '%s' "$note" | head -n 1 | cut -c 1-70)
-    url=$(printf '%s\n\nFrom the review of PR #%s.\n%s\n' "$note" "$pr" "$who" |
-        gh issue create --title "Later: $title" --label "$labels" --body-file -)
+    # A rerun after a failed step finds what the first run made, so a note never
+    # becomes two issues or two pointers.
+    open=$(gh issue list --state open --label later --limit 500 --json number,title,body,url)
+    url=$(printf '%s' "$open" | jq -r --arg t "Later: $title" --arg pr "From the review of PR #$pr." \
+        '[.[] | select(.title == $t and (.body | contains($pr)))][0].url // empty')
+    if [ -z "$url" ]; then
+        url=$(printf '%s\n\nFrom the review of PR #%s.\n%s\n' "$note" "$pr" "$who" |
+            gh issue create --title "Later: $title" --label "$labels" --body-file -)
+    fi
     if [ -n "$owner" ]; then
-        gh issue comment "$owner" --body "Later from PR #$pr: #${url##*/} is yours ($title)." > /dev/null
+        pointer="Later from PR #$pr: #${url##*/} is yours ($title)."
+        posted=$(gh issue view "$owner" --json comments)
+        if ! printf '%s' "$posted" | jq -e --arg p "$pointer" 'any(.comments[]; .body == $p)' > /dev/null; then
+            gh issue comment "$owner" --body "$pointer" > /dev/null
+        fi
     fi
     echo "ticket: $url"
 }

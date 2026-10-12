@@ -40,14 +40,17 @@ load5=$3
 free=$(memory_pressure -Q | sed -n 's/.*free percentage: \([0-9]*\)%.*/\1/p')
 lowpower=$(pmset -g | awk '/lowpowermode/ { print $2 }')
 
+# A slot is in use when lockf can't take it at once. -k keeps the file: without
+# it lockf deletes the file it locked.
 in_use=0
 known=0
+held=
 for n in 1 2; do
     [ -f "$slots/slot$n" ] || continue
     known=$((known + 1))
     st=0
-    lockf -s -n -t 0 "$slots/slot$n" true 2> /dev/null || st=$?
-    [ "$st" -eq 75 ] && in_use=$((in_use + 1))
+    lockf -k -s -n -t 0 "$slots/slot$n" true 2> /dev/null || st=$?
+    if [ "$st" -eq 75 ]; then in_use=$((in_use + 1)); held="$held $n"; fi
 done
 if [ "$known" -eq 2 ]; then slot_line="build slots $in_use of 2 in use"; else slot_line="build slots unknown"; fi
 
@@ -65,8 +68,8 @@ echo "  load $per_core per core (5 min) | pageouts $rate/s | memory ${free:-?}% 
 if [ "$lowpower" = 1 ]; then
     echo "  warning: Low Power Mode is on, so builds run slower. Only Jake turns it off."
 fi
-for n in 1 2; do
-    [ -f "$slots/slot$n.holder" ] && [ "$in_use" -gt 0 ] && echo "  slot $n: $(head -n 1 "$slots/slot$n.holder")"
+for n in $held; do
+    [ -f "$slots/slot$n.holder" ] && echo "  slot $n: $(head -n 1 "$slots/slot$n.holder")"
 done
 
 # Lexicon's own work (builds, tests, the app, sessions' tools) is expected load;

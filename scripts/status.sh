@@ -68,7 +68,8 @@ jq -n -r --arg now "$now" --slurpfile main "$tmp/main.json" --slurpfile open "$t
             (if ($l | index("building")) and ($l | index("waiting-on-jake")) then "building and waiting-on-jake" else empty end),
             (if ($l | index("ready-for-agent")) and ($l | index("waiting-on-jake")) then "ready-for-agent and waiting-on-jake" else empty end),
             (if ($l | index("parked")) and (($l | index("building")) or ($l | index("ready-for-agent"))) then "parked and \($l | map(select(. == "building" or . == "ready-for-agent")) | join(" and "))" else empty end),
-            (if ($l | index("building")) and $mergedFor[$i.number | tostring] then "building after PR #\($mergedFor[$i.number | tostring]) merged" else empty end)
+            (if ($l | index("building")) and $mergedFor[$i.number | tostring] then "building after PR #\($mergedFor[$i.number | tostring]) merged" else empty end),
+            (if ($i.title | test("^Spec:")) and ($l | index("ready-for-agent")) then "a spec with ready-for-agent (it lands on the frontier)" else empty end)
           | "  #\($i.number) \(.)"),
         ($closed[0][] | . as $i | labels | map(select(. == "building" or . == "ready-for-agent" or . == "waiting-on-jake"))
           | select(length > 0) | "  #\($i.number) closed with \(join(" and "))")]
@@ -80,6 +81,8 @@ sed '/^@@machine$/,$d' "$tmp/board"
 echo "Lane: $(scripts/live-lane.sh status 2>&1 | sed 's/^live-lane: //')"
 if scripts/live-lane.sh queue > "$tmp/queue" 2> /dev/null; then
     if [ -s "$tmp/queue" ]; then head -n 5 "$tmp/queue" | sed 's/^/  queued: /'; else echo "  queue: empty"; fi
+else
+    echo "  queue: unknown (scripts/live-lane.sh has no queue)"
 fi
 if pgrep -f "$HOME/Applications/Lexicon.app/Contents/MacOS/" > /dev/null; then
     echo "Daily copy: running"
@@ -89,9 +92,24 @@ fi
 echo "Machine: $(scripts/machine.sh --interval 1 | head -n 1)"
 sed '1,/^@@machine$/d' "$tmp/board"
 
+# A watcher counts while its pid is alive and it wrote its state in the last 10
+# minutes: a pid file left by a crash can name an unrelated process, and a
+# watcher whose polls all fail keeps its pid but reports nothing.
 watchers=
+stale=
 for pid in "$watch"/*.pid; do
     [ -f "$pid" ] || continue
-    if kill -0 "$(cat "$pid")" 2> /dev/null; then watchers="$watchers${watchers:+, }$(basename "$pid" .pid)"; fi
+    name=$(basename "$pid" .pid)
+    kill -0 "$(cat "$pid")" 2> /dev/null || continue
+    if [ -n "$(find "$watch/$name.state" -mmin -10 2> /dev/null)" ]; then
+        watchers="$watchers${watchers:+, }$name"
+    else
+        stale="$stale${stale:+, }$name"
+    fi
 done
-if [ -n "$watchers" ]; then echo "Watching: $watchers"; else echo "NOT WATCHED: no scripts/watch-events.sh is running, so nothing reports new events"; fi
+if [ -n "$watchers" ]; then
+    echo "Watching: $watchers"
+else
+    echo "NOT WATCHED: no scripts/watch-events.sh is running, so nothing reports new events"
+fi
+[ -z "$stale" ] || echo "  no poll in 10 min from: $stale"

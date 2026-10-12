@@ -87,6 +87,15 @@ test_it_moves_no_ref() {
     [ "$(git for-each-ref | git hash-object --stdin)$(git status --porcelain)" = "$before" ] || fail "a ref or the tree changed"
 }
 
+test_a_failed_pr_list_is_not_an_empty_one() {
+    setup
+    branch 56 129 "Package.swift 1 fn"
+    rm "$GH_FIXTURES/prs.json"
+    lanes
+    [ "$status" -ne 0 ] || fail "should fail when gh pr list fails"
+    expect_no_out "no open claude/issue-* PRs"
+}
+
 test_no_open_prs() {
     setup
     lanes

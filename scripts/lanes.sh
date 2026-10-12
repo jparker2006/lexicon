@@ -16,10 +16,12 @@ cd "$(dirname "$0")/.."
 tmp=$(mktemp -d -t lanes)
 trap 'rm -rf "$tmp"' EXIT
 
-main=$(gh api 'repos/{owner}/{repo}/commits/main' | jq -r .sha)
-gh pr list --state open --limit 100 --json number,headRefName,headRefOid |
-    jq -r '.[] | select(.headRefName | test("^claude/issue-[0-9]+$"))
-        | "\(.number) \(.headRefName | ltrimstr("claude/issue-")) \(.headRefOid)"' | sort -n > "$tmp/prs"
+# Each gh call on its own line: in a pipe its failure would read as no PRs.
+gh api 'repos/{owner}/{repo}/commits/main' > "$tmp/main.json"
+main=$(jq -r .sha "$tmp/main.json")
+gh pr list --state open --limit 100 --json number,headRefName,headRefOid > "$tmp/prs.json"
+jq -r '.[] | select(.headRefName | test("^claude/issue-[0-9]+$"))
+    | "\(.number) \(.headRefName | ltrimstr("claude/issue-")) \(.headRefOid)"' "$tmp/prs.json" | sort -n > "$tmp/prs"
 
 have() { git cat-file -e "$1^{commit}" 2> /dev/null; }
 for sha in "$main" $(awk '{ print $3 }' "$tmp/prs"); do

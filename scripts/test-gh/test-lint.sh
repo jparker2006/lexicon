@@ -77,6 +77,33 @@ BODY
     expect_status 0
 }
 
+test_fix_replaces_none_with_the_needed_edge() {
+    use_fixture later
+    sed '/^## Blocked by$/,$d' "$TESTS/fixtures/lint/64-typed.md" > "$TMP/body.md"
+    printf '## Blocked by\n\nNone (can start any time).\n' >> "$TMP/body.md"
+    jq --rawfile body "$TMP/body.md" '.[0].body = $body | .[0].number = 64' \
+        "$GH_FIXTURES/issues.json" > "$TMP/i" && mv "$TMP/i" "$GH_FIXTURES/issues.json"
+    run ticket-lint.sh 64 --fix
+    expect_status 0
+    jq -r '.[0].body' "$GH_FIXTURES/issues.json" | grep -q -x -- '- #58' || fail "no #58 edge: $(jq -r '.[0].body' "$GH_FIXTURES/issues.json" | tail -5)"
+    ! jq -r '.[0].body' "$GH_FIXTURES/issues.json" | grep -q 'None (can start' || fail "kept the none line"
+}
+
+test_fix_never_writes_when_the_read_fails() {
+    use_fixture later
+    run ticket-lint.sh 64 --fix
+    [ "$status" -ne 0 ] || fail "should fail: #64 is not in the fixture"
+    expect_no_log "gh issue edit"
+}
+
+test_module_names_in_prose_are_not_modules() {
+    sed 's/^\*\*Modules:\*\* History, LexiconUI, LexiconCore$/**Modules:** History/' "$TESTS/fixtures/lint/64-typed.md" |
+        grep -v '^Sketch:' > "$TMP/body.md"
+    echo "Cleanup runs after the History row is made. Fixes land later." >> "$TMP/body.md"
+    run ticket-lint.sh --file "$TMP/body.md"
+    expect_status 0
+}
+
 test_open_questions_must_be_empty() {
     sed 's/^## Open questions$/## Open questions\n\n- Which gesture?/' "$TESTS/fixtures/lint/64-typed.md" | awk '{ gsub(/\\n/, "\n"); print }' > "$TMP/body.md"
     run ticket-lint.sh --file "$TMP/body.md"

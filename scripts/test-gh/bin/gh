@@ -14,6 +14,8 @@
 # An unknown call fails loudly, so a script never passes on a call the fake
 # doesn't understand. $LEXICON_NOW is the time new comments and issues get.
 set -eu
+# A missing fixture must fail the call, not pass an empty answer down a pipe.
+set -o pipefail
 : "${GH_FIXTURES:?GH_FIXTURES is not set}"
 echo "gh $*" >> "${GH_LOG:-/dev/null}"
 now=${LEXICON_NOW:-2026-01-01T00:00:00Z}
@@ -158,13 +160,15 @@ case "${1:-} ${2:-}" in
     "pr view")
         shift 2
         n=$(positional "$@")
+        # Without a number, gh answers for the current branch: its open PR, else
+        # its latest merged or closed one.
         if [ -n "$n" ]; then
             sel=".number == $n"
         else
-            sel=".headRefName == \"$(git branch --show-current)\" and .state == \"OPEN\""
+            sel=".headRefName == \"$(git branch --show-current)\""
         fi
         jq -e ".[] | select($sel)" "$GH_FIXTURES/prs.json" > /dev/null || die "no pull requests found"
-        jq "[.[] | select($sel)][0]" "$GH_FIXTURES/prs.json" | project "$@"
+        jq "[.[] | select($sel)] | sort_by(.state == \"OPEN\", .number) | last" "$GH_FIXTURES/prs.json" | project "$@"
         ;;
     "pr list")
         shift 2

@@ -20,6 +20,25 @@ test_claim_takes_37_once_jake_said_yes() {
     expect_status 0
 }
 
+test_claim_takes_37_once_jake_said_yes_to_the_guard_hook() {
+    use_fixture claim-0531
+    jq '(.[] | select(.number == 37) | .comments) += [{id: "IC_yes", author: {login: "jparker2006"}, body: "Decision (Jake, 2026-10-10): yes, wire the guard hook.", createdAt: "2026-10-11T05:30:00Z", url: "u"}]' \
+        "$GH_FIXTURES/issues.json" > "$TMP/i" && mv "$TMP/i" "$GH_FIXTURES/issues.json"
+    run ticket.sh claim 37
+    expect_status 0
+}
+
+test_claim_finishes_a_claim_cut_off_after_its_labels() {
+    use_fixture claim-0531
+    jq '(.[] | select(.number == 38) | .labels) = [{name: "building"}]' "$GH_FIXTURES/issues.json" > "$TMP/i" && mv "$TMP/i" "$GH_FIXTURES/issues.json"
+    run ticket.sh claim 38
+    expect_status 0
+    expect_out "finished the claim on #38"
+    run ticket.sh claim 38
+    expect_status 1
+    expect_err "#38 is already claimed (it has building)"
+}
+
 test_claim_swaps_the_labels_and_posts_once() {
     use_fixture claim-0531
     run ticket.sh claim 38
@@ -200,6 +219,16 @@ test_ready_accepts_a_check_run_before_the_commit() {
     expect_status 0
 }
 
+test_ready_refuses_a_merged_pr() {
+    setup_135
+    stamp HEAD
+    jq '(.[] | select(.number == 137) | .state) = "MERGED"' "$GH_FIXTURES/prs.json" > "$TMP/p" && mv "$TMP/p" "$GH_FIXTURES/prs.json"
+    ready
+    expect_status 1
+    expect_err "PR #137 for claude/issue-135 is merged, not open"
+    [ "$(ready_lines)" -eq 0 ] || fail "posted anyway"
+}
+
 # --- ac: #54's acceptance lines were never marked; its 10 ms bar was decided
 # in a PR comment, not on the issue.
 
@@ -236,6 +265,24 @@ test_ac_check_lists_every_unmarked_line() {
     expect_err "item 4 is unmarked"
 }
 
+test_ac_skips_boxes_in_collapsed_details() {
+    use_fixture ac-54
+    jq '.[0].body |= sub("## Blocked by"; "<details>\n\n- [ ] a note, not a criterion\n\n</details>\n\n## Blocked by")' \
+        "$GH_FIXTURES/issues.json" > "$TMP/i" && mv "$TMP/i" "$GH_FIXTURES/issues.json"
+    run ticket.sh ac 54 1=met:https://x.example/1 2=met:https://x.example/2 3=waived:https://x.example/3 4=moved:#60
+    expect_status 0
+    jq -r '.[0].body' "$GH_FIXTURES/issues.json" | grep -q -F -- "- [ ] a note, not a criterion" || fail "touched the note"
+}
+
+test_ac_never_writes_when_the_read_fails() {
+    use_fixture ac-54
+    run ticket.sh ac 99 1=met:https://x.example/1
+    [ "$status" -ne 0 ] || fail "should fail: #99 is not in the fixture"
+    expect_no_log "gh issue edit"
+    run ticket.sh ac 99 --check
+    [ "$status" -ne 0 ] || fail "--check passed without reading"
+}
+
 test_ac_refuses_a_mark_without_a_link() {
     use_fixture ac-54
     run ticket.sh ac 54 1=met:looks-fine
@@ -259,10 +306,30 @@ test_later_creates_an_owned_issue() {
         '.[] | select(.number == 154) | .comments[-1].body == $c' "$GH_FIXTURES/issues.json" > /dev/null || fail "no pointer on #154"
 }
 
+test_later_rerun_makes_no_second_issue_or_pointer() {
+    use_fixture later
+    run ticket.sh later 93 "The guard lets gh pr -R <repo> merge through" --owner 154
+    run ticket.sh later 93 "The guard lets gh pr -R <repo> merge through" --owner 154
+    expect_status 0
+    [ "$(jq '[.[] | select(.title | startswith("Later:"))] | length' "$GH_FIXTURES/issues.json")" -eq 1 ] || fail "two issues"
+    [ "$(jq '[.[] | select(.number == 154) | .comments[] | select(.body | startswith("Later from PR #93"))] | length' "$GH_FIXTURES/issues.json")" -eq 1 ] || fail "two pointers"
+}
+
 test_later_new_goes_to_triage() {
     use_fixture later
     run ticket.sh later 102 "The scorer counts trailing silence as lag" --new
     expect_status 0
     jq -e '.[-1] | [.labels[].name] == ["later", "needs-triage"]' "$GH_FIXTURES/issues.json" > /dev/null ||
         fail "labels: $(jq -c '.[-1].labels' "$GH_FIXTURES/issues.json")"
+}
+
+test_ready_takes_a_stamp_with_an_unknown_tree_at_head_only() {
+    setup_135
+    printf 'sha=%s\ntree=unknown\nexit=0\n' "$(git rev-parse HEAD)" > "$TMP/stamp"
+    mkdir -p .build && cp "$TMP/stamp" .build/check-stamp
+    ready
+    expect_status 0
+    printf 'sha=%s\ntree=unknown\nexit=0\n' "$older" > .build/check-stamp
+    ready
+    expect_status 1
 }

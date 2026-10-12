@@ -1,13 +1,15 @@
 #!/bin/sh
 # unblocked: the frontier, by the one rule for blockers: a blocker is done when
-# its PR has merged (or the issue is closed). GitHub's own blocked-by counts any
-# open issue, and tickets Jake can feel stay open after their PR merges.
+# its PR has merged. GitHub's own blocked-by counts any open issue, and tickets
+# Jake can feel stay open after their PR merges. A blocker with no code, such as
+# Jake's own account or key ticket, is done when it is closed as completed; one
+# closed as not planned never is, so its dependents get looked at again.
 #
 #   scripts/unblocked.sh            each open ready-for-agent issue whose blockers
 #                                   are done, with a one-line builder chip, then
 #                                   the ones still waiting and on what
-#   scripts/unblocked.sh --check N  exits 0 when every blocker of #N is done, else
-#                                   names the ones that are not (ticket.sh claim)
+#   scripts/unblocked.sh --check N  exits 0 when every blocker of #N is done, 3
+#                                   naming the ones that are not (ticket.sh claim)
 #
 # Blockers are the #N in the issue's "## Blocked by" section, unless it starts
 # with "none". A blocker's PR is one whose branch is claude/issue-N or whose body
@@ -25,7 +27,7 @@ esac
 
 tmp=$(mktemp -d -t unblocked)
 trap 'rm -rf "$tmp"' EXIT
-gh issue list --state all --limit 1000 --json number,title,state,labels,body > "$tmp/issues.json"
+gh issue list --state all --limit 1000 --json number,title,state,stateReason,labels,body > "$tmp/issues.json"
 gh pr list --state merged --limit 1000 --json number,headRefName,body > "$tmp/prs.json"
 
 # One object per issue: number, state, title, labels, needs line, and each
@@ -49,9 +51,10 @@ jq -n --slurpfile issues "$tmp/issues.json" --slurpfile prs "$tmp/prs.json" '
     | {number, state, title, labels: [.labels[].name], needs: (.body | needs),
        blockers: [.body | blockers[] | tostring as $b
          | {number: ., issue: $byNum[$b], pr: $prFor[$b]}
-         | .done = ((.issue.state // "") == "CLOSED" or .pr != null)
+         | .done = (.pr != null or ((.issue.state // "") == "CLOSED" and .issue.stateReason != "NOT_PLANNED"))
          | .why = (if .pr != null then "PR #\(.pr) merged" elif .done then "closed"
-                   elif .issue == null then "not found" else "open, no merged PR" end)
+                   elif .issue == null then "not found" elif .issue.state == "CLOSED" then "closed as not planned"
+                   else "open, no merged PR" end)
          | {number, done, why}]}
 ' > "$tmp/all.json"
 
@@ -62,7 +65,7 @@ if [ -n "$check" ]; then
         | [.blockers[] | select(.done | not) | "#\(.number) (\(.why))"] | join(", ")' "$tmp/all.json")
     if [ -n "$waiting" ]; then
         echo "unblocked: #$check waits on $waiting" >&2
-        exit 1
+        exit 3
     fi
     exit 0
 fi

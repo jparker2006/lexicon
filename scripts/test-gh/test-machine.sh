@@ -45,6 +45,8 @@ test_slots_in_use_are_counted() {
     run machine.sh
     expect_out "build slots 1 of 2 in use"
     expect_out "slot 1: #153 builder (pid 4100)"
+    # Without -k, lockf deletes the file it locked: the probe would remove the slot.
+    expect_log "lockf -k -s -n -t 0 $HOME/Library/Application Support/Lexicon Dev/heavy/slot1 true"
 }
 
 test_a_quiet_mac_says_yes() {

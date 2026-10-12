@@ -16,8 +16,9 @@
 #     <what> (M min)", with an agent part when there are Live items and a Jake part
 #     whose minutes add up the Jake items.
 #   - "## Open questions" is there and empty.
-#   - A ticket whose Modules line (or body, without one) names 3 or more modules
-#     under Sources/ has a "Sketch:" link from /pstack:architect.
+#   - A ticket whose Modules line names 3 or more modules under Sources/ has a
+#     "Sketch:" link from /pstack:architect. Only that line counts: module names
+#     such as History and Cleanup are ordinary words in the rest of a body.
 # The lint checks shape, not truth: whether an item can really run is a reader's call.
 set -eu
 cd "$(dirname "$0")/.."
@@ -31,7 +32,8 @@ case "${1:-}" in
         name="#$1"
         issue=$1
         [ "${2:-}" = --fix ] && fix=1
-        body=$(gh issue view "$1" --json body | jq -r .body)
+        json=$(gh issue view "$1" --json body)
+        body=$(printf '%s' "$json" | jq -r .body)
         ;;
     *) usage ;;
 esac
@@ -74,7 +76,6 @@ lint() {
     /Needs the Live checks session for:/ { needsLine = trim(substr($0, index($0, "for:") + 4)); needsSeen = 1 }
     /^(\*\*)?Modules:/ { modulesLine = $0 }
     /Sketch:/ && /(https?:|\]\()/ { sketch = 1 }
-    { all = all "\n" $0 }
     END {
         if (n == 0) problem("no acceptance items under ## Acceptance criteria")
         jakeMin = 0
@@ -116,30 +117,31 @@ lint() {
         }
         if (!openSeen) problem("no ## Open questions heading")
         else if (openText) problem("## Open questions is not empty")
-        scope = modulesLine != "" ? modulesLine : all
-        split(modules, mods, " "); named = ""; count = 0
-        for (i in mods) if (mods[i] != "" && scope ~ ("(^|[^A-Za-z])" mods[i] "([^A-Za-z]|$)")) { count++; named = named (named == "" ? "" : ", ") mods[i] }
+        nm = split(modules, mods, " "); named = ""; count = 0
+        for (i = 1; i <= nm; i++) if (modulesLine ~ ("(^|[^A-Za-z])" mods[i] "([^A-Za-z]|$)")) { count++; named = named (named == "" ? "" : ", ") mods[i] }
         if (count >= 3 && !sketch) problem("names " count " modules (" named ") and has no Sketch: link from /pstack:architect")
         if (mode == "fix") fixed()
     }
     function problem(s) { if (mode != "fix") print s }
     # The body with every needed #N in Blocked by, in place of "none" if it said so.
-    function fixed(   i, add, out) {
+    function fixed(   i, add, under) {
         add = ""
         for (k in need) if (!(k in blocked)) add = add "- #" k "\n"
+        # The edges go after the last line of the section, or straight under its
+        # heading when it was empty or said none (whose lines are dropped).
+        under = blockedNone || !blockedEnd
         for (i = 1; i <= NR; i++) {
             if (blockedNone && i > blockedLine && i <= blockedEnd) continue
             print lines[i]
-            if (i == blockedLine && add != "") printf "%s", (blockedNone ? "\n" : "")
-            if (i == (blockedEnd ? blockedEnd : blockedLine) && add != "") printf "%s%s", (blockedEnd && !blockedNone ? "" : "\n"), add
+            if (add != "" && i == (under ? blockedLine : blockedEnd)) printf "%s%s", (under ? "\n" : ""), add
         }
         if (!blockedSeen && add != "") printf "\n## Blocked by\n\n%s", add
     }'
 }
 
 if [ -n "$fix" ]; then
-    lint fix | gh issue edit "$issue" --body-file - > /dev/null
-    body=$(gh issue view "$issue" --json body | jq -r .body)
+    body=$(lint fix)
+    printf '%s\n' "$body" | gh issue edit "$issue" --body-file - > /dev/null
 fi
 problems=$(lint check)
 if [ -n "$problems" ]; then
