@@ -4,7 +4,7 @@ The one record of what has been decided since the v0 spec ([#36](https://github.
 
 ## How an entry is written
 
-- **Changed in the same PR as the behavior.** A PR that departs from the spec or from an entry here changes this file, and `scripts/pr-body-check.mjs` refuses a body whose wording departs from the spec without a link to the entry here.
+- **Changed in the same PR as the behavior.** A PR that departs from the spec or from an entry here changes this file in the same PR, or links the entry that already allows it. `scripts/pr-body-check.mjs` refuses a body whose departure wording ("departs from", "deviates", "unlike the spec") has no link to this file.
 - **Each decided entry carries Jake's own words, verbatim, the question as he was asked it, and the time** (UTC). His words are quoted from the session where he answered; the link is the GitHub record of the question or the decision.
 - **An entry without Jake's words is Proposed.** It stands as built, and it goes into the next grill round, where the orchestrator asks Jake to confirm or change it. Nobody writes "Jake's call" for a choice he didn't make.
 - **A fact is not a decision.** A corrected number or a found behavior is recorded as a fact and applied; a change of what Lexicon does is a decision and goes to Jake.

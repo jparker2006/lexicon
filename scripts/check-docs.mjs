@@ -9,12 +9,13 @@
 // Fails on:
 //   - a future pointer at a ticket ("lands with #N", "lands with the X ticket",
 //     "once #N lands") whose sentence names no ticket number, or names one
-//     that has merged. A ticket has merged when a commit subject on HEAD ends
-//     in "(#N)" or "(#N) (#M)", as squash merges do; --merged replaces that
-//     list (tests). A shallow clone, such as CI's checkout, is deepened first
-//     (git fetch --unshallow; CI checks out full history, so it never needs
-//     to), and one that can't be deepened fails the check (exit 2) rather than
-//     skip the rule.
+//     that has merged. A ticket has merged when a commit subject on main ends
+//     in "(#N)" or "(#N) (#M)", as squash merges do. Main is the history HEAD
+//     shares with origin/main (their merge base), so a branch's own "(#N)"
+//     commits don't count; with no origin/main, HEAD's history. --merged
+//     replaces the list (tests). CI checks out full history; any other shallow
+//     clone is deepened first (git fetch --unshallow), and one that can't be
+//     fails the check (exit 2) rather than skip the rule.
 //   - a scripts/ path that does not exist. Globs and <placeholders> are skipped.
 //
 // Reads AGENTS.md, CLAUDE.md, GLOSSARY.md, README.md, docs/**/*.md except
@@ -45,8 +46,12 @@ function mergedTickets() {
       process.exit(2)
     }
   }
+  let main = 'HEAD'
+  try {
+    main = execFileSync('git', ['-C', root, 'merge-base', 'HEAD', 'refs/remotes/origin/main'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {}
   const merged = new Set()
-  for (const subject of git('log', '--format=%s', 'HEAD').split('\n')) {
+  for (const subject of git('log', '--format=%s', main).split('\n')) {
     const tail = subject.match(/\(#(\d+)\)(?: \(#(\d+)\))?$/)
     if (tail) for (const n of tail.slice(1)) if (n) merged.add(Number(n))
   }

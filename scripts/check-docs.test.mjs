@@ -65,7 +65,7 @@ test('"lands with" that points at no ticket is not a future pointer', () => {
   assert.equal(run(root, '').status, 0)
 })
 
-test('a pointer with words between the ticket and "lands" or "merges" is still future', () => {
+test('a ticket list or "(PR #N)" between the ticket and its verb is still future', () => {
   const root = tree({ 'docs/adr/x.md': 'Esc also reaches the app until #58 and #62 land a way to take it.\n', 'AGENTS.md': 'The merge path is manual once #159 (PR #215) merges.\n' })
   const r = run(root, '62,159')
   assert.equal(r.status, 1)
@@ -74,7 +74,7 @@ test('a pointer with words between the ticket and "lands" or "merges" is still f
   assert.doesNotMatch(r.out, /#58 has merged/)
 })
 
-test('a shallow clone, as CI checks out, reads the merged tickets too', () => {
+test('a shallow clone is deepened and reads the merged tickets', () => {
   const origin = tree({ 'AGENTS.md': 'The skeleton lands with #38.\n' })
   const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   git(origin, 'init', '-q')
@@ -137,6 +137,35 @@ test('a bare verb after a ticket list is future too: "until #58 and #62 merge"',
 test('the noun "merge" after a ticket is not the verb: "After #38 the merge path is manual."', () => {
   const root = tree({ 'AGENTS.md': 'After #38 the merge path is manual.\n' })
   assert.equal(run(root, '38').status, 0)
+})
+
+test('a linked ticket and a possessive are pointers too', () => {
+  const root = tree({ 'AGENTS.md': 'The merge path is manual once [#38](https://github.com/x/y/issues/38) lands.\n', 'GLOSSARY.md': 'Try steps are copied once #159\'s install step lands.\n' })
+  const r = run(root, '38,159')
+  assert.equal(r.status, 1)
+  assert.match(r.out, /^AGENTS\.md:1: #38 has merged/m)
+  assert.match(r.out, /^GLOSSARY\.md:1: #159 has merged/m)
+})
+
+test('a branch\'s own "(#N)" commits don\'t make its ticket merged; main\'s do', () => {
+  const root = tree({ 'AGENTS.md': 'Its docs check lands with #162. The skeleton lands with #38.\n' })
+  const git = (...args) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  git('init', '-q')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'M0: architecture skeleton (#38) (#92)')
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+  git('commit', '-q', '--allow-empty', '-m', 'feat(scripts): check-docs (#162)')
+  let status = 0
+  let out = ''
+  try {
+    out = execFileSync('node', [script, '--root', root], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (e) {
+    status = e.status
+    out = `${e.stdout}${e.stderr}`
+  }
+  assert.equal(status, 1, out)
+  assert.match(out, /#38 has merged/)
+  assert.doesNotMatch(out, /#162 has merged/)
 })
 
 test('a future pointer at an open ticket passes', () => {
