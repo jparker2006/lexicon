@@ -352,19 +352,19 @@ test_zsh_drops_an_entry_whose_pid_was_reused() {
 }
 
 test_a_waiter_from_before_the_clocks_go_back_keeps_its_place() {
-    # W waits in line; one second after it starts, a made-up zone's clocks go
+    # W waits in line; a second after it starts, a made-up zone's clocks go
     # back an hour, so its local start time names the hour that repeats.
     mkfifo "$T/release.W"
     sh -c 'read -r x < "$1"' w "$T/release.W" &
     W=$!
     PIDS="$PIDS $W"
     start=$(TZ=UTC LC_ALL=C date -j -f '%a %b %e %T %Y' "$(TZ=UTC LC_ALL=C /bin/ps -o lstart= -p "$W")" +%s 2> /dev/null)
+    [ -n "$start" ] || fail "could not read W's start time"
     mkdir -p "$SLOTS/queue"
     : > "$SLOTS/queue/0000000001.$W"
     TZ=UTC touch -t "$(TZ=UTC date -r "$start" +%Y%m%d%H%M.%S)" "$SLOTS/queue/0000000001.$W"
     back=$((start + 1 + 3600))
     zone="AAA0BBB-1,0/0,$(( $(TZ=UTC date -r "$back" +%j | sed 's/^0*//') - 1 ))/$(TZ=UTC date -r "$back" +%H:%M:%S)"
-    until [ "$(/bin/date +%s)" -gt $((start + 1)) ]; do :; done
     out=$(TZ=$zone scripts/lib/heavy.sh status)
     echo > "$T/release.W"
     case "$out" in *"queue: 1 waiting"*) ;; *) fail "a waiter lost its place when the clocks went back: $out" ;; esac
