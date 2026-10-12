@@ -67,19 +67,20 @@ heavy_holder() {
 # no later than that, since a pid is reused once its process is gone: 0 yes,
 # 1 no, 2 unknown (ps failed for a moment). Both times are the kernel's own,
 # read from the process and the file, never from the clock, so a stall between
-# readings changes nothing. A dead process its parent has not yet reaped (a
-# zombie, which kill -0 still finds) is gone.
+# readings changes nothing; the start is printed and read back in UTC, which
+# has no hour that repeats when the clocks go back. A dead process its parent
+# has not yet reaped (a zombie, which kill -0 still finds) is gone.
 heavy_alive() {
     heavy_by=${2:-}
     kill -0 "$1" 2> /dev/null || return 1
-    heavy_ps=$(LC_ALL=C ps -o stat=,lstart= -p "$1" 2> /dev/null) || return 2
+    heavy_ps=$(TZ=UTC LC_ALL=C ps -o stat=,lstart= -p "$1" 2> /dev/null) || return 2
     [ -n "$heavy_ps" ] || return 2
     # Split by a command substitution, which zsh splits too.
     set -- $(printf '%s\n' "$heavy_ps")
     case "$1" in Z*) return 1 ;; esac
     [ -n "$heavy_by" ] || return 0
     shift
-    heavy_since=$(LC_ALL=C date -j -f '%a %b %e %T %Y' "$*" +%s 2> /dev/null) || return 2
+    heavy_since=$(TZ=UTC LC_ALL=C date -j -f '%a %b %e %T %Y' "$*" +%s 2> /dev/null) || return 2
     [ "$heavy_since" -le "$heavy_by" ]
 }
 
