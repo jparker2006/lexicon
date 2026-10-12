@@ -139,6 +139,39 @@ test_ready_posts_the_ci_pending_line_at_once() {
     [ "$(ready_lines)" -eq 1 ] || fail "posted twice"
 }
 
+# #53's head 6895aca went to Live checks; its Ready line has to say so, or the
+# Reviewer reads "CI pending" as all that's left.
+comment_135() {
+    jq --arg b "$1" '(.[] | select(.number == 135) | .comments) += [{"author": {"login": "jparker2006"}, "body": $b, "createdAt": "2026-10-11T14:55:00Z"}]' \
+        "$GH_FIXTURES/issues.json" > "$TMP/i" && mv "$TMP/i" "$GH_FIXTURES/issues.json"
+}
+
+test_ready_says_live_checks_pending_while_the_head_has_no_result() {
+    setup_135
+    stamp HEAD
+    sha7=$(git rev-parse --short=7 HEAD)
+    comment_135 "Live checks request: claude/issue-135 @ $sha7
+
+PR #137: 2 hands-off, 0 for Jake."
+    ready
+    expect_status 0
+    expect_out "ticket: posted on #135: Ready for review: PR #137 at $sha7, CI pending, Live checks pending"
+}
+
+test_ready_drops_live_checks_pending_once_the_result_is_in() {
+    setup_135
+    stamp HEAD
+    sha7=$(git rev-parse --short=7 HEAD)
+    comment_135 "Live checks request: claude/issue-135 @ $sha7"
+    comment_135 "Live checks: claude/issue-135 @ $sha7
+
+1. PASS"
+    ready
+    expect_status 0
+    expect_out "ticket: posted on #135: Ready for review: PR #137 at $sha7, CI pending"
+    expect_no_out "Live checks pending"
+}
+
 test_ready_refuses_an_older_stamp() {
     setup_135
     stamp "$older"

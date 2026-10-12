@@ -9,7 +9,7 @@ test_refuses_64_as_written() {
     expect_err "item 1 is not under a ### Headless, ### Live or ### Jake heading"
     expect_err "no \"Needs the Live checks session for:\" line"
     expect_err "no ## Open questions heading"
-    expect_err "names 3 modules (History, LexiconCore, LexiconUI) and has no Sketch: link"
+    ! printf '%s\n' "$err" | grep -q 'Sketch' || fail "a ticket needs no Sketch: the builder makes it after claiming"
 }
 
 test_refuses_64_without_the_58_edge() {
@@ -94,14 +94,6 @@ test_fix_never_writes_when_the_read_fails() {
     run ticket-lint.sh 64 --fix
     [ "$status" -ne 0 ] || fail "should fail: #64 is not in the fixture"
     expect_no_log "gh issue edit"
-}
-
-test_module_names_in_prose_are_not_modules() {
-    sed 's/^\*\*Modules:\*\* History, LexiconUI, LexiconCore$/**Modules:** History/' "$TESTS/fixtures/lint/64-typed.md" |
-        grep -v '^Sketch:' > "$TMP/body.md"
-    echo "Cleanup runs after the History row is made. Fixes land later." >> "$TMP/body.md"
-    run ticket-lint.sh --file "$TMP/body.md"
-    expect_status 0
 }
 
 test_open_questions_must_be_empty() {

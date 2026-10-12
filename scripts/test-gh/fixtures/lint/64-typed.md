@@ -7,7 +7,6 @@
 **Test seam:** live app + headless pipeline (retry)  
 **Modules:** History, LexiconUI, LexiconCore
 **Needs the Live checks session for:** agent: row actions on a sample row, and the fn double-tap gesture on a row (Live items 1 and 5)
-Sketch: https://github.com/jparker2006/lexicon/issues/64#issuecomment-sketch (the rewrite's stand-in for a /pstack:architect sketch)
 
 ## What to build
 
