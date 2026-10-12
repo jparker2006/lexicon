@@ -83,9 +83,7 @@ struct Focus {
     }
 
     static func now() -> Focus? {
-        readTwice { () -> (Answer, Focus?) in
-            // Each read names the focused app again: a retry never uses an app focus may have left.
-            guard let (pid, app) = focusedApp() else { return (.unreadable, nil) }
+        readTwice(naming: focusedApp) { (pid, app) -> (Answer, Focus?) in
             var value: CFTypeRef?
             switch Answer(AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue) {
             case .unreadable:
@@ -101,10 +99,15 @@ struct Focus {
         }
     }
 
-    /// Reads once more after an unreadable answer: one slow or failed read is not
-    /// the app's answer. Costs up to two more `AX.timeout`s (150 ms each), only
-    /// when the first read failed; a normal read is unchanged.
-    static func readTwice<Value>(_ attempt: () -> (Answer, Value?)) -> Value? {
+    /// Reads once more after an unreadable answer (an app not named counts as
+    /// one): one slow or failed read is not the app's answer. Each read names the
+    /// focused app again, so a retry never uses an app focus may have left. Costs
+    /// up to two more `AX.timeout`s (300 ms), only when the first read failed.
+    static func readTwice<App, Value>(naming: () -> App?, answering: (App) -> (Answer, Value?)) -> Value? {
+        func attempt() -> (Answer, Value?) {
+            guard let app = naming() else { return (.unreadable, nil) }
+            return answering(app)
+        }
         let first = attempt()
         return first.0 == .unreadable ? attempt().1 : first.1
     }
