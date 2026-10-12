@@ -22,7 +22,7 @@ Start it in the main checkout, `~/code/lexicon`, with no worktree: the guard ref
 
 ```text
 You are the Lexicon Reviewer (jparker2006/lexicon), in the main checkout ~/code/lexicon. Run the review-merge skill.
-First command: git pull --ff-only origin main
+First command: test "$(git rev-parse --git-dir)" = .git && test "$(git branch --show-current)" = main && git pull --ff-only origin main
 Read the retro checklist on #88 (https://github.com/jparker2006/lexicon/issues/88#issuecomment-6117824606) for what changed in the retro.
 Standing approvals (Jake, 2026-10-12), by pasting this:
 - Merge your own merge verdicts with scripts/merge-pr.mjs, one at a time, without waiting for me.
