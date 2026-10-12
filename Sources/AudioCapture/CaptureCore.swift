@@ -28,8 +28,6 @@ final class CaptureCore: @unchecked Sendable {
     private let startedAt: HostTime
     /// One level per emitted chunk, for the recording indicator.
     private let onLevel: @Sendable (AudioLevel) -> Void
-    /// Every frame read as zero (the `mic zeros` test hook).
-    private let silenced: Bool
 
     private var segment: Segment
     private var resampler: Resampler
@@ -49,9 +47,13 @@ final class CaptureCore: @unchecked Sendable {
     /// Audio kept after fn-up. Set by `finish` on the writer queue; read only
     /// after `stop` returned, which orders it after the write.
     private(set) var tailLength: Duration?
+    #if DEBUG
+    /// Every frame read as zero (the `mic zeros` test hook). Set before `begin`.
+    var silenced = false
+    #endif
 
     init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, startedAt: HostTime,
-          silenced: Bool = false, onLevel: @escaping @Sendable (AudioLevel) -> Void) {
+          onLevel: @escaping @Sendable (AudioLevel) -> Void) {
         segment = source.firstSegment
         guard let resampler = Self.resampler(for: segment.rate, policy: policy) else { return nil }
         self.resampler = resampler
@@ -60,7 +62,6 @@ final class CaptureCore: @unchecked Sendable {
         self.policy = policy
         self.startedAt = startedAt
         self.onLevel = onLevel
-        self.silenced = silenced
         fileURL = file
         (feed, feedContinuation) = AudioFeed.makeStream()
         let (problemStream, problems) = AsyncStream<CaptureProblem>.makeStream()
@@ -223,7 +224,9 @@ final class CaptureCore: @unchecked Sendable {
         while true {
             let count = segment.ring.read(into: UnsafeMutableBufferPointer(start: input.floatChannelData![0], count: capacity))
             guard count > 0 else { return }
+            #if DEBUG
             if silenced { input.floatChannelData![0].update(repeating: 0, count: count) }
+            #endif
             input.frameLength = AVAudioFrameCount(count)
             resampler.convert(emit: emit)
         }

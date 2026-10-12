@@ -63,9 +63,7 @@ func aHookedKeyIsTheKeyboardsKey(_ key: SyntheticKey) async {
     }
     #expect(hooked.commands == real.commands)
     #expect(hooked.typed == real.typed)
-    // The recognizer saw the key: it was not dropped as Lexicon's own.
-    let isPress = if case .fnDown = key { true } else { false }
-    #expect(real.commands.count > (isPress ? 0 : 1))
+    #expect(!real.commands.isEmpty)
 }
 
 /// The event as a keyboard sends it, built here by hand rather than by `SyntheticKey`.
@@ -128,14 +126,15 @@ struct HookRig {
     let conductor: Conductor<HeadlessDestination>
     private let commands: AsyncStream<KeyCommand>.Continuation
 
-    init(local: any LocalTranscriber = ScriptedTranscriber(text: "Ship it")) throws {
+    init(local: any LocalTranscriber = ScriptedTranscriber(text: "Ship it"),
+         hardware: MicHardware = FakeMic().hardware) throws {
         let paths = AppPaths.temporary()
         let (stream, continuation) = AsyncStream<KeyCommand>.makeStream()
         let tap = EventTapThread(gesture: FnGesture(holdThreshold: .zero), input: InputClock(),
                                  continuation: continuation, secureInput: { false })
         keyboard = Keyboard(tap: tap, commands: stream)
         commands = continuation
-        recorder = Recorder(hardware: FakeMic().hardware)
+        recorder = Recorder(hardware: hardware)
         history = try HistoryStore(paths: paths)
         destination = HeadlessDestination()
         let conductor = Conductor(

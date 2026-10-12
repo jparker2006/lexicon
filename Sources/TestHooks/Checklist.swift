@@ -168,7 +168,8 @@ public struct ChecklistResult: Codable, Sendable, Equatable {
     public let seconds: Double
     /// The last run's output, as a fingerprint.
     public let output: String
-    /// The first failing run's bar and its last output line, with quoted text fingerprinted.
+    /// The first failing run's bar and its last output line: quoted text
+    /// fingerprinted for a harness item, the whole line for a shell one.
     public let failure: String?
 
     public init(title: String, runs: Int, passed: Int, seconds: Double, output: String, failure: String?) {
@@ -183,7 +184,9 @@ public struct ChecklistResult: Codable, Sendable, Equatable {
         for (run, result) in outputs.enumerated() {
             if let bar = item.bars.first(where: { !$0.holds(status: result.status, output: result.output) }) {
                 let last = result.output.split(separator: "\n").last.map(String.init) ?? ""
-                failure = failure ?? "run \(run + 1): \(Self.describe(bar)), exit \(result.status): \(Fingerprint.quotes(in: last))"
+                // The harness quotes any text it prints; a shell line can print anything.
+                let shown = if case .shell = item.command { Fingerprint(last).description } else { Fingerprint.quotes(in: last) }
+                failure = failure ?? "run \(run + 1): \(Self.describe(bar)), exit \(result.status): \(shown)"
             } else {
                 passed += 1
             }
@@ -273,11 +276,13 @@ public struct Sample: Sendable, Equatable {
 
     public init(_ values: [Double]) { sorted = values.sorted() }
 
-    /// One number per line that has one: the first given in ms ("lag 131 ms",
-    /// as in a log or `wait-fn` line), else the first number at all.
+    /// One number per line: the first given in ms ("lag 131 ms", as in a log
+    /// or `wait-fn` line), or a line that is only a number. Any other line is
+    /// skipped, so an id's digits never count.
     public init(lines text: String) {
         self.init(text.split(separator: "\n").compactMap { line in
-            let number = line.firstMatch(of: /(\d+(?:\.\d+)?) ms\b/).map(\.1) ?? line.firstMatch(of: /-?\d+(?:\.\d+)?/).map(\.0)
+            let number = line.firstMatch(of: /(\d+(?:\.\d+)?) ms\b/).map(\.1)
+                ?? line.wholeMatch(of: /\s*(-?\d+(?:\.\d+)?)\s*/).map(\.1)
             return number.flatMap { Double($0) }
         })
     }

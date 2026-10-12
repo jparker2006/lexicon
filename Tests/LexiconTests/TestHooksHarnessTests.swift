@@ -74,6 +74,12 @@ private let pasteChecklist = """
     #expect(!report.comment.contains(fixture))
 }
 
+@Test func aFailingShellItemShowsItsLastLineOnlyAsAFingerprint() throws {
+    let item = try Checklist(parsing: "item: field\nrun: sh echo the field reads refactor the hook").items[0]
+    let result = ChecklistResult(item, outputs: [(1, "the field reads refactor the hook\n")], seconds: 0.1)
+    #expect(result.failure == "run 1: wanted exit 0, exit 1: \(Fingerprint("the field reads refactor the hook"))")
+}
+
 @Test func aFingerprintIsTheLengthAndAHashNotTheText() {
     let text = "Ship it to staging"
     #expect(Fingerprint(text).description.hasPrefix("18 chars #"))
@@ -98,6 +104,7 @@ private let pasteChecklist = """
         inserted  4AB12CD3  lag 131 ms, engine local:parakeetUnified, speech 80 ms
         inserted  9F0E77A1  lag 588 ms, engine local:parakeetUnified, speech 95 ms
         212
+        failed  9F0E77A1  
         """
     #expect(Sample(lines: lines).sorted == [131, 212, 588])
 }

@@ -39,13 +39,14 @@ case "${1:-}" in
 check) [ -z "$fn_listeners" ] || printf '%s\n' "$fn_listeners" >&2 ;;
 wait-fn)
     # Real fn presses reach every listener, and another's paste reads as typing in Dev.
-    if command -v require_no_fn_listeners >/dev/null 2>&1; then
-        require_no_fn_listeners
-    elif [ -n "$fn_listeners" ]; then
+    # fn-listeners.sh's own refusal when it has one (#157), else this one.
+    command -v require_no_fn_listeners >/dev/null 2>&1 || require_no_fn_listeners() {
+        [ -z "$fn_listeners" ] && return 0
         printf '%s\n' "$fn_listeners" >&2
-        echo "harness: wait-fn reads real fn presses, so another fn listener makes its results wrong. Quit it from its menu bar, then rerun." >&2
+        echo "harness: another app answers fn, so Dev's fn results would be wrong. Quit it from its menu bar, then rerun." >&2
         exit 1
-    fi
+    }
+    require_no_fn_listeners
     ;;
 esac
 

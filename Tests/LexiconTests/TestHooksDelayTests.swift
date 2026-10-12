@@ -27,4 +27,30 @@ func aResultDelayHoldsTheTextUntilTheDelayHasPassed() async throws {
     #expect(await system.conductor.dictate(file: wav, pace: .asFastAsPossible).status == .inserted)
     #expect(clock.sleepers == 0)
 }
+
+@Test(.timeLimit(.minutes(1)))
+func aDelayedAnswerThatFailsSpendsTheDelay() async throws {
+    // The clock never moves: a held answer would hang until the time limit.
+    let model = SlowedTranscriber(FailsOnce(), clock: TestClock())
+    model.slowNext(by: .seconds(120))
+    let clip = AudioClip(samples: tone(16_000))
+    await #expect(throws: LocalModelNotInstalled.self) {
+        try await model.transcribe(clip, terms: [], priority: .live)
+    }
+    #expect(try await model.transcribe(clip, terms: [], priority: .live) == "Ship it.")
+}
+
+/// A model not installed at the first call, as before setup finishes, and installed after.
+private actor FailsOnce: LocalTranscriber {
+    nonisolated let model = LocalModel.parakeetUnified
+    private var calls = 0
+    var isResident: Bool { true }
+    func load() {}
+    func unload() {}
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
+        calls += 1
+        if calls == 1 { throw LocalModelNotInstalled(model) }
+        return "Ship it."
+    }
+}
 #endif

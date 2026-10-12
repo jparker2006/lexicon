@@ -84,24 +84,27 @@ public final class Recorder: Sendable {
     /// tail ends now and the new capture starts at once.
     public func start(_ input: AudioInput, writingTo file: URL,
                       since keyDown: HostTime = .now()) async throws(RecorderError) -> LiveCapture {
+        #if DEBUG
+        // Spent by the next mic Dictation even when its start fails, as the hook says.
+        let silenced = if case .microphone = input { silenceNext.exchange(false, ordering: .relaxed) } else { false }
+        #endif
         let source: any CaptureSource
         var policy = policy
-        var silenced = false
         switch input {
         case .microphone(let uid):
             source = try await microphone.start(deviceUID: uid, keyDown: keyDown)
-            #if DEBUG
-            silenced = silenceNext.exchange(false, ordering: .relaxed)
-            #endif
         case .file(let url, let pace):
             source = try FileSource(url: url, pace: pace)
             if pace == .asFastAsPossible { policy.drainEvery = .milliseconds(5) }
         }
         guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue, startedAt: keyDown,
-                                     silenced: silenced, onLevel: broadcaster.send) else {
+                                     onLevel: broadcaster.send) else {
             source.stop()
             throw .engineFailed("no converter from \(source.firstSegment.rate) Hz to 16 kHz")
         }
+        #if DEBUG
+        core.silenced = silenced
+        #endif
         core.begin()
         return LiveCapture(core: core)
     }
@@ -118,9 +121,10 @@ public final class Recorder: Sendable {
     public var levels: AsyncStream<AudioLevel> { broadcaster.subscribe() }
 
     #if DEBUG
-    /// The `mic zeros` test hook: the next microphone capture records digital
-    /// zeros, as a dead or contended mic delivers. The engine starts and runs as
-    /// usual; its samples are zeroed before anything reads them.
+    /// The `mic zeros` test hook: the next Dictation from the mic records
+    /// digital zeros, as a dead or contended mic delivers. The engine starts and
+    /// runs as usual; its samples are zeroed before anything reads them. A start
+    /// that fails spends it too.
     public func silenceNextMicrophoneCapture() { silenceNext.store(true, ordering: .relaxed) }
     #endif
 }

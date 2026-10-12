@@ -24,16 +24,16 @@ enum AppTestHooks {
     /// app's own folder with `--dev-data`.
     static func dataPaths(bundleID: String) -> AppPaths {
         let own = AppPaths.forBundle(id: bundleID)
-        guard !CommandLine.arguments.contains(TestHookChannel.devDataArgument) else { return own }
-        let scratch = AppPaths.scratch(forBundle: bundleID)
+        let paths = TestHookChannel.dataRoot(forBundle: bundleID, arguments: CommandLine.arguments)
+        guard paths != own else { return own }
         do {
-            try ParakeetTranscriber.shareModels(of: own, with: scratch)
+            try ParakeetTranscriber.shareModels(of: own, with: paths)
         } catch {
             // Dictations wait for a model rather than the run touching the dev app's data.
             Logger(subsystem: bundleID, category: "test-hooks")
                 .error("the scratch data root has no model: \(error.localizedDescription, privacy: .public)")
         }
-        return scratch
+        return paths
     }
 
     /// The wire is always under the dev app's own root, wherever its data

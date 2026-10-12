@@ -5,8 +5,8 @@ public import Transcription
 
 /// The `dictate --result-delay` test hook: the local model's next live answer
 /// comes late, as a slow model's would, so a check can switch apps, type or
-/// press fn while a Dictation is still transcribing. Debug builds only: the
-/// dev app wraps its model in one only when launched with test hooks.
+/// press fn while a Dictation is still transcribing. Debug builds only: every
+/// debug launch wraps the model in one, inert until a hook calls `slowNext`.
 public final class SlowedTranscriber: LocalTranscriber {
     private let base: any LocalTranscriber
     private let clock: any Clock<Duration>
@@ -17,8 +17,8 @@ public final class SlowedTranscriber: LocalTranscriber {
         self.clock = clock
     }
 
-    /// The next `.live` transcription answers `delay` after the model does.
-    /// Recovery and Retry (`.background`) are never slowed.
+    /// The next `.live` transcription answers `delay` after the model does; one
+    /// that throws spends it too. Recovery and Retry (`.background`) are never slowed.
     public func slowNext(by delay: Duration) { next.withLock { $0 = delay } }
 
     public var model: LocalModel { base.model }
@@ -27,8 +27,9 @@ public final class SlowedTranscriber: LocalTranscriber {
     public func unload() async { await base.unload() }
 
     public func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String {
+        let delay = priority == .live ? next.withLock { $0.take() } : nil
         let text = try await base.transcribe(clip, terms: terms, priority: priority)
-        if priority == .live, let delay = next.withLock({ $0.take() }) { try await clock.sleep(for: delay) }
+        if let delay { try await clock.sleep(for: delay) }
         return text
     }
 }

@@ -159,6 +159,12 @@ public struct TestHookChannel: Sendable {
     /// scratch one, for checks that need its real History or Lexicon.
     public static let devDataArgument = "--dev-data"
 
+    /// A test-hooks run's data root: the scratch one, so synthetic Dictations
+    /// never land in the dev app's History, or its own with `devDataArgument`.
+    public static func dataRoot(forBundle bundleID: String, arguments: [String]) -> AppPaths {
+        arguments.contains(devDataArgument) ? AppPaths.forBundle(id: bundleID) : AppPaths.scratch(forBundle: bundleID)
+    }
+
     /// A request older than this is dropped unanswered. Its sender gave up long
     /// ago, and a stale "dictate" must never type into whatever has focus at the
     /// next launch.

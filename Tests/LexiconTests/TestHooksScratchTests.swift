@@ -3,6 +3,7 @@ import Foundation
 import Testing
 @testable import LexiconCore
 import LexiconDomain
+import TestHooks
 
 // A test-hooks run's scratch data root (#156): synthetic History, audio and
 // Lexicon go to a folder of their own, never into the dev app's data folder,
@@ -16,6 +17,12 @@ import LexiconDomain
     }
     // The same folder each launch, so a relaunch finds the Dictations made before it.
     #expect(AppPaths.scratch(forBundle: AppPaths.devBundleID) == AppPaths.scratch(forBundle: AppPaths.devBundleID))
+}
+
+@Test func aTestHooksRunUsesTheScratchRootUnlessToldToUseTheDevData() {
+    let root = { (arguments: [String]) in TestHookChannel.dataRoot(forBundle: AppPaths.devBundleID, arguments: arguments) }
+    #expect(root(["Lexicon", "--test-hooks"]) == AppPaths.scratch(forBundle: AppPaths.devBundleID))
+    #expect(root(["Lexicon", "--test-hooks", "--dev-data"]) == AppPaths.forBundle(id: AppPaths.devBundleID))
 }
 
 @Test func aDictationInAScratchRunWritesOnlyUnderTheScratchRoot() async throws {

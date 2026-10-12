@@ -63,7 +63,8 @@ let usage = """
       wait-fn print each Dictation's outcome and lag from Lexicon Dev's log as it
               lands, until --count of them (default 1) or --timeout (default 120 s)
       fixture speak <text> into a 16 kHz WAV for `hook dictate`; prints its path
-      stats   n, p50, p95 and max (nearest rank) of the first number on each line
+      stats   n, p50, p95 and max (nearest rank) of a sample: each line's first
+              number in ms, or a line that is only a number
       run-checklist  run a checklist file's items, print the result table and a
               `Live checks:` comment body
       result  the `Live checks:` comment body for the last run-checklist

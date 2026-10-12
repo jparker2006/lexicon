@@ -5,7 +5,8 @@ import TestHooks
 /// `lexicon-harness run-checklist <file>`: runs each item of a `Checklist` its
 /// `repeat` times, judges every run against its pass bars, then prints the
 /// result table and the `Live checks:` comment body. A harness item runs this
-/// same binary; a `sh` item runs /bin/sh. Outputs are judged here and shown
+/// same binary; a `sh` item runs /bin/sh, with this binary's path in
+/// `$LEXICON_HARNESS` so a line can combine a hook with a read. Outputs are judged here and shown
 /// only as fingerprints. The run is saved for `result`. Exits 1 if any item fails.
 func runChecklist(_ arguments: [String]) async throws {
     guard arguments.count == 1 else { fail(usage, code: 64) }
@@ -22,8 +23,10 @@ func runChecklist(_ arguments: [String]) async throws {
         case .harness(let words): (me, words)
         case .shell(let line): ("/bin/sh", ["-c", line])
         }
+        var environment = ProcessInfo.processInfo.environment
+        environment["LEXICON_HARNESS"] = me
         var outputs: [(status: Int32, output: String)] = []
-        for _ in 0..<item.runs { outputs.append(try await runChild(tool, words)) }
+        for _ in 0..<item.runs { outputs.append(try await runChild(tool, words, environment: environment)) }
         let result = ChecklistResult(item, outputs: outputs, seconds: (clock.now - start) / .seconds(1))
         print("   \(result.passes ? "Pass" : "Fail"), \(result.passed) of \(result.runs)")
         results.append(result)

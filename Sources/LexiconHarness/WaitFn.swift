@@ -64,8 +64,9 @@ struct DictationOutcome: CustomStringConvertible {
               let match = message.firstMatch(of: /^Dictation (\S+) (has no mic|\w+):?\s*(.*)$/) else { return nil }
         id = String(match.1.prefix(8))
         status = match.2 == "has no mic" ? "noMic" : String(match.2)
-        // Lag, engine and speech time are public; a failure's reason is private and reads "<private>".
-        detail = match.3.contains("<private>") || status == "noMic" ? "" : String(match.3)
+        // Lag, engine and speech time are public. A failure's or wait's reason is
+        // private, and readable on a Mac that shows private log data, so never kept.
+        detail = ["failed", "waiting", "noMic"].contains(status) ? "" : String(match.3)
     }
 
     var description: String { "\(status)  \(id)  \(detail)" }
