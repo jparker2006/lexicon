@@ -661,6 +661,10 @@ let rejectedModelOutputs: [Pair] = [
     // Only a set-off "like" hedges the word after it; a verb or a comparison may be reworded around.
     #expect(guarded("I like this idea.", "I like the idea.") == nil)
     #expect(guarded("It looks like a cache is stale.", "It looks like the cache is stale.") == nil)
+    // A comparison before a name or a number holds too, whatever its commas.
+    #expect(guarded("It's Postgres but faster. I like it.", "It's like Postgres but faster. I like it.")
+        == .droppedContentWord)
+    #expect(guarded("It takes eighty. I like eighty.", "It takes, like, eighty. I like eighty.") == .droppedContentWord)
     // The rules drop an "uh" inside a spoken number, so the AI may too.
     #expect(guarded("Call five oh oh seven.", "Call five uh oh oh seven.") == nil)
     // A "like" that ends its sentence hedges nothing in the next one.
