@@ -168,6 +168,29 @@ test('a branch\'s own "(#N)" commits don\'t make its ticket merged; main\'s do',
   assert.doesNotMatch(out, /#162 has merged/)
 })
 
+test('a ticket that merged on main after the branch forked counts as merged', () => {
+  const root = tree({ 'AGENTS.md': 'Esc reaches the app until #58 lands.\n' })
+  const git = (...args) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  git('init', '-q')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'docs')
+  const fork = git('rev-parse', 'HEAD').trim()
+  git('commit', '-q', '--allow-empty', '-m', 'M1: Esc cancels (#58) (#300)')
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+  git('checkout', '-q', '-b', 'claude/issue-1', fork)
+  git('commit', '-q', '--allow-empty', '-m', 'feat: x (#1)')
+  let status = 0
+  let out = ''
+  try {
+    out = execFileSync('node', [script, '--root', root], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (e) {
+    status = e.status
+    out = `${e.stdout}${e.stderr}`
+  }
+  assert.equal(status, 1, out)
+  assert.match(out, /#58 has merged/)
+})
+
 test('a future pointer at an open ticket passes', () => {
   const root = tree({ 'AGENTS.md': 'The live-checks skill lands with #161.\n' })
   assert.equal(run(root, '38').status, 0)

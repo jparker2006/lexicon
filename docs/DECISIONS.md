@@ -4,7 +4,7 @@ The one record of what has been decided since the v0 spec ([#36](https://github.
 
 ## How an entry is written
 
-- **Changed in the same PR as the behavior.** A PR that departs from the spec or from an entry here changes this file in the same PR, or links the entry that already allows it. `scripts/pr-body-check.mjs` refuses a body whose departure wording ("departs from", "deviates", "unlike the spec") has no link to this file.
+- **Changed in the same PR as the behavior.** A PR that departs from the spec or from an entry here changes this file in the same PR, or links the entry that already allows it. A PR body that names a departure ("departs from", "supersedes", "Jake's call") links its entry. `scripts/pr-body-check.mjs` refuses "departs from", "deviates" and "unlike the spec" with no link to this file; "supersedes" and "Jake's call" are #226.
 - **Each decided entry carries Jake's own words, verbatim, the question as he was asked it, and the time** (UTC). His words are quoted from the session where he answered; the link is the GitHub record of the question or the decision.
 - **An entry without Jake's words is Proposed.** It stands as built, and it goes into the next grill round, where the orchestrator asks Jake to confirm or change it. Nobody writes "Jake's call" for a choice he didn't make.
 - **A fact is not a decision.** A corrected number or a found behavior is recorded as a fact and applied; a change of what Lexicon does is a decision and goes to Jake.
@@ -141,7 +141,7 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 **67. What a `// timing-ok:` line covers.** Besides a real-time deadline that only bounds a hang, the timing lint (`scripts/checks/20-test-timing.sh`) accepts a `// timing-ok:` disclosure on the line for: a poll interval, a kill moment that is the test's own input, a semaphore the test itself releases, and a cancellation-only stand-in. The Reviewer's ruling in its verdict on PR #211 (#160).
 
-**69. Only the orchestrator posts chips.** Jake, 2026-10-12 09:49:04Z, not asked: "sometimes builders give me chips to spin up...". The orchestrator answered with the rule and wrote it on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6121815026): a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, and workflow.md, Roles.
+**69. Only the orchestrator posts chips.** Proposed. Jake, 2026-10-12 09:49:04Z, not asked: "sometimes builders give me chips to spin up...". The orchestrator answered with the rule and wrote it on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6121815026): a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, and workflow.md, Roles.
 
 ## Current: the product (spec part 3)
 
