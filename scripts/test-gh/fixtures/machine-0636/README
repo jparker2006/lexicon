@@ -1,0 +1,4 @@
+The 06:36 UTC readings on 2026-10-11 (#42): "load averages: 25.60 13.07 9.42"
+on 10 cores, Low Power Mode on all build day (#47: "lowpowermode 1"),
+fseventsd and a Python process near 100 percent of a core. The pageout and
+memory numbers were not recorded then; these are ordinary values.

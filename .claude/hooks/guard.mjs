@@ -1,13 +1,26 @@
 #!/usr/bin/env node
-// Claude Code PreToolUse hook for Bash, wired in .claude/settings.json. Adapted from
-// Jake's Glox repo (glox-brain-lab, scripts/agents/guard.mjs). It turns rules that
-// lived only in sentences into refusals:
+// Claude Code PreToolUse hook for Bash, Read, Grep and Glob, wired in .claude/settings.json.
+// Adapted from Jake's Glox repo (glox-brain-lab, scripts/agents/guard.mjs). It turns rules
+// that lived only in sentences into refusals:
+//   - Jake's private folder (~/Library/Application Support/Lexicon/, never Lexicon Dev's)
+//     and .env files, in Bash and in Read, Grep and Glob; a recursive search of a folder
+//     above the private one counts too. The permissions.deny rules come first; this is the
+//     backstop for the forms they miss;
+//   - Keychain secret reads (`security find-generic-password` and kin) and scratch scripts
+//     that call SecItem's reader: a step that needs a key goes on the Live checks checklist;
+//   - osascript, open or kill aimed at Jake's daily Lexicon; scripts/install.sh and
+//     scripts/live-lane.sh daily do that inside, where the guard never looks;
 //   - pushing to main, from any session: everything lands by PR;
 //   - merging a PR from anywhere but the Reviewer's session, which runs in the main
 //     checkout (its .git is a folder; every builder's worktree has a .git file), and
-//     any merge but a squash pinned to the reviewed head sha;
+//     any merge but a squash pinned to the reviewed head sha. Once scripts/merge-pr.mjs
+//     exists, the raw merge is refused in every session: the script is the one merge path;
+//   - `git reset --hard`, `git clean -f` and force pushes, which AGENTS.md leaves to Jake;
+//   - bare `swift build`, `swift test` and `swift run` once scripts/test.sh and
+//     scripts/lib/heavy.sh exist, so every build takes a build slot;
 //   - `tccutil reset` without the Lexicon Dev bundle ID, which resets Jake's daily
-//     Lexicon or every app;
+//     Lexicon or every app, and a reset of Lexicon Dev outside an open sitting;
+//   - `gh pr create` or `edit` whose body closes an issue or carries an em dash;
 //   - starting Docker, which can take the Mac down mid-build;
 //   - killing processes by name, which can kill other sessions' processes;
 //   - GitHub writes carrying Codex's handle, which start paid Codex cloud tasks;
@@ -48,17 +61,28 @@
 //   - a push or merge through GIT_DIR, --git-dir, or a wrapper it doesn't know (`caffeinate`, `arch`);
 //   - any clone whose .git is a folder counts as the main checkout, so the Reviewer's rule rests on
 //     builders and the orchestrator running in worktrees;
-//   - merges through tools other than Bash, such as an auto-merge button in the app, never reach it.
+//   - merges through tools other than Bash, such as an auto-merge button in the app, never reach it;
+//   - private paths and .env files are read from words only: a path a variable or a pipe supplies, a
+//     search with no path from a folder above the private one, and anything a script opens itself are
+//     not seen. gh, echo, printf and git commit, tag and notes only name paths, so only gh's body files are judged;
+//   - a SecItem reader is seen only in the source swift, swiftc, python or osascript is given;
+//   - a recursive search is judged by its roots and one folder below them, and by the main checkout's .env;
+//   - deliberate hiding: a word built by a substitution (`$(echo icon)`), git and gh aliases, `security -i` on
+//     stdin, and a path inside a script or a heredoc body the guard doesn't parse. It is a seatbelt against honest
+//     mistakes, not a sandbox.
 // An unreadable heredoc, any other parse failure and nesting about 1,500 levels
-// deep allow the command. A non-string cwd allows any command that needs a path.
+// deep allow the command, which is a shell parse the guard doesn't know. A non-string cwd allows any
+// command that needs a path. A tool call it can't read, or an error in the guard itself, refuses the call.
 // This is a backstop, not the permission system.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
 // Built from parts so the hook's own source never carries the handle.
 const CODEX_HANDLE = new RegExp(`@${'codex'}\\b`, 'i');
+// The Keychain readers a scratch script would call.
+const SECITEM_READ = /\b(?:SecItemCopyMatching|SecKeychainFindGenericPassword|SecKeychainFindInternetPassword)\b/;
 
 const REASONS = {
   docker: 'Refused: never start Docker from an agent session; it can crash the Mac.',
@@ -70,6 +94,17 @@ const REASONS = {
   merge: 'Refused: only the Reviewer merges, from its session in the main checkout; builders and the orchestrator never do.',
   mergeForm: 'Refused: the Reviewer merges only with `gh pr merge <pr> --squash --match-head-commit <full head sha>`.',
   tcc: "Refused: tccutil reset names the Lexicon Dev bundle ID only; anything else resets Jake's daily Lexicon or every app.",
+  sitting: "Refused: each reset of Lexicon Dev's permissions costs Jake an Allow click, so it runs only in an open sitting (scripts/live-lane.sh sitting start); put it on the Live checks checklist.",
+  private: "Refused: ~/Library/Application Support/Lexicon/ holds Jake's private data; agents never open it or search a folder above it (AGENTS.md). Lexicon Dev's folder is fine.",
+  env: "Refused: .env files hold Jake's keys; agents never read them (AGENTS.md).",
+  keychain: 'Refused: agents never read Keychain items (AGENTS.md); put the step that needs a key on the Live checks checklist.',
+  daily: "Refused: Jake's daily Lexicon is his; only scripts/install.sh and scripts/live-lane.sh daily quit, open or kill it.",
+  mergeScript: 'Refused: only the Reviewer merges, and only with scripts/merge-pr.mjs from the main checkout.',
+  destructive: 'Refused: git reset --hard, git clean -f, force pushes and rebasing a pushed branch discard work or rewrite history; ask Jake (AGENTS.md).',
+  envSearch: "Refused: this recursive search reaches a .env file and would print Jake's keys; leave it out (grep --exclude='.env*', rg -g '!.env*') or search a narrower folder.",
+  bareBuild: 'Refused: build and test through scripts/test.sh or scripts/check.sh (or scripts/lib/heavy.sh <command>), which take a build slot.',
+  closing: 'Refused: a closing keyword before an issue number closes it on merge; write Refs #N (AGENTS.md), and Jake closes the issue.',
+  emDash: 'Refused: no em dashes in a PR (AGENTS.md); use a comma, a colon or a new sentence.',
 };
 
 const MAIN = 'main';
@@ -101,9 +136,30 @@ const WRAPPERS = new Map([
   ['nice', new Set(['-n', '--adjustment'])],
   ['timeout', new Set(['-k', '-s', '--kill-after', '--signal'])],
   ['builtin', new Set()],
+  ['xcrun', new Set(['--sdk', '-sdk', '--toolchain', '-toolchain'])],
 ]);
 // gh's own flags that come before the subcommand, with a value.
 const GH_GLOBAL_VALUE_OPTIONS = new Set(['-R', '--repo', '--hostname']);
+// The daily copy's bundle ID, never Lexicon Dev's (dev.jparker.lexicon.dev); a quoted "Lexicon" app; its bundle path.
+const DAILY_ID = 'dev.jparker.lexicon';
+const DEV_ID = 'dev.jparker.lexicon.dev';
+const DAILY_APP = /\bdev\.jparker\.lexicon\b(?![.\w-])|\b(?:application|app|process)\s+"Lexicon(?:\.app)?"|(?:^|[\s/"'])Lexicon\.app\b/i;
+// Jake's private folder, as any home writes it. "Lexicon Dev" never matches: a space follows.
+const PRIVATE_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon(?:\/|$)/i;
+// Its models folder holds model weights, not private data, and Lexicon Dev's models folder links to it.
+const MODELS_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon\/models(?:\/|$)/i;
+// A .env file, but not the templates that hold no keys.
+const ENV_FILE = /^\.env(?:\.(?!(?:example|sample|template)$)[^/]+)?$/i;
+// Commands that reach every file under the folders they are given (ln through the link it makes), and those that do with a flag: its letters.
+const RECURSIVE_READERS = new Set(['find', 'rg', 'fd', 'ag', 'tar', 'rsync', 'zip', 'ditto', 'ln']);
+const RECURSIVE_FLAGS = new Map([['grep', 'rR'], ['egrep', 'rR'], ['fgrep', 'rR'], ['cp', 'rR'], ['rm', 'rR'], ['ls', 'R'], ['scp', 'r']]);
+// Commands that only name paths: their words are text, not files they open.
+const NAMES_ONLY = new Set(['echo', 'printf']);
+const GREPS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag']);
+const KEYCHAIN_READS = new Set(['find-generic-password', 'find-internet-password', 'dump-keychain']);
+const KEYCHAIN_SHELL_OUT = /\b(?:find-generic-password|find-internet-password|dump-keychain)\b/;
+// Runners a scratch Keychain reader would be written for.
+const SCRIPT_RUNNERS = new Set(['swift', 'swiftc', 'python', 'python3', 'osascript']);
 // .claude's tracked entries; deleting one of these, .claude or .claude/worktrees is refused.
 const CLAUDE_TRACKED = /^(agents|skills|commands|hooks|settings.*\.json)$/;
 // Names a find's name filters must not reach: .claude, the worktrees and the tracked entries. A settings file stands for settings*.json.
@@ -343,11 +399,45 @@ function splitString(line) {
   }
 }
 
-/** gh's arguments from the subcommand on, past its own flags. */
-function ghSubcommand(args) {
+/** gh's arguments past the flags at their front. */
+function skipGhFlags(args) {
   let rest = args;
   while (rest.length && rest[0].startsWith('-')) rest = rest.slice(GH_GLOBAL_VALUE_OPTIONS.has(rest[0]) ? 2 : 1);
   return rest;
+}
+
+/** gh's arguments from the subcommand on, past its own flags. gh reads them after `pr` too, so `gh pr -R <repo> merge` is `pr merge -R <repo>`. */
+function ghSubcommand(args) {
+  const rest = skipGhFlags(args);
+  if (rest[0] !== 'pr') return rest;
+  const sub = skipGhFlags(rest.slice(1));
+  return ['pr', ...sub.slice(0, 1), ...rest.slice(1, rest.length - sub.length), ...sub.slice(1)];
+}
+
+/**
+ * Whether a gh call merges a PR: a bare `merge` after `pr`, past gh's flags. It fails closed: a word after a flag
+ * the guard doesn't know might be that flag's value, so the search goes on past it.
+ */
+function ghPrMerges(args) {
+  const rest = skipGhFlags(args);
+  if (rest[0] !== 'pr') return false;
+  let maybeValue = false;
+  for (let i = 1; i < rest.length; i += 1) {
+    const word = rest[i];
+    if (GH_GLOBAL_VALUE_OPTIONS.has(word)) {
+      i += 1;
+      maybeValue = false;
+    } else if (word.startsWith('-')) {
+      maybeValue = !word.includes('=');
+    } else if (word === 'merge') {
+      return true;
+    } else if (maybeValue) {
+      maybeValue = false;
+    } else {
+      return false;
+    }
+  }
+  return false;
 }
 
 /** `target` with a leading ~, $HOME or ${HOME} replaced by the home directory. */
@@ -686,15 +776,20 @@ function currentBranch(dir) {
 /** Why a git push with these arguments, run in `dir`, is refused, or null: it would update main. */
 function pushRefusal(args, dir) {
   const positional = [];
+  let forced = false;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (['--all', '--mirror', '--branches'].includes(arg)) return REASONS.main;
     if (PUSH_VALUE_OPTIONS.has(arg)) i += 1;
+    else if (/^--force(?:-with-lease)?(?:=|$)/.test(arg) || /^-[a-zA-Z]*f/.test(arg)) forced = true;
     else if (!arg.startsWith('-')) positional.push(arg);
   }
   // The first is the remote; with no refspec, git pushes the branch checked out.
   const refspecs = positional.slice(1);
-  if (!refspecs.length) return currentBranch(dir) === MAIN ? REASONS.main : null;
+  // A leading + forces that one refspec.
+  if (refspecs.some((refspec) => refspec.startsWith('+'))) forced = true;
+  const fallback = forced ? REASONS.destructive : null;
+  if (!refspecs.length) return currentBranch(dir) === MAIN ? REASONS.main : fallback;
   for (const refspec of refspecs) {
     if (refspec.includes(UNKNOWN)) continue;
     const spec = refspec.replace(/^\+/, '');
@@ -705,6 +800,13 @@ function pushRefusal(args, dir) {
     if (destination?.includes('*')) return REASONS.main;
     if (destination?.replace(/^refs\/heads\//, '') === MAIN) return REASONS.main;
   }
+  return fallback;
+}
+
+/** Why a git reset or clean is refused, or null: --hard and a forced clean throw away uncommitted work. */
+function gitDiscardRefusal(sub, args) {
+  if (sub === 'reset' && args.includes('--hard')) return REASONS.destructive;
+  if (sub === 'clean' && args.some((arg) => arg === '--force' || /^-[a-zA-Z]*f/.test(arg))) return REASONS.destructive;
   return null;
 }
 
@@ -723,14 +825,20 @@ function flagValue(args, flag) {
   return undefined;
 }
 
-/** Why a gh command is refused for merging or moving main, or null. */
-function ghMergeRefusal(gh, command) {
-  if (gh[0] === 'pr' && gh[1] === 'merge') {
+/** Whether `relative` exists in the repo root, CLAUDE_PROJECT_DIR. The rules that switch on with a script read it here. */
+function inRepo(relative) {
+  return Boolean(process.env.CLAUDE_PROJECT_DIR) && existsSync(path.join(process.env.CLAUDE_PROJECT_DIR, relative));
+}
+
+/** Why a gh command is refused for merging or moving main, or null. `raw` is gh's arguments as written. */
+function ghMergeRefusal(gh, raw, command) {
+  if (ghPrMerges(raw)) {
+    if (inRepo('scripts/merge-pr.mjs')) return REASONS.mergeScript;
     if (!reviewerSession()) return REASONS.merge;
     const args = gh.slice(2);
     const squash = args.includes('--squash') || args.includes('-s');
     const pinned = /^[0-9a-f]{40}$/.test(flagValue(args, '--match-head-commit') ?? '');
-    if (!squash || !pinned || args.some((arg) => MERGE_OTHER_WAYS.has(arg))) return REASONS.mergeForm;
+    if (!squash || !pinned || args.some((arg) => MERGE_OTHER_WAYS.has(arg.split('=')[0]))) return REASONS.mergeForm;
     return null;
   }
   if (gh[0] !== 'api' || !isGitHubWrite(gh)) return null;
@@ -738,15 +846,250 @@ function ghMergeRefusal(gh, command) {
   const branchField = gh.map((arg) => /^branch=(.+)$/.exec(arg)?.[1]).find(Boolean);
   if (gh.some((arg) => CONTENTS_ENDPOINT.test(arg)) && (branchField ?? MAIN) === MAIN) return REASONS.main;
   const merges = gh.some((arg) => MERGE_ENDPOINT.test(arg)) || (gh[1] === 'graphql' && GRAPHQL_MERGE.test(text(command)));
-  if (merges) return reviewerSession() ? REASONS.mergeForm : REASONS.merge;
+  if (merges) return inRepo('scripts/merge-pr.mjs') ? REASONS.mergeScript : reviewerSession() ? REASONS.mergeForm : REASONS.merge;
   return null;
 }
 
-/** Why a tccutil command is refused, or null: a reset that doesn't name the Lexicon Dev bundle ID. */
+/** Why a tccutil command is refused, or null: a reset that doesn't name the Lexicon Dev bundle ID, or one outside a sitting. */
 function tccRefusal(args) {
   if (args[0] !== 'reset') return null;
   // `tccutil reset <service> [bundle id]`; with no bundle ID it resets every app.
-  return /lexicon.*dev/i.test(args[2] ?? '') ? null : REASONS.tcc;
+  if ((args[2] ?? '').toLowerCase() !== DEV_ID) return REASONS.tcc;
+  return sittingOpen() ? null : REASONS.sitting;
+}
+
+/**
+ * Whether a sitting is open: scripts/live-lane.sh sitting start writes the marker on Jake's go, and sitting end removes it.
+ * A sitting whose holder crashed leaves the marker behind, so its pid must still be the process that started then.
+ */
+function sittingOpen() {
+  let marker;
+  try {
+    marker = readFileSync(path.join(homedir(), 'Library/Application Support/Lexicon Dev/live-sitting.open'), 'utf8');
+  } catch {
+    return false;
+  }
+  const field = (name) => new RegExp(`^${name}=(.*)$`, 'm').exec(marker)?.[1].trim();
+  const pid = field('pid');
+  if (!/^\d+$/.test(pid ?? '')) return false;
+  const started = spawnSync('ps', ['-o', 'lstart=', '-p', pid], { encoding: 'utf8', timeout: 2000, env: { ...process.env, TZ: 'UTC' } });
+  return started.status === 0 && started.stdout.trim() === field('pid-started');
+}
+
+/** `file` with the links in its deepest existing folder followed, so a link to a folder above the private one is seen. */
+function realOrSelf(file) {
+  const rest = [];
+  for (let head = file; ; head = path.dirname(head)) {
+    try {
+      return path.join(realpathSync(head), ...rest.reverse());
+    } catch {
+      if (path.dirname(head) === head) return file;
+      rest.push(path.basename(head));
+    }
+  }
+}
+
+/** Jake's private folder in this home, as written and with its links followed. */
+function privateDirs() {
+  const dir = path.join(homedir(), 'Library/Application Support/Lexicon');
+  return unique([dir, realOrSelf(dir)]);
+}
+
+/** The patterns a brace list stands for: `{a,b}.md` is `a.md` and `b.md`. */
+function braces(pattern) {
+  const match = /^(.*?)\{([^{}]*)\}(.*)$/.exec(pattern);
+  return match ? match[2].split(',').flatMap((alt) => braces(`${match[1]}${alt}${match[3]}`)) : [pattern];
+}
+
+/** How the absolute path `resolved`, which may hold glob patterns, reaches `dir`: 'inside' it or at it, 'above' it, or null. */
+function reach(resolved, dir) {
+  const have = resolved.split('/').filter(Boolean);
+  const want = dir.split('/').filter(Boolean);
+  for (let i = 0; i < Math.min(have.length, want.length); i += 1) {
+    if (have[i] === '**') return 'inside';
+    if (!braces(have[i]).some((pattern) => globMatches(pattern, want[i]))) return null;
+  }
+  return have.length >= want.length ? 'inside' : 'above';
+}
+
+/** Whether a file name, which may be a glob, names a .env file. A glob counts when it is written for one, not when it is `*` or `.*`. */
+function envName(name) {
+  if (ENV_FILE.test(name)) return true;
+  return /[*?[{]/.test(name) && /^\.e|env/i.test(name) && braces(name).some((pattern) => globMatches(pattern, '.env'));
+}
+
+/** Whether text names the private folder, other than its models folder. */
+function namesPrivate(text) {
+  return PRIVATE_TEXT.test(text) && !MODELS_TEXT.test(text);
+}
+
+/** Whether the absolute path `file` is the private folder's models folder or inside it, named without a glob. */
+function inModels(file, dir) {
+  const at = dir.split('/').filter(Boolean).length;
+  return file.split('/').filter(Boolean)[at]?.toLowerCase() === 'models' && reach(file, dir) === 'inside';
+}
+
+/** Why the absolute path `resolved` is refused, or null: in the private folder, above it for a recursive read, or a .env file. A link is followed. */
+function pathRefusal(resolved, recursiveRead) {
+  if (resolved === null) return null;
+  for (const file of unique([resolved, realOrSelf(resolved)])) {
+    if (namesPrivate(file)) return REASONS.private;
+    for (const dir of privateDirs()) {
+      const reached = reach(file, dir);
+      if (inModels(file, dir)) continue;
+      if (reached === 'inside' || (recursiveRead && reached === 'above')) return REASONS.private;
+    }
+  }
+  return envName(path.basename(resolved)) ? REASONS.env : null;
+}
+
+/** The words of a command that may be paths it opens, each as written after a flag's = or a redirection. A grep's pattern is text, not a path. */
+function pathWords(name, args) {
+  const greps = GREPS.has(name);
+  const patternFlag = /^(?:-[a-zA-Z]*e|--regexp)$/;
+  // The first plain word is the pattern, unless -e or --regexp gives it.
+  let patternSkipped = !greps || args.some((arg) => patternFlag.test(arg) || arg.startsWith('--regexp='));
+  const words = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (greps && patternFlag.test(arg)) {
+      i += 1;
+    } else if (greps && arg.startsWith('--regexp=')) {
+      continue;
+    } else if (!patternSkipped && !arg.startsWith('-')) {
+      patternSkipped = true;
+    } else if (REDIRECTION.test(arg)) {
+      words.push(REDIRECTION.exec(arg)[1]);
+    } else if (arg.startsWith('-')) {
+      // A flag's glob value is a filter, such as --exclude='.env*', not a file it opens.
+      const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : '';
+      if (!/[*?[{]/.test(value)) words.push(value);
+    } else {
+      words.push(arg);
+    }
+  }
+  return words.filter(Boolean);
+}
+
+/** Why a command is refused for opening Jake's private folder or a .env file, or null. */
+function dataRefusal(name, args, gh, cwd) {
+  if (NAMES_ONLY.has(name)) return null;
+  let words;
+  if (name === 'gh') {
+    words = gh[0] === 'gist' ? gh.slice(2) : bodyFiles(gh);
+  } else if (name === 'git') {
+    // Only these git commands open the paths they are given; the rest take messages, refs and patterns.
+    const [sub, ...rest] = gitSubcommand(args, cwd).rest;
+    words = sub === 'add' || (sub === 'diff' && rest.includes('--no-index')) ? pathWords(name, rest) : [];
+  } else {
+    words = pathWords(name, args);
+  }
+  const letters = RECURSIVE_FLAGS.get(name);
+  const recursiveRead =
+    RECURSIVE_READERS.has(name) || (letters && args.some((arg) => arg === '--recursive' || new RegExp(`^-[a-zA-Z]*[${letters}]`).test(arg)));
+  for (const word of words) {
+    if (namesPrivate(expandHome(word))) return REASONS.private;
+    // A path a substitution writes is not known.
+    if (word.includes(UNKNOWN)) continue;
+    const reason = pathRefusal(targetPath(word, cwd), recursiveRead);
+    if (reason) return reason;
+  }
+  return null;
+}
+
+/** The main checkout of the repo the session is in, which holds Jake's .env; null when it can't be found. */
+function mainCheckoutDir() {
+  if (!process.env.CLAUDE_PROJECT_DIR) return null;
+  const result = spawnSync('git', ['-C', process.env.CLAUDE_PROJECT_DIR, 'rev-parse', '--path-format=absolute', '--git-common-dir'], {
+    encoding: 'utf8',
+    timeout: 2000,
+  });
+  return result.status === 0 ? path.dirname(result.stdout.trim()) : null;
+}
+
+/** Whether a folder holds a .env file, directly or one folder down, as ~/code holds lexicon/.env. */
+function holdsEnv(dir, depth = 1) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  if (entries.some((entry) => ENV_FILE.test(entry.name))) return true;
+  return depth > 0 && entries.some((entry) => entry.isDirectory() && !entry.name.startsWith('.') && holdsEnv(path.join(dir, entry.name), depth - 1));
+}
+
+/**
+ * Why a recursive search is refused for reaching a .env file, or null: grep -r, or rg or ag told to read hidden or ignored
+ * files, whose roots hold a .env or sit above the main checkout, which does. Leaving .env out by a filter allows it.
+ */
+function envSearchRefusal(name, args, cwd) {
+  let searches;
+  if (['grep', 'egrep', 'fgrep'].includes(name)) {
+    searches = args.some((arg) => arg === '--recursive' || /^-[a-zA-Z]*[rR]/.test(arg));
+  } else if (name === 'rg' || name === 'ag') {
+    searches = args.some((arg) => /^-[a-zA-Z]*u|^--(?:hidden|no-ignore|unrestricted|all-types|skip-vcs-ignores)/.test(arg));
+  }
+  if (!searches) return null;
+  const filtered = args.some((arg, i) => /\.env/i.test(arg) && (/^--exclude(?:-dir)?=|^--ignore=|^--glob=|^-g./.test(arg) || ['--exclude', '-g', '--glob', '--ignore'].includes(args[i - 1])));
+  if (filtered) return null;
+  const roots = pathWords(name, args).map((word) => (word.includes(UNKNOWN) ? null : targetPath(word, cwd)));
+  const main = mainCheckoutDir();
+  for (const root of roots.length ? roots : [cwd]) {
+    if (root === null) continue;
+    const real = realOrSelf(root);
+    if (holdsEnv(real)) return REASONS.envSearch;
+    if (main && holdsEnv(main) && !path.relative(real, main).startsWith('..')) return REASONS.envSearch;
+  }
+  return null;
+}
+
+/**
+ * Why a command is refused for reading a Keychain secret, or null: security's secret reads, gh's token, git's credential
+ * helpers, or a script that calls SecItem's reader or shells out to security.
+ */
+function keychainRefusal(name, args, gh, command, cwd) {
+  if (name === 'security') return KEYCHAIN_READS.has(args.find((arg) => !arg.startsWith('-'))) ? REASONS.keychain : null;
+  if (name === 'gh') return gh[0] === 'auth' && gh[1] === 'token' ? REASONS.keychain : null;
+  if (name === 'git' || name === 'git-credential-osxkeychain') {
+    return name !== 'git' || gitSubcommand(args, cwd).rest[0]?.startsWith('credential') ? REASONS.keychain : null;
+  }
+  if (!SCRIPT_RUNNERS.has(name)) return null;
+  const sources = [text(command), ...args.filter((arg) => !arg.startsWith('-')).map((file) => readable(file, cwd))];
+  return sources.some((source) => SECITEM_READ.test(source) || KEYCHAIN_SHELL_OUT.test(source)) ? REASONS.keychain : null;
+}
+
+/** Why a command is refused for quitting, opening or killing Jake's daily Lexicon, or null. */
+function dailyRefusal(name, args, command, cwd) {
+  if (name === 'osascript') {
+    const sources = [text(command), ...args.filter((arg) => !arg.startsWith('-')).map((file) => readable(file, cwd))];
+    return sources.some((source) => DAILY_APP.test(source)) ? REASONS.daily : null;
+  }
+  if (name === 'open') {
+    const daily = args.some((arg, i) => {
+      const flag = args[i - 1] ?? '';
+      if (/^-[a-zA-Z]*b$/.test(flag)) return arg.toLowerCase() === DAILY_ID;
+      if (/^-[a-zA-Z]*a$/.test(flag)) return /^lexicon(?:\.app)?$/i.test(path.basename(arg.replace(/\/+$/, '')));
+      return !arg.startsWith('-') && path.basename(arg.replace(/\/+$/, '')).toLowerCase() === 'lexicon.app';
+    });
+    return daily ? REASONS.daily : null;
+  }
+  if (name === 'kill' && command.subs.some((sub) => DAILY_APP.test(text(sub)))) return REASONS.daily;
+  return null;
+}
+
+/** Why a bare swift build, test or run is refused, or null: once the build-slot wrapper exists, builds go through it. */
+function buildRefusal(name, args) {
+  const builds = (name === 'swift' && ['build', 'test', 'run'].includes(args[0])) || ['swift-build', 'swift-test', 'swift-run'].includes(name);
+  if (!builds || args.some((arg) => arg === '--help' || arg === '-h')) return null;
+  return inRepo('scripts/test.sh') && inRepo('scripts/lib/heavy.sh') ? REASONS.bareBuild : null;
+}
+
+/** Why the text of a PR body or title is refused, or null: a closing keyword before an issue, or an em dash. */
+function prBodyRefusal(texts) {
+  const closing = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[\w.-]+\/[\w.-]+#\d+|#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)/i;
+  if (texts.some((body) => closing.test(body))) return REASONS.closing;
+  return texts.some((body) => body.includes('\u2014')) ? REASONS.emDash : null;
 }
 
 function check(command, cwd) {
@@ -761,6 +1104,14 @@ function check(command, cwd) {
       if (reason) return reason;
     }
   }
+  const gh = name === 'gh' ? ghSubcommand(args) : [];
+  const ruled =
+    dataRefusal(name, args, gh, cwd) ??
+    envSearchRefusal(name, args, cwd) ??
+    keychainRefusal(name, args, gh, command, cwd) ??
+    dailyRefusal(name, args, command, cwd) ??
+    buildRefusal(name, args);
+  if (ruled) return ruled;
   if (name === 'docker' || name === 'docker-compose') return REASONS.docker;
   if (name === 'open' && args.some((arg, i) => (/^-[a-zA-Z]*a$/.test(args[i - 1] ?? '') && /^docker/i.test(arg)) || /docker\.app/i.test(arg))) {
     return REASONS.docker;
@@ -780,16 +1131,19 @@ function check(command, cwd) {
   if (name === 'git') {
     const { dir, rest } = gitSubcommand(args, cwd);
     if (rest[0] === 'push') return pushRefusal(rest.slice(1), dir);
+    const discard = gitDiscardRefusal(rest[0], rest.slice(1));
+    if (discard) return discard;
   }
   if (name === 'tccutil') return tccRefusal(args);
-  const gh = name === 'gh' ? ghSubcommand(args) : [];
-  const mergeReason = name === 'gh' ? ghMergeRefusal(gh, command) : null;
+  if (name === 'gh' && gh[0] === 'pr' && gh[1] === 'update-branch' && gh.includes('--rebase')) return REASONS.destructive;
+  const mergeReason = name === 'gh' ? ghMergeRefusal(gh, args, command) : null;
   if (mergeReason) return mergeReason;
   if (name === 'gh' && isGitHubWrite(gh)) {
     // The body may sit in a flag, a heredoc, a file or a substitution that reads one.
     const files = [...bodyFiles(gh), ...substitutedFiles(command)];
     const texts = [text(command), ...files.map((file) => readable(file, cwd))];
     if (texts.some((text) => CODEX_HANDLE.test(text))) return REASONS.handle;
+    if (gh[0] === 'pr' && ['create', 'edit'].includes(gh[1])) return prBodyRefusal(texts);
   }
   return null;
 }
@@ -804,18 +1158,40 @@ function refusal(source, cwd) {
   }
 }
 
-let input;
+/** Why a Read, Grep or Glob call is refused, or null: it reads the private folder, a .env file or, for Grep, a folder above the private one. */
+function toolRefusal(tool, toolInput, cwd) {
+  const at = (file) => (typeof file === 'string' && file ? path.resolve(cwd, expandHome(file)) : null);
+  if (tool === 'Read') return pathRefusal(at(toolInput.file_path), false);
+  if (tool === 'Grep') {
+    const reason = pathRefusal(at(toolInput.path) ?? cwd, true);
+    if (reason) return reason;
+    const glob = typeof toolInput.glob === 'string' ? toolInput.glob : '';
+    return envName(path.basename(glob)) ? REASONS.env : null;
+  }
+  // Glob lists names only, so .env and the folders above the private one are fine.
+  if (typeof toolInput.pattern !== 'string' || !toolInput.pattern) return null;
+  const base = realOrSelf(at(toolInput.path) ?? cwd);
+  const full = path.resolve(base, expandHome(toolInput.pattern));
+  return namesPrivate(full) || privateDirs().some((dir) => reach(full, dir) === 'inside' && !inModels(full, dir)) ? REASONS.private : null;
+}
+
+// The guard fails closed: Claude Code lets a call through on any exit but 0 and 2, so an error here refuses it with 2.
 try {
   let raw = '';
   for await (const chunk of process.stdin) raw += chunk;
-  input = JSON.parse(raw);
-} catch {
-  input = null;
-}
-const command = input?.tool_input?.command;
-const reason = input?.tool_name === 'Bash' && typeof command === 'string' ? refusal(command, input.cwd || process.cwd()) : null;
-if (reason) {
-  process.stdout.write(`${JSON.stringify({
-    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
-  })}\n`);
+  const input = JSON.parse(raw);
+  const tool = input?.tool_name;
+  const cwd = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
+  const command = input?.tool_input?.command;
+  let reason = null;
+  if (tool === 'Bash' && typeof command === 'string') reason = refusal(command, cwd);
+  else if (['Read', 'Grep', 'Glob'].includes(tool) && input.tool_input) reason = toolRefusal(tool, input.tool_input, cwd);
+  if (reason) {
+    process.stdout.write(`${JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+    })}\n`);
+  }
+} catch (error) {
+  process.stderr.write(`guard: ${error.message}; refusing the call\n`);
+  process.exitCode = 2;
 }

@@ -56,6 +56,11 @@ for tool in lsappinfo osascript open; do
     chmod +x "$T/bin/$tool"
 done
 
+# The app's temporary folder (where a test-hooks run keeps its scratch data) is
+# the test's own TMPDIR, so nothing here reads or writes the real one.
+printf '#!/bin/sh\n[ "$1" = DARWIN_USER_TEMP_DIR ] && { echo "%s/"; exit 0; }\nexec /usr/bin/getconf "$@"\n' "$TMPDIR" > "$T/bin/getconf"
+chmod +x "$T/bin/getconf"
+
 pass() { echo "ok: $1"; }
 fail() { echo "FAIL: $1" >&2; FAILED=1; }
 
@@ -108,6 +113,8 @@ fake_listener() {
     mkdir -p "$(dirname "$1")"
     # It exits once orphaned, so a test killed outright (no trap runs) leaves none behind.
     [ -e "$T/listener" ] || printf '#include <unistd.h>\nint main(void) { while (getppid() != 1) sleep(1); return 0; }\n' | cc -x c -o "$T/listener" -
+    # A new file each time: macOS can refuse to overwrite a binary that just ran.
+    rm -f "$1"
     cp "$T/listener" "$1"
     "$1" &
     LISTENERS="$LISTENERS $!"

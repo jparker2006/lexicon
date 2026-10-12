@@ -1,0 +1,5 @@
+[
+{"number":45,"title":"M0: Test hooks and the Accessibility harness","state":"OPEN","labels":[{"name":"ready-for-agent"}],"comments":[],"createdAt":"2026-10-11T05:26:09Z","updatedAt":"2026-10-11T05:26:09Z","closedAt":null,"url":"https://github.com/jparker2006/lexicon/issues/45","body":""},
+{"number":44,"title":"M0: App shell, signed dev build and daily install command","state":"OPEN","labels":[{"name":"ready-for-agent"}],"comments":[],"createdAt":"2026-10-11T05:26:05Z","updatedAt":"2026-10-11T05:26:05Z","closedAt":null,"url":"https://github.com/jparker2006/lexicon/issues/44","body":""},
+{"number":43,"title":"M0: Never-lose audio file writer","state":"OPEN","labels":[{"name":"ready-for-agent"}],"comments":[],"createdAt":"2026-10-11T05:26:02Z","updatedAt":"2026-10-11T05:26:02Z","closedAt":null,"url":"https://github.com/jparker2006/lexicon/issues/43","body":""}
+]

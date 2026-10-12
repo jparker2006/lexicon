@@ -7,11 +7,15 @@
 #   scripts/bench.sh <budget> <A.app> <B.app> [runs per side]   default 5
 #   scripts/bench.sh background [seconds]    measure the quiet Mac's load (default 60 s)
 #   scripts/bench.sh sample <file>           the load sampler alone, until stopped
-#   scripts/bench.sh report <budget> <A numbers> <B numbers> <load file>
+#   scripts/bench.sh seed <history.sqlite>   add the synthetic year to a History
+#   scripts/bench.sh report <budget> <A numbers> <B numbers> <load file> [same]
 #
 # Budgets, each with one reading and its exclusion rule, fixed before the first run:
 #   history-open  History window, open to first rows, every open, p95 100 ms or less.
 #                 Excludes nothing. Needs debug bundles: the harness opens it through test hooks.
+#                 Reads a year of History: before the first run it seeds 36,500 synthetic
+#                 Dictations (100 a day) into the scratch data root a test-hooks run uses,
+#                 never Dev's own data. The harness's check scrolls to the oldest day.
 #   launch        process start to fn working, warm relaunch with `open`, p95 150 ms or less.
 #                 Excludes each install's first launch (macOS checks the new signature).
 #
@@ -19,7 +23,9 @@
 # commit. Each run installs one with scripts/lib/install-app.sh and reads the
 # app's own log lines, so only the live-app lane's holder runs this. The
 # verdict is PROVISIONAL, never PASS or FAIL, while the run's median load is
-# over 1.5 times the measured background, or another app answers fn.
+# over 1.5 times the measured background, or another app answers fn. When A
+# and B build the same app code, the verdict is SAME APP CODE: their
+# difference is run-to-run noise, and the budget is read from main's numbers.
 set -eu
 HERE=$PWD
 cd "$(dirname "$0")/.."
@@ -31,6 +37,24 @@ BACKGROUND="$HOME/Library/Application Support/$NAME/live-lane/bench-background"
 APP="$APP_PATH"
 
 die() { echo "bench: $*" >&2; exit 1; }
+
+# The History a test-hooks run of Dev opens (AppPaths.scratch: the app's temporary folder).
+SCRATCH_HISTORY="$(getconf DARWIN_USER_TEMP_DIR)$NAME scratch/history.sqlite"
+YEAR=36500
+
+# Adds the synthetic year to History $1 (one statement; ids are fixed, so a
+# second run adds nothing) and prints how many of its rows are there. Every
+# row is an inserted Dictation whose audio has expired, so no file is needed.
+seed() {
+    sqlite3 "$1" "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < $YEAR)
+        INSERT OR IGNORE INTO dictation (id, started_at, ended_at, origin, purpose, status, model_text,
+            cleaned_text, final_text, lag_ms, audio_ms, audio_storage, app_bundle_id, app_title)
+        SELECT printf('%08X-0000-4000-8000-%012X', i, i), now - i * 864000, now - i * 864000 + 3000,
+            'live', 'type', 'inserted', 'synthetic dictation ' || i, 'Synthetic dictation ' || i || '.',
+            'Synthetic dictation ' || i || '.', 600, 3000, 'expired', 'com.apple.TextEdit', 'TextEdit'
+        FROM n, (SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000 AS now);"
+    sqlite3 "$1" "SELECT count(*) FROM dictation WHERE id LIKE '%-0000-4000-8000-%'"
+}
 
 budget() {
     case "$1" in
@@ -82,12 +106,14 @@ load_stats() {
 
 report() {
     budget "$1"
+    same=${5:-}
     set -- $(percentiles < "$2") $(percentiles < "$3") $(load_stats < "$4")
     a_n=$1 a50=$2 a95=$3 b_n=$4 b50=$5 b95=$6 lmin=$7 lmed=$8 lmax=$9
     echo "A (branch): $a_n samples, p50 $a50 ms, p95 $a95 ms"
     echo "B (main):   $b_n samples, p50 $b50 ms, p95 $b95 ms"
     echo "load: min $lmin, median $lmed, max $lmax"
     [ "$a_n" -gt 0 ] && [ "$b_n" -gt 0 ] || { echo "FAIL: no samples on one side"; return 1; }
+    printf 'A - B: p50 %+d ms, p95 %+d ms\n' $((a50 - b50)) $((a95 - b95))
     provisional=
     if [ -s "$BACKGROUND" ]; then
         background=$(cat "$BACKGROUND")
@@ -101,6 +127,8 @@ report() {
     [ "$listeners" = "fn listeners: none" ] || provisional="${provisional:+$provisional; }$listeners"
     if [ -n "$provisional" ]; then
         echo "PROVISIONAL, no final verdict: $provisional. A's p95 $a95 ms against the $TARGET ms budget."
+    elif [ "$same" = same ]; then
+        echo "SAME APP CODE: A and B build the same Sources, so A - B is run-to-run noise. Main's p95 $b95 ms against the $TARGET ms budget."
     elif [ "$a95" -le "$TARGET" ]; then
         echo "PASS: A's p95 $a95 ms is within the $TARGET ms budget."
     else
@@ -111,13 +139,32 @@ report() {
 
 running_pid() { pgrep -f "^$APP/Contents/MacOS/" | head -1; }
 
+# Installs $1 with test hooks so the app creates its scratch History, quits it,
+# and seeds the synthetic year there.
+prepare_history() {
+    rm -rf "$OUT/stage.app"
+    ditto "$1" "$OUT/stage.app"
+    scripts/lib/install-app.sh dev "$OUT/stage.app" --test-hooks > /dev/null
+    ticks=0
+    until [ -s "$SCRATCH_HISTORY" ]; do
+        sleep 0.1
+        ticks=$((ticks + 1))
+        [ "$ticks" -lt 150 ] || die "$NAME made no History at $SCRATCH_HISTORY within 15 s of launch"
+    done
+    pid=$(running_pid)
+    [ -z "$pid" ] || { kill -TERM "$pid"; while kill -0 "$pid" 2>/dev/null; do sleep 0.1; done; }
+    rows=$(seed "$SCRATCH_HISTORY")
+    [ "$rows" -eq "$YEAR" ] || die "the synthetic year has $rows of $YEAR rows in $SCRATCH_HISTORY"
+    echo "History: the synthetic year, $YEAR Dictations, in $SCRATCH_HISTORY"
+}
+
 # Lines from Lexicon Dev's log since $1, category $2, matching sed expression $3.
 log_numbers() {
     /usr/bin/log show --start "$1" --style compact --predicate \
         "category == \"$2\" && processImagePath CONTAINS \"/$NAME.app/\"" | sed -n "$3"
 }
 
-# One run of one side: install the bundle, then append its samples to $2.
+# One run of one side: install the bundle, then append its samples to $2. $3 names the side.
 run() {
     rm -rf "$OUT/stage.app"
     ditto "$1" "$OUT/stage.app"
@@ -125,7 +172,8 @@ run() {
         history-open)
             scripts/lib/install-app.sh dev "$OUT/stage.app" --test-hooks > /dev/null
             since=$(date '+%Y-%m-%d %H:%M:%S')
-            scripts/harness.sh history > /dev/null
+            scripts/harness.sh history > "$OUT/harness.log" 2>&1 \
+                || die "the harness's History check failed on $3 (run $RUN), so no verdict: $(tail -1 "$OUT/harness.log")"
             log_numbers "$since" History 's/.*first rows drawn \([0-9][0-9]*\) ms after open.*/\1/p' >> "$2"
             ;;
         launch)
@@ -164,9 +212,13 @@ case "${1:-}" in
         [ $# -eq 2 ] || { echo "usage: bench.sh sample <file>" >&2; exit 64; }
         sample "$2"
         ;;
+    seed)
+        [ $# -eq 2 ] || { echo "usage: bench.sh seed <history.sqlite>" >&2; exit 64; }
+        seed "$2"
+        ;;
     report)
-        [ $# -eq 5 ] || { echo "usage: bench.sh report <budget> <A numbers> <B numbers> <load file>" >&2; exit 64; }
-        report "$2" "$3" "$4" "$5"
+        [ $# -eq 5 ] || [ $# -eq 6 ] || { echo "usage: bench.sh report <budget> <A numbers> <B numbers> <load file> [same]" >&2; exit 64; }
+        report "$2" "$3" "$4" "$5" "${6:-}"
         ;;
     history-open | launch)
         BUDGET=$1
@@ -189,6 +241,7 @@ case "${1:-}" in
         echo "reading: $READING; budget p95 $TARGET ms"
         echo "excluded: $EXCLUDES"
         echo "$(fn_listeners_line); $(power | sed 's/^# //'); samples in $OUT"
+        [ "$BUDGET" != history-open ] || prepare_history "$2"
         sample "$OUT/load.txt" &
         sampler=$!
         trap 'kill "$sampler" 2>/dev/null || true' EXIT
@@ -199,17 +252,25 @@ case "${1:-}" in
         while [ "$i" -lt "$RUNS" ]; do
             i=$((i + 1))
             # Alternate which side goes first, so neither always follows the other.
-            if [ $((i % 2)) -eq 1 ]; then run "$2" "$OUT/A.txt"; run "$3" "$OUT/B.txt"
-            else run "$3" "$OUT/B.txt"; run "$2" "$OUT/A.txt"
+            RUN=$i
+            if [ $((i % 2)) -eq 1 ]; then run "$2" "$OUT/A.txt" A; run "$3" "$OUT/B.txt" B
+            else run "$3" "$OUT/B.txt" B; run "$2" "$OUT/A.txt" A
             fi
         done
         kill "$sampler"
         wait "$sampler" 2>/dev/null || true
         power >> "$OUT/load.txt"
-        report "$BUDGET" "$OUT/A.txt" "$OUT/B.txt" "$OUT/load.txt"
+        # The same app code on both sides: no difference between them can be a regression.
+        same=
+        a=$(commit "$2") b=$(commit "$3")
+        case "$a$b" in
+            *dirty* | *unknown*) ;;
+            *) if git diff --quiet "$a" "$b" -- Sources Package.swift Package.resolved scripts/app 2>/dev/null; then same=same; fi ;;
+        esac
+        report "$BUDGET" "$OUT/A.txt" "$OUT/B.txt" "$OUT/load.txt" $same
         ;;
     *)
-        echo "usage: bench.sh history-open|launch <A.app> <B.app> [runs] | background [s] | sample <file> | report ..." >&2
+        echo "usage: bench.sh history-open|launch <A.app> <B.app> [runs] | background [s] | sample <file> | seed <history.sqlite> | report ..." >&2
         exit 64
         ;;
 esac
