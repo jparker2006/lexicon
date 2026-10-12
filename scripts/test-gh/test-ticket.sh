@@ -219,6 +219,27 @@ test_ready_accepts_a_check_run_before_the_commit() {
     expect_status 0
 }
 
+test_ready_refuses_another_issue_than_the_branch() {
+    # From #135's worktree, "ready 38" would post a false Ready on #38.
+    setup_135
+    stamp HEAD
+    status=0
+    "$TMP/repo/scripts/ticket.sh" ready 38 > "$TMP/out" 2> "$TMP/err" || status=$?
+    err=$(cat "$TMP/err")
+    expect_status 1
+    expect_err "this is claude/issue-135, not claude/issue-38"
+    expect_no_log "gh issue comment"
+}
+
+test_ready_refuses_a_pr_that_refs_another_issue() {
+    setup_135
+    stamp HEAD
+    jq '(.[] | select(.number == 137) | .body) = "Refs #134"' "$GH_FIXTURES/prs.json" > "$TMP/p" && mv "$TMP/p" "$GH_FIXTURES/prs.json"
+    ready
+    expect_status 1
+    expect_err "PR #137 doesn't start \"Refs #135\""
+}
+
 test_ready_refuses_a_merged_pr() {
     setup_135
     stamp HEAD

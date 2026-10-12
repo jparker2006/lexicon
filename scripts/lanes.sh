@@ -29,12 +29,15 @@ for sha in "$main" $(awk '{ print $3 }' "$tmp/prs"); do
 done
 
 # Prints the conflicted files of merging $1 and $2, comma-separated, or "clean".
+# merge-tree exits 1 for conflicts and more for an error.
 merge() {
-    if git merge-tree --write-tree --name-only --no-messages "$1" "$2" > "$tmp/merge"; then
-        echo clean
-    else
-        echo "conflicts in $(sed 1d "$tmp/merge" | sort -u | paste -sd, - | sed 's/,/, /g')"
-    fi
+    st=0
+    git merge-tree --write-tree --name-only --no-messages "$1" "$2" > "$tmp/merge" 2> /dev/null || st=$?
+    case $st in
+        0) echo clean ;;
+        1) echo "conflicts in $(sed 1d "$tmp/merge" | sort -u | paste -sd, - | sed 's/,/, /g')" ;;
+        *) echo "unknown (git merge-tree failed)" ;;
+    esac
 }
 
 if [ ! -s "$tmp/prs" ]; then

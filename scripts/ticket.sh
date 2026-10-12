@@ -11,7 +11,8 @@
 #       ask goes to Jake before anyone builds.
 #   scripts/ticket.sh ready <issue>
 #       Comments "Ready for review: PR #M at <sha7>, CI pending" once and removes
-#       building. Refuses a dirty tree, a HEAD that isn't the PR's head on GitHub,
+#       building. Refuses unless the branch is claude/issue-<issue> and its PR
+#       starts "Refs #<issue>", and refuses a dirty tree, a HEAD that isn't the PR's head on GitHub,
 #       and a check stamp (.build/check-stamp, written by scripts/check.sh) that
 #       failed or is for other content. A stamp still counts after merges of
 #       origin/main on top of the checked commit; CI checks the merge result.
@@ -87,10 +88,13 @@ ready() {
     n=$1
     [ -z "$(git status --porcelain)" ] || die "the tree is dirty; commit or drop the changes first"
     branch=$(git branch --show-current)
-    pr=$(gh pr view --json number,headRefOid,state 2> /dev/null) || die "no open PR for $branch"
+    [ "$branch" = "claude/issue-$n" ] || die "this is $branch, not claude/issue-$n: run ready from #$n's own worktree"
+    pr=$(gh pr view --json number,headRefOid,state,body 2> /dev/null) || die "no open PR for $branch"
     m=$(printf '%s' "$pr" | jq -r .number)
     # gh also answers with the branch's last merged or closed PR.
     [ "$(printf '%s' "$pr" | jq -r .state)" = OPEN ] || die "PR #$m for $branch is $(printf '%s' "$pr" | jq -r .state | tr 'A-Z' 'a-z'), not open"
+    printf '%s' "$pr" | jq -e --arg n "$n" '(.body // "") | gsub("\r"; "") | (split("\n")[0] // "") | test("^Refs #" + $n + "\\b")' > /dev/null ||
+        die "PR #$m doesn't start \"Refs #$n\""
     head=$(git rev-parse HEAD)
     [ "$(printf '%s' "$pr" | jq -r .headRefOid)" = "$head" ] ||
         die "HEAD $(git rev-parse --short HEAD) isn't PR #$m's head on GitHub ($(printf '%s' "$pr" | jq -r '.headRefOid[:7]')); push first"
@@ -137,7 +141,8 @@ ac() {
         esac
     done
     json=$(gh issue view "$n" --json body)
-    body=$(printf '%s' "$json" | jq -r .body | tr -d '\r')
+    body=$(printf '%s' "$json" | jq -r '.body // empty' | tr -d '\r')
+    [ -n "$body" ] || die "#$n has no body"
     # Prints the new body, a line "@@problems", then one "unmarked <n> <text>" or
     # "unknown <n>" line per problem.
     result=$(printf '%s\n' "$body" | awk -v marks="$marks" '

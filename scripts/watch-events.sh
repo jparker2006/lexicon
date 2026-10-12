@@ -54,6 +54,7 @@ case "$role" in
     *) usage ;;
 esac
 [ "$role" != builder ] || [ -n "$issue" ] || usage
+case "$interval" in "" | *[!0-9]* | 0) usage ;; esac
 
 dir="$HOME/Library/Application Support/Lexicon Dev/watch"
 name=$role${issue:+-$issue}
@@ -76,7 +77,7 @@ poll() {
         | select([$prs[0][].number | tostring] | index($n) | not) | $n' "$state" > "$tmp/gone" || return 1
     : > "$tmp/gone.jsonl"
     while read -r n; do
-        gh pr view "$n" --json number,state,mergedAt,closedAt,mergeCommit,headRefName,body >> "$tmp/gone.jsonl" || return 1
+        gh pr view "$n" --json number,state,mergedAt,closedAt,mergeCommit,headRefName,body,comments >> "$tmp/gone.jsonl" || return 1
     done < "$tmp/gone"
     jq -s . "$tmp/gone.jsonl" > "$tmp/gone.json" || return 1
 
@@ -102,7 +103,7 @@ poll() {
         | ($prs[0] | map({key: .headRefName, value: .number}) | from_entries) as $prOfBranch
         | ($prs[0] + $gone[0] | map({key: (.number | tostring), value: issue_of}) | from_entries) as $issueOfPr
         | ([$issues[0][] | .number as $n | .comments[] | {where: "#\($n)", issue: ($n | tostring), c: .}]
-           + [$prs[0][] | .number as $n | .comments[] | {where: "PR #\($n)", issue: $issueOfPr[$n | tostring], c: .}]) as $all
+           + [$prs[0][], $gone[0][] | .number as $n | .comments[]? | {where: "PR #\($n)", issue: $issueOfPr[$n | tostring], c: .}]) as $all
         | [$all[] | select($seenC[.c.id] | not) | (.c.body | kind) as $k | select($k != null)
             | {at: .c.createdAt, type: $k, issue, text: "\($k) \(.where) \(.c.body | (split("\n")[0] // "") | .[0:140]) \(.c.url // "")"}]
           + [$prs[0][] | select($heads[.number | tostring] != null and $heads[.number | tostring] != .headRefOid)
@@ -127,16 +128,26 @@ poll() {
     ' > "$tmp/out" || return 1
     sed -n 's/^STATE //p' "$tmp/out" > "$state.new"
     [ -s "$state.new" ] || return 1
-    mv "$state.new" "$state"
+    # Printed before the state is saved: a kill in between repeats an event on
+    # the next start rather than losing it.
     grep -v '^STATE ' "$tmp/out" || true
+    mv "$state.new" "$state"
 }
 
 if [ -n "$once" ]; then
     poll
     exit 0
 fi
+# Two watchers for one role would print every event twice.
+if [ -f "$dir/$name.pid" ] && kill -0 "$(cat "$dir/$name.pid")" 2> /dev/null; then
+    once=1 # so cleanup leaves the running watcher's pid file
+    echo "watch-events: a $name watcher already runs (pid $(cat "$dir/$name.pid"))" >&2
+    exit 1
+fi
 echo $$ > "$dir/$name.pid"
 while :; do
     poll || echo "watch-events: poll failed; trying again in $interval s" >&2
-    sleep "$interval"
+    # In the background, so TERM ends the wait at once.
+    sleep "$interval" &
+    wait $!
 done

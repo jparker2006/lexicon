@@ -88,3 +88,31 @@ test_a_failed_poll_keeps_the_state() {
     poll watch-ci/2
     expect_out "CI main e2c850b failure"
 }
+
+test_a_verdict_on_a_pr_that_merged_within_a_poll_still_fires() {
+    poll watch-merged/1
+    poll watch-merged/2
+    use_fixture watch-merged/3
+    jq '(.[] | select(.number == 110) | .comments) += [{id: "IC_verdict110", author: {login: "jparker2006"}, body: "**Reviewer verdict: merge** (head 9e11d49).", createdAt: "2026-10-11T11:04:30Z", url: "https://github.com/jparker2006/lexicon/pull/110#issuecomment-1"}]' \
+        "$GH_FIXTURES/prs.json" > "$TMP/p" && mv "$TMP/p" "$GH_FIXTURES/prs.json"
+    run watch-events.sh --role orchestrator --once
+    expect_status 0
+    expect_out "VERDICT PR #110 **Reviewer verdict: merge** (head 9e11d49)."
+    expect_out "MERGED PR #110"
+}
+
+test_a_second_watcher_for_a_role_is_refused() {
+    use_fixture watch-ci/1
+    mkdir -p "$HOME/Library/Application Support/Lexicon Dev/watch"
+    echo $$ > "$HOME/Library/Application Support/Lexicon Dev/watch/reviewer.pid"
+    run watch-events.sh --role reviewer --interval 60
+    expect_status 1
+    expect_err "a reviewer watcher already runs"
+    [ "$(cat "$HOME/Library/Application Support/Lexicon Dev/watch/reviewer.pid")" = "$$" ] || fail "removed the running watcher's pid file"
+}
+
+test_an_interval_of_zero_is_refused() {
+    use_fixture watch-ci/1
+    run watch-events.sh --role reviewer --interval 0
+    expect_status 64
+}

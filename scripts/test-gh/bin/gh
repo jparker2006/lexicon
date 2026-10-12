@@ -184,6 +184,10 @@ case "${1:-} ${2:-}" in
                 | select($w == "" or .workflowName == $w)] | sort_by(.createdAt) | reverse' \
             "$GH_FIXTURES/runs.json" | project "$@"
         ;;
+    "repo view")
+        shift 2
+        echo '{"owner":{"login":"jparker2006"},"nameWithOwner":"jparker2006/lexicon"}' | project "$@"
+        ;;
     "api "*)
         path=$2
         case "$path" in */*) ;; *) die "unknown api path $path" ;; esac

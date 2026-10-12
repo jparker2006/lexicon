@@ -50,9 +50,15 @@ test_a_watcher_that_stopped_polling_is_not_watching() {
     expect_out "  no poll in 10 min from: reviewer"
 }
 
-test_the_lane_queue_is_unknown_without_a_queue_command() {
+test_the_lane_queue_is_listed() {
     board status-0730 2026-10-11T07:30:00Z
-    expect_out "  queue: unknown"
+    expect_out "  queue: empty"
+    jq '(.[] | select(.number == 44) | .comments) += [{id: "IC_req44", author: {login: "jparker2006"}, body: "Live checks request: claude/issue-44 @ abc1234", createdAt: "2026-10-11T07:00:00Z", url: "u"}]' \
+        "$TESTS/fixtures/status-0730/issues.json" > "$TMP/i"
+    board status-0730 2026-10-11T07:30:00Z
+    cp "$TMP/i" "$GH_FIXTURES/issues.json"
+    run status.sh
+    expect_out "  queued: 1. #44 claude/issue-44 @ abc1234"
 }
 
 test_a_spec_with_ready_for_agent_is_a_label_conflict() {
