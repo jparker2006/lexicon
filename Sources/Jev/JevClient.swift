@@ -47,9 +47,8 @@ public struct JevClient: Sendable {
     /// and keys are never read at fn-down (a first Keychain read can wait on a prompt).
     public func prewarm(_ access: CloudAccess?) {
         guard let access, access.revoked == nil else { return }
-        let session = session
-        let request = request("HEAD", key: nil, body: nil)
-        Task { _ = try? await session.data(for: request) }
+        // Started before this returns, so nothing about it is left to a later task.
+        session.dataTask(with: request("HEAD", key: nil, body: nil)).resume()
     }
 
     public func decide<Answer: Sendable>(
