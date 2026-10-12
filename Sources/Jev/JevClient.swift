@@ -70,6 +70,9 @@ public struct JevClient: Sendable {
                     guard let key = await Self.key(access, sending: question.sent) else {
                         return answer(fallingBack(access.revoked.map(Decision<Answer>.Reason.init) ?? .noKey))
                     }
+                    // Checked again after the read: Private mode may have come on, or the race
+                    // been answered, while it waited. Either way nothing is sent.
+                    guard access.revoked == nil, !Task.isCancelled else { return }
                     answer(await self.ask(question, key: key, fallingBack: fallingBack))
                 },
                 Task {
