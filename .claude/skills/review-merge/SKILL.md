@@ -36,7 +36,7 @@ One comment on the PR, with every blocking item in it, so a PR comes back as few
 - `Verdict: merge (head <sha7>)`
 - `Verdict: merge with notes (head <sha7>)`, then a `Later:` line with one bullet per note, each naming the issue that owns it. `scripts/ticket.sh later <pr> "<note>" --owner <issue>` (or `--new`) makes that issue.
 - `Verdict: don't merge (head <sha7>)`
-- `Hold: <why> (head <sha7>)`, for anything Jake or another PR must settle first.
+- `Verdict: hold (head <sha7>): <why>`, for anything Jake, CI or another PR must settle first. The merge script refuses a hold, and the watcher reports it, since its first word is `Verdict`.
 
 On a high-tier PR the comment carries the Workflow's `## Review` markdown in full (its table, the `Reviewed sha:` line and the Helpers line), and, when `tier.mjs` printed a blast radius, one line `Blast radius: <the one safety fact> Proof: \`<command>\``. The merge script refuses a high-tier PR without them. Send no message: the orchestrator points the builder at a verdict that isn't a merge.
 
@@ -51,7 +51,7 @@ scripts/merge-pr.mjs <pr> <full 40-character reviewed head sha>
 It checks every gate (the verdict names this head, acceptance marked, Live checks results, the high-tier table, the critical-path order), brings a PR that is behind `main` up to date with `gh pr update-branch`, waits for CI on that exact new head, squash-merges, deletes the branch, closes the Refs issues and removes the builder's worktree. A raw `gh pr merge` is refused by the guard.
 
 - **Exit 0:** merged. Take the next PR.
-- **Exit 1, refused:** it printed every reason at once. Fix what is yours (the verdict line, a Later issue) and run it again. Merge a named critical-path PR first. When CI fails on the head with `main` merged in, the PR is green alone and broken on `main`: post `Hold: CI fails with main merged in (head <sha7>): <run link>` on the PR and take the next one. A conflict is posted to the builder by the script itself. Never route around a refusal: no raw merge, no push to the builder's branch.
+- **Exit 1, refused:** it printed every reason at once. Fix what is yours (the verdict line, a Later issue) and run it again. Merge a named critical-path PR first. When CI fails on the head with `main` merged in, the PR is green alone and broken on `main`: post `Verdict: hold (head <sha7>): CI fails with main merged in: <run link>` on the PR and take the next one. A conflict is posted to the builder by the script itself. Never route around a refusal: no raw merge, no push to the builder's branch.
 - **Exit 1 `unknown`, or exit 2:** read the PR again with `gh pr view` before anything else. Never retry blindly.
 
 ## Install

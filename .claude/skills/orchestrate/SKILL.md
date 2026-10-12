@@ -29,7 +29,7 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 | `LIVE-RESULT` | Send the builder a pointer to the result comment. With Jake items left, schedule a sitting (below). |
 | `LIVE-REQUEST` with Jake items | Schedule a sitting (below). |
 | `CI` failed on a PR | Send its builder a pointer to the run. |
-| `VERDICT` that isn't a merge (`don't merge`, `Hold`) | Send the builder a pointer to the verdict. |
+| `VERDICT` that isn't a merge (`don't merge`, `hold`) | Send the builder a pointer to the verdict. |
 | `CI` failed on `main` | Status to Jake with the run link. |
 | `HEAD-MOVED`, `FIXED-REVIEW`, a merge `VERDICT` | Nothing: the Reviewer and the builders own these. |
 

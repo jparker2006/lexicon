@@ -68,7 +68,7 @@ Physical steps are sitting messages. Anything else for Jake (a decision, an item
 - `idle` counts the harness's own posted keys too (#225): a focus-taking run resets it, so leave a minute between runs that each need `idle 60`.
 - In the agent shell `log` is a zsh builtin: write `/usr/bin/log`. zsh doesn't split `$xy`; use `${=xy}`.
 - With the daily Lexicon running, every real fn press dictates into both apps, and its Cmd-V makes Dev record `notInserted` with `typedSince` while the text appears (#141). Real-fn checks run only in a sitting, after `sitting start` quit it. Pair outcomes by pid in `/usr/bin/log show` (subsystem `Lexicon`).
-- Outside a sitting, put `hook mic zeros` before every fn hook, so the real mic can't paste into Jake's front app.
+- Put `hook mic zeros` before every fn hook in a step where Jake isn't speaking, so the real mic can't paste into his front app.
 - `hook dictate` and `hook insert` type into whatever field is focused: never while Jake's own work is frontmost. Feed `hook dictate` only WAVs from `fixture`, never Jake's recordings or the Test set.
 - A `/usr/bin/log show --last 3m` read sees every fn press in those 3 minutes: leave 3 minutes after any fn press or hook before a run that reads it (54-paste item 2).
 - fn+Right is End, which never moves the caret in Cocoa fields: prove fn passthrough with a test window that logs keyDown keyCode 119 and the fn flag, never with "the caret jumps".
