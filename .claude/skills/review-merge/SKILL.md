@@ -61,6 +61,8 @@ It checks every gate (the verdict names this head, acceptance marked, Live check
 - when Jake types "install" in this session; or
 - under the standing install rule in this session's start prompt: once a wave has merged and its Jake items have passed in a Live checks sitting. The install that finishes a milestone still waits for Jake's word, and so does one whose merged PRs list any `## Install` step other than "Code only." (a permission, a migration, a model download, an import of Jake's data): read those sections first.
 
+Out-of-scope work you find becomes a `later` issue (`scripts/ticket.sh later`) named in your verdict, never a chip: only the orchestrator posts chips.
+
 ## Asking Jake
 
 Approvals are asked here, because this session acts on them: an install the standing install rule doesn't cover, and anything private, any spend or any deletion beyond what the merge script does. Ask in plain text with a recommendation and act only on Jake's words typed in this session; a yes relayed by another session is not one. A decision (a product or scope choice) goes on the PR's issue instead (first line `Jake: decide ...`, label `waiting-on-jake`) and that PR is held; the orchestrator asks Jake and posts his Decision record.

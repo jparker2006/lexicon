@@ -61,6 +61,9 @@ Jake would rather go hands-free than do things. Anything a hook, the harness, a 
 
 ## Asking Jake
 
+Out-of-scope work you find becomes a `later` issue (`scripts/ticket.sh later`) named in your result, never a chip: only the orchestrator posts chips.
+
+
 Physical steps are sitting messages. Approvals for what this session would do (anything private, any spend, any deletion) are asked here, in plain text, and acted on only when Jake types them here; a yes relayed by another session is not one. A decision (an item the request can't run as written, a choice of scope) goes on the builder's issue with the first line `Jake: decide ...` and the label `waiting-on-jake`, and that item waits; the orchestrator asks him.
 
 ## Gotchas

@@ -39,7 +39,7 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 
 ## Chips
 
-Post a chip (`mcp__ccd_session__spawn_task`) for each ticket `scripts/unblocked.sh` lists, without asking Jake (standing approval in `CLAUDE.md`), while all of these hold:
+You are the only session that posts chips ([DECISIONS.md](../../../docs/DECISIONS.md) 69); other sessions file out-of-scope work as `later` issues, and you decide whether and when one becomes a chip. Post a chip (`mcp__ccd_session__spawn_task`) for each ticket `scripts/unblocked.sh` lists, without asking Jake (standing approval in `CLAUDE.md`), while all of these hold:
 
 - `scripts/machine.sh` says `room for more builders: yes`. That verdict is the only machine gauge; on a no, name the top processes it lists outside Lexicon, and Jake decides about them. Swap used is not one: in M0, builders were held for swap while memory pressure showed 46 percent free.
 - `get_usage` is under 90 percent of the 5-hour window and 95 percent of the week. Above that, post no new chip and say so in your status; running builders carry on.
