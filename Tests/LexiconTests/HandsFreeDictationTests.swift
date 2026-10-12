@@ -110,7 +110,7 @@ func theCapWarnsOnceThenStopsAndInsertsAHandsFreeDictation() async throws {
     try #require(rig.feed(.deadline(at(8_000))).commands == [.oneMinuteLeft(first)])
     seen += await readUntil(&events) { event in if case .oneMinuteLeft(let who) = event { who == first } else { false } }
     // The cap mark: began + cap.
-    try #require(rig.feed(.deadline(at(10_000))).commands == [.dictationStopped(first, at: at(10_000))])
+    try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(first, at: at(10_000))])
     seen += await readUntil(&events) { event in if case .finished = event { true } else { false } }
     await rig.settle()
 
@@ -155,7 +155,7 @@ func theCapWarnsAndStopsAHeldDictationToo() async throws {
     seen += await readUntil(&events) { event in if case .confirmed(let who, .hold) = event { who == id } else { false } }
     try #require(rig.feed(.deadline(at(8_000))).commands == [.oneMinuteLeft(id)])
     seen += await readUntil(&events) { event in if case .oneMinuteLeft(let who) = event { who == id } else { false } }
-    try #require(rig.feed(.deadline(at(10_000))).commands == [.dictationStopped(id, at: at(10_000))])
+    try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(id, at: at(10_000))])
     seen += await readUntil(&events) { event in if case .finished = event { true } else { false } }
     await rig.settle()
 
@@ -173,7 +173,7 @@ func theCapWarnsAndStopsAHeldDictationToo() async throws {
 @Test(.timeLimit(.minutes(1)))
 func aLostFnUpEndsAtTheCapAndQuitWaitsForIt() async throws {
     // No fn-up ever comes: the tap was disabled and nothing said so. The cap ends the hold at
-    // 10 s, and Quit (`idle`) waits for that end and no longer.
+    // 10 s, and Quit (`idle`) returns once it has.
     let rig = try HandsFreeRig(config: KeyboardConfig(cap: .seconds(10), capWarning: .seconds(2)))
     var events = await rig.conductor.events().makeAsyncIterator()
     let id = DictationID()
@@ -184,13 +184,10 @@ func aLostFnUpEndsAtTheCapAndQuitWaitsForIt() async throws {
     try #require(rig.feed(.deadline(at(300))).commands == [.dictationConfirmed(id, .hold)])
     seen += await readUntil(&events) { event in if case .confirmed(let who, .hold) = event { who == id } else { false } }
 
+    // Quit while the press is held: it returns once the cap ends the press, with the row written.
     let conductor = rig.conductor
     let quitting = Task { await conductor.idle() }
-    // Quit parks on the recording Dictation's capture end: it cannot return while the press is held.
-    await until { await conductor.captureEndWaiters.count == 1 }
-    #expect(await conductor.capturingID == id)
-
-    try #require(rig.feed(.deadline(at(10_000))).commands == [.dictationStopped(id, at: at(10_000))])
+    try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(id, at: at(10_000))])
     await quitting.value
     await rig.settle()
 
@@ -198,6 +195,38 @@ func aLostFnUpEndsAtTheCapAndQuitWaitsForIt() async throws {
     #expect(row.status == .inserted)
     #expect(row.versions?.model == "Ship it")
     #expect(try CAFFile.read(rig.history.audioURL(for: id)).samples.count > 0)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aHandsFreeDictationWhoseMicNeverStartsGivesEscBack() async throws {
+    // The mic never starts, so the Conductor ends the hands-free Dictation itself. The recognizer
+    // hears it: Esc reaches the apps again, and the next fn-down begins a new press instead of
+    // stopping a Dictation that is already over.
+    let clock = TestClock()
+    let mic = FakeMic(wedgesAtStart: [0], clock: clock)
+    defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
+    let rig = try HandsFreeRig(hardware: mic.hardware)
+    var events = await rig.conductor.events().makeAsyncIterator()
+    var starts = mic.wedged.makeAsyncIterator()
+    let first = DictationID(), next = DictationID()
+
+    try #require(rig.feed(.fnDown(at(0), secureInput: false, id: first)).commands == [.dictationBegan(first, at: at(0))])
+    rig.feed(.fnUp(at(90)))
+    try #require(rig.feed(.fnDown(at(200), secureInput: false, id: DictationID())).commands
+        == [.dictationConfirmed(first, .handsFree)])
+    #expect(rig.recognizer.takesEscape)
+    _ = try #require(await starts.next())
+    await clock.waitForSleepers(1)
+    await clock.advance(by: Microphone.startLimit)
+    _ = await readUntil(&events) { event in if case .notice(.microphoneUnavailable) = event { true } else { false } }
+
+    #expect(!rig.recognizer.takesEscape)
+    try #require(rig.feed(.fnDown(at(5_000), secureInput: false, id: next)).commands == [.dictationBegan(next, at: at(5_000))])
+    rig.feed(.fnUp(at(6_000)))
+    _ = await readUntil(&events) { event in if case .finished(let who, _) = event { who == next } else { false } }
+    await rig.settle()
+    #expect(await rig.history.dictation(first)?.status == .failed)
+    #expect(await rig.history.dictation(next)?.status == .inserted)
 }
 
 /// The real Conductor following an open stream of commands from one recognizer, which the
@@ -221,7 +250,7 @@ private struct HandsFreeRig {
             recorder: recorder, speech: SpeechEngine(local: local, clock: TestClock()), cleanup: Cleanup(),
             lexicon: try Lexicon(paths: paths), history: history, destination: destination,
             preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
-            keyboard: nil, fixes: nil, jev: nil)
+            keyboard: Keyboard(commands: recognizer.commands, feed: { _ = recognizer.feed($0) }), fixes: nil, jev: nil)
         self.recognizer = recognizer
         self.recorder = recorder
         self.history = history
@@ -267,6 +296,8 @@ private final class Recognizer: Sendable {
             return output
         }
     }
+
+    var takesEscape: Bool { gesture.withLock { $0.takesEscape } }
 
     func end() { continuation.finish() }
 }

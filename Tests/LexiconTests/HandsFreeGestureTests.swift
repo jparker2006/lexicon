@@ -29,12 +29,12 @@ private func run(_ inputs: [KeyInput], gesture: inout FnGesture) -> [KeyCommand]
 
 @Test func aLoneReleaseWaitsForASecondTapInsteadOfDiscarding() {
     // The first half of a double tap: the release emits nothing, and the recognizer
-    // asks to be woken one window (0.25 s) after the release.
+    // asks to be woken one window (0.25 s) and the late-key grace (50 ms) after the release.
     var gesture = FnGesture(shortCap)
     _ = gesture.handle(.fnDown(at(0), secureInput: false, id: a))
     let release = gesture.handle(.fnUp(at(90)))
     #expect(release.commands.isEmpty)
-    #expect(release.wakeAt == at(340))
+    #expect(release.wakeAt == at(390))
     #expect(gesture.isRecording)
 }
 
@@ -53,11 +53,11 @@ func aSecondPressInsideTheWindowMakesItHandsFree(gap: Int, isDoubleTap: Bool) {
 }
 
 @Test func aLoneTapIsDiscardedWhenTheWindowCloses() {
-    // With no second press by the wake-up mark (0.34 s), the tap is discarded.
+    // With no second press by the wake-up mark (0.39 s), the tap is discarded.
     var gesture = FnGesture(shortCap)
     _ = gesture.handle(.fnDown(at(0), secureInput: false, id: a))
     _ = gesture.handle(.fnUp(at(90)))
-    #expect(gesture.handle(.deadline(at(340))).commands == [.dictationDiscarded(a)])
+    #expect(gesture.handle(.deadline(at(390))).commands == [.dictationDiscarded(a)])
     #expect(!gesture.isRecording)
 }
 
@@ -165,10 +165,10 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     }
     let warning = gesture.handle(.deadline(at(8_000)))
     #expect(warning.commands == [.oneMinuteLeft(a)])
-    #expect(warning.wakeAt == at(10_000))
+    #expect(warning.wakeAt == at(10_050))
     // Once only: the same mark again sends nothing, and the stop is still due at 10 s.
     #expect(gesture.handle(.deadline(at(8_000))).commands.isEmpty)
-    #expect(gesture.handle(.deadline(at(10_000))).commands == [.dictationStopped(a, at: at(10_000))])
+    #expect(gesture.handle(.deadline(at(10_050))).commands == [.dictationStopped(a, at: at(10_000))])
     #expect(!gesture.isRecording)
 }
 
@@ -195,7 +195,7 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     // No release ever arrives: the warning and then the cap end the Dictation, and a
     // release after that does nothing.
     var gesture = FnGesture(shortCap)
-    #expect(run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000)), .deadline(at(10_000))],
+    #expect(run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000)), .deadline(at(10_050))],
                 gesture: &gesture)
         == [.dictationBegan(a, at: at(0)), .dictationConfirmed(a, .hold), .oneMinuteLeft(a), .dictationStopped(a, at: at(10_000))])
     #expect(!gesture.isRecording)
@@ -255,4 +255,56 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     #expect(gesture.takesEscape)
     _ = gesture.handle(.fnDown(at(1_000), secureInput: false, id: c))
     #expect(!gesture.takesEscape)
+}
+
+@Test func aSecondTapStampedInsideTheWindowCountsWhenTheWindowsMarkIsHandledFirst() {
+    // The press and the window's timer share the tap thread's run loop, so a press stamped
+    // inside the window can be handled just after a timer at the window's end. The press's
+    // own time decides: the window's mark waits a little before it drops the tap.
+    var gesture = FnGesture(shortCap)
+    _ = gesture.handle(.fnDown(at(0), secureInput: false, id: a))
+    _ = gesture.handle(.fnUp(at(90)))
+    #expect(gesture.handle(.deadline(at(340))).commands.isEmpty)
+    #expect(gesture.handle(.fnDown(at(335), secureInput: false, id: b)).commands == [.dictationConfirmed(a, .handsFree)])
+}
+
+@Test func aStopPressStampedBeforeTheCapStopsAtItsOwnTimeWhenTheCapsMarkIsHandledFirst() {
+    // As for the window: the stop press stamped at 9.99 s stops the Dictation there, and is
+    // never taken for the first press of a new one.
+    var gesture = FnGesture(shortCap)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90)), .fnDown(at(200), secureInput: false, id: b),
+             .deadline(at(8_000))], gesture: &gesture)
+    #expect(gesture.handle(.deadline(at(10_000))).commands.isEmpty)
+    #expect(gesture.handle(.fnDown(at(9_990), secureInput: false, id: b)).commands == [.dictationStopped(a, at: at(9_990))])
+}
+
+@Test func aSecondTapWithSecureInputOnDropsTheTap() {
+    // A password field took focus between the taps: never dictate into it.
+    var gesture = FnGesture(shortCap)
+    _ = gesture.handle(.fnDown(at(0), secureInput: false, id: a))
+    _ = gesture.handle(.fnUp(at(90)))
+    #expect(gesture.handle(.fnDown(at(200), secureInput: true, id: b)).commands == [.dictationDiscarded(a)])
+    #expect(!gesture.isRecording)
+}
+
+@Test func aSecondFnDownDuringAPressIsIgnored() {
+    // Its fn-up was lost (the tap was briefly off): the press goes on, and its release judges it.
+    var gesture = FnGesture(shortCap)
+    _ = gesture.handle(.fnDown(at(0), secureInput: false, id: a))
+    #expect(gesture.handle(.fnDown(at(100), secureInput: false, id: b)) == FnGesture.Output())
+    #expect(gesture.phase == .pressed(a, since: at(0)))
+}
+
+@Test func theConductorEndingADictationGivesEscBack() {
+    // The Conductor ended this Dictation itself (its mic never started): the recognizer forgets
+    // it, so Esc reaches the apps again and the next fn-down begins a new press. An end for
+    // any other Dictation changes nothing.
+    var gesture = FnGesture(shortCap)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90)), .fnDown(at(200), secureInput: false, id: b)],
+            gesture: &gesture)
+    #expect(gesture.handle(.ended(b)) == FnGesture.Output())
+    #expect(gesture.takesEscape)
+    #expect(gesture.handle(.ended(a)) == FnGesture.Output())
+    #expect(!gesture.takesEscape)
+    #expect(gesture.handle(.fnDown(at(1_000), secureInput: false, id: b)).commands == [.dictationBegan(b, at: at(1_000))])
 }

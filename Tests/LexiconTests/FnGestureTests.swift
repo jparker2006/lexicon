@@ -41,7 +41,7 @@ private func run(_ inputs: [KeyInput]) -> [KeyCommand] {
     // The release waits for a second tap; with none by 0.25 s after it, the tap is dropped.
     #expect(run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90))], gesture: &gesture)
         == [.dictationBegan(a, at: at(0))])
-    #expect(gesture.handle(.deadline(at(340))).commands == [.dictationDiscarded(a)])
+    #expect(gesture.handle(.deadline(at(390))).commands == [.dictationDiscarded(a)])
     // The hold deadline it asked for still fires; it is stale and does nothing.
     #expect(gesture.handle(.deadline(at(300))).commands.isEmpty)
     #expect(gesture.phase == .idle)
@@ -157,15 +157,17 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
         var warned: Set<DictationID> = []
         for _ in 0..<40 {
             time += next(400)
-            let input: KeyInput = switch next(7) {
+            let input: KeyInput = switch next(8) {
             case 0: .fnDown(at(time), secureInput: next(5) == 0, id: DictationID())
             case 1: .fnUp(at(time))
             case 2: .otherKey(at(time))
             case 3: .deadline(at(time))
             case 4: .sleep(at(time))
             case 5: .escape(at(time))
+            case 6: .ended(open ?? DictationID())  // the Conductor gave up the open Dictation
             default: .fnDown(at(time), secureInput: false, id: DictationID())
             }
+            if case .ended(let id) = input, id == open { open = nil }
             for command in gesture.handle(input).commands {
                 switch command {
                 case .dictationBegan(let id, _):

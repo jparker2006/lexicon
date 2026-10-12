@@ -21,7 +21,7 @@ func loneTapLeavesNoHistoryRowAndNoAudioFile() async throws {
 
     // No second press within the double-tap window: the tap is dropped when the window closes.
     await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false, id: DictationID()), .fnUp(fnAt(90)),
-                                           .deadline(fnAt(340))]))
+                                           .deadline(fnAt(390))]))
     let started = await awaitStart(&events)
     let id = try #require(started)
     await settleFn(rig)
@@ -131,7 +131,7 @@ func sleepWithTheNextPressStillQueuedKeepsThatDictation() async throws {
     keys.press(.fnUp(fnAt(600)), .fnDown(fnAt(700), secureInput: false, id: second))
     await rig.conductor.systemWillSleep()
     keys.press(.fnUp(fnAt(1_500)), .fnDown(fnAt(1_800), secureInput: false, id: tap), .fnUp(fnAt(1_850)),
-               .deadline(fnAt(2_100)))
+               .deadline(fnAt(2_150)))
     keys.end()
     while let command = await commands.next() { await rig.conductor.handle(command) }
     await settleFn(rig)

@@ -16,6 +16,8 @@ enum KeyInput: Sendable, Hashable {
     case deadline(HostTime)
     /// The Mac is going to sleep (see `Keyboard.systemWillSleep`).
     case sleep(HostTime)
+    /// The Conductor ended this Dictation itself (see `Keyboard.dictationEnded`).
+    case ended(DictationID)
 }
 
 /// The fn gesture state machine (#53, #58). Pure: no clocks, no threads, no
@@ -106,7 +108,7 @@ struct FnGesture: Sendable {
         switch input {
         case .fnDown(let at, secureInput: false, let id):
             return begin(id, at: at)
-        case .fnDown, .fnUp, .otherKey, .escape, .deadline, .sleep:
+        case .fnDown, .fnUp, .otherKey, .escape, .deadline, .sleep, .ended:
             // A password field, the stop press's own fn-up, a key, a stale deadline, a
             // second report of an Esc that already cancelled: nothing to do.
             return Output()
@@ -115,7 +117,7 @@ struct FnGesture: Sendable {
 
     private mutating func pressed(_ id: DictationID, since: HostTime, _ input: KeyInput) -> Output {
         switch input {
-        case .fnDown:
+        case .fnDown, .ended:
             // Its fn-up was lost (the tap was briefly disabled): the press goes on.
             return Output()
         case .fnUp(let at):
@@ -157,7 +159,7 @@ struct FnGesture: Sendable {
             let alone = discard(id)
             let next = idle(input)
             return Output(commands: alone.commands + next.commands, wakeAt: next.wakeAt)
-        case .fnUp:
+        case .fnUp, .ended:
             return Output()
         case .otherKey, .escape, .sleep:
             // A key between the taps: not a double tap. Esc was never taken, it reached the app.
@@ -181,7 +183,7 @@ struct FnGesture: Sendable {
             guard recording.mode == .hold else { return Output() }
             phase = .idle
             return Output(commands: [.dictationStopped(id, at: at)])
-        case .otherKey:
+        case .otherKey, .ended:
             return Output()  // passed through; recording continues
         case .escape:
             phase = .idle
