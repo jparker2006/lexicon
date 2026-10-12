@@ -475,24 +475,34 @@ private func searchTimes(_ paths: AppPaths) -> [Duration] {
     let paths = try await year().paths
     let presenter = HistoryWindowPresenter(paths: paths, system: nil)
     autoreleasepool { _ = presenter.warmUp() }
-    /// One open, as the presenter makes it; nil times it not.
-    func openOnce(_ clock: ContinuousClock?) -> Duration? {
-        var took: Duration?
-        autoreleasepool {
-            let start = clock?.now
-            let controller = HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: .withUniqueName()) {}
-            controller.window?.alphaValue = 0
-            controller.showWindow(nil)
-            controller.window?.displayIfNeeded()
-            if let clock, let start { took = clock.now - start }
-            controller.close()
-        }
-        return took
+    /// Orders the window in and draws it, as the presenter's show() does.
+    func show(_ controller: HistoryWindowController) {
+        controller.window?.alphaValue = 0
+        controller.showWindow(nil)
+        controller.window?.displayIfNeeded()
     }
     // Untimed: the app has drawn its status item and menu before History ever opens,
     // and a test process has drawn nothing, so its very first window pays for that.
-    _ = openOnce(nil)
-    let samples = (0..<20).compactMap { _ in openOnce(ContinuousClock()) }
+    // Its pasteboard, never Jake's, serves every timed open, so none is made inside the timing.
+    var first: HistoryWindowController? = HistoryWindowController(
+        reader: HistoryReader(paths: paths), system: nil, pasteboard: .withUniqueName()) {}
+    let pasteboard = first!.pasteboard
+    autoreleasepool {
+        show(first!)
+        first?.close()
+        first = nil
+    }
+    let clock = ContinuousClock()
+    let samples = (0..<20).map { _ in
+        autoreleasepool {
+            let start = clock.now
+            let controller = HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: pasteboard) {}
+            show(controller)
+            let took = clock.now - start
+            controller.close()
+            return took
+        }
+    }
     print("History window, open to first rows over \(perDay * yearDays) Dictations: first \(samples[0]), "
         + "p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")
     #expect(percentile(samples, 0.95) <= .milliseconds(100))

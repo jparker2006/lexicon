@@ -30,7 +30,7 @@ extension AppDelegate {
             \(setup.permissionsSummary, privacy: .public)
             """)
         // After the mark, so the icon never waits for it; fn runs off the main thread.
-        DispatchQueue.main.async { [weak self] in _ = self?.history?.warmUp() }
+        DispatchQueue.main.async { [weak self] in self?.history?.warmUp() }
     }
 
     /// What setup needs from modules only the shell imports: the fn tap and the
