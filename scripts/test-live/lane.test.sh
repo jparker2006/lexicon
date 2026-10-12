@@ -35,12 +35,12 @@ jq -n --rawfile r53 "$T/r53" --rawfile r64 "$T/r64" --rawfile r57old "$T/r57old"
         {createdAt: "2026-10-11T21:00:00Z", body: $r57}]},
     {number: 53, body: "", comments: [
         {createdAt: "2026-10-11T06:00:00Z", body: $r53},
-        {createdAt: "2026-10-11T07:00:00Z", body: "Live checks: claude/issue-53 @ 50edc77\n\nall pass"}]},
+        {createdAt: "2026-10-11T07:00:00Z", body: "## Live checks: claude/issue-53 @ 50edc77\n\nall pass"}]},
     {number: 64, body: "", comments: [{createdAt: "2026-10-11T15:05:00Z", body: $r64}]},
     {number: 58, body: "Hands-free double-tap", comments: []}]' > "$T/issues.json"
 expect ok '^1\. #64 claude/issue-64' "the queue lists open requests oldest first" "$LANE" queue
 expect ok '^2\. #57 claude/issue-57 @ bbbbbbb' "only an issue's newest request is queued" "$LANE" queue
-absent '#53|aaaaaaa' "an answered or superseded request is not queued" "$LANE" queue
+absent '#53|aaaaaaa' "a request answered (here under a Markdown heading) or superseded is not queued" "$LANE" queue
 
 # The repo is public: a request, or a result, from anyone but the owner doesn't count.
 cp "$T/issues.json" "$T/issues-owner.json"

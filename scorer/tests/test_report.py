@@ -121,7 +121,8 @@ class Report(unittest.TestCase):
         code, text = run_report("--gold", MANIFEST, "--run", self.run, "--split", "everyday")
         out = json.loads(text)
         self.assertEqual(code, 0)
-        self.assertEqual(set(out), {"run", "worse"})
+        self.assertEqual(set(out), {"run", "worse", "gold", "partial"})
+        self.assertFalse(out["partial"])
         self.assertEqual(out["worse"], [])
 
     def test_the_report_prints_no_text_terms_or_ids(self):
@@ -158,12 +159,20 @@ class Report(unittest.TestCase):
                     run_report("--gold", MANIFEST, "--run", path, "--split", "everyday")
                 self.assertIn(f"entry f01: {field}", e.exception.code)
 
-    def test_a_baseline_missing_a_scored_entry_is_an_error(self):
+    def test_a_baseline_from_before_the_test_set_grew_compares_on_the_shared_entries(self):
         rows = [r for r in read_jsonl(WISPR) if r["id"] != "f05"]
         path = self.write("short-wispr.jsonl", rows)
-        with self.assertRaises(SystemExit):
-            run_report("--gold", MANIFEST, "--run", self.run, "--baseline", path,
-                       "--split", "everyday", "--resamples", "1000")
+        code, text = run_report("--gold", MANIFEST, "--run", self.run, "--baseline", path,
+                                "--split", "everyday", "--resamples", "1000")
+        out = json.loads(text)
+        self.assertEqual((out["compared"], out["run"]["entries"], out["baseline"]["entries"]), (11, 11, 11))
+        self.assertEqual(out["gold"]["scored"], 12)
+
+    def test_a_run_missing_a_scored_entry_is_still_an_error(self):
+        path = self.write("short-run.jsonl", [r for r in perfect(self.everyday) if r["id"] != "f05"])
+        for baseline in ((), ("--baseline", WISPR)):
+            with self.subTest(baseline=baseline), self.assertRaises(SystemExit):
+                run_report("--gold", MANIFEST, "--run", path, *baseline, "--split", "everyday", "--resamples", "1000")
 
     def test_resamples_below_1000_is_an_error_with_a_baseline(self):
         with self.assertRaises(SystemExit):

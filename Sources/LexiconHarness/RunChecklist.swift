@@ -43,7 +43,7 @@ func runChecklist(_ arguments: [String]) async throws {
     try FileManager.default.createDirectory(at: harnessFolder, withIntermediateDirectories: true)
     try JSONEncoder().encode(run).write(to: lastRun, options: .atomic)
 
-    let report = ChecklistReport(issue: run.issue ?? "?", branch: run.branch ?? "?", sha: run.sha ?? "?", app: run.app,
+    let report = ChecklistReport(issue: run.issue ?? "?", branch: run.branch, sha: run.sha ?? "?", app: run.app,
                                  fnListeners: run.fnListeners, results: results)
     print("\n\(report.table)\n\n\(report.comment)")
     if results.contains(where: { !$0.passes }) { exit(1) }

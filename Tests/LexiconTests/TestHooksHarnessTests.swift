@@ -69,8 +69,11 @@ private let pasteChecklist = """
     #expect(report.table.contains("| 1 | paste-check lands the text and puts the clipboard back | Fail, 9 of 10 | 31.2 s |"))
     #expect(report.table.contains("run 7: wanted exit 0, exit 1: FAIL  the target field reads <\(Fingerprint(fixture))>"))
     #expect(report.table.contains("| 2 | the fn tap ignores Lexicon's own Cmd-V | Pass, 1 of 1 | 0.8 s |"))
-    #expect(report.comment.hasPrefix("Live checks: #54, main @ d347832\n\nLexicon Dev 0.1 (412, d347832). fn listeners: none."))
+    #expect(report.comment.hasPrefix("Live checks: main @ d347832\n\n#54. Lexicon Dev 0.1 (412, d347832). fn listeners: none."))
     #expect(report.comment.hasSuffix("Fail: 1 of 2 items."))
+    let unnamed = ChecklistReport(issue: "54", branch: nil, sha: "d3478321abc", app: "Lexicon Dev", fnListeners: "none",
+                                  results: results)
+    #expect(unnamed.comment.hasPrefix("Live checks: <no branch named> @ d347832\n"))
     #expect(!report.comment.contains(fixture))
 }
 
@@ -100,13 +103,26 @@ private let pasteChecklist = """
     #expect(ChecklistResult(items[2], outputs: [(3, "")], seconds: 0).passes)
 }
 
+/// `result`'s comment answers its request in the Live checks queue: scripts/live-lane.sh
+/// counts a request `Live checks request: <branch> @ <sha7>` answered by a comment
+/// that starts `Live checks: ` plus the same `<branch> @ <sha7>`.
+@Test func aResultAnswersItsRequestInTheLiveChecksQueue() throws {
+    let request = "Live checks request: claude/issue-54 @ d347832"
+    let head = String(request.dropFirst("Live checks request: ".count))
+    let item = try Checklist(parsing: "item: x\nrun: check").items[0]
+    let run = ChecklistRun(issue: "54", branch: "claude/issue-54", sha: "d3478321abcdef", app: "Lexicon Dev",
+                           fnListeners: "none", results: [ChecklistResult(item, outputs: [(0, "")], seconds: 1)])
+    let comment = try run.report(issue: "54", branch: "claude/issue-54", sha: "d347832").comment
+    #expect(comment.hasPrefix("Live checks: " + head))
+}
+
 /// A run saved at one sha can only be posted as that sha's result.
 @Test func aSavedRunIsPostedOnlyForTheShaItRanAt() throws {
     let item = try Checklist(parsing: "item: x\nrun: check").items[0]
     let run = ChecklistRun(issue: "54", branch: "main", sha: "d3478321abc", app: "Lexicon Dev 0.1 (1, d347832)",
                            fnListeners: "none", results: [ChecklistResult(item, outputs: [(0, "")], seconds: 1)])
 
-    #expect(try run.report(issue: "#54", branch: "main", sha: "d347832").comment.hasPrefix("Live checks: #54, main @ d347832"))
+    #expect(try run.report(issue: "#54", branch: "main", sha: "d347832").comment.hasPrefix("Live checks: main @ d347832"))
     #expect(throws: ChecklistRun.Mismatch(description: "the last run was at d347832, not 10d35db")) {
         try run.report(issue: "54", branch: "main", sha: "10d35db")
     }
