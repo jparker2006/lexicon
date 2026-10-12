@@ -157,7 +157,8 @@ import LexiconDomain
     let queue = LocalJobQueue()
     let waiter = Task { await queue.untilWaiting(atLeast: 1) }
     // Parked first, so the cancel has to wake it, not just stop it before it starts.
-    while await queue.watching == 0 { await Task.yield() }
+    // Nothing signals a park, so this polls; it returns on cancel like every wait here.
+    await until { await queue.watching > 0 }
     waiter.cancel()
     await waiter.value
 }
