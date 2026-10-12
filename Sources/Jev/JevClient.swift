@@ -240,6 +240,8 @@ public struct Decision<Answer: Sendable>: Sendable {
         case noKey
         case timeout
         case error
+        /// The caller gave up, so nobody waits for the answer.
+        case cancelled
 
         init(_ revoked: AccessRevoked) {
             switch revoked {
