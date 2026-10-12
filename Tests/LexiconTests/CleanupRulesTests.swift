@@ -163,6 +163,8 @@ let numberRepeatCases: [Case] = [
     Case("Um, five five five is the number I need.", "Five five five is the number I need."),
     Case("Use the PIN one one one one.", "Use the PIN one one one one."),
     Case("Dial five oh oh oh now.", "Dial five oh oh oh now."),
+    Case("Dial 5 oh oh 7 now.", "Dial 5 oh oh 7 now."),
+    Case("Dial five, oh oh now.", "Dial five, oh oh now."),
     Case("Oh oh seven, that's the one.", "Oh oh seven, that's the one."),
     Case("The build is version two two and it's stable.", "The build is version two two and it's stable."),
     Case("It's a hundred hundred pixels wide.", "It's a hundred hundred pixels wide."),
@@ -259,6 +261,7 @@ let interjectionCases: [Case] = [
     Case("Uh, oh no, the build broke.", "Oh no, the build broke."),
     // An "oh" inside a number is a zero, so the "uh" before it is a filler.
     Case("Call room five uh oh seven.", "Call room five oh seven."),
+    Case("Call room 5 uh oh 7.", "Call room 5 oh 7."),
     Case("Uh oh, five servers are down.", "Uh oh, five servers are down."),
     Case("Uh oh five servers are down.", "Uh oh five servers are down."),
 ]

@@ -210,13 +210,15 @@ enum Fillers {
         return kept.joined(separator: " ")
     }
 
-    /// The "oh" run holding `k` touches a number with no mark between.
+    /// The "oh" run holding `k` touches a number: right after one ("five, oh oh") or right
+    /// before one with no mark between ("oh oh seven"; "uh oh, five servers" is no zero).
     private static func zeroRun(_ tokens: [Token], around k: Int) -> Bool {
         var first = k
         while first > 0, tokens[first - 1].word == "oh", tokens[first - 1].trailing.isEmpty { first -= 1 }
         var last = k
         while last + 1 < tokens.count, tokens[last].trailing.isEmpty, tokens[last + 1].word == "oh" { last += 1 }
-        return first > 0 && tokens[first - 1].trailing.isEmpty && tokens[first - 1].isNumber
+        return first > 0 && (tokens[first - 1].trailing.isEmpty || tokens[first - 1].trailing == ",")
+                && tokens[first - 1].isNumber
             || last + 1 < tokens.count && tokens[last].trailing.isEmpty && tokens[last + 1].isNumber
     }
 
@@ -263,6 +265,13 @@ enum Fillers {
                            && tokens[j + 1].trailing.hasPrefix(",") ? 2 : 0
                    })
             .map { tokens[$0] }
+    }
+
+    /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written, the
+    /// test both `Fillers` and `StructuralCheck` use for a digit run ("five oh oh seven").
+    static func isNumeral(_ word: String) -> Bool {
+        word.first?.isNumber == true
+            || word.split(separator: "-").first.map { StructuralCheck.isCardinal(String($0)) } ?? false
     }
 
     /// "5 MB", "$5", "eighty", "twenty-something", "tenths": a number or an estimate of one.
@@ -414,8 +423,7 @@ private struct Token {
     var isHardFiller: Bool {
         Fillers.hard.contains(word) && !(text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase })
     }
-    /// "twenty", "twenty-six", "thirty-something", "two-ish": a spoken number.
-    var isNumber: Bool { word.split(separator: "-").first.map { StructuralCheck.isCardinal(String($0)) } ?? false }
+    var isNumber: Bool { Fillers.isNumeral(word) }
     /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.
     var isName: Bool { text.contains(where: \.isUppercase) && !Fillers.firstPerson.contains(word) }
     /// The speech model started a sentence here: "Um", "Then". Not "I", which is always capitalized.
