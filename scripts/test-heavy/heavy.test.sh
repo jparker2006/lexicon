@@ -61,6 +61,8 @@ job() {
 }
 
 # expect_event "NAME SLOT JOBS": the next job to take a slot is that one.
+# timing-ok: the 30 s read limit here and in expect_wait only bounds a hang;
+# every wait ends on the job's own line, never on time.
 expect_event() {
     read -r -t 30 got <&3 || fail "no job took a slot; expected '$1'"
     [ "$got" = "$1" ] || fail "expected '$1' to take a slot, got '$got'"
@@ -151,12 +153,32 @@ test_the_third_slot_opens_while_the_mac_has_room() {
     release H2
 }
 
+test_a_slot_probe_never_opens_the_third_slot() {
+    export LEXICON_MACHINE_VERDICT=yes
+    job H1
+    expect_event "H1 1 $CORES"
+    # Slot 2 locked with no holder: what a status probe looks like for the
+    # instant it holds the lock. Slot 3 opens only beside two real builds.
+    mkfifo "$T/release.P"
+    lockf -k "$SLOTS/slot2" sh -c 'echo "P probe" > "$1/events"; read -r x < "$1/release.P"' probe "$T" &
+    P=$!
+    PIDS="$PIDS $P"
+    expect_event "P probe"
+    job J
+    expect_wait "number 1 in line"
+    release P
+    expect_event "J 2 $((CORES / 2))"
+    release J
+    release H1
+}
+
 test_the_third_slot_stays_shut_on_a_no() {
     hold_two
     export LEXICON_MACHINE_VERDICT=no
     job J
     expect_wait "number 1 in line"
     # J asks the verdict on every try; after three more, slot 3 is still free.
+    # timing-ok: the read limit only bounds a hang.
     for n in 1 2 3 4; do
         read -r -t 30 got <&5 || fail "J stopped trying for slot 3"
     done
