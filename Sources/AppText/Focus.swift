@@ -83,7 +83,7 @@ struct Focus {
         let app = AX.app(frontmost)
         var value: CFTypeRef?
         let answer = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value)
-        guard let pid = standIn(frontmost: frontmost, focusedElement: answer) else { return nil }
+        guard let pid = standIn(frontmost: frontmost, focusedElementError: answer.rawValue) else { return nil }
         let field = value.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }  // type id checked
         if let field { AXUIElementSetMessagingTimeout(field, AX.timeout) }
         return Focus(pid: pid, app: app, field: field)
@@ -93,8 +93,8 @@ struct Focus {
     /// focused element, or "none" (a key window with no focused element answers
     /// that). A timeout or any other error leaves nowhere to type, so the same
     /// Dictation never holds or pastes on how fast Accessibility answered.
-    static func standIn(frontmost: pid_t?, focusedElement: AXError) -> pid_t? {
-        guard let frontmost, [.success, .noValue].contains(focusedElement) else { return nil }
+    static func standIn(frontmost: pid_t?, focusedElementError: Int32) -> pid_t? {
+        guard let frontmost, [AXError.success, .noValue].contains(AXError(rawValue: focusedElementError)) else { return nil }
         return frontmost
     }
 

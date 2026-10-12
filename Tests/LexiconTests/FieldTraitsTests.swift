@@ -1,4 +1,3 @@
-import ApplicationServices
 import Testing
 @testable import AppText
 
@@ -29,12 +28,13 @@ func aPasteGoesOnlyWhereTheFocusedElementTakesText(traits: FieldTraits, expected
 // Cmd-V, so it is a target with no field, but only on a definite answer from
 // the app itself: a timeout or other error stays "nowhere to type", so the
 // same Dictation never holds or pastes on how fast Accessibility answered.
-@Test(arguments: [(AXError.noValue, Int32?(42)), (.success, 42), (.cannotComplete, nil), (.failure, nil),
-                  (.apiDisabled, nil)])
-func theFrontmostAppStandsInOnlyWhenItAnswersAboutItsFocus(_ answer: AXError, _ expected: Int32?) {
-    #expect(Focus.standIn(frontmost: 42, focusedElement: answer) == expected)
+// AXError raw values: success 0, noValue -25212, cannotComplete -25204 (a timeout),
+// failure -25200, apiDisabled -25211.
+@Test(arguments: [(Int32(-25212), Int32?(42)), (0, 42), (-25204, nil), (-25200, nil), (-25211, nil)])
+func theFrontmostAppStandsInOnlyWhenItAnswersAboutItsFocus(_ answer: Int32, _ expected: Int32?) {
+    #expect(Focus.standIn(frontmost: 42, focusedElementError: answer) == expected)
 }
 
 @Test func withNoFrontmostAppNothingStandsIn() {
-    #expect(Focus.standIn(frontmost: nil, focusedElement: .noValue) == nil)
+    #expect(Focus.standIn(frontmost: nil, focusedElementError: -25212) == nil)
 }
