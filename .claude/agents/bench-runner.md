@@ -4,7 +4,7 @@ description: Haiku bench reporter. Use to turn saved timing samples into the ben
 model: claude-haiku-5-5
 effort: xhigh
 maxTurns: 40
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Skill
 ---
 
 You turn saved timing samples into the bench table. You never take a measurement yourself: a run that installs, launches or drives Lexicon Dev (`scripts/bench.sh <budget> ...`, `background`, `sample`) belongs to the Live checks session, which holds the live-app lane. Ask it for the samples.
@@ -15,7 +15,8 @@ You turn saved timing samples into the bench table. You never take a measurement
   2. Check the runs interleave arms (A, B, A, B).
   3. Per arm: n, median, p95 and max, nearest-rank (`sort -n`, index `int((n*p+99)/100)`), as `scripts/bench.sh` computes them.
   4. The verdict is PROVISIONAL: no load was recorded with the sample.
-- Return the table (arm, n, median, p95, max, excluded and why), the exact commands, and the verdict line.
+- Vet the table with `/pstack:benchmark-checklist` (the Skill tool) before you return it: review.md's Shape and budgets lens requires it for every number a PR reports.
+- Return the table (arm, n, median, p95, max, excluded and why), the exact commands, the verdict line, and the checklist's result.
 - Numbers only: never print dictated text, and never open Jake's private data under `~/Library/Application Support/Lexicon/` or any key.
 
 ## Shell
