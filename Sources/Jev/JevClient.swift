@@ -24,8 +24,20 @@ public struct JevClient: Sendable {
     static let model = "jev-1.13.0"
 
     private let session: URLSession
+    /// Times the budget. Tests pass a fake one, so no test races a real budget.
+    private let clock: any Clock<Duration>
+    /// URLSession's own limit on a request, in seconds.
+    private let requestTimeout: TimeInterval
 
-    public init(session: URLSession = .shared) { self.session = session }
+    public init(session: URLSession = .shared, clock: any Clock<Duration> = ContinuousClock()) {
+        self.init(session: session, clock: clock, requestTimeout: 5)
+    }
+
+    init(session: URLSession, clock: any Clock<Duration>, requestTimeout: TimeInterval) {
+        self.session = session
+        self.clock = clock
+        self.requestTimeout = requestTimeout
+    }
 
     /// fn-down: open the TLS connection so a later decision skips the cold start
     /// (measured 359 ms cold vs 150 ms warm). A HEAD with no text and no key: the
@@ -34,7 +46,8 @@ public struct JevClient: Sendable {
     public func prewarm(_ access: CloudAccess?) {
         guard let access, access.revoked == nil else { return }
         let session = session
-        Task { _ = try? await session.data(for: Self.request("HEAD", key: nil, body: nil)) }
+        let request = request("HEAD", key: nil, body: nil)
+        Task { _ = try? await session.data(for: request) }
     }
 
     public func decide<Answer: Sendable>(
@@ -51,21 +64,31 @@ public struct JevClient: Sendable {
             return fallingBack(access.revoked.map(Decision<Answer>.Reason.init) ?? .noKey)
         }
 
-        let request = Self.request("POST", key: key, body: question.body)
+        let request = request("POST", key: key, body: question.body)
         let session = session
+        let clock = clock
 
         // First to finish wins; the others are cancelled, which cancels the request.
         return await withTaskGroup(of: Decision<Answer>.self) { group in
             group.addTask {
                 guard access.revoked == nil else { return fallingBack(.privateMode) }
-                guard let (data, response) = try? await session.data(for: request),
-                      (response as? HTTPURLResponse)?.statusCode == 200,
+                let data: Data, response: URLResponse
+                do {
+                    (data, response) = try await session.data(for: request)
+                } catch let error as URLError where error.code == .timedOut {
+                    // URLSession's limit can beat the budget's timer on a busy Mac:
+                    // either way the answer came too late.
+                    return fallingBack(.timeout)
+                } catch {
+                    return fallingBack(.error)
+                }
+                guard (response as? HTTPURLResponse)?.statusCode == 200,
                       let (answer, probability) = question.decode(data)
                 else { return fallingBack(.error) }
                 return Decision(answer: answer, source: .jev(probability: probability))
             }
             group.addTask {
-                try? await Task.sleep(for: budget)
+                try? await clock.sleep(for: budget)
                 return fallingBack(.timeout)
             }
             group.addTask {
@@ -79,8 +102,8 @@ public struct JevClient: Sendable {
         }
     }
 
-    private static func request(_ method: String, key: String?, body: Data?) -> URLRequest {
-        var request = URLRequest(url: endpoint, timeoutInterval: 5)
+    private func request(_ method: String, key: String?, body: Data?) -> URLRequest {
+        var request = URLRequest(url: Self.endpoint, timeoutInterval: requestTimeout)
         request.httpMethod = method
         if let key { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         if let body {

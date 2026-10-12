@@ -53,7 +53,7 @@ private let replyLimit = Duration.seconds(120)
 @Test func withNobodyListeningSendGivesUpAndTakesItsRequestBack() async throws {
     let channel = TestHookChannel(paths: AppPaths.temporary())
     await #expect(throws: TestHookError.noReply) {
-        try await channel.send(.status, timeout: .milliseconds(50))
+        try await channel.send(.status, timeout: .milliseconds(50))  // timing-ok: nobody listens, so it always runs out
     }
     #expect(leftovers(channel).isEmpty)
 }

@@ -38,11 +38,6 @@
 // it waits on real time by design. There only the blocking rules apply: a
 // blocked thread can lose its wakeup and hang the check (#52 hung 14 minutes).
 //
-// `owed` lists the hits another ticket is fixing, one hit per entry, by file and
-// what, so the check stays green meanwhile. Each prints as owed; a second such
-// hit fails, and an entry that no longer hits fails, so whoever fixes it deletes
-// it here. Never add one without its issue.
-//
 // Exit 0: clean. Exit 1: one line per hit. Exit 2: could not run.
 
 import Foundation
@@ -51,10 +46,6 @@ let defaultRoots = ["Tests", "scripts", "Sources/LexiconEval", "Sources/LexiconE
 let clockFile = "Tests/TestSupport/TestClock.swift"
 let liveApp = "Sources/LexiconHarness"
 
-let owed: [(file: String, what: String, issue: String)] = [
-    ("Tests/LexiconTests/JevClientTests.swift", "a .milliseconds(50) budget or comparison", "#149"),
-    ("Tests/LexiconTests/TestHooksTests.swift", "a .milliseconds(50) budget or comparison", "#156"),
-]
 let fix = "wait on an explicit signal or the TestClock (\(clockFile)); run a child process with runChild "
     + "(Tests/TestSupport/ChildProcess.swift); a speed budget goes in a timing run, @Test(.enabled(if: timingRun)); "
     + "a pure hang guard may say `// timing-ok: <why>`"
@@ -211,17 +202,17 @@ func swiftFiles(under root: String) -> [String] {
         .map { root.hasSuffix("/") ? root + $0 : root + "/" + $0 }.sorted()
 }
 
-/// `file` relative to the package root, however it was named: `./Tests/...` or absolute.
+/// `file` relative to the package root, however it was named: `./Tests/...`,
+/// absolute, or through a symlinked folder such as /tmp.
 func relative(_ file: String) -> String {
-    let root = FileManager.default.currentDirectoryPath + "/"
-    let path = URL(filePath: file).standardizedFileURL.path(percentEncoded: false)
+    func real(_ url: URL) -> String { url.standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false) }
+    let root = real(URL(filePath: FileManager.default.currentDirectoryPath)) + "/"
+    let path = real(URL(filePath: file))
     return path.hasPrefix(root) ? String(path.dropFirst(root.count)) : path
 }
 
 let roots = CommandLine.arguments.count > 1 ? Array(CommandLine.arguments.dropFirst()) : defaultRoots
 var violations: [String] = []
-var owing: [String] = []
-var unpaid = Set(owed.indices)
 var files = 0
 for file in roots.flatMap(swiftFiles(under:)) {
     guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { fail("cannot read \(file)") }
@@ -245,22 +236,11 @@ for file in roots.flatMap(swiftFiles(under:)) {
         guard !comments[index].contains(timingOK) else { continue }
         for what in hits(in: line, blockingOnly: inTimingRun || path.hasPrefix(liveApp + "/"))
         where !(path == clockFile && what.hasSuffix("budget or comparison")) {
-            let at = "\(path):\(index + 1): \(what)"
-            if let entry = unpaid.first(where: { owed[$0].file == path && owed[$0].what == what }) {
-                unpaid.remove(entry)
-                owing.append("\(at): owed, \(owed[entry].issue) is fixing it")
-            } else {
-                violations.append("\(at): tests must not depend on machine speed; \(fix)")
-            }
+            violations.append("\(path):\(index + 1): \(what): tests must not depend on machine speed; \(fix)")
         }
     }
 }
 
-// An entry is paid only where its file was checked; another run's roots may not hold it.
-for entry in unpaid.sorted() where roots == defaultRoots {
-    violations.append("\(owed[entry].file): no longer has \(owed[entry].what) (\(owed[entry].issue)); delete its owed entry")
-}
-owing.forEach { print($0) }
 if violations.isEmpty {
     print("check-tests: OK (\(files) files)")
     exit(0)
