@@ -39,23 +39,33 @@ func anAppsFocusedElementAnswerIsAFieldNoFieldOrUnreadable(_ code: Int32, _ expe
 
 // One slow or failed read is not the app's answer: the focus is read once more
 // before it is called unreadable, and each read names the focused app again, so
-// a retry never uses an app that focus may have left (review on PR #241).
-@Test func aFocusReadThatFailsOnceIsReadAgainAndTheSecondReadNamesTheApp() {
-    var attempts: [(Focus.Answer, String?)] = [(.unreadable, "Notes"), (.none, "Finder")]
-    var reads = 0
-    let app = Focus.readTwice { reads += 1; return attempts.removeFirst() }
+// a retry never uses an app that focus may have left.
+@Test func aFocusRetryNamesTheFocusedAppAgain() {
+    var focused = ["Notes", "Finder"]  // focus moves while the first read times out
+    var named: [String] = []
+    let app = Focus.readTwice(naming: { () -> String? in named.append(focused[0]); return focused.removeFirst() },
+                              answering: { app in app == "Notes" ? (.unreadable, nil) : (.none, app) })
     #expect(app == "Finder")
-    #expect(reads == 2)
+    #expect(named == ["Notes", "Finder"])
 }
 
 @Test func aDefiniteAnswerIsReadOnce() {
     var reads = 0
-    #expect(Focus.readTwice { reads += 1; return (Focus.Answer.none, "Finder") } == "Finder")
+    #expect(Focus.readTwice(naming: { "Finder" }, answering: { app in reads += 1; return (.none, app) }) == "Finder")
     #expect(reads == 1)
 }
 
 @Test func aFocusReadThatFailsTwiceIsUnreadable() {
     var reads = 0
-    #expect(Focus.readTwice { reads += 1; return (Focus.Answer.unreadable, String?.none) } == nil)
+    #expect(Focus.readTwice(naming: { "Finder" }, answering: { (_: String) -> (Focus.Answer, String?) in
+        reads += 1
+        return (.unreadable, nil)
+    }) == nil)
     #expect(reads == 2)
+}
+
+@Test func anUnnamedFocusedAppIsAskedForOnceMore() {
+    var asks = 0
+    #expect(Focus.readTwice(naming: { () -> String? in asks += 1; return nil }, answering: { app in (.none, app) }) == nil)
+    #expect(asks == 2)
 }
