@@ -54,6 +54,17 @@ public actor ParakeetTranscriber: LocalTranscriber {
     /// `coremldata.bin`, no `.partial` left) tells them apart.
     public static func isInstalled(paths: AppPaths) -> Bool { isComplete(folder(paths)) }
 
+    /// Points `paths`' models at `source`'s with a link, unless `paths` has
+    /// models of its own: a scratch data root uses the installed weights rather
+    /// than downloading about 614 MB again.
+    public static func shareModels(of source: AppPaths, with paths: AppPaths) throws {
+        let models = modelsFolder(paths)
+        guard (try? models.checkResourceIsReachable()) != true,
+              (try? FileManager.default.destinationOfSymbolicLink(atPath: models.path)) == nil else { return }
+        try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: models, withDestinationURL: modelsFolder(source))
+    }
+
     static func isComplete(_ folder: URL) -> Bool {
         let files = FileManager.default
         let whole = requiredFiles.allSatisfy { name in

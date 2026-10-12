@@ -10,7 +10,8 @@ import LexiconDomain
 
 private let status = TestHookStatus(bundleID: AppPaths.devBundleID, version: "0.1 (1, abc)", pid: 42,
                                     accessibility: true, microphone: "granted",
-                                    privacy: .private, alwaysPrivateApps: ["com.apple.Terminal", "com.microsoft.VSCode"])
+                                    privacy: .private, alwaysPrivateApps: ["com.apple.Terminal", "com.microsoft.VSCode"],
+                                    dataRoot: "/tmp/Lexicon Dev scratch")
 
 /// How long a test waits for a reply that takes milliseconds. Generous on
 /// purpose: the server answers from a task, and a loaded CI runner can leave
