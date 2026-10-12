@@ -75,17 +75,27 @@ struct Focus {
     static func now() -> Focus? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, AX.timeout)
-        guard let pid = focusedPID(accessibility: AX.element(system, kAXFocusedApplicationAttribute).flatMap(AX.pid),
-                                   frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier) else { return nil }
-        let app = AX.app(pid)
-        return Focus(pid: pid, app: app, field: AX.element(app, kAXFocusedUIElementAttribute))
+        if let app = AX.element(system, kAXFocusedApplicationAttribute), let pid = AX.pid(app) {
+            return Focus(pid: pid, app: app, field: AX.element(app, kAXFocusedUIElementAttribute))
+        }
+        // The system-wide query named no app, but one is in front and gets Cmd-V.
+        guard let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        let app = AX.app(frontmost)
+        var value: CFTypeRef?
+        let answer = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value)
+        guard let pid = standIn(frontmost: frontmost, focusedElement: answer) else { return nil }
+        let field = value.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }  // type id checked
+        if let field { AXUIElementSetMessagingTimeout(field, AX.timeout) }
+        return Focus(pid: pid, app: app, field: field)
     }
 
-    /// An app in front whose focus Accessibility can't name (a key window with no
-    /// focused element was seen to answer nothing) still gets Cmd-V, so it is
-    /// the target: one with no field, which the 5 s rule then covers.
-    static func focusedPID(accessibility: pid_t?, frontmost: pid_t?) -> pid_t? {
-        accessibility ?? frontmost
+    /// Only a definite answer from the frontmost app makes it the target: its
+    /// focused element, or "none" (a key window with no focused element answers
+    /// that). A timeout or any other error leaves nowhere to type, so the same
+    /// Dictation never holds or pastes on how fast Accessibility answered.
+    static func standIn(frontmost: pid_t?, focusedElement: AXError) -> pid_t? {
+        guard let frontmost, [.success, .noValue].contains(focusedElement) else { return nil }
+        return frontmost
     }
 
     var isSecure: Bool { traits.map { FieldTraits.accepts($0) == .secure } ?? false }
