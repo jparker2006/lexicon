@@ -1,6 +1,6 @@
 # The fn tap listens and never holds a key
 
-Status: accepted by the orchestrator and the Reviewer in PR #123; Jake had a heads-up, not a question, so it is Proposed in `docs/DECISIONS.md` (item 34) until he confirms it. His answer on item 59 already keeps idle typing delay at the listen-only figure.
+Status: Proposed (`docs/DECISIONS.md` item 34). The orchestrator and the Reviewer chose it in PR #123 and Jake had a heads-up, not a question, so it stands as built until he confirms it. The question he did answer, item 59, set idle typing delay at the listen-only 2 to 12 ms as the bar M1 must keep.
 
 Lexicon's fn tap is a listen-only CGEventTap (`.listenOnly`), created in one place, `Sources/KeyInput/EventTap.swift`, and started only when `CGPreflightListenEventAccess()` already reads true, so it never raises a permission prompt. It sees fn and every other key and swallows nothing. The spec chose one active, session-level tap, on an unmeasured "a few microseconds" callback budget from the architecture sketch. Measured live in M0 (#53, PR #123), keys reached the focused app 26 to 74 ms late through the active tap and 2 to 12 ms late through the listen-only one. A delay on every key Jake types, all day, costs more than anything a tap could swallow.
 

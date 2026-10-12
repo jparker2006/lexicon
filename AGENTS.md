@@ -20,7 +20,7 @@ Two things are always true. Judge every change against them:
 
 ## Where things are
 
-- `docs/DECISIONS.md`: every decision since the spec, current and replaced, each with Jake's words, the question and the time. A change that departs from the spec or a recorded decision updates it in the same PR.
+- `docs/DECISIONS.md`: every decision since the spec, current and replaced, each with Jake's words, the question and the time, or marked Proposed until he gives them. A change that departs from the spec or a recorded decision updates it in the same PR.
 - `docs/architecture.md`: modules, who owns what, the invariants the compiler enforces, budgets and how each is read.
 - `docs/adr/`: decisions that are hard to reverse. `GLOSSARY.md`: the words to use.
 - `docs/agents/`: how Jake, the orchestrator, builders, Live checks and the Reviewer work ([workflow.md](docs/agents/workflow.md)), the review checklist ([review.md](docs/agents/review.md)), labels and the issue tracker.

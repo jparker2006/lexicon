@@ -1,6 +1,7 @@
 // Tests for check-docs.mjs, on fixture trees: two lines exactly as main had
 // them before #162 (AGENTS.md line 24 and workflow.md's install line), and
-// their rewrites. No network; the merged tickets are passed in.
+// their rewrites. No network: the merged tickets are passed in, or read from a
+// local repo and its file:// clone.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -92,6 +93,42 @@ test('a shallow clone, as CI checks out, reads the merged tickets too', () => {
   }
   assert.equal(status, 1, out)
   assert.match(out, /^AGENTS\.md:1: #38 has merged/m)
+})
+
+test('a shallow clone that cannot be deepened fails instead of skipping the rule', () => {
+  const origin = tree({ 'AGENTS.md': 'Nothing future here.\n' })
+  const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { stdio: 'ignore' })
+  git(origin, 'init', '-q')
+  git(origin, 'add', '-A')
+  git(origin, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'one')
+  git(origin, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'two')
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'check-docs-clone-'))
+  execFileSync('git', ['clone', '-q', '--depth', '1', `file://${origin}`, clone], { stdio: 'ignore' })
+  fs.rmSync(origin, { recursive: true, force: true })
+  try {
+    execFileSync('node', [script, '--root', clone], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    assert.fail('passed with no history to read')
+  } catch (e) {
+    assert.equal(e.status, 2, `${e.stdout}${e.stderr}`)
+    assert.match(e.stderr, /shallow clone/)
+  }
+})
+
+test('only a squash subject\'s trailing (#N) marks a ticket merged', () => {
+  const root = tree({ 'AGENTS.md': 'Esc stays with the app until #58 lands.\n' })
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' })
+  git('init', '-q')
+  git('add', '-A')
+  git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'docs: see (#58) for the plan (#150)')
+  const r = (() => {
+    try { return { status: 0, out: execFileSync('node', [script, '--root', root], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) } } catch (e) { return { status: e.status, out: `${e.stdout}${e.stderr}` } }
+  })()
+  assert.equal(r.status, 0, r.out)
+})
+
+test('a later noun is not the verb: "After #38 the merge path is manual."', () => {
+  const root = tree({ 'AGENTS.md': 'After #38 the merge path is manual.\n' })
+  assert.equal(run(root, '38').status, 0)
 })
 
 test('a future pointer at an open ticket passes', () => {

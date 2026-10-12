@@ -8,12 +8,12 @@
 //
 // Fails on:
 //   - a future pointer at a ticket ("lands with #N", "lands with the X ticket",
-//     "once #N lands") whose
-//     sentence names no ticket number, or names one that has merged. A ticket
-//     has merged when a commit subject on HEAD ends in "(#N)" or "(#N) (#M)";
-//     --merged replaces that list (tests). A shallow clone, such as CI's
-//     checkout, is deepened first (git fetch --unshallow); if that fails,
-//     only the paths are checked, and it says so.
+//     "once #N lands") whose sentence names no ticket number, or names one
+//     that has merged. A ticket has merged when a commit subject on HEAD ends
+//     in "(#N)" or "(#N) (#M)", as squash merges do; --merged replaces that
+//     list (tests). A shallow clone, such as CI's checkout, is deepened first
+//     (git fetch --unshallow), and one that can't be deepened fails the check
+//     (exit 2) rather than skip the rule.
 //   - a scripts/ path that does not exist. Globs and <placeholders> are skipped.
 //
 // Reads AGENTS.md, CLAUDE.md, GLOSSARY.md, README.md, docs/**/*.md except
@@ -33,20 +33,23 @@ const root = path.resolve(option('--root') ?? path.join(path.dirname(fileURLToPa
 
 function mergedTickets() {
   const given = option('--merged')
-  if (given !== undefined) return { merged: new Set(given.split(',').filter(Boolean).map(Number)), shallow: false }
+  if (given !== undefined) return new Set(given.split(',').filter(Boolean).map(Number))
   const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' })
   if (git('rev-parse', '--is-shallow-repository').trim() === 'true') {
     try {
       execFileSync('git', ['-C', root, 'fetch', '--quiet', '--unshallow'], { stdio: 'ignore', timeout: 120_000 })
+      if (git('rev-parse', '--is-shallow-repository').trim() === 'true') throw new Error('still shallow')
     } catch {
-      return { merged: null, shallow: true }
+      console.error('check-docs: a shallow clone that git fetch --unshallow could not deepen has no history to say which tickets merged')
+      process.exit(2)
     }
   }
   const merged = new Set()
   for (const subject of git('log', '--format=%s', 'HEAD').split('\n')) {
-    for (const m of subject.matchAll(/\(#(\d+)\)/g)) merged.add(Number(m[1]))
+    const tail = subject.match(/\(#(\d+)\)(?: \(#(\d+)\))?$/)
+    if (tail) for (const n of tail.slice(1)) if (n) merged.add(Number(n))
   }
-  return { merged, shallow: false }
+  return merged
 }
 
 function docs() {
@@ -69,11 +72,11 @@ function docs() {
 // "once #159 (PR #215) merges", "until #58 and #62 land". Not "the result lands
 // with every item PASS".
 const TICKET = String.raw`(?:\[?#\d+\]?|the [^.]*?\bticket\b)`
-const FUTURE = new RegExp(String.raw`\b(?:lands with|will land (?:with|in)) ${TICKET}|\b(?:once|until|when|after) \[?#\d+\]?[^.]{0,60}?\b(?:lands?|merges?|ships?)\b`, 'i')
+const FUTURE = new RegExp(String.raw`\b(?:lands with|will land (?:with|in)) ${TICKET}|\b(?:once|until|when|after) \[?#\d+\]?[^.]{0,60}?\b(?:lands?|merges|ships)\b`, 'i')
 // A path character may not come before it, so ~/x/scripts/y and .claude/scripts are left alone.
 const SCRIPT = /(?<![\w./~-])scripts\/[\w./-]*\w/g
 
-const { merged, shallow } = mergedTickets()
+const merged = mergedTickets()
 const failures = []
 for (const rel of docs()) {
   const lines = fs.readFileSync(path.join(root, rel), 'utf8').split('\n')
@@ -84,7 +87,7 @@ for (const rel of docs()) {
       const tickets = [...sentence.matchAll(/#(\d+)/g)].map((m) => Number(m[1]))
       if (!tickets.length) {
         failures.push(`${where}: a future pointer that names no ticket number ("${sentence.match(FUTURE)[0]}"): name the ticket (#N) so this check sees when it lands, or say what is true now`)
-      } else if (merged) {
+      } else {
         for (const n of new Set(tickets)) {
           if (merged.has(n)) failures.push(`${where}: #${n} has merged, so "${sentence.match(FUTURE)[0]}" is no longer future: say what is true now`)
         }
@@ -97,7 +100,6 @@ for (const rel of docs()) {
   })
 }
 
-if (shallow) console.error('check-docs: a shallow clone that could not be deepened has no history, so merged tickets were not checked')
 for (const f of failures) console.log(f)
 if (failures.length) process.exit(1)
 console.log('check-docs: OK')
