@@ -213,8 +213,8 @@ final class MicLane: @unchecked Sendable {
 
     func begin(deviceUID: String?, keyDown: HostTime) throws(RecorderError) -> MicSource {
         // fn never waits (#18): a capture still in its tail ends now. First, before
-        // anything that can fail or get stuck: once this lane is abandoned nothing
-        // else on it runs, and the tail's engine would hold the mic until relaunch.
+        // anything that can fail or get stuck: a stuck call holds this queue, so
+        // the tail's own stop could never run and its engine would hold the mic.
         active?.cutOff()
         // Queued behind the call that got stuck, and already answered by the deadline.
         guard !isAbandoned else { throw .startTimedOut }

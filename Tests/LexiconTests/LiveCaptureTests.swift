@@ -162,7 +162,7 @@ func aSecondDeviceChangeRightAfterARebuildStillKeepsRecording() async throws {
 
 @Test(.timeLimit(.minutes(1)))
 func aStuckStartReleasesTheLastEngineAndTheNextStartRecords() async throws {
-    // A capture still in its tail holds the mic when fn-down comes again. That
+    // A capture still running (as in its tail) holds the mic when fn-down comes again. That
     // start's device lookup sticks, so it times out and its lane is abandoned:
     // only a release before the lookup stops the engine the held capture holds.
     let clock = TestClock()
