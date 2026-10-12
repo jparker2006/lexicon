@@ -37,7 +37,7 @@ Task.detached { await system.run() }                         // key loop, recove
 indicator.follow(await system.conductor.events(), levels: system.recorder.levels)  // pill, icon, sounds
 ```
 
-One Dictation, in `LexiconCore/Conductor+Run.swift` (abridged; this file is the trace):
+One Dictation, in `LexiconCore/Conductor+Run.swift` and, from `land`, `Conductor+Land.swift` (abridged; these files are the trace):
 
 ```swift
 let capture  = try await recorder.start(start.input, writingTo: history.audioURL(for: id))   // audio first
