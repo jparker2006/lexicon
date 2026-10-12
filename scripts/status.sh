@@ -8,11 +8,13 @@
 # it has waited and the session where Jake answers. Then main, the building
 # issues (minutes since their last comment), open PRs (CI, commits behind main,
 # whether the Ready line names the current head), the live-app lane and its
-# queue, whether the daily copy is running, the machine verdict, the last Live
-# checks results, label conflicts, and the watchers. NOT WATCHED means no
+# queue, whether the daily copy is running, the machine verdict, the build
+# slots in use and the jobs waiting for one, the last Live checks results,
+# label conflicts, and the watchers. NOT WATCHED means no
 # scripts/watch-events.sh is running, so nothing reports new events.
 set -eu
 cd "$(dirname "$0")/.."
+. scripts/lib/heavy.sh
 
 tmp=$(mktemp -d -t status)
 trap 'rm -rf "$tmp"' EXIT
@@ -90,6 +92,7 @@ else
     echo "Daily copy: not running"
 fi
 echo "Machine: $(scripts/machine.sh --interval 1 | head -n 1)"
+echo "  $(heavy_summary)"
 sed '1,/^@@machine$/d' "$tmp/board"
 
 # A watcher counts while its pid is alive and it wrote its state in the last 10
