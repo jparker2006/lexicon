@@ -29,9 +29,9 @@
 # ~/Library/Application Support/Lexicon Dev/heavy/: slot1 to slot3 (the files
 # lockf(1) holds, so a holder that dies frees its slot at once), each holder's
 # line in slotN.holder, and the line in queue/, one file per waiter named by
-# its number and pid. An entry drops out as soon as its waiter's process is gone
-# or it was written before the Mac last started (a pid from then may name an
-# unrelated process), so a crashed session never blocks the line.
+# its number and pid, holding the time that process started. An entry drops out
+# as soon as that process is gone, even when another process has its pid, so a
+# crashed session never blocks the line.
 # scripts/machine.sh and scripts/status.sh read both through heavy_summary.
 #
 # A job that holds a slot (HEAVY_SLOT is set) runs the scripts it calls in that
@@ -56,14 +56,15 @@ heavy_holder() {
     cat "$HEAVY_DIR/slot$1.holder" 2>/dev/null || echo "an unknown job"
 }
 
-heavy_boot() { sysctl -n kern.bootsessionuuid 2> /dev/null || echo unknown; }
+# When process $1 started, to the second. With its pid, it names one process:
+# a pid alone may be reused once the process is gone.
+heavy_started() { ps -o lstart= -p "$1" 2> /dev/null; }
 
 # The line's live entries, first come first. With "prune", deletes the rest.
 heavy_queue() {
-    heavy_q_boot=$(heavy_boot)
     for heavy_q in "$HEAVY_DIR"/queue/*; do
         [ -f "$heavy_q" ] || continue
-        if kill -0 "${heavy_q##*.}" 2> /dev/null && [ "$(cat "$heavy_q" 2> /dev/null)" = "$heavy_q_boot" ]; then
+        if kill -0 "${heavy_q##*.}" 2> /dev/null && [ "$(cat "$heavy_q" 2> /dev/null)" = "$(heavy_started "${heavy_q##*.}")" ]; then
             echo "$heavy_q"
         elif [ "${1:-}" = prune ]; then
             rm -f "$heavy_q"
@@ -215,7 +216,7 @@ case "${ZSH_EVAL_CONTEXT:-}:$0" in
         n=$(( $(cat "$HEAVY_DIR/queue.next" 2> /dev/null || echo 0) + 1 ))
         echo "$n" > "$HEAVY_DIR/queue.next"
         entry=$(printf '%s/queue/%010d.%s' "$HEAVY_DIR" "$n" "$2")
-        heavy_boot > "$HEAVY_DIR/queue.new"
+        heavy_started "$2" > "$HEAVY_DIR/queue.new"
         mv "$HEAVY_DIR/queue.new" "$entry"
         echo "$entry"
         ;;

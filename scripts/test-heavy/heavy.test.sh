@@ -203,7 +203,7 @@ test_an_entry_whose_pid_was_reused_drops_out() {
     # A waiter killed earlier in this boot left this entry; its pid now names
     # another process (H1's).
     mkdir -p "$SLOTS/queue"
-    sysctl -n kern.bootsessionuuid > "$SLOTS/queue/0000000000.$H1"
+    echo "Thu Jan  1 00:00:00 1970" > "$SLOTS/queue/0000000000.$H1"
     job A
     expect_wait "number 1 in line"
     release H1

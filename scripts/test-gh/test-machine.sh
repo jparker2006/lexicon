@@ -59,13 +59,15 @@ test_waiters_in_line_are_counted() {
     use_fakes
     queue="$HOME/Library/Application Support/Lexicon Dev/heavy/queue"
     mkdir -p "$queue"
-    # A live waiter, one whose process is gone, and one from before the Mac
-    # last started (the fake sysctl answers every call with the same reading).
-    sysctl -n kern.bootsessionuuid > "$queue/0000000001.$$"
+    # A live waiter, one whose process is gone, and one whose pid now names a
+    # process that started after it queued. The fake ps gives every process
+    # the same start time.
+    echo "Mon Oct 12 06:30:00 2026" > "$GH_FIXTURES/cmd/ps"
+    cp "$GH_FIXTURES/cmd/ps" "$queue/0000000001.$$"
     sh -c 'exit 0' & dead=$!
     wait "$dead"
-    sysctl -n kern.bootsessionuuid > "$queue/0000000002.$dead"
-    echo an-earlier-boot > "$queue/0000000003.$PPID"
+    cp "$GH_FIXTURES/cmd/ps" "$queue/0000000002.$dead"
+    echo "Mon Oct 12 06:00:00 2026" > "$queue/0000000003.$PPID"
     : > "$GH_FIXTURES/cmd/lockf"
     run machine.sh
     expect_out "build slots 0 of 3 in use | queue: 1 waiting"
