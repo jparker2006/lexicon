@@ -6,7 +6,8 @@
 #   scripts/bundle.sh daily            release build as "Lexicon"
 #
 # Prints the signed bundle's path (under .build/bundle/) on stdout; all else goes to stderr.
-# Installs nothing: scripts/dev-run.sh and scripts/install.sh do that.
+# Installs nothing: scripts/dev-run.sh and scripts/install.sh do that. Builds in a
+# build slot (scripts/lib/heavy.sh).
 #
 # Signed with the self-signed "Lexicon Dev" certificate in the login keychain,
 # Hardened Runtime on. The designated requirement then names the bundle id and
@@ -30,13 +31,16 @@ esac
 # SHA-1 of the "Lexicon Dev" certificate (public; `security find-identity -p codesigning`).
 CERT=E94A28969B47D61CE9C8561BB9D2EB8BB022F31D
 
+. scripts/lib/heavy.sh
+heavy scripts/bundle.sh "$@"
 if [ "$CONFIG" = debug ]; then
     . scripts/lib/swift-flags.sh
 else
-    set -- --explicit-target-dependency-import-check error
+    # No Swift Testing paths: they would land in the daily binary's rpaths.
+    SWIFT_FLAGS="--explicit-target-dependency-import-check error${HEAVY_JOBS:+ --jobs $HEAVY_JOBS}"
 fi
-swift build --product LexiconApp -c "$CONFIG" "$@" >&2
-BIN="$(swift build -c "$CONFIG" --show-bin-path "$@")/LexiconApp"
+swift build --product LexiconApp -c "$CONFIG" $SWIFT_FLAGS >&2
+BIN="$(swift build -c "$CONFIG" --show-bin-path $SWIFT_FLAGS)/LexiconApp"
 
 APP=".build/bundle/$CONFIG/$NAME.app"
 rm -rf "$APP"
