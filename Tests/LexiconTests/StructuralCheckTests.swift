@@ -644,6 +644,10 @@ let rejectedModelOutputs: [Pair] = [
     let rules = RuleSet([Rule(heard: "cube cuddle", written: "kubectl")])
     #expect(StructuralCheck.check("Use kubectl for that.", ruled: "Use, like, kubectl for that.", terms: [], rules: rules)
         == .droppedContentWord)
+    let preCommit = RuleSet([Rule(heard: "pre commit", written: "pre-commit")])
+    #expect(TextPass.run("Run, like, pre commit first.", rules: preCommit) == "Run, like, pre-commit first.")
+    #expect(StructuralCheck.check("Run pre-commit first.", ruled: "Run, like, pre-commit first.", terms: [],
+                                  rules: preCommit) == .droppedContentWord)
     // A retracted "uh" elsewhere does not excuse dropping the "uh" of "uh huh".
     #expect(StructuralCheck.check("Keep the file. Huh, that's right.",
                                   ruled: "Delete the uh file, actually no, keep the file. Uh huh, that's right.",

@@ -85,11 +85,12 @@ enum Fillers {
         "before", "after", "if", "dont", "doesnt", "cant", "wont", "ain't", "kinda", "sorta", "nah", "nope",
     ]
 
-    /// Doubles that grammar allows, on top of `protected` and numbers. A doubled
+    /// Doubles that grammar allows, on top of `protected` and numbers. "oh oh" and "ha ha"
+    /// are exclamations; a lone "oh" before a number would read as a zero. A doubled
     /// ordinal ("the first first step") stays a stutter: it makes no number.
     static let meantDoubles: Set<String> = [
-        "that", "had", "is", "do", "so", "very", "bye", "ha", "knock", "much", "long", "far", "way", "super", "many",
-        "more", "well", "too", "pretty", "totally", "double", "triple",
+        "that", "had", "is", "do", "so", "very", "bye", "ha", "oh", "knock", "much", "long", "far", "way", "super",
+        "many", "more", "well", "too", "pretty", "totally", "double", "triple",
     ]
 
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".

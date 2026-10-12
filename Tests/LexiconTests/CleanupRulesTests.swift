@@ -178,6 +178,7 @@ let numberRepeatCases: [Case] = [
     Case("Our team won won the hackathon.", "Our team won the hackathon."),
     Case("Ship it to to five users first.", "Ship it to five users first."),
     Case("Ha ha, very funny.", "Ha ha, very funny."),
+    Case("Oh oh, five servers are down.", "Oh oh, five servers are down."),
     // Three or more in a row is emphasis, not a stutter.
     Case("Go go go, ship it.", "Go go go, ship it."),
     Case("Go go, go, ship it.", "Go go, go, ship it."),

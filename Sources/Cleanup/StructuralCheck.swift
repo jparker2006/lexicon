@@ -83,12 +83,13 @@ enum StructuralCheck {
         // word it hedges still after it ("like 80"), so another "like" kept elsewhere is no excuse.
         var meant: [String: Int] = [:]
         let names = capitalizedWords(refText)
+        let written = writtenWords(refText, rules: rules, terms: terms)
         for k in ref.indices where !retracted.contains(k) {
             guard let key = meaningKey(ref, k) else { continue }
             if ref[k].word == "like" {
                 guard ref[k].mark == ",", let object = likeObject(ref, k)?.word,
-                      Fillers.keepsLike(object, isName: names.contains(object)) || rules?.isWritten(object) == true
-                        || terms.contains(where: { $0.text.lowercased() == object }) else { continue }
+                      Fillers.keepsLike(object, isName: names.contains(object)) || written.contains(object)
+                else { continue }
             }
             meant[key, default: 0] += 1
         }
@@ -487,6 +488,18 @@ enum StructuralCheck {
                            endsSentence: { endsSentence(t[$0]) },
                            youKnow: { t[$0].word == "you_know" && t[$0].mark == "," ? 1 : 0 })
             .map { t[$0] }
+    }
+
+    /// The first word, as `tokens` reads it, of each Term and of each Rule's written side in
+    /// `text` ("pre-commit" gives "pre", "Next.js" gives "next.js"): what a "like" before one hedges.
+    static func writtenWords(_ text: String, rules: RuleSet?, terms: [Term]) -> Set<String> {
+        var words = Set(terms.compactMap { tokens($0.text).first?.word })
+        if let rules {
+            for piece in text.split(whereSeparator: \.isWhitespace) where rules.isWritten(piece) {
+                if let first = tokens(String(piece)).first?.word { words.insert(first) }
+            }
+        }
+        return words
     }
 
     /// Lowercased words written with a capital past a sentence's first word ("Postgres",
