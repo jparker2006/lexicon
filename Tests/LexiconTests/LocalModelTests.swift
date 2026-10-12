@@ -170,22 +170,22 @@ import LexiconDomain
     let (started, starting) = AsyncStream<Void>.makeStream()
 
     let first = Task {
-        await queue.run(.background) {
+        try await queue.run(.background) {
             starting.yield()
             for await _ in release { break }  // holds the Neural Engine until released
             await order.append("first")
         }
     }
     for await _ in started { break }
-    let background = Task { await queue.run(.background) { await order.append("background") } }
+    let background = Task { try await queue.run(.background) { await order.append("background") } }
     await queue.untilWaiting(atLeast: 1)
-    let live = Task { await queue.run(.live) { await order.append("live") } }
+    let live = Task { try await queue.run(.live) { await order.append("live") } }
     await queue.untilWaiting(atLeast: 2)
 
     releasing.yield()
-    await first.value
-    await background.value
-    await live.value
+    try await first.value
+    try await background.value
+    try await live.value
 
     #expect(await order.names == ["first", "live", "background"])
 }
