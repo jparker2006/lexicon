@@ -107,7 +107,7 @@ func theCapWarnsOnceThenStopsAndInsertsAHandsFreeDictation() async throws {
     }
     try #require(rig.feed(.fnUp(at(300))).commands == [])
     // The warning mark: began + cap - capWarning.
-    try #require(rig.feed(.deadline(at(8_000))).commands == [.oneMinuteLeft(first)])
+    try #require(rig.feed(.deadline(at(8_050))).commands == [.oneMinuteLeft(first)])
     seen += await readUntil(&events) { event in if case .oneMinuteLeft(let who) = event { who == first } else { false } }
     // The cap mark: began + cap.
     try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(first, at: at(10_000))])
@@ -153,7 +153,7 @@ func theCapWarnsAndStopsAHeldDictationToo() async throws {
     seen += await readUntil(&events) { event in if case .started(let who) = event { who == id } else { false } }
     try #require(rig.feed(.deadline(at(300))).commands == [.dictationConfirmed(id, .hold)])
     seen += await readUntil(&events) { event in if case .confirmed(let who, .hold) = event { who == id } else { false } }
-    try #require(rig.feed(.deadline(at(8_000))).commands == [.oneMinuteLeft(id)])
+    try #require(rig.feed(.deadline(at(8_050))).commands == [.oneMinuteLeft(id)])
     seen += await readUntil(&events) { event in if case .oneMinuteLeft(let who) = event { who == id } else { false } }
     try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(id, at: at(10_000))])
     seen += await readUntil(&events) { event in if case .finished = event { true } else { false } }

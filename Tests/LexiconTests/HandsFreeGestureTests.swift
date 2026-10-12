@@ -139,7 +139,7 @@ func escBeforeTheHoldThresholdDiscardsAndAtOrAfterItConfirmsThenCancels(millisec
     _ = run([.fnDown(at(0), secureInput: false, id: a)], gesture: &gesture)
     let confirm = gesture.handle(.deadline(at(300)))
     #expect(confirm.commands == [.dictationConfirmed(a, .hold)])
-    #expect(confirm.wakeAt == at(8_000))
+    #expect(confirm.wakeAt == at(8_050))
 }
 
 @Test func aHandsFreeAsksForTheWarningCountedFromTheFirstFnDownNotTheSecondTap() {
@@ -149,7 +149,7 @@ func escBeforeTheHoldThresholdDiscardsAndAtOrAfterItConfirmsThenCancels(millisec
     _ = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90))], gesture: &gesture)
     let confirm = gesture.handle(.fnDown(at(200), secureInput: false, id: b))
     #expect(confirm.commands == [.dictationConfirmed(a, .handsFree)])
-    #expect(confirm.wakeAt == at(8_000))
+    #expect(confirm.wakeAt == at(8_050))
 }
 
 @Test(arguments: [false, true])
@@ -163,11 +163,11 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     } else {
         _ = gesture.handle(.deadline(at(300)))
     }
-    let warning = gesture.handle(.deadline(at(8_000)))
+    let warning = gesture.handle(.deadline(at(8_050)))
     #expect(warning.commands == [.oneMinuteLeft(a)])
     #expect(warning.wakeAt == at(10_050))
     // Once only: the same mark again sends nothing, and the stop is still due at 10 s.
-    #expect(gesture.handle(.deadline(at(8_000))).commands.isEmpty)
+    #expect(gesture.handle(.deadline(at(8_050))).commands.isEmpty)
     #expect(gesture.handle(.deadline(at(10_050))).commands == [.dictationStopped(a, at: at(10_000))])
     #expect(!gesture.isRecording)
 }
@@ -179,14 +179,14 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300))], gesture: &gesture)
     let early = gesture.handle(.deadline(at(7_990)))
     #expect(early.commands.isEmpty)
-    #expect(early.wakeAt == at(8_000))
-    #expect(gesture.handle(.deadline(at(8_000))).commands == [.oneMinuteLeft(a)])
+    #expect(early.wakeAt == at(8_050))
+    #expect(gesture.handle(.deadline(at(8_050))).commands == [.oneMinuteLeft(a)])
 }
 
 @Test func aCapDeadlineDeliveredLateStopsAtTheCapMark() {
     // Delivered at 10.4 s, the stop is still stamped at the cap: 10 s after the first fn-down.
     var gesture = FnGesture(shortCap)
-    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000))], gesture: &gesture)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_050))], gesture: &gesture)
     #expect(gesture.handle(.deadline(at(10_400))).commands == [.dictationStopped(a, at: at(10_000))])
     #expect(!gesture.isRecording)
 }
@@ -195,7 +195,7 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     // No release ever arrives: the warning and then the cap end the Dictation, and a
     // release after that does nothing.
     var gesture = FnGesture(shortCap)
-    #expect(run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000)), .deadline(at(10_050))],
+    #expect(run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_050)), .deadline(at(10_050))],
                 gesture: &gesture)
         == [.dictationBegan(a, at: at(0)), .dictationConfirmed(a, .hold), .oneMinuteLeft(a), .dictationStopped(a, at: at(10_000))])
     #expect(!gesture.isRecording)
@@ -207,10 +207,10 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     // 0.8 s, and the mark it had asked for then does nothing.
     var gesture = FnGesture(shortCap)
     _ = gesture.handle(.fnDown(at(0), secureInput: false, id: a))
-    #expect(gesture.handle(.deadline(at(300))).wakeAt == at(8_000))
+    #expect(gesture.handle(.deadline(at(300))).wakeAt == at(8_050))
     #expect(gesture.handle(.sleep(at(800))).commands == [.dictationStopped(a, at: at(800))])
     #expect(!gesture.isRecording)
-    #expect(gesture.handle(.deadline(at(8_000))).commands.isEmpty)
+    #expect(gesture.handle(.deadline(at(8_050))).commands.isEmpty)
 }
 
 @Test func sleepInHandsFreeStopsIt() {
@@ -273,7 +273,7 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     // that stops the Dictation at its own time.
     var gesture = FnGesture(shortCap)
     _ = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90)), .fnDown(at(200), secureInput: false, id: b),
-             .deadline(at(8_000))], gesture: &gesture)
+             .deadline(at(8_050))], gesture: &gesture)
     #expect(gesture.handle(.deadline(at(10_000))).commands.isEmpty)
     #expect(gesture.handle(.fnDown(at(9_990), secureInput: false, id: b)).commands == [.dictationStopped(a, at: at(9_990))])
 }
@@ -283,7 +283,7 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     // 10 s, and the press stamped before it is ignored by its own time, never a new press.
     var gesture = FnGesture(shortCap)
     _ = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90)), .fnDown(at(200), secureInput: false, id: b),
-             .deadline(at(8_000))], gesture: &gesture)
+             .deadline(at(8_050))], gesture: &gesture)
     #expect(gesture.handle(.deadline(at(10_050))).commands == [.dictationStopped(a, at: at(10_000))])
     #expect(gesture.handle(.fnDown(at(9_990), secureInput: false, id: b)) == FnGesture.Output())
     #expect(gesture.handle(.fnUp(at(10_040))) == FnGesture.Output())
@@ -328,7 +328,7 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     for keyFirst in [true, false] {
         var gesture = FnGesture(shortCap)
         _ = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90)), .fnDown(at(200), secureInput: false, id: b),
-                 .deadline(at(8_000))], gesture: &gesture)
+                 .deadline(at(8_050))], gesture: &gesture)
         let inputs: [KeyInput] = keyFirst
             ? [.fnDown(at(10_010), secureInput: false, id: b), .deadline(at(10_000))]
             : [.deadline(at(10_050)), .fnDown(at(10_010), secureInput: false, id: b)]
@@ -340,7 +340,7 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     // The cap stopped the Dictation at 10 s, to be typed; an Esc at 10.01 s handled before the
     // cap's timer comes after it all the same.
     var gesture = FnGesture(shortCap)
-    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000))], gesture: &gesture)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_050))], gesture: &gesture)
     #expect(gesture.handle(.escape(at(10_010))).commands == [.dictationStopped(a, at: at(10_000))])
     #expect(gesture.handle(.deadline(at(10_000))).commands.isEmpty)
 }
@@ -350,7 +350,7 @@ func anEscStampedJustBeforeTheCapCancelsWhicheverIsHandledFirst(escFirst: Bool) 
     // An Esc at 9.995 s cancels the Dictation, whether the tap handles it before or after the
     // cap's timer, within the 50 ms the cap's mark waits.
     var gesture = FnGesture(shortCap)
-    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000))], gesture: &gesture)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_050))], gesture: &gesture)
     let inputs: [KeyInput] = escFirst ? [.escape(at(9_995)), .deadline(at(10_000))] : [.deadline(at(10_000)), .escape(at(9_995))]
     #expect(run(inputs, gesture: &gesture) == [.dictationCancelled(a)])
 }
@@ -373,6 +373,16 @@ func aKeyStampedAfterTheWarningMarkGetsTheWarningFirstWhicheverIsHandledFirst(ke
     // whatever the key does, whether the tap handles the key or the mark's timer first.
     var gesture = FnGesture(shortCap)
     _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300))], gesture: &gesture)
-    let inputs: [KeyInput] = keyFirst ? [.escape(at(8_010)), .deadline(at(8_000))] : [.deadline(at(8_000)), .escape(at(8_010))]
+    let inputs: [KeyInput] = keyFirst ? [.escape(at(8_010)), .deadline(at(8_050))] : [.deadline(at(8_050)), .escape(at(8_010))]
     #expect(run(inputs, gesture: &gesture) == [.oneMinuteLeft(a), .dictationCancelled(a)])
+}
+
+@Test(arguments: [true, false])
+func anEscStampedJustBeforeTheWarningMarkGetsNoWarningWhicheverIsHandledFirst(escFirst: Bool) {
+    // An Esc at 7.99 s ends the Dictation before its warning, whether the tap handles it before
+    // or after the warning's timer, within the 50 ms the warning's mark waits.
+    var gesture = FnGesture(shortCap)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300))], gesture: &gesture)
+    let inputs: [KeyInput] = escFirst ? [.escape(at(7_990)), .deadline(at(8_000))] : [.deadline(at(8_000)), .escape(at(7_990))]
+    #expect(run(inputs, gesture: &gesture) == [.dictationCancelled(a)])
 }
