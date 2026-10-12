@@ -95,15 +95,17 @@ heavy_room() {
     return "$heavy_ok"
 }
 
-# Runs the command holding slot $1 ("quiet": every slot) if lockf can take it,
-# and then exits with the command's status. Returns when the slot is held.
+# Runs the command holding slot $1 ("quiet": every slot) if lockf can take it
+# at once, and then exits with the command's status. Returns when it can't.
 heavy_try() {
     heavy_status=0
     if [ "$1" = quiet ]; then
-        # Blocks, as the head of the line, so nobody behind it gets a slot and
-        # the slots drain to it, slot 1 first.
+        # Slot 1 first, and nothing held while it waits: a blocking lockf left
+        # behind by a killed waiter would keep slot 1 and later run the command
+        # for nobody. As the head of the line, nobody behind it takes a slot,
+        # so the slots drain to it.
         shift
-        lockf -s -k "$HEAVY_DIR/slot1" lockf -s -k "$HEAVY_DIR/slot2" lockf -s -k "$HEAVY_DIR/slot3" \
+        lockf -s -k -t 0 "$HEAVY_DIR/slot1" lockf -s -k -t 0 "$HEAVY_DIR/slot2" lockf -s -k -t 0 "$HEAVY_DIR/slot3" \
             "$HEAVY_LIB" --holding quiet "$heavy_entry" "$@" || heavy_status=$?
     else
         heavy_n=$1
@@ -155,12 +157,12 @@ heavy_run() {
         heavy_noroom=
         if [ "$heavy_place" -eq 1 ]; then
             if [ -n "$heavy_mode" ]; then
-                if heavy_held 1 || heavy_held 2 || heavy_held 3; then heavy_wait_line >&2; fi
                 heavy_try quiet "$@"
+            else
+                heavy_try 1 "$@"
+                heavy_try 2 "$@"
+                if heavy_room; then heavy_try 3 "$@"; else heavy_noroom=1; fi
             fi
-            heavy_try 1 "$@"
-            heavy_try 2 "$@"
-            if heavy_room; then heavy_try 3 "$@"; else heavy_noroom=1; fi
         fi
         if [ -z "$heavy_waited" ]; then
             heavy_wait_line >&2

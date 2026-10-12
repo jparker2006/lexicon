@@ -187,6 +187,28 @@ test_quiet_waits_in_line_like_any_job() {
     release J
 }
 
+test_a_waiting_quiet_run_holds_no_slot() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job Q --quiet
+    expect_wait "number 1 in line"
+    # Only the waiter dies, as when a session's own process is killed: nothing
+    # it started may keep a slot or run its command later. Killed once it has a
+    # child: a lockf trying the slots, or the wait between tries.
+    n=0
+    until pgrep -P "$Q" > /dev/null; do
+        n=$((n + 1))
+        [ "$n" -lt 5000 ] || fail "Q never tried the slots"
+    done
+    kill -KILL "$Q"
+    wait "$Q" 2> /dev/null || true
+    release H1
+    job J
+    expect_event "J 1 $((CORES / 2))"
+    release J
+    release H2
+}
+
 test_a_slot_holder_runs_nested_jobs_in_its_own_slot() {
     export LEXICON_MACHINE_VERDICT=no
     hold_two
