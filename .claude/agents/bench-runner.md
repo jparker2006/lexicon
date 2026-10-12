@@ -16,7 +16,7 @@ You turn saved timing samples into the bench table. You never take a measurement
   3. Per arm: n, median, p95 and max, nearest-rank (`sort -n`, index `int((n*p+99)/100)`), as `scripts/bench.sh` computes them.
   4. The verdict is PROVISIONAL: no load was recorded with the sample.
 - Return the table (arm, n, median, p95, max, excluded and why), the exact commands, and the verdict line.
-- Numbers only: never print dictated text, and never open Jake's private data under `~/Library/Application Support/Lexicon/`.
+- Numbers only: never print dictated text, and never open Jake's private data under `~/Library/Application Support/Lexicon/` or any key.
 
 ## Shell
 

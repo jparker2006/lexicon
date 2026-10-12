@@ -15,7 +15,7 @@
 | `editor` | `claude-haiku-5-5` | xhigh | 60 | makes one assigned change in its own files |
 | `test-writer` | `claude-haiku-5-5` | xhigh | 60 | turns a criterion or a CONFIRMED finding into a test that fails at the head; never edits Sources/ |
 | `spec-checker` | `claude-haiku-5-5` | xhigh | 40 | lists where a ticket or diff departs from the spec and DECISIONS.md, with the line |
-| `bench-runner` | `claude-haiku-5-5` | xhigh | 40 | runs one timing measurement by the bench protocol; PASS or PROVISIONAL, never a budget call |
+| `bench-runner` | `claude-haiku-5-5` | xhigh | 40 | turns saved timing samples into the bench table with `scripts/bench.sh report`; never measures live |
 | `live-prep` | `claude-haiku-5-5` | xhigh | 30 | turns a Live checks request and the diff into harness commands with pass bars, before the lane opens |
 | `live-parse` | `claude-haiku-5-5` | xhigh | 30 | turns a Live checks run's logs into the result table; lengths and hashes, never dictated text |
 
@@ -36,6 +36,13 @@ The only sizing table: other docs point here instead of restating it. The counts
 | Normal code ticket | about 20 to 40 |
 | Hard ticket (fn, mic, paste, never-lose, privacy, network) | about 30 to 50, with an Opus design critic before a system-hook or latency design is locked |
 | Flake or hang fix | the above plus a pattern swarm over the test files, one worker per file or small group, at most 50 |
+
+Specialist helpers count toward those totals. Use them when:
+
+- `test-writer`: for each acceptance criterion of a code ticket before building it, and for each CONFIRMED finding before fixing it.
+- `spec-checker`: on the ticket before building, and on the diff before the review Workflow.
+- `bench-runner`: whenever a PR reports a lag, memory or speed number, on the samples Live checks saved.
+- `live-prep`: on each Live checks request, before the lane opens. `live-parse`: on each Live checks run's output.
 
 ### Swarms, by job type
 

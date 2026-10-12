@@ -20,7 +20,8 @@ export const meta = {
 //              reviewerLenses) plus the PR's top risks, critic-deep on the high tier,
 //              and a blast-radius pass where review-map.json says so
 //   risks      reviewer mode: the PR's top risks, as review.md section names or free text;
-//              every one runs. With none, the first high-tier section reached is used.
+//              up to four lenses run in all, and the output names any left out. With
+//              none, the first high-tier section reached is used.
 //   findings   [{path, line, claim, scenario?, cite?}] from a bot or an earlier review,
 //              verified like a critic's
 //   sideBySide run critic and critic-deep on every lens and tag who found what
@@ -210,7 +211,7 @@ const mapFile = from('.claude/workflows/review-map.json')
 const headings = fs.readFileSync(rules, 'utf8').split('\\n').filter(l => l.startsWith('## ')).map(l => l.slice(3).trim())
 const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'))
 const decisions = from('docs/DECISIONS.md')
-const fromCheckout = [rules, mapFile].filter(f => !f.startsWith(at)).map(f => path.relative(process.cwd(), f))
+const fromCheckout = [rules, mapFile, decisions].filter(f => f && !f.startsWith(at)).map(f => path.relative(process.cwd(), f))
 console.log(JSON.stringify({ sha, main, later, note, rules, headings, map, decisions, fromCheckout }))
 PREP`
 }
@@ -220,12 +221,15 @@ const prepPrompt = `Run this one Bash command exactly as written, from the repos
 
 ${prepCommand({ issue: a.issue, sha: a.sha, base: a.base, pr: a.pr, head: a.head, reviewed: a.reviewed })}`
 const prep = await hire('prep', 'haiku', 'xhigh', prepPrompt, { label: 'snapshot', phase: 'Snapshot', schema: OUT })
-let info
-try {
-  info = JSON.parse(prep.out)
-} catch {
-  throw new Error('snapshot failed: ' + (prep ? prep.out : 'no reply'))
+// The helper sometimes hands the JSON back escaped once more, as a string's contents.
+const parsed = text => {
+  for (const attempt of [() => JSON.parse(text), () => JSON.parse(JSON.parse(`"${text}"`))]) {
+    try { const v = attempt(); if (v && typeof v === 'object') return v } catch {}
+  }
+  return null
 }
+const info = prep && parsed(prep.out.trim())
+if (!info) throw new Error('snapshot failed: ' + (prep ? prep.out : 'no reply'))
 if (!info.main && !info.later) {
   const what = (a.reviewed ? `no change of the branch's own since \`${a.reviewed.slice(0, 7)}\`` : 'the diff is empty') + (info.note ? `; ${info.note}` : '')
   return {
@@ -267,18 +271,21 @@ function sectionLenses(files) {
   return lenses
 }
 
+const unrun = []
 function lensesFor(files) {
   if (mode === 'builder') {
     return [...sectionLenses(files), { name: `Acceptance criteria of #${a.issue}`, files, rule: false }]
   }
   const names = [...map.reviewerLenses]
   for (const r of a.risks || []) if (!names.includes(r)) names.push(r)
-  // Every risk the Reviewer names runs; with none named, the first high-tier section is the top risk.
+  // With no risk named, the first high-tier section reached is the top risk.
   if (!(a.risks || []).length) {
     const top = sectionLenses(files).find(l => !names.includes(l.name) && reach(map.highTier, l.files).length)
     if (top) names.push(top.name)
   }
-  return names.map(name => ({ name, files, rule: known.has(name) }))
+  // 2 to 4 lenses (#152); any named risk past four is reported, not silently dropped.
+  for (const name of names.slice(4)) if (!unrun.includes(name)) unrun.push(name)
+  return names.slice(0, 4).map(name => ({ name, files, rule: known.has(name) }))
 }
 
 function critics() {
@@ -423,7 +430,9 @@ const lines = [
   '',
   `Counted: ${counted.length} CONFIRMED. Dropped: ${rows.filter(r => r.verdict === 'REFUTED').length} REFUTED, ${rows.filter(r => r.verdict === 'UNSURE').length} UNSURE, ${uncited.length} with a citation that does not hold.`,
 ]
-lines.push('', 'Each CONFIRMED test is written, not run: the builder runs it red before fixing. A dropped finding comes back only with a test that fails first.')
+if (counted.some(r => r.v && r.v.test)) lines.push('', 'Each CONFIRMED test is written, not run: the builder runs it red before fixing.')
+lines.push('', 'A REFUTED or UNSURE finding comes back only with a test that fails first.')
+if (unrun.length) lines.push('', `Lenses not run (reviewer mode runs at most four): ${unrun.join('; ')}.`)
 if (incomplete.length) lines.push('', `INCOMPLETE: ${incomplete.join('; ')}.`)
 if (info.note) lines.push('', `Not reviewed: ${info.note}.`)
 if (stale.length) lines.push('', `review-map.json names sections review.md no longer has: ${stale.join(', ')}. Any review.md section the map doesn't name runs on every file.`)
