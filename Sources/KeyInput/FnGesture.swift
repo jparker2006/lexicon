@@ -43,10 +43,11 @@ enum KeyInput: Sendable, Hashable {
 ///
 /// Every input carries the event's own time, and every rule is judged on it,
 /// not on when a timer happened to fire: fn-up or a key at 0.31 s still counts
-/// as a hold even if the 0.30 s deadline has not been delivered yet. A mark
-/// that ends something (the double-tap window, the cap) also waits
-/// `lateKeyGrace` past its time, so a key stamped before it but handled after
-/// its timer still counts.
+/// as a hold even if the 0.30 s deadline has not been delivered yet. Keys and
+/// timers share the tap thread, so a key stamped before a mark can be handled
+/// after the mark's timer: the double-tap window waits `lateKeyGrace` past its
+/// end before it drops the tap, and the cap stops on time but remembers when,
+/// so a stop press stamped before it is not taken for a new press.
 ///
 /// Every event passes through the tap. Only Esc is ever taken from the app in
 /// front, and only while `takesEscape` (the Esc hotkey follows it).
@@ -82,10 +83,14 @@ struct FnGesture: Sendable {
 
     private(set) var phase: Phase = .idle
     private let config: KeyboardConfig
+    /// When the cap last stopped a Dictation. An fn-down stamped before it was that
+    /// Dictation's stop press, handled after the cap's timer.
+    private var cappedAt: HostTime?
 
-    /// Keys and timers share the tap thread's run loop, so a key can be handled a few
-    /// milliseconds after a timer due later than the key's own time (keys reach the
-    /// tap 2 to 12 ms after they are pressed). Nobody hears a drop or a stop 50 ms late.
+    /// How late a key may be handled after its own time and still count against the
+    /// double-tap window. Keys reach the tap 2 to 12 ms after they are pressed (ADR 0004);
+    /// one handled later than this, behind a stalled tap thread, is taken as a new press.
+    /// Nobody hears a dropped tap 50 ms late.
     static let lateKeyGrace: Duration = .milliseconds(50)
 
     init(_ config: KeyboardConfig) {
@@ -116,6 +121,7 @@ struct FnGesture: Sendable {
     private mutating func idle(_ input: KeyInput) -> Output {
         switch input {
         case .fnDown(let at, secureInput: false, let id):
+            if let cappedAt, at < cappedAt { return Output() }  // the stop press of a Dictation the cap ended
             return begin(id, at: at)
         case .fnDown, .fnUp, .otherKey, .escape, .deadline, .sleep, .ended:
             // A password field, the stop press's own fn-up, a key, a stale deadline, a
@@ -237,22 +243,22 @@ struct FnGesture: Sendable {
         return Output(commands: [.dictationConfirmed(id, mode)], wakeAt: warnAt(recording))
     }
 
-    /// The cap clock: stop at `began + cap` (judged `lateKeyGrace` later), warn once
-    /// before it, and always say when to wake next. An early or stale deadline just asks again.
+    /// The cap clock: stop at `began + cap`, warn once before it, and always say
+    /// when to wake next. An early or stale deadline just asks again.
     private mutating func capDeadline(_ recording: Recording, now: HostTime) -> Output {
         let capAt = recording.began.advanced(by: config.cap)
-        let stopAt = capAt.advanced(by: Self.lateKeyGrace)
-        if now >= stopAt {
+        if now >= capAt {
             phase = .idle
+            cappedAt = capAt
             return Output(commands: [.dictationStopped(recording.id, at: capAt)])
         }
         guard !recording.warned, now >= warnAt(recording) else {
-            return Output(wakeAt: recording.warned ? stopAt : warnAt(recording))
+            return Output(wakeAt: recording.warned ? capAt : warnAt(recording))
         }
         var warned = recording
         warned.warned = true
         phase = .recording(warned)
-        return Output(commands: [.oneMinuteLeft(recording.id)], wakeAt: stopAt)
+        return Output(commands: [.oneMinuteLeft(recording.id)], wakeAt: capAt)
     }
 
     private func warnAt(_ recording: Recording) -> HostTime {
