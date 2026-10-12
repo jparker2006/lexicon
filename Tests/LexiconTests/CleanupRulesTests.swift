@@ -154,6 +154,56 @@ func onlyAccidentalRepeatsGo(_ c: Case) {
     #expect(clean(c.raw) == c.gold)
 }
 
+/// A repeated number word is a number, not a stutter: a year, a time, a digit run.
+let numberRepeatCases: [Case] = [
+    Case("We shipped it in twenty twenty six.", "We shipped it in twenty twenty six."),
+    Case("Twenty twenty six was the year.", "Twenty twenty six was the year."),
+    Case("Meet me at ten ten tomorrow.", "Meet me at ten ten tomorrow."),
+    Case("Call five five five, one two one two.", "Call five five five, one two one two."),
+    Case("I I think the the build is fine.", "I think the build is fine."),
+]
+
+@Test(arguments: numberRepeatCases)
+func repeatedNumberWordsStay(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// "like" stays before an estimate or a name, whatever the number word or name.
+let likeKeptCases: [Case] = [
+    Case("It takes, like, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("It's, like, Postgres but faster.", "It's, like, Postgres but faster."),
+    Case("Like, I think it's done.", "I think it's done."),
+]
+
+@Test(arguments: likeKeptCases)
+func likeStaysBeforeAnyNumberOrName(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// "uh huh" and "mm-hmm" are answers, not fillers.
+let interjectionCases: [Case] = [
+    Case("Uh huh, that's right.", "Uh huh, that's right."),
+    Case("Uh-huh, that's right.", "Uh-huh, that's right."),
+    Case("Mm-hmm, ship it.", "Mm-hmm, ship it."),
+]
+
+@Test(arguments: interjectionCases)
+func interjectionsAreWords(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// An abbreviation's period ends a sentence only when the speech model capitalized what follows.
+let abbreviationCases: [Case] = [
+    Case("Add docs, tests, etc. um, then ship it.", "Add docs, tests, etc. then ship it."),
+    Case("Add docs, tests, etc. Um, ship it.", "Add docs, tests, etc. Ship it."),
+    Case("It's due at 5 p.m. Um, ship it.", "It's due at 5 p.m. Ship it."),
+]
+
+@Test(arguments: abbreviationCases)
+func abbreviationsEndASentenceOnlyBeforeACapital(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
 let hardFillerCases: [Case] = [
     Case("Um.", ""),
     Case("Add a test, um.", "Add a test."),
