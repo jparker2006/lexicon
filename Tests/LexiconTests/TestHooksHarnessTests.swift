@@ -71,6 +71,9 @@ private let pasteChecklist = """
     #expect(report.table.contains("| 2 | the fn tap ignores Lexicon's own Cmd-V | Pass, 1 of 1 | 0.8 s |"))
     #expect(report.comment.hasPrefix("Live checks: #54, main @ d347832\n\nLexicon Dev 0.1 (412, d347832). fn listeners: none."))
     #expect(report.comment.hasSuffix("Fail: 1 of 2 items."))
+    let unnamed = ChecklistReport(issue: "54", branch: nil, sha: "d3478321abc", app: "Lexicon Dev", fnListeners: "none",
+                                  results: results)
+    #expect(unnamed.comment.hasPrefix("Live checks: #54 @ d347832\n"))
     #expect(!report.comment.contains(fixture))
 }
 

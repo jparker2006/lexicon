@@ -11,8 +11,10 @@ import Foundation
 ///     # comments and blank lines are skipped
 ///     issue: 54
 ///     branch: claude/issue-54
-///     sha: 4dfdca8
 ///
+/// The sha a run is reported at is the one Lexicon Dev was built from. A
+/// `sha:` line, for a request pinned to one build, makes a run on any other
+/// build refuse.
 ///     item: paste-check lands the text and puts the clipboard back
 ///     run: paste-check
 ///     repeat: 10
@@ -256,13 +258,14 @@ public struct ChecklistRun: Codable, Sendable, Equatable {
 /// text, only fingerprints, so nothing a field held reaches GitHub.
 public struct ChecklistReport: Sendable, Equatable {
     public let issue: String
-    public let branch: String
+    /// nil when the checklist names none: the header then gives the sha alone.
+    public let branch: String?
     public let sha: String
     public let app: String
     public let fnListeners: String
     public let results: [ChecklistResult]
 
-    public init(issue: String, branch: String, sha: String, app: String, fnListeners: String,
+    public init(issue: String, branch: String?, sha: String, app: String, fnListeners: String,
                 results: [ChecklistResult]) {
         (self.issue, self.branch, self.sha, self.app, self.fnListeners, self.results) =
             (issue, branch, sha, app, fnListeners, results)
@@ -282,7 +285,7 @@ public struct ChecklistReport: Sendable, Equatable {
         let passed = results.filter(\.passes).count
         let issue = issue.hasPrefix("#") ? issue : "#\(issue)"
         return """
-            Live checks: \(issue), \(branch) @ \(sha.prefix(7))
+            Live checks: \(issue)\(branch.map { ", \($0)" } ?? "") @ \(sha.prefix(7))
 
             \(app). fn listeners: \(fnListeners).
 
