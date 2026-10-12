@@ -65,12 +65,13 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
         /// Captured audio from sample `heldFrom` on.
         var held: [Int16] = []
         var heldFrom = 0
-        /// Windows decoded while recording, in order from the first.
-        var decoded: [Window] = []
+        /// The next window to decode while recording, by its place in the grid.
+        var next = 0
+        /// Windows decoded while recording, by their place in the grid. One that
+        /// failed is missing, and `finish` decodes it again from the clip.
+        var decoded: [Int: Window] = [:]
         /// Decodes the captured windows in order; nil while none is ready.
         var worker: Task<Void, Never>?
-        /// A window failed while recording: the rest wait for the clip at fn-up.
-        var failed = false
         /// fn-up or cancel: no more audio is taken.
         var closed = false
     }
@@ -87,7 +88,7 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
 
     public func append(_ samples: [Int16]) {
         state.withLock { state in
-            guard !state.closed, !state.failed else { return }
+            guard !state.closed else { return }
             state.held += samples
             if state.worker == nil, nextWindow(state) != nil {
                 state.worker = Task { await self.decodeCaptured() }
@@ -97,7 +98,7 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
 
     /// The next window to decode while recording, if all its samples are in.
     private func nextWindow(_ state: State) -> (start: Int, samples: ArraySlice<Int16>)? {
-        let start = state.decoded.count * grid.stride
+        let start = state.next * grid.stride
         let offset = start - state.heldFrom
         guard !state.closed, state.held.count - offset >= grid.window else { return nil }
         return (start, state.held[offset..<offset + grid.window])
@@ -109,24 +110,16 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
             if next == nil { state.worker = nil }
             return next.map { ($0.start, Array($0.samples)) }
         }) {
-            do {
-                let window = try await decode(samples, start)
-                state.withLock { state in
-                    state.decoded.append(window)
-                    // The next window starts one stride on: what comes before it is done with.
-                    let next = state.decoded.count * grid.stride
-                    state.held.removeFirst(min(next - state.heldFrom, state.held.count))
-                    state.heldFrom = next
-                }
-            } catch {
-                // Not the Dictation's answer: the clip is whole at fn-up, and `finish`
-                // decodes this window again from it.
-                state.withLock { state in
-                    state.failed = true
-                    state.held = []
-                    state.worker = nil
-                }
-                return
+            // A window that fails is not the Dictation's answer: the clip is whole at
+            // fn-up, and `finish` decodes that one window again from it.
+            let window = try? await decode(samples, start)
+            state.withLock { state in
+                state.decoded[state.next] = window
+                state.next += 1
+                // The next window starts one stride on: what comes before it is done with.
+                let next = state.next * grid.stride
+                state.held.removeFirst(min(next - state.heldFrom, state.held.count))
+                state.heldFrom = next
             }
         }
     }
@@ -142,11 +135,14 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
             return state.decoded
         }
         // Every window decoded while recording is in the clip's grid too; the rest come from the clip.
-        let starts = grid.starts(total: clip.samples.count)
-        var windows = Array(decoded.prefix(starts.count))
-        for start in starts.dropFirst(windows.count) {
-            let end = min(start + grid.window, clip.samples.count)
-            windows.append(try await decode(Array(clip.samples[start..<end]), start))
+        var windows: [Window] = []
+        for (place, start) in grid.starts(total: clip.samples.count).enumerated() {
+            if let window = decoded[place] {
+                windows.append(window)
+            } else {
+                let end = min(start + grid.window, clip.samples.count)
+                windows.append(try await decode(Array(clip.samples[start..<end]), start))
+            }
         }
         return try await join(windows)
     }

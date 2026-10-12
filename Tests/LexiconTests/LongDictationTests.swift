@@ -102,7 +102,27 @@ import LexiconDomain
     #expect(spokenText(outcome) == "w0:1000 w800:1000")
 }
 
-@Test(.timeLimit(.minutes(1))) func theConductorFeedsALiveDictationsAudioToTheLocalModelAsItIsCaptured() async throws {
+@Test(.timeLimit(.minutes(1))) func aFailedWindowLeavesOnlyItselfForFnUp() async throws {
+    let clock = TestClock()
+    let fake = WindowedFake(failingFirst: true)
+    let engine = SpeechEngine(local: fake, cloud: noNetworkChanges(clock), clock: clock)
+    let plan = SpeechPlan.make(preferences: .defaults, access: nil, terms: [])
+    let samples = clipSamples(count: 2_600)
+    let (feed, input) = AudioFeed.makeStream()
+
+    let attempt = await engine.begin(feed: feed, plan: plan)
+    for chunk in chunks(of: samples, sizes: [100]) { input.yield(chunk) }
+    // The window at 0 fails; the windows after it are still decoded while Jake talks.
+    await fake.waitForDecodes(of: [0, 800, 1_600])
+    input.finish()
+    fake.markFnUp()
+    let outcome = await attempt.finish(AudioClip(samples: samples))
+
+    #expect(fake.decodes.filter(\.afterFnUp).map(\.start) == [0])
+    #expect(spokenText(outcome) == "w0:1000 w800:1000 w1600:1000")
+}
+
+@Test(.timeLimit(.minutes(1))) func theConductorHandsALiveDictationsCaptureFeedToTheLocalSession() async throws {
     let fake = WindowedFake()
     let clock = TestClock()
     let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
@@ -111,8 +131,9 @@ import LexiconDomain
 
     let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
 
-    // The capture's own feed reaches the session, every sample of it: the path a long
-    // live Dictation takes to have its windows decoded before fn-up.
+    // The capture's own feed reaches the session, every sample of it. Whether a window is
+    // decoded before fn-up depends on timing here; aLongDictationDecodesEachWindowWhileJakeTalks
+    // shows that at the engine, where the test holds fn-up back.
     let total = try #require(fake.finishedClip)
     await fake.waitForAppended(total)
     #expect(fake.appended == total)
