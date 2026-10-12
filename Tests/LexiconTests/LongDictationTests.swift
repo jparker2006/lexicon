@@ -1,5 +1,6 @@
 import Synchronization
 import Testing
+@testable import LexiconCore
 import LexiconDomain
 @testable import Transcription
 
@@ -51,7 +52,6 @@ import LexiconDomain
     let attempt = await engine.begin(feed: feed, plan: plan)
     for chunk in chunks(of: samples, sizes: [100]) { input.yield(chunk) }
     input.finish()
-    #expect(fake.decodes.isEmpty)
 
     fake.markFnUp()
     let outcome = await attempt.finish(AudioClip(samples: samples))
@@ -82,6 +82,45 @@ import LexiconDomain
     #expect(spokenText(live) == spokenText(oneShot))
 }
 
+@Test(.timeLimit(.minutes(1))) func aWindowThatFailsWhileJakeTalksIsDecodedAgainFromTheClipAtFnUp() async throws {
+    let clock = TestClock()
+    let fake = WindowedFake(failingFirst: true)
+    let engine = SpeechEngine(local: fake, cloud: noNetworkChanges(clock), clock: clock)
+    let plan = SpeechPlan.make(preferences: .defaults, access: nil, terms: [])
+    let samples = clipSamples(count: 1_800)
+    let (feed, input) = AudioFeed.makeStream()
+
+    let attempt = await engine.begin(feed: feed, plan: plan)
+    for chunk in chunks(of: samples, sizes: [100]) { input.yield(chunk) }
+    // The window at 0 is whole, and its decode fails once (a model hiccup while Jake talks).
+    await fake.waitForDecodes(of: [0])
+    input.finish()
+    fake.markFnUp()
+    let outcome = await attempt.finish(AudioClip(samples: samples))
+
+    // The clip is whole at fn-up, so a failed window is one more decode from it, not a lost Dictation.
+    #expect(spokenText(outcome) == "w0:1000 w800:1000")
+}
+
+@Test(.timeLimit(.minutes(1))) func theConductorFeedsALiveDictationsAudioToTheLocalModelAsItIsCaptured() async throws {
+    let fake = WindowedFake()
+    let clock = TestClock()
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+                                         local: fake, cloud: noNetworkChanges(clock), clock: clock)
+    let wav = try writeWAV(clipSamples(count: 4_500), rate: 16_000, in: try scratchDirectory())
+
+    let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
+
+    // The capture's own feed reaches the session, every sample of it: the path a long
+    // live Dictation takes to have its windows decoded before fn-up.
+    let total = try #require(fake.finishedClip)
+    await fake.waitForAppended(total)
+    #expect(fake.appended == total)
+    let expected = WindowedFake.grid.starts(total: total)
+        .map { "w\($0):\(min(WindowedFake.grid.window, total - $0))" }.joined(separator: " ")
+    #expect(result.attempts.first?.text == expected)
+}
+
 // MARK: Helpers
 
 /// One window's decode, as the fake saw it.
@@ -104,11 +143,20 @@ private final class WindowedFake: LocalTranscriber, Sendable {
     static let yieldBudget = 2_000_000
 
     let model = LocalModel.parakeetUnified
-    private let state = Mutex(State())
+    private let state: Mutex<State>
 
     private struct State: Sendable {
         var decodes: [Decode] = []
         var fnUp = false
+        /// Samples the session was handed while Jake talked, and the clip it got at fn-up.
+        var appended = 0
+        var finishedClip: Int?
+        /// The next decode throws, as a model call can.
+        var failNext = false
+    }
+
+    init(failingFirst: Bool = false) {
+        state = Mutex(State(failNext: failingFirst))
     }
 
     var isResident: Bool { get async { true } }
@@ -116,13 +164,47 @@ private final class WindowedFake: LocalTranscriber, Sendable {
     func unload() async {}
 
     func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
-        WindowedSession<String>(grid: Self.grid, decode: { samples, start in
-            self.record(samples: samples, start: start)
+        Counted(fake: self, base: WindowedSession<String>(grid: Self.grid, decode: { samples, start in
+            try self.record(samples: samples, start: start)
             return "w\(start):\(samples.count)"
-        }, join: { windows in windows.joined(separator: " ") })
+        }, join: { windows in windows.joined(separator: " ") }))
     }
 
     var decodes: [Decode] { state.withLock { $0.decodes } }
+    var appended: Int { state.withLock { $0.appended } }
+    var finishedClip: Int? { state.withLock { $0.finishedClip } }
+
+    /// The real session, with what it was handed counted.
+    private final class Counted: LocalSession {
+        let fake: WindowedFake
+        let base: any LocalSession
+        init(fake: WindowedFake, base: any LocalSession) {
+            self.fake = fake
+            self.base = base
+        }
+
+        func append(_ samples: [Int16]) {
+            fake.state.withLock { $0.appended += samples.count }
+            base.append(samples)
+        }
+
+        func finish(_ clip: AudioClip) async throws -> String {
+            fake.state.withLock { $0.finishedClip = clip.samples.count }
+            return try await base.finish(clip)
+        }
+
+        func cancel() { base.cancel() }
+    }
+
+    /// Yields until the session has been handed `count` samples, or the budget is spent:
+    /// the feed is read to its end even after fn-up.
+    func waitForAppended(_ count: Int) async {
+        var yields = 0
+        while appended < count, yields < Self.yieldBudget, !Task.isCancelled {
+            await Task.yield()
+            yields += 1
+        }
+    }
 
     /// The test calls this right before `attempt.finish`: decodes logged after it are fn-up's.
     func markFnUp() {
@@ -138,12 +220,17 @@ private final class WindowedFake: LocalTranscriber, Sendable {
         }
     }
 
-    private func record(samples: [Int16], start: Int) {
-        state.withLock { state in
+    private func record(samples: [Int16], start: Int) throws {
+        let fails = state.withLock { state in
             state.decodes.append(Decode(start: start, count: samples.count, first: samples.first, afterFnUp: state.fnUp))
+            defer { state.failNext = false }
+            return state.failNext
         }
+        if fails { throw ModelHiccup() }
     }
 }
+
+private struct ModelHiccup: Error {}
 
 /// Sample i of a clip is Int16(i % 30_000): distinct across a clip this long, so a
 /// window cut from the wrong place shows up as the wrong first sample.

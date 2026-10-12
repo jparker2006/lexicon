@@ -69,7 +69,8 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
         var decoded: [Window] = []
         /// Decodes the captured windows in order; nil while none is ready.
         var worker: Task<Void, Never>?
-        var failure: (any Error)?
+        /// A window failed while recording: the rest wait for the clip at fn-up.
+        var failed = false
         /// fn-up or cancel: no more audio is taken.
         var closed = false
     }
@@ -86,7 +87,7 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
 
     public func append(_ samples: [Int16]) {
         state.withLock { state in
-            guard !state.closed, state.failure == nil else { return }
+            guard !state.closed, !state.failed else { return }
             state.held += samples
             if state.worker == nil, nextWindow(state) != nil {
                 state.worker = Task { await self.decodeCaptured() }
@@ -118,8 +119,11 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
                     state.heldFrom = next
                 }
             } catch {
+                // Not the Dictation's answer: the clip is whole at fn-up, and `finish`
+                // decodes this window again from it.
                 state.withLock { state in
-                    state.failure = error
+                    state.failed = true
+                    state.held = []
                     state.worker = nil
                 }
                 return
@@ -133,11 +137,10 @@ public final class WindowedSession<Window: Sendable>: LocalSession {
             return state.worker
         }
         await worker?.value
-        let (decoded, failure) = state.withLock { state in
+        let decoded = state.withLock { state in
             defer { state.held = [] }
-            return (state.decoded, state.failure)
+            return state.decoded
         }
-        if let failure { throw failure }
         // Every window decoded while recording is in the clip's grid too; the rest come from the clip.
         let starts = grid.starts(total: clip.samples.count)
         var windows = Array(decoded.prefix(starts.count))
