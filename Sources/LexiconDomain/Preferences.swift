@@ -146,7 +146,8 @@ public enum AccessRevoked: String, Sendable, Codable, CaseIterable {
 /// network: speech, Cleanup's LLM, Jev and model downloads all take one.
 ///
 /// Private mode is encoded as the ABSENCE of this value: the only constructor
-/// returns nil in Private mode or for an always-private app. A new cloud feature
+/// returns nil in Private mode, for an always-private app, or for an eval of a
+/// model whose zero retention isn't confirmed. A new cloud feature
 /// cannot forget to check Private mode, because it cannot be called without this.
 /// One value per Dictation, revocable mid-Dictation (#5): once revoked, every key
 /// lookup returns nil, speech sessions cut their stream, and the local model,
@@ -163,7 +164,8 @@ public final class CloudAccess: Sendable {
     private init(lookup: @escaping @Sendable (CredentialID) -> String?) { self.lookup = lookup }
 
     /// The only constructor. Called by the Conductor once per Dictation (after the
-    /// active app is known), for a fix in the frontmost app, and by model install.
+    /// active app is known), for a fix in the frontmost app, by model install, and
+    /// by a Test set eval of a cloud model.
     public static func granted(by preferences: Preferences, for use: CloudUse,
                                keys: @escaping @Sendable (CredentialID) -> String?) -> CloudAccess? {
         preferences.cloudDenied(for: use) == nil ? CloudAccess(lookup: keys) : nil
