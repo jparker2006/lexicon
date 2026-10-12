@@ -28,6 +28,18 @@ test_one_screen() {
     expect_out "Machine: room for more builders: yes"
 }
 
+test_build_slots_and_their_line() {
+    use_fixture status-0730
+    use_fakes
+    mkdir -p "$HOME/Library/Application Support/Lexicon Dev/heavy/queue"
+    sysctl -n kern.bootsessionuuid > "$HOME/Library/Application Support/Lexicon Dev/heavy/queue/0000000001.$$"
+    : > "$GH_FIXTURES/cmd/lockf"
+    export LEXICON_NOW=2026-10-11T07:30:00Z
+    run status.sh
+    expect_status 0
+    expect_out "  build slots 0 of 3 in use | queue: 1 waiting"
+}
+
 test_not_watched_without_a_watcher() {
     board status-0730 2026-10-11T07:30:00Z
     expect_out "NOT WATCHED"
