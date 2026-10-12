@@ -80,6 +80,58 @@ private let pasteChecklist = """
     #expect(result.failure == "run 1: wanted exit 0, exit 1: \(Fingerprint("the field reads refactor the hook"))")
 }
 
+@Test func aCommandThatFailsNeverPassesOnItsOutput() throws {
+    let items = try Checklist(parsing: """
+        item: has
+        run: sh echo ok; exit 1
+        pass: has ok
+
+        item: lacks
+        run: sh exit 2
+        pass: lacks FAIL
+
+        item: an exit code named
+        run: sh exit 3
+        pass: exit 3
+        """).items
+    #expect(items.map(\.bars) == [[.exit(0), .has("ok")], [.exit(0), .lacks("FAIL")], [.exit(3)]])
+    #expect(!ChecklistResult(items[0], outputs: [(1, "ok\n")], seconds: 0).passes)
+    #expect(!ChecklistResult(items[1], outputs: [(2, "")], seconds: 0).passes)
+    #expect(ChecklistResult(items[2], outputs: [(3, "")], seconds: 0).passes)
+}
+
+/// A run saved at one sha can only be posted as that sha's result.
+@Test func aSavedRunIsPostedOnlyForTheShaItRanAt() throws {
+    let item = try Checklist(parsing: "item: x\nrun: check").items[0]
+    let run = ChecklistRun(issue: "54", branch: "main", sha: "d3478321abc", app: "Lexicon Dev 0.1 (1, d347832)",
+                           fnListeners: "none", results: [ChecklistResult(item, outputs: [(0, "")], seconds: 1)])
+
+    #expect(try run.report(issue: "#54", branch: "main", sha: "d347832").comment.hasPrefix("Live checks: #54, main @ d347832"))
+    #expect(throws: ChecklistRun.Mismatch(description: "the last run was at d347832, not 10d35db")) {
+        try run.report(issue: "54", branch: "main", sha: "10d35db")
+    }
+    #expect(throws: ChecklistRun.Mismatch(description: "the last run was for #54, not #156")) {
+        try run.report(issue: "156", branch: "main", sha: "d347832")
+    }
+    #expect(throws: ChecklistRun.Mismatch(description: "the last run was on main, not claude/issue-156")) {
+        try run.report(issue: "54", branch: "claude/issue-156", sha: "d347832")
+    }
+    let unnamed = ChecklistRun(issue: nil, branch: nil, sha: nil, app: "", fnListeners: "none", results: run.results)
+    #expect(throws: ChecklistRun.Mismatch(description: "the last run has no sha: name one in the checklist")) {
+        try unnamed.report(issue: "54", branch: "main", sha: "d347832")
+    }
+}
+
+@Test func theStatusNamesTheCommitTheAppWasBuiltFrom() {
+    #expect(status(version: "0.1 (412, 4dfdca8)").commit == "4dfdca8")
+    #expect(status(version: "0.1 (412, ?)").commit == nil)
+}
+
+private func status(version: String) -> TestHookStatus {
+    TestHookStatus(bundleID: "dev.jparker.lexicon.dev", version: version, pid: 1, accessibility: true,
+                   microphone: "granted", privacy: .standard, alwaysPrivateApps: [], dataRoot: "/tmp")
+}
+
 @Test func aFingerprintIsTheLengthAndAHashNotTheText() {
     let text = "Ship it to staging"
     #expect(Fingerprint(text).description.hasPrefix("18 chars #"))
@@ -89,11 +141,12 @@ private let pasteChecklist = """
 }
 
 /// #57's warm relaunch timings (comment of 2026-10-11 23:29Z): three runs each,
-/// with the medians posted then. Nearest rank reproduces them.
-@Test func statsReproducesThePercentilesPostedForASavedSample() {
+/// with the medians posted then. Nearest rank reproduces them; on an even or
+/// hand-picked sample it can differ from a posted median, as on #53.
+@Test func statsGivesNearestRankPercentilesAsLagReportDoes() {
     #expect(Sample([54, 46, 41]).summary == "n 3, p50 46, p95 54, max 54")    // main fn working, posted 46
     #expect(Sample([187, 183, 192]).summary == "n 3, p50 187, p95 192, max 192")  // branch status item, posted 187
-    // #53's fn-up delivery times (µs): 19 values, posted median 245. Nearest rank says 259.
+    // #53's fn-up delivery times (µs), 19 values: nearest rank gives 259 (#53 posted 245).
     let up: [Double] = [528, 545, 585, 340, 289, 259, 238, 99, 113, 351, 221, 292, 221, 561, 477, 112, 149, 245, 108]
     #expect(Sample(up).percentile(50) == 259)
     #expect(Sample(up).percentile(95) == 585)

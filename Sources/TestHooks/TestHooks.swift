@@ -80,6 +80,11 @@ public struct TestHookStatus: Codable, Sendable, Equatable {
     /// was launched with `--dev-data`.
     public let dataRoot: String
 
+    /// The commit the app was built from: "4dfdca8" in "0.1 (412, 4dfdca8)".
+    public var commit: String? {
+        version.firstMatch(of: /, ([0-9a-f]{7,40})\)$/).map { String($0.1) }
+    }
+
     public init(bundleID: String, version: String, pid: Int32, accessibility: Bool, microphone: String,
                 privacy: PrivacyMode, alwaysPrivateApps: [String], dataRoot: String) {
         self.bundleID = bundleID

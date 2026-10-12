@@ -20,8 +20,9 @@ import Foundation
 ///
 /// `run` is a harness command line (quotes group words), or `sh <command>` for
 /// a shell line. `pass` lines all must hold on every run: `exit <code>`,
-/// `has <text>` or `lacks <text>` (the output contains it, or doesn't). No
-/// `pass` line means `exit 0`; no `repeat` means once.
+/// `has <text>` or `lacks <text>` (the output contains it, or doesn't). A run
+/// must also exit 0 unless an `exit` line names another code, so a command
+/// that failed never passes on its output. No `repeat` means once.
 public struct Checklist: Sendable, Equatable {
     public struct Item: Sendable, Equatable {
         public let title: String
@@ -39,6 +40,8 @@ public struct Checklist: Sendable, Equatable {
         case exit(Int32)
         case has(String)
         case lacks(String)
+
+        var isExit: Bool { if case .exit = self { true } else { false } }
 
         public func holds(status: Int32, output: String) -> Bool {
             switch self {
@@ -69,7 +72,7 @@ public struct Checklist: Sendable, Equatable {
             guard let block = open else { return }
             guard let command = block.command else { throw ParseError(line: block.line, reason: "item has no run line") }
             items.append(Item(title: block.title, command: command, runs: block.runs,
-                              bars: block.bars.isEmpty ? [.exit(0)] : block.bars))
+                              bars: block.bars.contains(where: \.isExit) ? block.bars : [.exit(0)] + block.bars))
             open = nil
         }
 
@@ -203,6 +206,49 @@ public struct ChecklistResult: Codable, Sendable, Equatable {
         case .has(let text): "wanted has \(text)"
         case .lacks(let text): "wanted lacks \(text)"
         }
+    }
+}
+
+/// One `run-checklist` run, saved for `result`: the sha it ran at and how it
+/// went. Keyed to that sha, so a later run's comment can never carry its passes.
+public struct ChecklistRun: Codable, Sendable, Equatable {
+    public let issue: String?
+    public let branch: String?
+    /// The commit Lexicon Dev was built from, else the checklist's `sha`.
+    public let sha: String?
+    public let app: String
+    /// Other apps answering fn while it ran: "none", or their names.
+    public let fnListeners: String
+    public let results: [ChecklistResult]
+
+    public init(issue: String?, branch: String?, sha: String?, app: String, fnListeners: String,
+                results: [ChecklistResult]) {
+        (self.issue, self.branch, self.sha, self.app, self.fnListeners, self.results) =
+            (issue, branch, sha, app, fnListeners, results)
+    }
+
+    public struct Mismatch: Error, Equatable, CustomStringConvertible {
+        public let description: String
+    }
+
+    /// This run as the comment for `issue`, `branch` and `sha`, or why it is not theirs.
+    public func report(issue: String, branch: String, sha: String) throws(Mismatch) -> ChecklistReport {
+        guard let ran = self.sha else { throw Mismatch(description: "the last run has no sha: name one in the checklist") }
+        guard Self.same(ran, sha) else { throw Mismatch(description: "the last run was at \(ran.prefix(7)), not \(sha.prefix(7))") }
+        let bare = { (issue: String) in issue.hasPrefix("#") ? String(issue.dropFirst()) : issue }
+        if let ranIssue = self.issue, bare(ranIssue) != bare(issue) {
+            throw Mismatch(description: "the last run was for #\(bare(ranIssue)), not #\(bare(issue))")
+        }
+        if let ranBranch = self.branch, ranBranch != branch {
+            throw Mismatch(description: "the last run was on \(ranBranch), not \(branch)")
+        }
+        return ChecklistReport(issue: issue, branch: branch, sha: ran, app: app, fnListeners: fnListeners, results: results)
+    }
+
+    /// Two abbreviations of one commit: the shorter, at least 7 characters, starts the longer.
+    public static func same(_ a: String, _ b: String) -> Bool {
+        let (short, long) = a.count <= b.count ? (a.lowercased(), b.lowercased()) : (b.lowercased(), a.lowercased())
+        return short.count >= 7 && long.hasPrefix(short)
     }
 }
 

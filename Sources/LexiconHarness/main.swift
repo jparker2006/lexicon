@@ -98,7 +98,7 @@ do {
     case "fixture": try await fixture(rest)
     case "stats": try stats(rest)
     case "run-checklist": try await runChecklist(rest)
-    case "result": try await result(rest)
+    case "result": try result(rest)
     case TargetField.mode: TargetField.serve(text: rest.first ?? "", focused: rest.dropFirst().first == "focused")
     default: fail(usage, code: 64)
     }

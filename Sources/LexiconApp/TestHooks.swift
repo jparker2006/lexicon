@@ -175,8 +175,12 @@ enum AppTestHooks {
         guard isFixture(wav) else {
             return .failed("dictate takes a test fixture: a WAV in a fixtures folder or the temporary folder")
         }
-        if let resultDelay { model?.slowNext(by: .seconds(max(0, min(resultDelay, 120)))) }
-        let result = await system.conductor.dictate(file: wav, pace: .realtime)
+        let dictate = { @Sendable in await system.conductor.dictate(file: wav, pace: .realtime) }
+        let result = if let model, let resultDelay {
+            await model.slowing(by: .seconds(max(0, min(resultDelay, 120))), dictate)
+        } else {
+            await dictate()
+        }
         return .dictated(TestHookDictation(status: result.status?.rawValue, lagMillis: result.lag.map { micros($0) / 1_000 },
                                            model: result.model?.id, characters: result.versions?.cleaned.count))
     }
