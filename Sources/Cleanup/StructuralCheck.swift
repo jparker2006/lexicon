@@ -469,9 +469,9 @@ enum StructuralCheck {
         if word == "like" { return likeObject(t, k).map { "like " + $0.word } }
         guard Fillers.hard.contains(word) else { return nil }
         if t[k].mark == nil, k + 1 < t.count, Fillers.interjections.contains(word + " " + t[k + 1].word) {
-            let zero = t[k + 1].word == "oh" && t[k + 1].mark == nil && k + 2 < t.count && isNumber(t[k + 2].word)
-                && k > 0 && t[k - 1].mark == nil && isNumber(t[k - 1].word)
-            return zero ? nil : word + " " + t[k + 1].word
+            let inNumber = Fillers.soundInNumber(count: t.count, at: k, word: { t[$0].word },
+                                                 marked: { t[$0].mark != nil }, isNumber: { isNumber(t[$0].word) })
+            return inNumber ? nil : word + " " + t[k + 1].word
         }
         if k > 0, t[k - 1].mark == nil, Fillers.interjections.contains(t[k - 1].word + " " + word) {
             return t[k - 1].word + " " + word

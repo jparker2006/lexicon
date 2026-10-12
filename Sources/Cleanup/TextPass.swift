@@ -122,24 +122,29 @@ enum Fillers {
         for i in tokens.indices.dropLast() where tokens[i].isAbbreviation && !titles.contains(tokens[i].word) {
             tokens[i].endsSentence = tokens[i + 1].isCapitalized
         }
-        // Runs of one word with nothing between: three or more of a content word is emphasis ("go go go"),
-        // and "oh" touching a number is a zero ("oh oh seven", "five oh oh oh").
+        // Three or more of a content word running, commas allowed, is emphasis ("go go, go");
+        // a function word said three times is still a stutter ("the the the").
         var run = tokens.startIndex
         while run < tokens.endIndex {
             var end = run + 1
-            while end < tokens.endIndex, tokens[end - 1].trailing.isEmpty, tokens[end].word == tokens[run].word {
+            while end < tokens.endIndex, tokens[end - 1].trailing.isEmpty || tokens[end - 1].trailing == ",",
+                  tokens[end].word == tokens[run].word {
                 end += 1
             }
-            // A function word said three times is still a stutter: "the the the".
             if end - run >= 3, !tokens[run].word.isEmpty, !StructuralCheck.stop.contains(tokens[run].word) {
                 for k in run..<end { tokens[k].isEmphasis = true }
             }
-            if tokens[run].word == "oh",
-               run > 0 && tokens[run - 1].trailing.isEmpty && tokens[run - 1].isNumber
-                || end < tokens.endIndex && tokens[end - 1].trailing.isEmpty && tokens[end].isNumber {
-                for k in run..<end { tokens[k].isZero = true }
-            }
             run = end
+        }
+        // "oh" touching a number with no mark between is a zero ("oh oh seven", "five oh oh oh"),
+        // and a filler sound before it inside the number is a filler ("five uh oh seven").
+        for k in tokens.indices where tokens[k].word == "oh" {
+            tokens[k].isZero = zeroRun(tokens, around: k)
+        }
+        for k in tokens.indices where tokens[k].isHardFiller {
+            tokens[k].isInNumber = soundInNumber(count: tokens.count, at: k, word: { tokens[$0].word },
+                                                 marked: { !tokens[$0].trailing.isEmpty },
+                                                 isNumber: { tokens[$0].isNumber })
         }
         var kept: [String] = []
         var keptWords: [String] = []
@@ -203,6 +208,29 @@ enum Fillers {
             kept[kept.count - 1].removeLast()
         }
         return kept.joined(separator: " ")
+    }
+
+    /// The "oh" run holding `k` touches a number with no mark between.
+    private static func zeroRun(_ tokens: [Token], around k: Int) -> Bool {
+        var first = k
+        while first > 0, tokens[first - 1].word == "oh", tokens[first - 1].trailing.isEmpty { first -= 1 }
+        var last = k
+        while last + 1 < tokens.count, tokens[last].trailing.isEmpty, tokens[last + 1].word == "oh" { last += 1 }
+        return first > 0 && tokens[first - 1].trailing.isEmpty && tokens[first - 1].isNumber
+            || last + 1 < tokens.count && tokens[last].trailing.isEmpty && tokens[last + 1].isNumber
+    }
+
+    /// A filler sound at `k` inside a spoken number, before a zero "oh": "five uh oh seven",
+    /// "five uh oh oh seven". Shared with `StructuralCheck`, which reads its own tokens.
+    static func soundInNumber(count: Int, at k: Int, word: (Int) -> String, marked: (Int) -> Bool,
+                              isNumber: (Int) -> Bool) -> Bool {
+        guard k > 0, !marked(k - 1), isNumber(k - 1), !marked(k) else { return false }
+        var j = k + 1
+        while j < count, word(j) == "oh" {
+            if marked(j) { return false }
+            j += 1
+        }
+        return j > k + 1 && j < count && isNumber(j)
     }
 
     /// Where the word a "like" at `k` hedges is: the next word past filler sounds and a
@@ -272,8 +300,9 @@ enum Fillers {
         let word = token.word
         if protected.contains(word) || token.isQuoted { return 0 }
         // "five uh oh seven": the "oh" is a zero inside a number, so "uh" is a filler.
-        let inNumber = next?.isZero == true && prior.map { $0.trailing.isEmpty && $0.isNumber } == true
-        if let next, token.trailing.isEmpty, !inNumber, interjections.contains(word + " " + next.word) { return 0 }
+        if let next, token.trailing.isEmpty, !token.isInNumber, interjections.contains(word + " " + next.word) {
+            return 0
+        }
         if let prior, prior.trailing.isEmpty, !token.isZero, interjections.contains(prior.word + " " + word) {
             return 0
         }
@@ -325,9 +354,11 @@ private struct Token {
     var endsSentence: Bool
     /// "etc.", "e.g.", "p.m.": the period may be the abbreviation's own.
     let isAbbreviation: Bool
-    /// An "oh" read as zero, and a word said three or more times running (`Fillers.clean`).
+    /// Set by `Fillers.clean` from the tokens around: an "oh" read as zero, a word said
+    /// three or more times running, a filler sound inside a spoken number.
     var isZero = false
     var isEmphasis = false
+    var isInNumber = false
 
     init(_ text: Substring) {
         var body = text

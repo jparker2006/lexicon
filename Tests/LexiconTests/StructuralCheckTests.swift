@@ -649,6 +649,8 @@ let rejectedModelOutputs: [Pair] = [
                                   terms: []) == .droppedContentWord)
     #expect(StructuralCheck.check("It takes eighty minutes.", ruled: "It takes, like, you know, eighty minutes.",
                                   terms: []) == .droppedContentWord)
+    // The rules drop an "uh" inside a spoken number, so the AI may too.
+    #expect(StructuralCheck.check("Call five oh oh seven.", ruled: "Call five uh oh oh seven.", terms: []) == nil)
     // A "like" that ends its sentence hedges nothing in the next one.
     #expect(StructuralCheck.check("It is. Ten people came.", ruled: "It is, like. Ten people came.", terms: []) == nil)
     // Another "like" kept elsewhere does not excuse dropping the hedge.
