@@ -24,17 +24,15 @@ func aPasteGoesOnlyWhereTheFocusedElementTakesText(traits: FieldTraits, expected
     #expect(FieldTraits.accepts(traits) == expected)
 }
 
-// An app in front whose focus the system-wide query can't name still gets
-// Cmd-V, so it is a target with no field, but only on a definite answer from
-// the app itself: a timeout or other error stays "nowhere to type", so the
-// same Dictation never holds or pastes on how fast Accessibility answered.
-// AXError raw values: success 0, noValue -25212, cannotComplete -25204 (a timeout),
-// failure -25200, apiDisabled -25211.
-@Test(arguments: [(Int32(-25212), Int32?(42)), (0, 42), (-25204, nil), (-25200, nil), (-25211, nil)])
-func theFrontmostAppStandsInOnlyWhenItAnswersAboutItsFocus(_ answer: Int32, _ expected: Int32?) {
-    #expect(Focus.standIn(frontmost: 42, focusedElementError: answer) == expected)
-}
-
-@Test func withNoFrontmostAppNothingStandsIn() {
-    #expect(Focus.standIn(frontmost: nil, focusedElementError: -25212) == nil)
+// What an app's focused-element answer means for the late-text rule, on every
+// path to the focus (#60): an element is a field, a definite "none" is an app
+// with no field (the 5 s rule), and anything else, a timeout included, can't be
+// read, so the text is held. A slow answer can only ever hold text, never paste it.
+// AXError raw values: success 0, noValue -25212, attributeUnsupported -25205,
+// notImplemented -25208, cannotComplete -25204 (a timeout), failure -25200,
+// apiDisabled -25211, invalidUIElement -25202.
+@Test(arguments: [(Int32(0), Focus.Answer.element), (-25212, .none), (-25205, .none), (-25208, .none),
+                  (-25204, .unreadable), (-25200, .unreadable), (-25211, .unreadable), (-25202, .unreadable)])
+func anAppsFocusedElementAnswerIsAFieldNoFieldOrUnreadable(_ code: Int32, _ expected: Focus.Answer) {
+    #expect(Focus.Answer(code) == expected)
 }
