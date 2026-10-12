@@ -126,7 +126,15 @@ test('only a squash subject\'s trailing (#N) marks a ticket merged', () => {
   assert.equal(r.status, 0, r.out)
 })
 
-test('a later noun is not the verb: "After #38 the merge path is manual."', () => {
+test('a bare verb after a ticket list is future too: "until #58 and #62 merge"', () => {
+  const root = tree({ 'AGENTS.md': 'Esc reaches the app until #58 and #62 merge.\n', 'GLOSSARY.md': 'Paste-last ships once #62 and #60 ship.\n' })
+  const r = run(root, '62')
+  assert.equal(r.status, 1)
+  assert.match(r.out, /^AGENTS\.md:1: #62 has merged/m)
+  assert.match(r.out, /^GLOSSARY\.md:1: #62 has merged/m)
+})
+
+test('the noun "merge" after a ticket is not the verb: "After #38 the merge path is manual."', () => {
   const root = tree({ 'AGENTS.md': 'After #38 the merge path is manual.\n' })
   assert.equal(run(root, '38').status, 0)
 })

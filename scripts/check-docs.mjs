@@ -12,8 +12,9 @@
 //     that has merged. A ticket has merged when a commit subject on HEAD ends
 //     in "(#N)" or "(#N) (#M)", as squash merges do; --merged replaces that
 //     list (tests). A shallow clone, such as CI's checkout, is deepened first
-//     (git fetch --unshallow), and one that can't be deepened fails the check
-//     (exit 2) rather than skip the rule.
+//     (git fetch --unshallow; CI checks out full history, so it never needs
+//     to), and one that can't be deepened fails the check (exit 2) rather than
+//     skip the rule.
 //   - a scripts/ path that does not exist. Globs and <placeholders> are skipped.
 //
 // Reads AGENTS.md, CLAUDE.md, GLOSSARY.md, README.md, docs/**/*.md except
@@ -37,10 +38,10 @@ function mergedTickets() {
   const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' })
   if (git('rev-parse', '--is-shallow-repository').trim() === 'true') {
     try {
-      execFileSync('git', ['-C', root, 'fetch', '--quiet', '--unshallow'], { stdio: 'ignore', timeout: 120_000 })
+      execFileSync('git', ['-C', root, 'fetch', '--quiet', '--unshallow'], { stdio: 'ignore', timeout: 120_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
       if (git('rev-parse', '--is-shallow-repository').trim() === 'true') throw new Error('still shallow')
     } catch {
-      console.error('check-docs: a shallow clone that git fetch --unshallow could not deepen has no history to say which tickets merged')
+      console.error('check-docs: a shallow clone that git fetch --unshallow could not deepen has no history to say which tickets merged; check out with full history (fetch-depth: 0 in CI)')
       process.exit(2)
     }
   }
@@ -69,10 +70,12 @@ function docs() {
 }
 
 // A pointer at a ticket: "lands with #38", "will land in the bundle scripts ticket",
-// "once #159 (PR #215) merges", "until #58 and #62 land". Not "the result lands
-// with every item PASS".
+// "once #159 (PR #215) merges", "until #58 and #62 land", "once #159's install
+// step lands". The verb comes right after the ticket list, so "after #38 the
+// merge path" and "the result lands with every item PASS" are not pointers.
 const TICKET = String.raw`(?:\[?#\d+\]?|the [^.]*?\bticket\b)`
-const FUTURE = new RegExp(String.raw`\b(?:lands with|will land (?:with|in)) ${TICKET}|\b(?:once|until|when|after) \[?#\d+\]?[^.]{0,60}?\b(?:lands?|merges|ships)\b`, 'i')
+const REF = String.raw`\[?#\d+\]?(?:\([^)\s]*\))?(?:'s(?: [\w-]+){1,4}?)?(?: \(PR #\d+\))?`
+const FUTURE = new RegExp(String.raw`\b(?:lands with|will land (?:with|in)) ${TICKET}|\b(?:once|until|when|after) ${REF}(?:,? (?:and|or) ${REF})* (?:lands?|merges?|ships?)\b`, 'i')
 // A path character may not come before it, so ~/x/scripts/y and .claude/scripts are left alone.
 const SCRIPT = /(?<![\w./~-])scripts\/[\w./-]*\w/g
 
