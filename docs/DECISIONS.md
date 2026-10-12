@@ -255,6 +255,7 @@ These stand as built until Jake confirms them as a batch or names items to chang
 - **55.** Memory while dictating, about 160 MB: peak 66 to 68 MB on a 6 s clip, 258 MB on a 20-minute clip (#47). Proposed: keep 160 MB for normal Dictations and measure the 20-minute peak again with #117.
 
 - **68.** The spec lists "`CloudAccess` is the only door to the network" among the compiler-enforced invariants. Only the key is: every cloud key comes through a `CloudAccess`, but the sockets and HTTP calls are plain `URLSession` that would take any request. architecture.md says so; keeping the network behind `CloudAccess` is a review rule (review.md).
+- **76.** Zero retention, which the spec requires before any eval sends Test set audio to a provider (spec "Privacy for eval"), is not on by default for the bake-off's speech providers. Meta's is for organization accounts only ([#111](https://github.com/jparker2006/lexicon/issues/111)); Cartesia Ink and ElevenLabs offer it on Enterprise plans only. [#166](https://github.com/jparker2006/lexicon/issues/166) enforces the spec's rule in code; whichever of these [#77](https://github.com/jparker2006/lexicon/issues/77) adds as a `CloudModel` states its status there.
 
 Settled since M0, no change: #81's quiet-Mac rerun (2026-10-12) kept Jev's 250 ms budget (warm p50 145 ms, p95 174 ms, 0 of 20 calls over 250 ms).
 

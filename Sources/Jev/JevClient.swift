@@ -242,7 +242,8 @@ public struct Decision<Answer: Sendable>: Sendable {
 
         init(_ revoked: AccessRevoked) {
             switch revoked {
-            case .privateModeOn, .alwaysPrivateApp: self = .privateMode
+            // Jev never runs under eval access, the only use denied for retention.
+            case .privateModeOn, .alwaysPrivateApp, .retentionUnconfirmed: self = .privateMode
             case .secretFound: self = .secretFound
             }
         }
