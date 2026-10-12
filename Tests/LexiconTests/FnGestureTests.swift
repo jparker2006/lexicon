@@ -20,12 +20,12 @@ private func run(_ inputs: [KeyInput], gesture: inout FnGesture) -> [KeyCommand]
 }
 
 private func run(_ inputs: [KeyInput]) -> [KeyCommand] {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     return run(inputs, gesture: &gesture)
 }
 
 @Test func fnDownStartsRecordingAtOnceAndAsksForTheHoldDeadline() {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     let down = gesture.handle(.fnDown(at(0), secureInput: false, id: a))
     #expect(down.commands == [.dictationBegan(a, at: at(0))])
     #expect(down.wakeAt == at(300))
@@ -37,16 +37,18 @@ private func run(_ inputs: [KeyInput]) -> [KeyCommand] {
 }
 
 @Test func loneTapIsDiscarded() {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
+    // The release waits for a second tap; with none by 0.25 s after it, the tap is dropped.
     #expect(run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90))], gesture: &gesture)
-        == [.dictationBegan(a, at: at(0)), .dictationDiscarded(a)])
-    // The deadline it asked for still fires; it is stale and does nothing.
+        == [.dictationBegan(a, at: at(0))])
+    #expect(gesture.handle(.deadline(at(340))).commands == [.dictationDiscarded(a)])
+    // The hold deadline it asked for still fires; it is stale and does nothing.
     #expect(gesture.handle(.deadline(at(300))).commands.isEmpty)
     #expect(gesture.phase == .idle)
 }
 
 @Test func keyWithinTheThresholdIsAShortcutAndCancelsSilently() {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     // fn+Right arrow: the key cancels, then fn-up and the deadline do nothing.
     #expect(run([.fnDown(at(0), secureInput: false, id: a), .otherKey(at(120)), .deadline(at(300)), .fnUp(at(400))],
                 gesture: &gesture)
@@ -55,7 +57,7 @@ private func run(_ inputs: [KeyInput]) -> [KeyCommand] {
 }
 
 @Test func keyAfterTheThresholdPassesThroughAndRecordingContinues() {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     #expect(run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .otherKey(at(800)), .otherKey(at(900)),
                  .fnUp(at(1_200))], gesture: &gesture)
         == [.dictationBegan(a, at: at(0)), .dictationConfirmed(a, .hold), .dictationStopped(a, at: at(1_200))])
@@ -63,17 +65,17 @@ private func run(_ inputs: [KeyInput]) -> [KeyCommand] {
 
 @Test(arguments: [(290, false), (299, false), (300, true), (310, true)])
 func fnUpAtTheEdge(milliseconds: Int, isHold: Bool) {
-    // No deadline delivered yet: the fn-up's own time decides.
+    // No deadline delivered yet: the fn-up's own time decides. A tap waits for a second one.
     let commands = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(milliseconds))])
     #expect(commands == (isHold
         ? [.dictationBegan(a, at: at(0)), .dictationConfirmed(a, .hold), .dictationStopped(a, at: at(milliseconds))]
-        : [.dictationBegan(a, at: at(0)), .dictationDiscarded(a)]))
+        : [.dictationBegan(a, at: at(0))]))
 }
 
 @Test(arguments: [(290, false), (299, false), (300, true), (310, true)])
 func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
     // A key before the deadline is delivered: the key's own time decides.
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     let commands = run([.fnDown(at(0), secureInput: false, id: a), .otherKey(at(milliseconds))], gesture: &gesture)
     #expect(commands == (isHold
         ? [.dictationBegan(a, at: at(0)), .dictationConfirmed(a, .hold)]
@@ -84,7 +86,7 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
 @Test func earlyDeadlineAsksAgainInsteadOfConfirming() {
     // A timer that fires a little early (at 0.29 s, or on wake from sleep) confirms
     // nothing and asks for the deadline again, so the hold is still confirmed at 0.30 s.
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     _ = gesture.handle(.fnDown(at(0), secureInput: false, id: a))
     #expect(gesture.handle(.deadline(at(290))) == FnGesture.Output(wakeAt: at(300)))
     #expect(gesture.handle(.deadline(at(300))).commands == [.dictationConfirmed(a, .hold)])
@@ -92,7 +94,7 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
 }
 
 @Test func fnDownWithSecureInputStartsNothing() {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     let down = gesture.handle(.fnDown(at(0), secureInput: true, id: a))
     #expect(down == FnGesture.Output())
     #expect(run([.otherKey(at(100)), .deadline(at(300)), .fnUp(at(1_000))], gesture: &gesture).isEmpty)
@@ -100,7 +102,7 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
 }
 
 @Test func sleepStopsAHoldAndTheReleaseThenDoesNothing() {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300))], gesture: &gesture)
     #expect(gesture.handle(.sleep(at(800))).commands == [.dictationStopped(a, at: at(800))])
     #expect(!gesture.isRecording)
@@ -142,23 +144,26 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
 @Test func everyPressEndsBeforeTheNextBeginsWhateverTheInputs() {
     // The Conductor keeps one recording at a time, so a press's stop or discard
     // must reach it before the next press's begin, for any order of inputs.
+    // A 5 s cap with a 1 s warning, so the cap's deadlines come up within a run.
     var seed: UInt64 = 0x5EED
     func next(_ bound: Int) -> Int {
         seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
         return Int((seed >> 33) % UInt64(bound))
     }
     for _ in 0..<2_000 {
-        var gesture = FnGesture(holdThreshold: .milliseconds(300))
+        var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300), cap: .seconds(5), capWarning: .seconds(1)))
         var time = 0
         var open: DictationID?
+        var warned: Set<DictationID> = []
         for _ in 0..<40 {
             time += next(400)
-            let input: KeyInput = switch next(6) {
+            let input: KeyInput = switch next(7) {
             case 0: .fnDown(at(time), secureInput: next(5) == 0, id: DictationID())
             case 1: .fnUp(at(time))
             case 2: .otherKey(at(time))
             case 3: .deadline(at(time))
             case 4: .sleep(at(time))
+            case 5: .escape(at(time))
             default: .fnDown(at(time), secureInput: false, id: DictationID())
             }
             for command in gesture.handle(input).commands {
@@ -171,11 +176,16 @@ func keyAtTheEdge(milliseconds: Int, isHold: Bool) {
                 case .dictationStopped(let id, _), .dictationCancelled(let id), .dictationDiscarded(let id):
                     #expect(open == id)
                     open = nil
+                case .oneMinuteLeft(let id):
+                    #expect(open == id)
+                    #expect(!warned.contains(id))
+                    warned.insert(id)
                 case .pasteLast, .justFixed:
                     break
                 }
             }
             #expect(gesture.isRecording == (open != nil))
+            #expect(!gesture.takesEscape || gesture.isRecording)
         }
     }
 }

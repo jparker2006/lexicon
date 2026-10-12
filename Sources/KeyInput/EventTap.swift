@@ -33,13 +33,17 @@ final class EventTapThread: @unchecked Sendable {
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
     private let log = Logger(subsystem: "Lexicon", category: "fn")
+    /// Takes Esc from the app in front (true) or gives it back (false).
+    private var takeEscape: @Sendable (Bool) -> Void
 
     init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
-         secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() }) {
+         secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() },
+         takeEscape: @escaping @Sendable (Bool) -> Void = { _ in }) {
         self.gesture = gesture
         self.input = input
         self.continuation = continuation
         self.secureInput = secureInput
+        self.takeEscape = takeEscape
     }
 
     /// Creates the tap (session level, listen-only, mask: flagsChanged, keyDown

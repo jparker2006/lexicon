@@ -88,7 +88,7 @@ private func afterAPress(_ key: SyntheticKey, _ deliver: (EventTapThread) -> Voi
 {
     let input = InputClock()
     let (stream, continuation) = AsyncStream<KeyCommand>.makeStream()
-    let tap = EventTapThread(gesture: FnGesture(holdThreshold: .seconds(60)), input: input,
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .seconds(60))), input: input,
                              continuation: continuation, secureInput: { false })
     if case .fnDown = key {} else { _ = tap.handle(.flagsChanged, keyboardEvent(.fnDown(shift: false))) }
     let mark = input.mark()
@@ -108,6 +108,7 @@ extension KeyCommand {
         case .dictationStopped: "stopped"
         case .dictationCancelled: "cancelled"
         case .dictationDiscarded: "discarded"
+        case .oneMinuteLeft: "oneMinuteLeft"
         case .pasteLast: "pasteLast"
         case .justFixed: "justFixed"
         }
@@ -130,7 +131,7 @@ struct HookRig {
          hardware: MicHardware = FakeMic().hardware) throws {
         let paths = AppPaths.temporary()
         let (stream, continuation) = AsyncStream<KeyCommand>.makeStream()
-        let tap = EventTapThread(gesture: FnGesture(holdThreshold: .zero), input: InputClock(),
+        let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: InputClock(),
                                  continuation: continuation, secureInput: { false })
         keyboard = Keyboard(tap: tap, commands: stream)
         commands = continuation

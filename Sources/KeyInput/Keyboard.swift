@@ -13,13 +13,15 @@ public enum KeyCommand: Sendable, Hashable {
     case dictationBegan(DictationID, at: HostTime)
     /// Held past the hold threshold, or second tap of a double tap.
     case dictationConfirmed(DictationID, DictationMode)
-    /// Released after a hold, the next fn-down in hands-free, or the Mac going to sleep.
+    /// Released after a hold, the next fn-down in hands-free, the Mac going to sleep, or the cap.
     case dictationStopped(DictationID, at: HostTime)
     /// Esc while recording (#18): nothing is typed, but the Dictation is still
     /// transcribed and saved to History, so paste-last gets it back.
     case dictationCancelled(DictationID)
     /// A stray tap that never became a Dictation. Its row and file are removed.
     case dictationDiscarded(DictationID)
+    /// One minute until the cap stops this Dictation (the 19-minute mark, #18).
+    case oneMinuteLeft(DictationID)
     /// ⌃⌘V: paste the final text of the newest Dictation that has text.
     case pasteLast
     /// "I just fixed this" (#13 catch-all). Trigger key decided in #24.
@@ -28,14 +30,26 @@ public enum KeyCommand: Sendable, Hashable {
 
 /// Key bindings and gesture timing, fixed in code (#18), re-checked in M0.
 public struct KeyboardConfig: Sendable, Hashable {
-    public var holdThreshold: Duration = .milliseconds(300)
+    public var holdThreshold: Duration
     /// From the first fn-up to the second fn-down (#18; Jake's double-tap gap measured 31 to 93 ms).
-    public var doubleTapWindow: Duration = .milliseconds(250)
+    public var doubleTapWindow: Duration
+    /// Every Dictation stops here, in either mode, as if fn were released (#18), counted
+    /// from its first fn-down. A forgotten hands-free, or a lost fn-up, ends here.
+    public var cap: Duration
+    /// How long before the cap the warning sounds.
+    public var capWarning: Duration
     /// None in v0 (#18): fn only. Kept as a seam for a non-Apple keyboard later.
     public var fallbackHotkey: Hotkey? = nil
     public var pasteLast: Hotkey = Hotkey(keyCode: 9, modifiers: [.control, .command])
     public var justFixed: Hotkey? = nil
-    public init() {}
+
+    public init(holdThreshold: Duration = .milliseconds(300), doubleTapWindow: Duration = .milliseconds(250),
+                cap: Duration = .seconds(20 * 60), capWarning: Duration = .seconds(60)) {
+        self.holdThreshold = holdThreshold
+        self.doubleTapWindow = doubleTapWindow
+        self.cap = cap
+        self.capWarning = capWarning
+    }
 }
 
 public struct Hotkey: Sendable, Hashable, Codable {
@@ -87,7 +101,7 @@ public final class Keyboard: Sendable {
 
     static func start(_ config: KeyboardConfig, input: InputClock, listenAccess: Bool) throws(KeyboardError) -> Keyboard {
         let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
-        let tap = EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
+        let tap = EventTapThread(gesture: FnGesture(config), input: input,
                                  continuation: continuation)
         try tap.start(listenAccess: listenAccess)
         return Keyboard(tap: tap, commands: commands)

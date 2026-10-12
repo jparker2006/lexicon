@@ -119,6 +119,8 @@ public actor Conductor<Destination: TextDestination> {
             endCapture(id, .cancel)
         case .dictationDiscarded(let id):
             endCapture(id, .discard)
+        case .oneMinuteLeft:
+            break
         case .pasteLast:
             Task { await self.pasteLast() }
         case .justFixed:

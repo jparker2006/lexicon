@@ -1,4 +1,5 @@
 import CoreGraphics
+import Synchronization
 import Testing
 import LexiconDomain
 @testable import KeyInput
@@ -123,7 +124,7 @@ private func isFnDown(_ key: KeyInput?, at: HostTime, secureInput: Bool) -> Bool
 }
 
 @Test func shiftWithFnNeverCancelsAHoldFromTheEvents() throws {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
     commands += feed(flagsChanged(56, [.maskShift, .maskSecondaryFn]), at: at(50), into: &gesture)
     commands += gesture.handle(.deadline(at(300))).commands
@@ -133,7 +134,7 @@ private func isFnDown(_ key: KeyInput?, at: HostTime, secureInput: Bool) -> Bool
 }
 
 @Test func shiftWithFnThenArrowWithinTheThresholdCancelsTheHold() throws {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
     commands += feed(flagsChanged(56, [.maskShift, .maskSecondaryFn]), at: at(50), into: &gesture)
     commands += feed(keyEvent(124, flags: [.maskShift, .maskSecondaryFn]), at: at(200), into: &gesture)
@@ -197,4 +198,30 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     #expect(throws: KeyboardError.noListenAccess) {
         try Keyboard.start(KeyboardConfig(), input: InputClock(), listenAccess: false)
     }
+}
+
+@Test func plainEscIsEscapeAndEscWithAModifierIsAnotherKey() {
+    let now = at(0)
+    // fn may be down (a hold): still plain Esc. Cmd, Option, Control or Shift make it a shortcut.
+    #expect(KeyInput(keyEvent(53), secureInput: { false }, now: now) == .escape(now))
+    #expect(KeyInput(keyEvent(53, flags: [.maskSecondaryFn]), secureInput: { false }, now: now) == .escape(now))
+    for modifier: CGEventFlags in [.maskCommand, .maskAlternate, .maskControl, .maskShift] {
+        #expect(KeyInput(keyEvent(53, flags: modifier), secureInput: { false }, now: now) == .otherKey(now))
+    }
+}
+
+@Test func theTapAsksForEscExactlyWhileADictationIsConfirmed() {
+    // The Esc hotkey follows the recognizer: taken when the hold is confirmed, given back when
+    // it ends, and asked for only on a change.
+    let asked = Mutex<[Bool]>([])
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: InputClock(),
+                             continuation: continuation, secureInput: { false },
+                             takeEscape: { on in asked.withLock { $0.append(on) } })
+    _ = tap.handle(.flagsChanged, flagsChanged(63, [.maskSecondaryFn]))
+    _ = tap.handle(.keyDown, keyEvent(0))  // a key after the (zero) threshold confirms the hold
+    _ = tap.handle(.keyDown, keyEvent(1))
+    _ = tap.handle(.keyDown, keyEvent(53))  // Esc cancels
+    _ = tap.handle(.keyDown, keyEvent(53))  // a second report of it changes nothing
+    #expect(asked.withLock { $0 } == [true, false])
 }

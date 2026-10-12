@@ -9,6 +9,9 @@ enum KeyInput: Sendable, Hashable {
     /// Any other key-down. Modifiers (Shift included) are flag changes, never key-downs,
     /// so they never get here: Shift with fn never cancels (it is the Re-speak trigger in M4).
     case otherKey(HostTime)
+    /// Plain Esc. Reported by the tap and, while it is registered, by the Esc
+    /// hotkey: the same press can arrive twice, and the second finds nothing to end.
+    case escape(HostTime)
     /// A timer the recognizer asked for has fired.
     case deadline(HostTime)
     /// The Mac is going to sleep (see `Keyboard.systemWillSleep`).
@@ -51,11 +54,14 @@ struct FnGesture: Sendable {
     private(set) var phase: Phase = .idle
     let holdThreshold: Duration
 
-    init(holdThreshold: Duration) {
-        self.holdThreshold = holdThreshold
+    init(_ config: KeyboardConfig) {
+        holdThreshold = config.holdThreshold
     }
 
     var isRecording: Bool { phase != .idle }
+
+    /// Esc is taken from the app in front exactly while this is true.
+    var takesEscape: Bool { false }
 
     mutating func handle(_ input: KeyInput) -> Output {
         switch (phase, input) {
