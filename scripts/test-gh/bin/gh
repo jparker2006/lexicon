@@ -1,0 +1,201 @@
+#!/bin/sh
+# A fake gh for the script tests: GitHub as JSON files in $GH_FIXTURES, so a
+# test replays a real past state with no network. Reads return only the fields
+# asked for with --json, as gh does, so a script that forgets a field fails
+# here too. Writes change the files (a comment lands on the issue, a label
+# moves), so a second run sees the first one's effect, and every call is logged
+# to $GH_LOG.
+#
+#   issues.json  issues: number, title, state, body, labels, comments, ...
+#   prs.json     pull requests: number, state, headRefName, headRefOid, ...
+#   runs.json    workflow runs: databaseId, headSha, headBranch, status, ...
+#   api/<path with / as _>.json   gh api <path>
+#
+# An unknown call fails loudly, so a script never passes on a call the fake
+# doesn't understand. $LEXICON_NOW is the time new comments and issues get.
+set -eu
+# A missing fixture must fail the call, not pass an empty answer down a pipe.
+set -o pipefail
+: "${GH_FIXTURES:?GH_FIXTURES is not set}"
+echo "gh $*" >> "${GH_LOG:-/dev/null}"
+now=${LEXICON_NOW:-2026-01-01T00:00:00Z}
+repo=https://github.com/jparker2006/lexicon
+
+die() { echo "gh (fake): $*" >&2; exit 1; }
+
+# Prints the value of a flag, or nothing.
+flag() {
+    want=$1
+    shift
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            "$want") echo "${2:-}"; return ;;
+            "$want"=*) echo "${1#*=}"; return ;;
+        esac
+        shift
+    done
+}
+
+# Every value of a repeatable flag, comma-joined.
+flags() {
+    want=$1
+    shift
+    out=
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            "$want") out="$out${out:+,}${2:-}"; shift ;;
+            "$want"=*) out="$out${out:+,}${1#*=}" ;;
+        esac
+        shift
+    done
+    echo "$out"
+}
+
+# The first argument that is not a flag or a flag's value.
+positional() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json | --state | --label | --limit | --branch | --commit | --workflow | --body | --body-file | \
+                --title | --add-label | --remove-label | --head | --search | -L | -R | --repo | -q | --jq | -X | --method)
+                shift 2 || return 0 ;;
+            -*) shift ;;
+            *) echo "$1"; return ;;
+        esac
+    done
+}
+
+body() {
+    b=$(flag --body "$@")
+    f=$(flag --body-file "$@")
+    if [ "$f" = - ]; then cat
+    elif [ -n "$f" ]; then cat "$f"
+    else printf '%s' "$b"
+    fi
+}
+
+# Keeps only the --json fields, as gh does.
+project() {
+    fields=$(flag --json "$@")
+    [ -n "$fields" ] || die "this fake only answers --json reads: gh $*"
+    case "$(flag --jq "$@")$(flag -q "$@")" in ?*) die "--jq is not supported; pipe to jq" ;; esac
+    jq --arg f "$fields" '($f | split(",")) as $keep
+        | def pick: with_entries(select(.key as $k | $keep | index($k)));
+        if type == "array" then map(pick) else pick end'
+}
+
+edit() {
+    file=$GH_FIXTURES/$1
+    shift
+    jq "$@" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+
+state_filter() {
+    case "$1" in
+        all) echo 'true' ;;
+        open) echo '.state == "OPEN"' ;;
+        closed) echo '.state != "OPEN"' ;;
+        merged) echo '.state == "MERGED"' ;;
+        *) die "unknown --state $1" ;;
+    esac
+}
+
+label_filter() {
+    jq -n --arg l "$1" '$l | split(",") | map(select(. != ""))'
+}
+
+case "${1:-} ${2:-}" in
+    "issue view")
+        shift 2
+        n=$(positional "$@")
+        jq -e --argjson n "$n" '.[] | select(.number == $n)' "$GH_FIXTURES/issues.json" > /dev/null ||
+            die "could not resolve to an issue with the number of $n"
+        jq --argjson n "$n" '.[] | select(.number == $n)' "$GH_FIXTURES/issues.json" | project "$@"
+        ;;
+    "issue list")
+        shift 2
+        st=$(flag --state "$@")
+        labels=$(label_filter "$(flags --label "$@")")
+        jq --argjson labels "$labels" "[.[] | select($(state_filter "${st:-open}"))
+            | select([.labels[].name] as \$have | all(\$labels[]; . as \$l | \$have | index(\$l)))]" \
+            "$GH_FIXTURES/issues.json" | project "$@"
+        ;;
+    "issue comment")
+        shift 2
+        n=$(positional "$@")
+        text=$(body "$@")
+        jq -e --argjson n "$n" '.[] | select(.number == $n)' "$GH_FIXTURES/issues.json" > /dev/null ||
+            die "could not resolve to an issue with the number of $n"
+        id=IC_fake$(jq '[.[].comments | length] | add + 1' "$GH_FIXTURES/issues.json")
+        edit issues.json --argjson n "$n" --arg body "$text" --arg now "$now" --arg id "$id" --arg repo "$repo" \
+            'map(if .number == $n then .comments += [{id: $id, author: {login: "jparker2006"}, body: $body,
+                createdAt: $now, url: "\($repo)/issues/\($n)#issuecomment-\($id)"}] | .updatedAt = $now else . end)'
+        echo "$repo/issues/$n#issuecomment-$id"
+        ;;
+    "issue edit")
+        shift 2
+        n=$(positional "$@")
+        add=$(label_filter "$(flags --add-label "$@")")
+        remove=$(label_filter "$(flags --remove-label "$@")")
+        edit issues.json --argjson n "$n" --argjson add "$add" --argjson remove "$remove" \
+            'map(if .number == $n then .labels = ([.labels[] | select(.name as $l | $remove | index($l) | not)]
+                + [$add[] | {name: .}] | unique_by(.name)) else . end)'
+        if [ -n "$(flag --body "$@")$(flag --body-file "$@")" ]; then
+            text=$(body "$@")
+            edit issues.json --argjson n "$n" --arg body "$text" 'map(if .number == $n then .body = $body else . end)'
+        fi
+        echo "$repo/issues/$n"
+        ;;
+    "issue create")
+        shift 2
+        text=$(body "$@")
+        title=$(flag --title "$@")
+        labels=$(label_filter "$(flags --label "$@")")
+        n=$(jq '[.[].number] + [0] | max + 1' "$GH_FIXTURES/issues.json")
+        edit issues.json --argjson n "$n" --arg title "$title" --arg body "$text" --argjson labels "$labels" \
+            --arg now "$now" --arg repo "$repo" \
+            '. + [{number: $n, title: $title, state: "OPEN", body: $body, labels: [$labels[] | {name: .}],
+                comments: [], createdAt: $now, updatedAt: $now, closedAt: null, url: "\($repo)/issues/\($n)"}]'
+        echo "$repo/issues/$n"
+        ;;
+    "pr view")
+        shift 2
+        n=$(positional "$@")
+        # Without a number, gh answers for the current branch: its open PR, else
+        # its latest merged or closed one.
+        if [ -n "$n" ]; then
+            sel=".number == $n"
+        else
+            sel=".headRefName == \"$(git branch --show-current)\""
+        fi
+        jq -e ".[] | select($sel)" "$GH_FIXTURES/prs.json" > /dev/null || die "no pull requests found"
+        jq "[.[] | select($sel)] | sort_by(.state == \"OPEN\", .number) | last" "$GH_FIXTURES/prs.json" | project "$@"
+        ;;
+    "pr list")
+        shift 2
+        st=$(flag --state "$@")
+        head=$(flag --head "$@")
+        jq --arg head "$head" "[.[] | select($(state_filter "${st:-open}")) | select(\$head == \"\" or .headRefName == \$head)]" \
+            "$GH_FIXTURES/prs.json" | project "$@"
+        ;;
+    "run list")
+        shift 2
+        jq --arg b "$(flag --branch "$@")" --arg c "$(flag --commit "$@")" --arg w "$(flag --workflow "$@")" \
+            '[.[] | select($b == "" or .headBranch == $b) | select($c == "" or (.headSha | startswith($c)))
+                | select($w == "" or .workflowName == $w)] | sort_by(.createdAt) | reverse' \
+            "$GH_FIXTURES/runs.json" | project "$@"
+        ;;
+    "repo view")
+        shift 2
+        echo '{"owner":{"login":"jparker2006"},"nameWithOwner":"jparker2006/lexicon"}' | project "$@"
+        ;;
+    "api "*)
+        path=$2
+        case "$path" in */*) ;; *) die "unknown api path $path" ;; esac
+        file=$GH_FIXTURES/api/$(printf %s "$path" | tr '/' '_').json
+        [ -f "$file" ] || die "no fixture for gh api $path ($file)"
+        cat "$file"
+        ;;
+    *)
+        die "unsupported call: gh $*"
+        ;;
+esac
