@@ -47,9 +47,10 @@ enum KeyInput: Sendable, Hashable {
 /// as a hold even if the 0.30 s deadline has not been delivered yet. Keys and
 /// timers share the tap thread, so a key stamped before a mark can be handled
 /// after the mark's timer. Every mark (the double-tap window, the warning and
-/// the cap) acts `lateKeyGrace` after its time; the cap's stop is still stamped
-/// at the cap, and a key stamped at or after a mark is handled after it. So a key gets one outcome whatever the handling order,
-/// unless it is handled more than `lateKeyGrace` after its stamp. Past that
+/// the cap) acts `lateKeyGrace` after its time, and the cap's stop is still
+/// stamped at the cap. A key is judged against a mark by its own stamp, so it
+/// gets one outcome whatever the handling order, unless it is handled more
+/// than `lateKeyGrace` after its stamp. Past that
 /// bound, the cap remembers when it stopped, so a stop press stamped before it
 /// is not a new press.
 ///
@@ -92,11 +93,12 @@ struct FnGesture: Sendable {
     private var cappedAt: HostTime?
 
     /// How late a key may be handled after its own time and still count against the
-    /// double-tap window, the warning and the cap. Keys reached the focused app 2 to 12 ms after they
-    /// were pressed through this listen-only tap (ADR 0004); one handled later than this,
-    /// behind a stalled tap thread, comes after the mark. Nobody hears a drop or a stop
-    /// 50 ms late, and Quit waits at most this long past the cap for a lost fn-up
-    /// (Jake took that trade, DECISIONS.md item 76).
+    /// double-tap window, the warning and the cap. Keys reached the focused app 2 to
+    /// 12 ms after they were pressed through this listen-only tap (ADR 0004); one
+    /// handled later than this, behind a stalled tap thread, comes after the mark.
+    /// The cost: a dropped tap, the warning sound and the cap's stop each come 50 ms
+    /// after their mark, and Quit waits at most this long past the cap for a lost
+    /// fn-up (Jake took that trade, DECISIONS.md item 76).
     static let lateKeyGrace: Duration = .milliseconds(50)
 
     init(_ config: KeyboardConfig) {

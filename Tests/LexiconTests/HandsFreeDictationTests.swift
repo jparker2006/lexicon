@@ -106,10 +106,10 @@ func theCapWarnsOnceThenStopsAndInsertsAHandsFreeDictation() async throws {
         if case .confirmed(let who, .handsFree) = event { who == first } else { false }
     }
     try #require(rig.feed(.fnUp(at(300))).commands == [])
-    // The warning mark: began + cap - capWarning.
+    // The warning mark (began + cap - capWarning), acting 50 ms later.
     try #require(rig.feed(.deadline(at(8_050))).commands == [.oneMinuteLeft(first)])
     seen += await readUntil(&events) { event in if case .oneMinuteLeft(let who) = event { who == first } else { false } }
-    // The cap mark: began + cap.
+    // The cap mark (began + cap), acting 50 ms later; the stop is stamped at the cap.
     try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(first, at: at(10_000))])
     seen += await readUntil(&events) { event in if case .finished = event { true } else { false } }
     await rig.settle()
