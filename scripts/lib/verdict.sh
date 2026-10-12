@@ -28,7 +28,8 @@ verdict() {
     verdict_why=
     if awk -v l="$verdict_load5" -v c="$verdict_cores" 'BEGIN { exit !(c ~ /^[0-9]+$/ && c > 0 && l ~ /^[0-9.]+$/) }'; then
         verdict_per_core=$(awk -v l="$verdict_load5" -v c="$verdict_cores" 'BEGIN { printf "%.2f", l / c }')
-        if awk -v p="$verdict_per_core" 'BEGIN { exit !(p >= 1) }'; then
+        # On the reading itself: 0.996 per core prints as 1.00 but is under 1.
+        if awk -v l="$verdict_load5" -v c="$verdict_cores" 'BEGIN { exit !(l / c >= 1) }'; then
             verdict_add "load $verdict_load5 over 5 min on $verdict_cores cores"
         fi
     else
