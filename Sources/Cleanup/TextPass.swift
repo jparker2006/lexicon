@@ -59,13 +59,13 @@ enum Fillers {
     ]
 
     /// After "like", these make it a comparison or an estimate, not a filler.
-    /// So does a number, a word with a digit ("like, 5 MB", "like, $5") or a name.
+    /// So does a number or ordinal, a word with a digit ("like, 5 MB", "like, $5") or a name.
     static let likeKeepers: Set<String> = [
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some",
         "many", "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice",
-        "double", "triple", "hundreds", "dozens", "thousands", "millions", "billions", "lots", "more", "less",
-        "between", "upwards", "somewhere",
+        "double", "triple", "dozen", "dozens", "tens", "hundreds", "thousands", "millions", "billions", "trillion",
+        "trillions", "lots", "more", "less", "between", "upwards", "somewhere",
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
@@ -299,15 +299,16 @@ private struct Token {
     var isCode: Bool { word.contains { $0 == "." || $0 == "/" || $0 == "_" || $0.isNumber } }
     /// "ER", "UH": a name, not a filler.
     var isAcronym: Bool { text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase } }
-    /// "twenty", "twenty-six": a spoken number.
-    var isNumber: Bool {
-        word.split(separator: "-", omittingEmptySubsequences: false).allSatisfy { StructuralCheck.isCardinal(String($0)) }
-    }
+    /// "twenty", "twenty-six", "thirty-something", "two-ish": a spoken number.
+    var isNumber: Bool { word.split(separator: "-").first.map { StructuralCheck.isCardinal(String($0)) } ?? false }
     /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.
     var isName: Bool { text.contains(where: \.isUppercase) && !Token.firstPerson.contains(word) }
     /// The speech model started a sentence here: "Um", "Then". Not "I", which is always capitalized.
     var isCapitalized: Bool { text.first(where: \.isLetter)?.isUppercase == true && !Token.firstPerson.contains(word) }
-    var keepsLike: Bool { word.contains(where: \.isNumber) || isNumber || isName || Fillers.likeKeepers.contains(word) }
+    var keepsLike: Bool {
+        word.contains(where: \.isNumber) || isNumber || StructuralCheck.ordinals[word] != nil || isName
+            || Fillers.likeKeepers.contains(word)
+    }
 
     static let firstPerson: Set<String> = ["i", "i'm", "i'd", "i'll", "i've"]
 
