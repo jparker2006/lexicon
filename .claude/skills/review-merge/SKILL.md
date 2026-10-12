@@ -61,7 +61,7 @@ It checks every gate (the verdict names this head, acceptance marked, Live check
 - when Jake types "install" in this session; or
 - under the standing install rule in this session's start prompt: once a wave has merged and its Jake items have passed in a Live checks sitting. The install that finishes a milestone still waits for Jake's word, and so does one whose merged PRs list any `## Install` step other than "Code only." (a permission, a migration, a model download, an import of Jake's data): read those sections first.
 
-Out-of-scope work you find becomes a `later` issue (`scripts/ticket.sh later`) named in your verdict, never a chip: only the orchestrator posts chips.
+Out-of-scope work you find becomes a `later` issue (`scripts/ticket.sh later <pr> "<note>" --owner <issue>`, or `--new`) named in your verdict, never a chip: only the orchestrator posts chips. A finding review.md's What blocks names (nondeterminism, a hang, a change of meaning) blocks instead; it never becomes a `later` note.
 
 ## Asking Jake
 

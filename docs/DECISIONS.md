@@ -125,7 +125,7 @@ Jake, 04:31:43Z: "publish, yes to all three". The second question was about the 
 **69. Only the orchestrator posts chips.**
 > The builder recorded the chips rule in DECISIONS.md as item 69, marked "Proposed": you raised the problem, but nobody asked you to confirm the rule itself. The rule: only the orchestrator posts chips, and other sessions file Later issues instead. Rec: yes.
 
-Jake, 2026-10-12 10:36Z: "yes to the chips rule" ([record](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6122562855)). He had raised the problem at 09:49:04Z ("sometimes builders give me chips to spin up..."). Decided: only the orchestrator posts chips; a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, workflow.md, Roles, and the orchestrate skill.
+Jake, 2026-10-12 10:36Z: "yes to the chips rule" ([record](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6122562855)). He had raised the problem at 09:49:04Z ("sometimes builders give me chips to spin up..."). Decided: only the orchestrator posts chips; a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, verdict or `Live checks:` result, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, workflow.md, Roles, the orchestrate, review-merge and live-checks skills, and the orchestrator's start prompt.
 
 ### Earlier, while M0 was built (2026-10-11)
 
