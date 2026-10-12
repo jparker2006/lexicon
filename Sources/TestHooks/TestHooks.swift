@@ -20,7 +20,14 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     /// Who is running, and its grants.
     case status
     /// Dictate this WAV through the live path, typing into the focused field.
-    case dictate(wav: String)
+    /// `resultDelay`: the local model answers this many seconds late.
+    case dictate(wav: String, resultDelay: Double?)
+    /// Press keys through the fn tap's own handler, in order, back to back.
+    case keys([TestHookKey])
+    /// The Mac is going to sleep, as NSWorkspace says it.
+    case sleep
+    /// The next Dictation's mic delivers only zeros.
+    case silenceMic
     /// Show one indicator state on the pill and the menu bar icon.
     case indicator(IndicatorState)
     /// Play one sound and report how long it took to reach the speaker.
@@ -37,6 +44,13 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     /// Turn Private mode on or off. A non-nil `alwaysPrivateApps` replaces the
     /// always-private list: nil leaves it as it is, [] clears it. Replies with the status.
     case privacy(PrivacyMode, alwaysPrivateApps: [String]?)
+}
+
+/// A key `keys` presses, as the keyboard would send it.
+public enum TestHookKey: Codable, Sendable, Equatable {
+    case fnDown(shift: Bool)
+    case fnUp(shift: Bool)
+    case escape
 }
 
 public enum TestHookReply: Codable, Sendable, Equatable {
@@ -62,9 +76,12 @@ public struct TestHookStatus: Codable, Sendable, Equatable {
     public let privacy: PrivacyMode
     /// Sorted, so two replies for the same settings are equal.
     public let alwaysPrivateApps: [String]
+    /// Where History, audio and the Lexicon go: a scratch folder unless the app
+    /// was launched with `--dev-data`.
+    public let dataRoot: String
 
     public init(bundleID: String, version: String, pid: Int32, accessibility: Bool, microphone: String,
-                privacy: PrivacyMode, alwaysPrivateApps: [String]) {
+                privacy: PrivacyMode, alwaysPrivateApps: [String], dataRoot: String) {
         self.bundleID = bundleID
         self.version = version
         self.pid = pid
@@ -72,6 +89,7 @@ public struct TestHookStatus: Codable, Sendable, Equatable {
         self.microphone = microphone
         self.privacy = privacy
         self.alwaysPrivateApps = alwaysPrivateApps
+        self.dataRoot = dataRoot
     }
 }
 
@@ -137,6 +155,9 @@ public struct TestHookChannel: Sendable {
     /// The launch argument that turns hooks on, for the dev bundle id only:
     /// `open "Lexicon Dev.app" --args --test-hooks`.
     public static let launchArgument = "--test-hooks"
+    /// With `launchArgument`: keep the dev app's own data folder instead of a
+    /// scratch one, for checks that need its real History or Lexicon.
+    public static let devDataArgument = "--dev-data"
 
     /// A request older than this is dropped unanswered. Its sender gave up long
     /// ago, and a stale "dictate" must never type into whatever has focus at the
