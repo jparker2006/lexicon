@@ -7,7 +7,8 @@
 #
 # The weights live in the daily copy's data folder, "Lexicon/models/", and the
 # dev folder's "models" is a symlink to it, so the two never hold two copies.
-# A builder only ever runs `dev`, which never writes into the daily folder:
+# `dev` writes into Lexicon Dev's data, so only the live-app lane's holder runs
+# it (scripts/live-lane.sh); it never writes into the daily folder:
 # - dev, daily install complete: link "Lexicon Dev/models" to it and stop.
 # - dev otherwise: download into "Lexicon Dev/models" itself.
 # - daily (Jake or the Reviewer): adopt a complete dev download if the daily
@@ -17,6 +18,7 @@ set -eu
 cd "$(dirname "$0")/.."
 . scripts/lib/flavor.sh
 flavor "${1:-dev}"
+[ "$FLAVOR" = daily ] || scripts/live-lane.sh check
 
 SUPPORT="$HOME/Library/Application Support"
 DAILY="$SUPPORT/Lexicon/models"
