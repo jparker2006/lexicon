@@ -205,25 +205,36 @@ enum Fillers {
         return kept.joined(separator: " ")
     }
 
-    /// The word a "like" at `i` would hedge: the next word past filler sounds and a set-off
-    /// "you know", within its sentence. "like, um, you know, eighty" hedges "eighty";
-    /// "like. Ten came" and "like, um. Ten failed" hedge nothing.
-    private static func likeObject(_ tokens: [Token], at i: Int) -> Token? {
-        guard !tokens[i].endsSentence else { return nil }
-        var j = i + 1
-        while j < tokens.count {
-            let token = tokens[j]
-            if token.isHardFiller {
-                if token.endsSentence { return nil }
+    /// Where the word a "like" at `k` hedges is: the next word past filler sounds and a
+    /// set-off "you know", within its sentence. "like, um, you know, eighty" hedges "eighty";
+    /// "like. Ten came" and "like, um. Ten failed" hedge nothing. Shared with
+    /// `StructuralCheck`, which reads its own tokens: `youKnow` is how many tokens a
+    /// set-off "you know" starting there takes (0 for none).
+    static func likeObject(count: Int, at k: Int, isFiller: (Int) -> Bool, endsSentence: (Int) -> Bool,
+                           youKnow: (Int) -> Int) -> Int? {
+        guard !endsSentence(k) else { return nil }
+        var j = k + 1
+        while j < count {
+            if isFiller(j) {
+                if endsSentence(j) { return nil }
                 j += 1
-            } else if token.word == "you", j + 1 < tokens.count, tokens[j + 1].word == "know",
-                      tokens[j + 1].trailing.hasPrefix(",") {
-                j += 2
+            } else if youKnow(j) > 0 {
+                j += youKnow(j)
             } else {
-                return token
+                return j
             }
         }
         return nil
+    }
+
+    private static func likeObject(_ tokens: [Token], at i: Int) -> Token? {
+        likeObject(count: tokens.count, at: i, isFiller: { tokens[$0].isHardFiller },
+                   endsSentence: { tokens[$0].endsSentence },
+                   youKnow: { j in
+                       tokens[j].word == "you" && j + 1 < tokens.count && tokens[j + 1].word == "know"
+                           && tokens[j + 1].trailing.hasPrefix(",") ? 2 : 0
+                   })
+            .map { tokens[$0] }
     }
 
     /// "5 MB", "$5", "eighty", "twenty-something", "tenths": a number or an estimate of one.

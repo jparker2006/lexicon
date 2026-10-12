@@ -48,7 +48,7 @@ enum StructuralCheck {
 
     /// nil = accept. Otherwise the first failing check, in the order listed above.
     /// `rules`: the RuleSet the rules pass used, so a "like" before a Rule's written side
-    /// is a hedge here too; without it, one is built from `terms`.
+    /// is a hedge here too; without it, only `terms` count.
     static func check(_ candidate: String, ruled: String, terms: [Term], rules: RuleSet? = nil) -> CheckFailure? {
         if hasUnspokenCode(candidate, ruled: ruled) { return .unspokenCode }
         let (outText, markers) = stripListMarkers(candidate)
@@ -479,22 +479,13 @@ enum StructuralCheck {
         return nil
     }
 
-    /// The word a "like" hedges, past filler sounds and a set-off "you know", within its
-    /// sentence: the search `Fillers.clean` makes, on canonical tokens.
+    /// The word a "like" hedges (`Fillers.likeObject`), on canonical tokens, where
+    /// "you know" is one token.
     static func likeObject(_ t: [Token], _ k: Int) -> Token? {
-        guard !endsSentence(t[k]) else { return nil }
-        var j = k + 1
-        while j < t.count {
-            if Fillers.hard.contains(t[j].word) {
-                if endsSentence(t[j]) { return nil }
-                j += 1
-            } else if t[j].word == "you_know", t[j].mark == "," {  // `canonical` joins "you know"
-                j += 1
-            } else {
-                return t[j]
-            }
-        }
-        return nil
+        Fillers.likeObject(count: t.count, at: k, isFiller: { Fillers.hard.contains(t[$0].word) },
+                           endsSentence: { endsSentence(t[$0]) },
+                           youKnow: { t[$0].word == "you_know" && t[$0].mark == "," ? 1 : 0 })
+            .map { t[$0] }
     }
 
     /// Lowercased words written with a capital past a sentence's first word ("Postgres",

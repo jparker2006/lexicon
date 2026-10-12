@@ -245,7 +245,7 @@ let newCases: [Accepted] = [
              [
               "Keep the last 14 days of logs, and archive anything older than 1 year.",
              ]),
-    // ramble (r01's gold keeps "like, 10": a hedge before a number)
+    // ramble (r01's gold here keeps "like, 10", unlike the bench's: a hedge before a number)
     Accepted("r01",
              "Okay so, um, here's the migration plan. First we freeze writes for, like, ten minutes, "
              + "and then we run the backfill, which takes about an hour. After that we switch the reads "
