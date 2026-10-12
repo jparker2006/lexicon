@@ -1,5 +1,6 @@
 import Foundation
 public import LexiconDomain
+import AudioCapture
 import Transcription
 import Cleanup
 import WordStore
@@ -32,7 +33,7 @@ extension Conductor {
         guard let record = await history.dictation(id), !record.status.isInFlight, record.status != .waiting,
               let clip = await history.clip(id) else { return .nothing(id) }
         // A dead mic's audio (DECISIONS item 70): no words to find, and a model asked anyway may make some up.
-        guard clip.samples.contains(where: { $0 != 0 }) else { return .nothing(id) }
+        guard InputSound(stored: clip) == .real else { return .nothing(id) }
         let preferences = preferences.snapshot()
         // Today's settings and today's access for the app it was dictated into.
         let access = CloudAccess.granted(by: preferences, for: .app(record.app), keys: secrets.lookup)

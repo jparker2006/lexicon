@@ -85,6 +85,12 @@ private func notices(_ events: AsyncStream<ConductorEvent>) async -> [Notice] {
     #expect(try await sound(of: inaudibleHiss(count: 48_000), rate: 48_000) == .real)
 }
 
+@Test func aStoredClipGivesTheSameVerdict() {
+    #expect(InputSound(stored: AudioClip(samples: [])) == .noFrames)
+    #expect(InputSound(stored: AudioClip(samples: zeroSamples(count: rate))) == .zeros)
+    #expect(InputSound(stored: AudioClip(samples: zeroSamples(count: rate) + [1])) == .real)
+}
+
 // MARK: Headless Dictation
 
 @Test(.timeLimit(.minutes(1)))

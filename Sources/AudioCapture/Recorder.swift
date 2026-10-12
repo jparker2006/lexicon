@@ -157,6 +157,17 @@ public enum InputSound: Sendable, Hashable {
     /// Not one frame: the engine ran, or stopped on its own with no configuration
     /// change, and never delivered a buffer.
     case noFrames
+
+    /// The same verdict from a stored clip, for audio whose raw frames are gone
+    /// (Retry, launch recovery). Judged at 16 kHz, so input that was real but
+    /// below one step reads as zeros: it held no words either.
+    public init(stored clip: AudioClip) {
+        if clip.samples.isEmpty {
+            self = .noFrames
+        } else {
+            self = clip.samples.contains { $0 != 0 } ? .real : .zeros
+        }
+    }
 }
 
 public enum CaptureProblem: Sendable, Hashable {

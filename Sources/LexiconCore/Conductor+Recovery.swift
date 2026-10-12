@@ -38,8 +38,9 @@ extension Conductor {
         }
         // A crash mid-hold on a dead mic (DECISIONS item 70): no words to find, and a model asked anyway
         // may make some up. No notice: at launch it would read as a mic problem now.
-        guard clip.samples.contains(where: { $0 != 0 }) else {
-            history.record(.failed(id, reason: "microphone: zeros"))
+        let sound = InputSound(stored: clip)
+        guard sound == .real else {
+            history.record(.failed(id, reason: "microphone: \(sound)"))
             emit(.finished(id, .failed))
             return DictationResult(id: id, status: .failed, versions: nil, cleanup: nil, model: nil, lag: nil,
                                    attempts: [])
