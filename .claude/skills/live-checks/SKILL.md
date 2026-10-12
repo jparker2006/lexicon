@@ -43,7 +43,7 @@ Keep evidence (the run output, `pill --shots` pictures, samples and their `stats
 | `hook indicator <state>`, `hook sound <cue>`, `pill [--shots <dir>]` | the pill and the sounds |
 | `hook privacy on\|off [--always-private <ids>]` | Private mode |
 | `history [word]` | the History window: open time, copy, search, close |
-| `relaunch [--release] [--test-hooks [--dev-data]]` | a warm relaunch and launch timings |
+| `relaunch [--release] [--test-hooks [--dev-data] [--short-cap]]` | a warm relaunch and launch timings; `--short-cap` makes the 20-minute cap 20 s, its warning at 15 s |
 | `wait-fn [--count n] [--timeout s]` | each real-fn Dictation's outcome and lag from Dev's log |
 | `stats <file>` | n, p50, p95, max of a saved sample |
 
