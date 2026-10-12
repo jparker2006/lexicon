@@ -25,9 +25,15 @@ setup() {
     SLOTS="$HOME/Library/Application Support/Lexicon Dev/heavy"
     PIDS=
     set -m
-    mkfifo "$T/events" "$T/waits"
+    mkfifo "$T/events" "$T/waits" "$T/readings"
     # Opened read-write, so a job's write never blocks on the test.
-    exec 3<> "$T/events" 4<> "$T/waits"
+    exec 3<> "$T/events" 4<> "$T/waits" 5<> "$T/readings"
+    # The verdict's page-out reading, once per try at slot 3: each call says
+    # so on the readings FIFO, so the test can count a waiter's tries.
+    mkdir "$T/bin"
+    printf '#!/bin/sh\necho reading > "%s/readings"\necho "Pageouts: 0."\n' "$T" > "$T/bin/vm_stat"
+    chmod +x "$T/bin/vm_stat"
+    export PATH="$T/bin:$PATH"
     trap cleanup EXIT
 }
 
@@ -150,6 +156,10 @@ test_the_third_slot_stays_shut_on_a_no() {
     export LEXICON_MACHINE_VERDICT=no
     job J
     expect_wait "number 1 in line"
+    # J asks the verdict on every try; after three more, slot 3 is still free.
+    for n in 1 2 3 4; do
+        read -r -t 30 got <&5 || fail "J stopped trying for slot 3"
+    done
     held 3 && fail "slot 3 was taken on a no"
     kill -0 "$J" || fail "J stopped waiting"
     release H1
@@ -185,6 +195,21 @@ test_quiet_waits_in_line_like_any_job() {
     release Q
     expect_event "J 1 $CORES"
     release J
+}
+
+test_an_entry_whose_pid_was_reused_drops_out() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    # A waiter killed earlier in this boot left this entry; its pid now names
+    # another process (H1's).
+    mkdir -p "$SLOTS/queue"
+    sysctl -n kern.bootsessionuuid > "$SLOTS/queue/0000000000.$H1"
+    job A
+    expect_wait "number 1 in line"
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release A
+    release H2
 }
 
 test_a_waiting_quiet_run_holds_no_slot() {
