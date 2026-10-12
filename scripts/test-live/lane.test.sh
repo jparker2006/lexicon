@@ -235,7 +235,7 @@ stop_listeners
 expect fail 'usage: live-lane.sh sitting' "an unknown sitting start option is refused" "$LANE" sitting start --hands
 
 # Jake's items outlive their request's hands-off result and the issue's close
-# at merge (#233): a sitting end forgets each one acked pass or fail.
+# at merge (#233): a sitting end forgets each one acked pass.
 fresh_queue
 # Only the lane holder's look keeps them: a builder's queue changes nothing.
 cp "$T/issues-57.json" "$T/issues.json"
@@ -279,6 +279,12 @@ cp "$T/issues-57.json" "$T/issues.json"
 "$LANE" sitting end > /dev/null
 "$LANE" queue > /dev/null
 expect ok '^No Jake items are queued, so no sitting\.$' "a passed step stays out while its request is open" "$LANE" sitting render
+# A pass is that item's, not its slot's: a new request at the same head with another item 1 queues it.
+sed 's/^item: Mic prompt$/item: Mic prompt again/' "$T/57.txt" > "$T/57b.txt"
+request "claude/issue-57 @ $read" "$T/57b.txt" > "$T/r57d"
+only_request 57 "$T/r57d" "$T/issues-57.json"
+expect ok '^2\. Mic prompt again \(#57\)' "a pass doesn't hide a different item in the same slot" "$LANE" sitting render
+cp "$T/issues-57.json" "$T/issues.json"
 # A newer request for the issue replaces what the older head left.
 cp "$T/issues-57.json" "$T/issues.json"
 "$LANE" queue > /dev/null
