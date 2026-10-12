@@ -47,7 +47,7 @@
       "Sources/Cleanup/**",
       "Sources/WordStore/**",
       "Sources/Fixes/**",
-      "Sources/LexiconEval/**",
+      "Sources/LexiconEval*/**",
       "scorer/**"
     ],
     "Combining with main": [
@@ -104,7 +104,7 @@
     ".claude/**",
     ".github/**",
     "Sources/LexiconUI/**",
-    "Sources/LexiconEval/**",
+    "Sources/LexiconEval*/**",
     "scorer/**",
     "scripts/test-set.sh",
     "scripts/import-lexicon.sh",
@@ -136,7 +136,7 @@
     "Sources/Jev/**",
     "Sources/Cleanup/**",
     "Sources/LocalParakeet/**",
-    "Sources/LexiconEval/**",
+    "Sources/LexiconEval*/**",
     "scripts/test-set.sh",
     "scripts/eval-quick.sh",
     "scripts/import-lexicon.sh",

@@ -194,7 +194,7 @@ func quitDoesNotWaitForeverOnADictationStuckInTheModel() async throws {
         await rig.conductor.handle(command)
     }
     await model.waitForCalls(1)
-    await rig.conductor.idle(finishingWithin: .milliseconds(100))
+    await rig.conductor.idle(finishingWithin: .milliseconds(100))  // timing-ok: the model never lets go, so it always runs out
 
     // Not lost: the row and its audio are on disk for launch recovery.
     #expect(await rig.history.dictation(id)?.status == .transcribing)
@@ -217,8 +217,10 @@ func aMicStartThatNeverReturnsEndsTheDictationAndTheNextOneRecords() async throw
     await rig.conductor.handle(.dictationBegan(stuck, at: fnAt(0)))
     await rig.conductor.handle(.dictationConfirmed(stuck, .hold))
     let wedged = try #require(await starts.next())
-    // The row is there before the mic answers.
-    await rig.history.flush()
+    // The row is there before the mic answers: the wedged start can come first,
+    // so wait for the row's own change, not a flush that may predate it.
+    var rows = rig.history.changes.makeAsyncIterator()
+    while let id = await rows.next(), id != stuck {}
     #expect(await rig.history.dictation(stuck)?.status == .recording)
 
     await clock.waitForSleepers(1)
@@ -384,7 +386,7 @@ private struct FnRig {
         self.history = history
         self.destination = destination
         conductor = Conductor(
-            recorder: recorder, speech: SpeechEngine(local: local), cleanup: Cleanup(),
+            recorder: recorder, speech: SpeechEngine(local: local, clock: TestClock()), cleanup: Cleanup(),
             lexicon: try Lexicon(paths: paths), history: history, destination: destination,
             preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
             keyboard: keyboard, fixes: nil, jev: nil)

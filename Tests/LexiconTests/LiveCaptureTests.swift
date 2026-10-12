@@ -268,7 +268,7 @@ final class FakeEngine: InputEngine, Sendable {
     }
 
     func start() throws(RecorderError) {
-        wedge(self)?.wait()
+        wedge(self)?.wait()  // timing-ok: the stuck Core Audio call under test; the test releases it
         guard !diesAtStart else { return }
         running.store(true, ordering: .relaxed)
         let tone = (0..<Self.frames).map { Float(sin(2 * Double.pi * 440 * Double($0) / 16_000)) / 4 }

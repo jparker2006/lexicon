@@ -411,21 +411,20 @@ private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws 
     #expect(rows.allSatisfy { $0.finalText?.lowercased().contains(marker) == true })
 }
 
-// MARK: - Speed (opt in: LEXICON_BENCH=1)
+// MARK: - Speed (opt in: LEXICON_TIMING=1)
 
 // The window's two latency targets, measured on a year of synthetic History.
-// Wall-clock numbers depend on the machine, so these never run in CI or a plain
-// `swift test`; run them alone, on a quiet Mac:
+// Wall-clock numbers depend on the machine, so these are timing runs only
+// (Tests/TestSupport/TimingRun.swift); run them alone, on a quiet Mac:
 //
-//     LEXICON_BENCH=1 swift test -c release --no-parallel --filter speed
-private let bench = ProcessInfo.processInfo.environment["LEXICON_BENCH"] != nil
+//     LEXICON_TIMING=1 scripts/lib/heavy.sh --quiet scripts/test.sh --filter speed
 
 private func percentile(_ samples: [Duration], _ p: Double) -> Duration {
     let sorted = samples.sorted()
     return sorted[min(sorted.count - 1, Int((Double(sorted.count) * p).rounded(.up)) - 1)]
 }
 
-@MainActor @Test(.enabled(if: bench)) func speedFirstRowsWithinBudget() async throws {
+@MainActor @Test(.enabled(if: timingRun)) func speedFirstRowsWithinBudget() async throws {
     let paths = try await year().paths
     let clock = ContinuousClock()
     var samples: [Duration] = []
@@ -457,7 +456,7 @@ private func searchTimes(_ paths: AppPaths) -> [Duration] {
 }
 
 /// The target is about 20 ms at Jake's own rate; the heavy year is reported, not held to it.
-@MainActor @Test(.enabled(if: bench)) func speedSearchWithinTarget() async throws {
+@MainActor @Test(.enabled(if: timingRun)) func speedSearchWithinTarget() async throws {
     let (store, paths) = try makeStore()
     let total = try await seedYear(store, perDay: jakesRate)
     let samples = searchTimes(paths)
