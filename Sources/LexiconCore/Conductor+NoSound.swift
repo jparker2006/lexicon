@@ -9,7 +9,8 @@ import History
 extension Conductor {
     /// Every frame was exactly zero (a dead or contended device), or not one frame came
     /// (an engine that ran and never delivered). A quiet room is never exact zeros, so
-    /// this is the mic, not Jake. Nothing is transcribed: there are no words in zeros, and
+    /// this is the mic, not Jake. Nothing is transcribed at fn-up (a streaming provider has
+    /// already had the zeros, which hold nothing of Jake's): there are no words in zeros, and
     /// a model asked anyway may make some up. The row keeps the audio it got.
     func noSound(_ id: DictationID, _ sound: InputSound, attempt: consuming SpeechAttempt,
                  cleaning: CleanupSession) async -> DictationResult {

@@ -74,7 +74,7 @@ extension Conductor {
 
         case .cancel:
             // Esc (#18): stop now, still transcribe and save, never type (no target).
-            // It lands as notInserted with text, and paste-last gets it back.
+            // It lands as notInserted with text, and paste-last gets it back. A dead mic has no words to save.
             let take = await capture.stop(.immediately)
             history.record(.audioEnded(id, take.summary))
             noteStorage(take.summary)
