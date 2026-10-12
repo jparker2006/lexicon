@@ -205,8 +205,9 @@ export function readModules(n, sources, gh = runGh) {
     const said = String(e.stderr || e.message).trim().split('\n')[0]
     // gh issue view says a missing issue as "GraphQL: Could not resolve ..." and
     // no access as "GraphQL: Resource not accessible ..."; the REST paths say
-    // "HTTP 403" and the like. A rate limit or a 408 is transient.
-    if (/^GraphQL: (?:Could not resolve|Resource not accessible)|HTTP 40[0-79]/.test(said)) return { modules: [], error: `GitHub refused reading #${n} (${said}), so the Sketch rule can't be checked` }
+    // "HTTP 403" and the like. A rate limit (even as a 403) or a 408 is transient.
+    const refused = /^GraphQL: (?:Could not resolve|Resource not accessible)|HTTP 40[0-79]/.test(said) && !/rate limit/i.test(said)
+    if (refused) return { modules: [], error: `GitHub refused reading #${n} or has no such issue (${said}); fix the Refs line or gh's access` }
     return { modules: [], error: `couldn't read #${n}'s Modules line with gh (${said}); check gh and run it again` }
   }
 }

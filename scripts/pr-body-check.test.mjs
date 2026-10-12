@@ -197,7 +197,8 @@ test("the ticket read has a deadline and names a refusal as one", () => {
     assert.match(refused.error, /GitHub refused/)
     assert.doesNotMatch(refused.error, /again/)
   }
-  for (const stderr of ['GraphQL: API rate limit exceeded for user ID 1.', 'HTTP 429: Too Many Requests', 'HTTP 408: Request Timeout']) {
+  for (const stderr of ['GraphQL: API rate limit exceeded for user ID 1.', 'HTTP 429: Too Many Requests', 'HTTP 408: Request Timeout',
+    'HTTP 403: API rate limit exceeded for user ID 1. (https://api.github.com/graphql)']) {
     const busy = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr }) })
     assert.match(busy.error, /again/, stderr)
   }
