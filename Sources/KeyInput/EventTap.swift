@@ -131,6 +131,7 @@ final class EventTapThread: @unchecked Sendable {
         switch key {
         case .fnDown(let at, _, _): logDelivery("down", at: at)
         case .fnUp(let at): logDelivery("up", at: at)
+        case .escape(let at): logDelivery("esc", at: at)  // Live checks: the tap still sees an Esc the hotkey takes
         default: break
         }
         return pass
