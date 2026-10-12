@@ -20,7 +20,7 @@ public enum KeyCommand: Sendable, Hashable {
     case dictationCancelled(DictationID)
     /// A stray tap that never became a Dictation. Its row and file are removed.
     case dictationDiscarded(DictationID)
-    /// One minute until the cap stops this Dictation (the 19-minute mark, #18).
+    /// One minute until the cap stops this Dictation (the 19-minute mark).
     case oneMinuteLeft(DictationID)
     /// ⌃⌘V: paste the final text of the newest Dictation that has text.
     case pasteLast
@@ -123,4 +123,9 @@ public final class Keyboard: Sendable {
     /// Lid close or sleep is a normal stop (#4). It goes through the recognizer,
     /// so the stop joins `commands` behind every command already waiting there.
     public func systemWillSleep() { feed(.sleep(.now())) }
+
+    /// The Conductor ended this Dictation itself (its mic never started). The
+    /// recognizer forgets it, so Esc goes back to the apps and the next fn-down
+    /// starts a new press instead of stopping one that is already over.
+    public func dictationEnded(_ id: DictationID) { feed(.ended(id)) }
 }

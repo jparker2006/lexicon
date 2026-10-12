@@ -1,7 +1,6 @@
 import Carbon.HIToolbox
 import Foundation
 import os
-import Synchronization
 
 /// A key Lexicon takes from the system only while it is registered: the app in
 /// front never sees it, and no event tap is involved, so no key waits on
@@ -23,7 +22,6 @@ final class RegisteredHotkey: @unchecked Sendable {
     private let onPress: @Sendable () -> Void
     private var refs: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
-    private let id = EventHotKeyID(signature: 0x4C58_4B59, id: RegisteredHotkey.nextID())  // 'LXKY'
     private let log = Logger(subsystem: "Lexicon", category: "fn")
 
     /// `onPress` runs on the main thread, once per press (no auto-repeat).
@@ -31,6 +29,9 @@ final class RegisteredHotkey: @unchecked Sendable {
         self.hotkey = hotkey
         self.onPress = onPress
     }
+
+    /// 'LXKY' and the key code: one registration per key, so the key names it.
+    private var id: EventHotKeyID { EventHotKeyID(signature: 0x4C58_4B59, id: UInt32(hotkey.keyCode)) }
 
     func setRegistered(_ on: Bool) {
         DispatchQueue.main.async { [self] in on ? register() : unregister() }
@@ -79,9 +80,6 @@ final class RegisteredHotkey: @unchecked Sendable {
         onPress()
         return noErr
     }
-
-    private static let ids = Mutex<UInt32>(0)
-    private static func nextID() -> UInt32 { ids.withLock { $0 += 1; return $0 } }
 }
 
 private let hotkeyCallback: EventHandlerUPP = { _, event, info in

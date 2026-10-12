@@ -20,8 +20,8 @@ enum KeyInput: Sendable, Hashable {
     case ended(DictationID)
 }
 
-/// The fn gesture state machine (#53, #58). Pure: no clocks, no threads, no
-/// CGEvent. Unit-tested with scripted inputs. Internal to KeyInput.
+/// The fn gesture state machine. Pure: no clocks, no threads, no CGEvent.
+/// Unit-tested with scripted inputs. Internal to KeyInput.
 ///
 ///     idle --fnDown--> pressed                    emits .dictationBegan (recording starts now)
 ///     idle --fnDown, secure input on--> idle      nothing: a password field is never dictated into
@@ -36,13 +36,17 @@ enum KeyInput: Sendable, Hashable {
 ///     recording --cap--> idle                     emits .oneMinuteLeft at the warning, .dictationStopped at the cap
 ///     recording --sleep--> idle                   emits .dictationStopped
 ///     pressed or tapped --sleep--> idle           judged as a release: a press under the threshold is discarded
+///     any --ended, same Dictation--> idle         nothing: the Conductor already ended it
 ///
 /// The id on fn-down names the Dictation; every command for that press carries it.
 /// A double tap's second press is not a new Dictation: its id is dropped.
 ///
 /// Every input carries the event's own time, and every rule is judged on it,
 /// not on when a timer happened to fire: fn-up or a key at 0.31 s still counts
-/// as a hold even if the 0.30 s deadline has not been delivered yet.
+/// as a hold even if the 0.30 s deadline has not been delivered yet. A mark
+/// that ends something (the double-tap window, the cap) also waits
+/// `lateKeyGrace` past its time, so a key stamped before it but handled after
+/// its timer still counts.
 ///
 /// Every event passes through the tap. Only Esc is ever taken from the app in
 /// front, and only while `takesEscape` (the Esc hotkey follows it).
@@ -78,6 +82,11 @@ struct FnGesture: Sendable {
 
     private(set) var phase: Phase = .idle
     private let config: KeyboardConfig
+
+    /// Keys and timers share the tap thread's run loop, so a key can be handled a few
+    /// milliseconds after a timer due later than the key's own time (keys reach the
+    /// tap 2 to 12 ms after they are pressed). Nobody hears a drop or a stop 50 ms late.
+    static let lateKeyGrace: Duration = .milliseconds(50)
 
     init(_ config: KeyboardConfig) {
         self.config = config
@@ -117,16 +126,18 @@ struct FnGesture: Sendable {
 
     private mutating func pressed(_ id: DictationID, since: HostTime, _ input: KeyInput) -> Output {
         switch input {
-        case .fnDown, .ended:
+        case .fnDown:
             // Its fn-up was lost (the tap was briefly disabled): the press goes on.
             return Output()
+        case .ended(let ended):
+            return forget(id, ifItIs: ended)
         case .fnUp(let at):
             if isHeld(since, at: at) {
                 phase = .idle
                 return Output(commands: [.dictationConfirmed(id, .hold), .dictationStopped(id, at: at)])
             }
             phase = .tapped(id, began: since, releasedAt: at)
-            return Output(wakeAt: at.advanced(by: config.doubleTapWindow))
+            return Output(wakeAt: at.advanced(by: config.doubleTapWindow + Self.lateKeyGrace))
         case .otherKey(let at):
             guard isHeld(since, at: at) else { return discard(id) }
             return confirm(id, .hold, began: since)
@@ -159,13 +170,16 @@ struct FnGesture: Sendable {
             let alone = discard(id)
             let next = idle(input)
             return Output(commands: alone.commands + next.commands, wakeAt: next.wakeAt)
-        case .fnUp, .ended:
+        case .fnUp:
             return Output()
+        case .ended(let ended):
+            return forget(id, ifItIs: ended)
         case .otherKey, .escape, .sleep:
             // A key between the taps: not a double tap. Esc was never taken, it reached the app.
             return discard(id)
         case .deadline(let now):
-            return now >= closes ? discard(id) : Output(wakeAt: closes)
+            let drop = closes.advanced(by: Self.lateKeyGrace)
+            return now >= drop ? discard(id) : Output(wakeAt: drop)
         }
     }
 
@@ -183,8 +197,10 @@ struct FnGesture: Sendable {
             guard recording.mode == .hold else { return Output() }
             phase = .idle
             return Output(commands: [.dictationStopped(id, at: at)])
-        case .otherKey, .ended:
+        case .otherKey:
             return Output()  // passed through; recording continues
+        case .ended(let ended):
+            return forget(id, ifItIs: ended)
         case .escape:
             phase = .idle
             return Output(commands: [.dictationCancelled(id)])
@@ -203,6 +219,12 @@ struct FnGesture: Sendable {
         return Output(commands: [.dictationBegan(id, at: at)], wakeAt: at.advanced(by: config.holdThreshold))
     }
 
+    /// The Conductor ended `id` itself: forget it without a command. Any other id is stale.
+    private mutating func forget(_ id: DictationID, ifItIs ended: DictationID) -> Output {
+        if id == ended { phase = .idle }
+        return Output()
+    }
+
     private mutating func discard(_ id: DictationID) -> Output {
         phase = .idle
         return Output(commands: [.dictationDiscarded(id)])
@@ -215,21 +237,22 @@ struct FnGesture: Sendable {
         return Output(commands: [.dictationConfirmed(id, mode)], wakeAt: warnAt(recording))
     }
 
-    /// The cap clock: stop at `began + cap`, warn once before it, and always say
-    /// when to wake next. An early or stale deadline just asks again.
+    /// The cap clock: stop at `began + cap` (judged `lateKeyGrace` later), warn once
+    /// before it, and always say when to wake next. An early or stale deadline just asks again.
     private mutating func capDeadline(_ recording: Recording, now: HostTime) -> Output {
         let capAt = recording.began.advanced(by: config.cap)
-        if now >= capAt {
+        let stopAt = capAt.advanced(by: Self.lateKeyGrace)
+        if now >= stopAt {
             phase = .idle
             return Output(commands: [.dictationStopped(recording.id, at: capAt)])
         }
         guard !recording.warned, now >= warnAt(recording) else {
-            return Output(wakeAt: recording.warned ? capAt : warnAt(recording))
+            return Output(wakeAt: recording.warned ? stopAt : warnAt(recording))
         }
         var warned = recording
         warned.warned = true
         phase = .recording(warned)
-        return Output(commands: [.oneMinuteLeft(recording.id)], wakeAt: capAt)
+        return Output(commands: [.oneMinuteLeft(recording.id)], wakeAt: stopAt)
     }
 
     private func warnAt(_ recording: Recording) -> HostTime {
