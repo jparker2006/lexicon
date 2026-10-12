@@ -134,6 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 status item up \(icon, privacy: .public) ms after process start (main at \(main, privacy: .public) ms); \
                 \(setup.permissionsSummary, privacy: .public)
                 """)
+            // After the mark, so the icon never waits for it; fn runs off the main thread.
+            DispatchQueue.main.async { history.warmUp() }
         }
     }
 
