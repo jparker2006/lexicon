@@ -39,7 +39,12 @@ setup() {
     # A waiter's next try at a slot is SIGKILLed with it while $T/kill-try
     # exists: its lockf, already started, outlives it.
     printf '#!/bin/sh\ncase "$*" in *--holding*) if [ -e "%s/kill-try" ]; then rm -f "%s/kill-try"; kill -KILL "$PPID"; fi ;; esac\nexec /usr/bin/lockf "$@"\n' "$T" "$T" > "$T/bin/lockf"
-    chmod +x "$T/bin/ps" "$T/bin/lockf"
+    # A queue entry can't be read for a moment while $T/read-fails exists, as
+    # when the job ahead deletes its own entry as it takes a slot.
+    for c in /bin/cat /usr/bin/stat; do
+        printf '#!/bin/sh\ncase "$*" in *"/heavy/queue/"*) [ ! -e "%s/read-fails" ] || exit 1 ;; esac\nexec %s "$@"\n' "$T" "$c" > "$T/bin/${c##*/}"
+    done
+    chmod +x "$T/bin/ps" "$T/bin/lockf" "$T/bin/cat" "$T/bin/stat"
     export PATH="$T/bin:$PATH"
     trap cleanup EXIT
 }
@@ -229,10 +234,11 @@ test_quiet_waits_in_line_like_any_job() {
 test_an_entry_whose_pid_was_reused_drops_out() {
     export LEXICON_MACHINE_VERDICT=no
     hold_two
-    # A waiter killed earlier in this boot left this entry; its pid now names
-    # another process (H1's).
+    # A waiter killed long ago left this entry, written while ps could not
+    # read its start time; its pid now names another process (H1's).
     mkdir -p "$SLOTS/queue"
-    echo "Thu Jan  1 00:00:00 1970" > "$SLOTS/queue/0000000000.$H1"
+    : > "$SLOTS/queue/0000000000.$H1"
+    touch -t 202001010000 "$SLOTS/queue/0000000000.$H1"
     job A
     expect_wait "number 1 in line"
     release H1
@@ -249,6 +255,22 @@ test_a_moment_without_ps_keeps_everyone_in_line() {
     : > "$T/ps-fails"
     job B
     expect_wait "number 2 in line"
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release H2
+    expect_event "B 2 $((CORES / 2))"
+    release A
+    release B
+}
+
+test_an_entry_read_that_fails_keeps_the_line() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job A
+    expect_wait "number 1 in line"
+    job B
+    expect_wait "number 2 in line"
+    : > "$T/read-fails"
     release H1
     expect_event "A 1 $((CORES / 2))"
     release H2
