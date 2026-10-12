@@ -209,8 +209,6 @@ Jake: as item 57. Decided: a package, import or file name in his repos keeps the
 
 Jake: as item 57. #58 spikes the registered hotkey and falls back to (b) only if it fails; #62 uses the same approach. [ADR 0004](adr/0004-listen-only-fn-tap.md).
 
-**60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
-
 **78. Esc is taken from the confirmed Dictation, not from fn-down.**
 > Jake: decide whether Esc reaches your app during the first third of a second of holding fn (PR #262, DECISIONS item 75, Proposed). #58 says Lexicon takes Esc "at recording start", the moment fn goes down. The build takes it only once the hold is confirmed (0.3 s) or on the second tap of a double tap. [...] Keep the build (recommended): Esc pressed in that first 0.3 s, or between the two taps, does its normal job in the front app (closes a dialog, cancels in the terminal). The half-started take is dropped: nothing typed, nothing in History. A stray fn tap or the Globe key never eats your Esc. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6128270245))
 
@@ -224,6 +222,8 @@ Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 14:54:52Z):
 > Jake: decide whether the 19-minute warning sound may also play 50 ms after 19:00, the same as your "cap yes" for the cap. I recommend yes. [...] Yes (recommended): a key pressed just before 19:00 always counts the same way, whichever the fn tap sees first. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127087016))
 
 Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 15:15:50Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127137470)). Decided: the 19-minute warning acts 50 ms after its mark too.
+
+**60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
 ### Proposed: built on an agent's default, never asked
 
