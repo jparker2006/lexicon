@@ -1,0 +1,22 @@
+#!/bin/sh
+# A fake system command for the script tests, so a machine reading replays
+# from files. Linked under each command's name; prints $GH_FIXTURES/cmd/<name>.<n>
+# on the nth call (or cmd/<name> on any call) and exits with the matching .exit
+# file's code, 0 without one.
+set -eu
+name=$(basename "$0")
+dir=$GH_FIXTURES/cmd
+count=$GH_FIXTURES/cmd/.$name.count
+n=$(( $(cat "$count" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$count"
+echo "$name $*" >> "${GH_LOG:-/dev/null}"
+for f in "$dir/$name.$n" "$dir/$name"; do
+    if [ -f "$f" ]; then
+        cat "$f"
+        [ -f "$f.exit" ] && exit "$(cat "$f.exit")"
+        exit 0
+    fi
+done
+[ "$name" = sleep ] && exit 0
+echo "fake: no fixture for $name (call $n) in $dir" >&2
+exit 127

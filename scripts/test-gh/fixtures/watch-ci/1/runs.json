@@ -1,0 +1,5 @@
+[
+{"attempt":1,"conclusion":"","createdAt":"2026-10-11T06:04:13Z","databaseId":38116851500,"event":"push","headBranch":"main","headSha":"e2c850b748be57afa1c9be978be033d4db25f69d","status":"in_progress","updatedAt":"2026-10-11T06:05:00Z","workflowName":"CI"},
+{"attempt":1,"conclusion":"success","createdAt":"2026-10-11T05:50:00Z","databaseId":38116065257,"event":"push","headBranch":"claude/issue-38","headSha":"a37731acacc72f5c64dac606b2096c573ee47db1","status":"completed","updatedAt":"2026-10-11T05:52:28Z","workflowName":"CI"},
+{"attempt":1,"conclusion":"success","createdAt":"2026-10-11T05:40:51Z","databaseId":38115566833,"event":"push","headBranch":"claude/issue-38","headSha":"fbc3d74592992ee9a0070fc11d42f59cb306a3cb","status":"completed","updatedAt":"2026-10-11T05:43:04Z","workflowName":"CI"}
+]
