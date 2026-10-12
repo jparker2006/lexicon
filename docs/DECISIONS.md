@@ -4,7 +4,7 @@ The one record of what has been decided since the v0 spec ([#36](https://github.
 
 ## How an entry is written
 
-- **Changed in the same PR as the behavior.** A PR that departs from the spec or from an entry here changes this file in the same PR, or links the entry that already allows it. A PR body that names a departure ("departs from", "supersedes", "Jake's call") links its entry. `scripts/pr-body-check.mjs` refuses "departs from", "deviates" and "unlike the spec" with no link to this file; "supersedes" and "Jake's call" are #226.
+- **Changed in the same PR as the behavior.** A PR that departs from the spec or from an entry here changes this file in the same PR, or links the entry that already allows it. A PR body that names a departure ("departs from", "supersedes", "Jake's call") links its entry. `scripts/pr-body-check.mjs` refuses "departs from", "deviates" and "unlike the spec" with no link to this file; "supersedes" and "Jake's call" are tracked in #226.
 - **Each decided entry carries Jake's own words, verbatim, the question as he was asked it, and the time** (UTC). His words are quoted from the session where he answered; the link is the GitHub record of the question or the decision.
 - **An entry without Jake's words is Proposed.** It stands as built, and it goes into the next grill round, where the orchestrator asks Jake to confirm or change it. Nobody writes "Jake's call" for a choice he didn't make.
 - **A fact is not a decision.** A corrected number or a found behavior is recorded as a fact and applied; a change of what Lexicon does is a decision and goes to Jake.
@@ -122,8 +122,6 @@ Decided: (a). Lives in workflow.md, Human time.
 
 Jake, 04:31:43Z: "publish, yes to all three". The second question was about the old public text: "#19 to #22 and the #36 body carry a few totals derived from your Wispr history. Rewrite them to remove those?", also yes. The orchestrator removed those totals, and `docs/architecture.md` lost its Wispr lag figures with this file. Lives in AGENTS.md, Private data.
 
-**62. The Reviewer uses Workflows and swarms, as a standing rule.** Not asked: Jake raised it himself, 2026-10-12 06:29:41Z, after telling the Reviewer to use Workflows and swarms: "we should make that a rule in our workflow though". The details are the orchestrator's, written on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6119007942), and are Proposed until Jake confirms them: in parallel, not in a line; the full review Workflow on high-tier PRs and a light pass on low-tier ones; every blocker in the first verdict; the opt-in carried in the start prompt. Lives in review.md, The Reviewer's duties.
-
 ### Earlier, while M0 was built (2026-10-11)
 
 **63. Builder sessions: up to 8.**
@@ -134,6 +132,8 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 **64. The plan only: no fast mode, no usage credits.** The orchestrator proposed a one-ticket fast-mode trial with usage credits and a spending cap. Jake, 2026-10-11 09:42:07Z: "Ohh na no fast mode if its not on the subscription lol." `.claude/settings.json` turns fast mode off. Lives in AGENTS.md, Ask Jake first.
 
 ### Proposed (stands as built, for the next grill round)
+
+**62. The Reviewer uses Workflows and swarms, as a standing rule.** Proposed. Not asked: Jake raised it himself, 2026-10-12 06:29:41Z, after telling the Reviewer to use Workflows and swarms: "we should make that a rule in our workflow though". The rule and its details are the orchestrator's, written on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6119007942): in parallel, not in a line; the full review Workflow on high-tier PRs and a light pass on low-tier ones; every blocker in the first verdict; the opt-in carried in the start prompt. Lives in review.md, The Reviewer's duties.
 
 **65. The merge rule.** The Reviewer runs `gh pr update-branch` only on the PR it is about to merge, then waits for CI on that exact head; builders bring `main` in only to resolve a conflict. The orchestrator's call, shown to Jake at 2026-10-12 04:21:18Z under "Calls I made for you (say if you disagree)"; he raised none, which is not a yes. Built in `scripts/merge-pr.mjs` (#159).
 
