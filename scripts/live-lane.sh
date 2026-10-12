@@ -269,26 +269,31 @@ next_slot() {
     fi
 }
 
-# Adds the Jake items of each open request to $JAKE (issue, head, then the
-# item's fields), first seen first. An issue's newer request replaces what its
-# older head left. Run on every queue, preflight and render, so an item is kept
-# before the hands-off result that answers its request.
+# Writes $ISSUES.jake: the kept Jake items (issue, head, then the item's
+# fields), first seen first, with each open request's added. An issue's newer
+# request replaces what its older head left. Only the lane's holder saves it
+# to $JAKE, on every queue, preflight and render, so an item is kept before the
+# hands-off result that answers its request; a builder's look changes nothing.
 remember_jake_items() {
-    mkdir -p "$STATE"
     requests > "$ISSUES.remember"
-    touch "$JAKE"
-    awk -F'\t' 'FILENAME == ARGV[1] { head[$2] = $3; next } !($1 in head) || head[$1] == $2' "$ISSUES.remember" "$JAKE" > "$JAKE.$$"
+    { [ ! -f "$JAKE" ] || cat "$JAKE"; } > "$ISSUES.kept"
+    awk -F'\t' 'FILENAME == ARGV[1] { head[$2] = $3; next } !($1 in head) || head[$1] == $2' "$ISSUES.remember" "$ISSUES.kept" > "$ISSUES.jake"
     while IFS='	' read -r created issue head index; do
         items=$(request_body "$issue" "$index" | scripts/live-request.sh items - 2> /dev/null) || continue
         printf '%s\n' "$items" | awk -F'\t' -v i="$issue" -v h="$head" '$3 == "jake" { print i "\t" h "\t" $0 }'
-    done < "$ISSUES.remember" | awk -F'\t' 'FILENAME == ARGV[1] { seen[$1 FS $2 FS $3] = 1; next } !seen[$1 FS $2 FS $3]++' "$JAKE.$$" - >> "$JAKE.$$"
-    mv "$JAKE.$$" "$JAKE"
+    done < "$ISSUES.remember" | awk -F'\t' 'FILENAME == ARGV[1] { seen[$1 FS $2 FS $3] = 1; next } !seen[$1 FS $2 FS $3]++' "$ISSUES.jake" - >> "$ISSUES.jake"
+    if read_lock 2> /dev/null && holds; then
+        mkdir -p "$STATE"
+        cp "$ISSUES.jake" "$JAKE.$$"
+        mv "$JAKE.$$" "$JAKE"
+    fi
 }
 
 # Writes $STATE/sitting.tsv (step, issue, head, item, title, fn) and prints the checklist.
 sitting_render() {
     # Acks are by step number, so the numbers stay fixed while a sitting is open.
     ! sitting_open || die "a sitting is open; end it before rendering the next one"
+    mkdir -p "$STATE"
     remember_jake_items
     steps=$(mktemp -t live-sitting)
     out=$(mktemp -t live-sitting)
@@ -306,7 +311,7 @@ sitting_render() {
         while IFS='	' read -r issue head item; do
             why=$(static_refusals "$issue" "${head##* @ }" "$item")
             if [ -n "$why" ]; then printf 'skip\t%s\n' "$why"; else printf 'item\t%s\t%s\t%s\n' "$issue" "$head" "$item"; fi
-        done < "$JAKE"
+        done < "$ISSUES.jake"
     } > "$steps"
     if grep -q '^fn' "$steps"; then
         waiting="Waiting for the daily Lexicon to quit: $(sed -n 's/^fn	//p' "$steps" | paste -sd ';' - | sed 's/;/; /g'). They run in the next sitting's hands-off part, or in a hands-free sitting (sitting start --hands-free) once Jake says \"hands free\"."

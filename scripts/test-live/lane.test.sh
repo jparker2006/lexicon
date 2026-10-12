@@ -228,6 +228,13 @@ expect fail 'usage: live-lane.sh sitting' "an unknown sitting start option is re
 # Jake's items outlive their request's hands-off result and the issue's close
 # at merge (#233): a sitting end forgets each one acked pass or fail.
 fresh_queue
+# Only the lane holder's look keeps them: a builder's queue changes nothing.
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" release > /dev/null
+"$LANE" queue > /dev/null
+jq --arg read "$read" '(.[0].comments) += [{createdAt: "2026-10-11T22:00:00Z", body: "Live checks: claude/issue-57 @ \($read)"}]' "$T/issues-57.json" > "$T/issues.json"
+take_lane "$REPO"
+expect ok '^No Jake items are queued, so no sitting\.$' "a builder's look at the queue keeps no Jake item" "$LANE" sitting render
 cp "$T/issues-57.json" "$T/issues.json"
 "$LANE" queue > /dev/null
 jq --arg read "$read" '(.[0].comments) += [{createdAt: "2026-10-11T22:00:00Z", body: "Live checks: claude/issue-57 @ \($read)\n\nall pass"}]' "$T/issues-57.json" > "$T/issues.json"
