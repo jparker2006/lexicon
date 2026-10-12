@@ -215,6 +215,8 @@ Jake: as item 57. #58 spikes the registered hotkey and falls back to (b) only if
 
 These stand as built until Jake confirms them as a batch or names items to change, in the next grill round.
 
+**70. Esc is taken from the confirmed Dictation, not from fn-down.** #58 says the Esc hotkey is "registered at recording start". Built: it is registered when the recognizer confirms the hold (0.30 s) or the second tap, and removed when the Dictation ends, so Esc in a stray tap, an fn chord or the double-tap gap still reaches the app (and drops the tap, as any key does, item 43). Registered with and without fn, since a hold keeps fn down. #58's builder.
+
 **34. The fn tap is listen-only.** Spec: one active, session-level CGEventTap. Built: a listen-only tap, started only when `CGPreflightListenEventAccess()` already reads true (it does with Accessibility alone, so there's no prompt). Measured live: keys reached the focused app 26 to 74 ms late through the active tap (five presses timed), 2 to 12 ms through listen-only. The orchestrator and Reviewer's choice, PR #123; Jake got a heads-up, not a question. Item 59's question, which Jake answered, kept idle typing delay at the listen-only figure. [ADR 0004](adr/0004-listen-only-fn-tap.md).
 
 **35. Sounds are warm on demand.** Spec: an always-warm audio engine. Built: the output engine starts with the Dictation and stops 3 s after its last use (never with Sounds off), because a running output engine stops the Mac from idle-sleeping. Start, stop and warning sounds take 7.7 to 10 ms; a cold cue takes 28 to 35 ms against a 20 ms target. #55's builder; written as "Jake's call" in the Later list without asking him (PR #110).
@@ -236,8 +238,6 @@ These stand as built until Jake confirms them as a batch or names items to chang
 **43. Chord cancel shipped in M0.** Spec: M1. Built: another key in the first 0.30 s cancels silently, so fn+arrow works from the first build. Decided when #53 was written.
 
 **44. Our own fn state machine, not Hex's code.** Spec: copy Hex's state machine and tests (MIT). Built: a smaller fn-only machine with Hex's test scenarios; no Hex code copied. #53's builder (PR #123).
-
-**70. Esc is taken from the confirmed Dictation, not from fn-down.** #58 says the Esc hotkey is "registered at recording start". Built: it is registered when the recognizer confirms the hold (0.30 s) or the second tap, and removed when the Dictation ends, so Esc in a stray tap, an fn chord or the double-tap gap still reaches the app (and drops the tap, as any key does, item 43). Registered with and without fn, since a hold keeps fn down. #58's builder.
 
 ### Moved to a later milestone
 

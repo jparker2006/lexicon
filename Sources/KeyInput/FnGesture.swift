@@ -46,8 +46,9 @@ enum KeyInput: Sendable, Hashable {
 /// as a hold even if the 0.30 s deadline has not been delivered yet. Keys and
 /// timers share the tap thread, so a key stamped before a mark can be handled
 /// after the mark's timer: the double-tap window waits `lateKeyGrace` past its
-/// end before it drops the tap, and the cap stops on time but remembers when,
-/// so a stop press stamped before it is not taken for a new press.
+/// end before it drops the tap. The cap stops on time whichever comes first: a
+/// key stamped at or after it is handled after the cap's stop, and the cap
+/// remembers when, so a stop press stamped before it is not a new press.
 ///
 /// Every event passes through the tap. Only Esc is ever taken from the app in
 /// front, and only while `takesEscape` (the Esc hotkey follows it).
@@ -191,6 +192,12 @@ struct FnGesture: Sendable {
 
     private mutating func whileRecording(_ recording: Recording, _ input: KeyInput) -> Output {
         let id = recording.id
+        if let at = input.keyTime, at >= capAt(recording) {
+            // The cap came first, though its timer has not been handled yet.
+            let capped = stopAtCap(recording)
+            let after = idle(input)
+            return Output(commands: capped.commands + after.commands, wakeAt: after.wakeAt)
+        }
         switch input {
         case .fnDown(let at, _, _):
             // Hands-free: the next press stops, and its fn-up then lands in idle, so it
@@ -246,20 +253,24 @@ struct FnGesture: Sendable {
     /// The cap clock: stop at `began + cap`, warn once before it, and always say
     /// when to wake next. An early or stale deadline just asks again.
     private mutating func capDeadline(_ recording: Recording, now: HostTime) -> Output {
-        let capAt = recording.began.advanced(by: config.cap)
-        if now >= capAt {
-            phase = .idle
-            cappedAt = capAt
-            return Output(commands: [.dictationStopped(recording.id, at: capAt)])
-        }
+        if now >= capAt(recording) { return stopAtCap(recording) }
         guard !recording.warned, now >= warnAt(recording) else {
-            return Output(wakeAt: recording.warned ? capAt : warnAt(recording))
+            return Output(wakeAt: recording.warned ? capAt(recording) : warnAt(recording))
         }
         var warned = recording
         warned.warned = true
         phase = .recording(warned)
-        return Output(commands: [.oneMinuteLeft(recording.id)], wakeAt: capAt)
+        return Output(commands: [.oneMinuteLeft(recording.id)], wakeAt: capAt(recording))
     }
+
+    private mutating func stopAtCap(_ recording: Recording) -> Output {
+        let capAt = capAt(recording)
+        phase = .idle
+        cappedAt = capAt
+        return Output(commands: [.dictationStopped(recording.id, at: capAt)])
+    }
+
+    private func capAt(_ recording: Recording) -> HostTime { recording.began.advanced(by: config.cap) }
 
     private func warnAt(_ recording: Recording) -> HostTime {
         recording.began.advanced(by: config.cap - config.capWarning)
@@ -267,6 +278,16 @@ struct FnGesture: Sendable {
 
     private func isHeld(_ since: HostTime, at time: HostTime) -> Bool {
         time >= since.advanced(by: config.holdThreshold)
+    }
+}
+
+extension KeyInput {
+    /// When a key or sleep happened; nil for the recognizer's own deadline and the Conductor's end.
+    var keyTime: HostTime? {
+        switch self {
+        case .fnDown(let at, _, _), .fnUp(let at), .otherKey(let at), .escape(let at), .sleep(let at): at
+        case .deadline, .ended: nil
+        }
     }
 }
 
