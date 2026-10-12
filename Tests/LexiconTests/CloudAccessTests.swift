@@ -101,26 +101,24 @@ private func access(_ preferences: Preferences = .defaults, app: AppContext = .u
     closeSocket.finish()
 }
 
-/// Every model whose zero-retention is not confirmed yet. Read from the model
-/// list, so no model's retention value is pinned here.
-private var unconfirmedModels: [CloudModel] { CloudModel.allCases.filter { $0.retention == .unconfirmed } }
+// Each model is checked against its own status, so these hold before and after
+// Jake confirms a provider's terms.
 
-@Test func anEvalToAnUnconfirmedRetentionModelIsDeniedWithTheGatesReason() throws {
-    try #require(!unconfirmedModels.isEmpty)
-    for model in unconfirmedModels {
-        #expect(Preferences.defaults.cloudDenied(for: .eval(model)) == .retentionUnconfirmed)
-        #expect(CloudAccess.granted(by: .defaults, for: .eval(model), keys: fakeKeys) == nil)
+@Test func anEvalIsGrantedOnlyForAModelWhoseZeroRetentionIsConfirmed() {
+    for model in CloudModel.allCases {
+        let confirmed = model.retention == .confirmed
+        #expect(Preferences.defaults.cloudDenied(for: .eval(model)) == (confirmed ? nil : .retentionUnconfirmed))
+        #expect((CloudAccess.granted(by: .defaults, for: .eval(model), keys: fakeKeys) != nil) == confirmed)
     }
 }
 
 @Test func privateModeIsCheckedFirstAndTheRetentionGateLeavesDailyDictationAlone() throws {
     var privateMode = Preferences.defaults
     privateMode.privacy = .private
-    try #require(!unconfirmedModels.isEmpty)
-    for model in unconfirmedModels {
+    for model in CloudModel.allCases {
         #expect(privateMode.cloudDenied(for: .eval(model)) == .privateModeOn)
     }
-    // The gate covers evals only: an app dictation with defaults is still granted.
+    // The gate covers evals only: daily Dictation with defaults is still granted.
     #expect(Preferences.defaults.cloudDenied(for: .app(.unknown)) == nil)
-    #expect(try access().key(.cleanup, sending: "An ordinary sentence.") == "fake-key-for-cleanup.openrouter")
+    #expect(try access().key(.speech(.museVoice)) == "fake-key-for-speech.meta.muse-voice-transcribe-1.0")
 }
