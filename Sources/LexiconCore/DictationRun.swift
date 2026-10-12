@@ -3,8 +3,9 @@ import AudioCapture
 import Transcription
 import Cleanup
 
-// What one run carries in (`RunStart`, `RunEnd`), from fn-up to `land`
-// (`DictationRun`), and out (`DictationResult`).
+// One run's values: what it starts from (`RunStart`), how its capture ends
+// (`RunEnd`), what it hands `land` (`DictationRun`) and what it reports
+// (`DictationResult`).
 
 extension Conductor {
     /// Everything `land` needs about one Dictation past fn-up, as one value, so
