@@ -166,6 +166,13 @@ test('a lens that could not finish its commands is INCOMPLETE', async () => {
   assert(/INCOMPLETE: .*gh pr list was refused/.test(r.result.markdown), 'the markdown should say why')
 })
 
+test('a newline in an INCOMPLETE reason stays on the INCOMPLETE line', async () => {
+  const { dir, sha } = fixtureRepo('incomplete-newline', ['Sources/Foo/a.swift'])
+  const r = await run(dir, { issue: 1, sha }, (p, o) =>
+    o.label.includes('Combining with main') ? { ...CLEAN, incomplete: 'gh pr list\nwas refused' } : CLEAN)
+  assert(/INCOMPLETE: [^\n]*was refused/.test(r.result.markdown), 'the reason should stay on the INCOMPLETE line')
+})
+
 test('the Combining lens lists every open PR, not the first 30', async () => {
   const { dir, sha } = fixtureRepo('combining', ['Sources/Foo/a.swift'])
   const r = await run(dir, { issue: 1, sha })
@@ -222,7 +229,7 @@ test('the Helpers line counts a helper that died and was retried', async () => {
   assert(/Helpers: .*2 verifier/.test(r.result.markdown), `two verifiers ran; Helpers line: ${r.result.markdown.split('Helpers: ')[1]}`)
 })
 
-test('the blast-radius brief bans installs and the live-app scripts', async () => {
+test("the blast-radius brief bans Jake's data, installs, the live app and GitHub posts", async () => {
   const { dir, sha } = fixtureRepo('blast-brief', ['Sources/History/a.swift'])
   const r = await run(dir, { issue: 1, sha, mode: 'reviewer' })
   const p = r.calls.find(c => c.label === 'blast radius').prompt

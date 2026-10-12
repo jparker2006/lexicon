@@ -372,7 +372,7 @@ async function review(pass, isDelta) {
       try { r = await hire(job.critic[0], job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts) } catch {}
       // A session started before critic-deep.md existed can't find it; same rules, critic's file.
       if (r || job.critic[0] !== 'critic-deep') return r
-      log(`critic-deep not available for ${job.lens.name}; running critic on ${job.critic[1]} instead`)
+      log(`critic-deep gave no answer for ${job.lens.name}; running critic on ${job.critic[1]} instead`)
       // A throw here would drop the lens before the next stage records it as INCOMPLETE.
       return hire('critic', job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts).catch(() => null)
     },
