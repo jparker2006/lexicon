@@ -69,9 +69,9 @@ enum Fillers {
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
-    /// Only without a comma between: "uh, huh?" is a filler and then "huh". "uh uh" is
-    /// left out: written that way it is as likely two fillers as a "no".
-    static let interjections: Set<String> = ["uh huh", "uh oh", "mm hmm", "um hmm", "uhm hmm", "ah ha"]
+    /// Only without a comma between: "uh, huh?" is a filler and then "huh". "uh uh" and
+    /// "um hmm" are left out: written that way they are as likely two fillers as a word.
+    static let interjections: Set<String> = ["uh huh", "uh oh", "mm hmm", "ah ha"]
 
     /// Hedges, negations and constraints. Never deleted, not even as a repeat
     /// ("it's not not working" means it works).
@@ -222,7 +222,9 @@ enum Fillers {
             return 1
         }
 
-        if let previous, token.isWord, !token.isNumber, !meantDoubles.contains(word),
+        // "oh" is a zero only beside a number: "oh oh seven", "five oh five".
+        let number = token.isNumber || word == "oh" && (prior?.isNumber == true || next?.isNumber == true)
+        if let previous, token.isWord, !number, !meantDoubles.contains(word),
            !previous.text.last!.isPunctuation, previous.word == word,
            previous.text == token.text || previous.opensSentence {
             return 1
@@ -297,11 +299,9 @@ private struct Token {
     var isCode: Bool { word.contains { $0 == "." || $0 == "/" || $0 == "_" || $0.isNumber } }
     /// "ER", "UH": a name, not a filler.
     var isAcronym: Bool { text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase } }
-    /// "twenty", "twenty-six", the "oh" in "five oh five": a spoken number.
+    /// "twenty", "twenty-six": a spoken number.
     var isNumber: Bool {
-        word.split(separator: "-", omittingEmptySubsequences: false).allSatisfy {
-            $0 == "oh" || StructuralCheck.isCardinal(String($0))
-        }
+        word.split(separator: "-", omittingEmptySubsequences: false).allSatisfy { StructuralCheck.isCardinal(String($0)) }
     }
     /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.
     var isName: Bool { text.contains(where: \.isUppercase) && !Token.firstPerson.contains(word) }
