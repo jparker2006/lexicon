@@ -239,7 +239,7 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 ### Moved to a later milestone
 
-- **45.** Long Dictations: a 20-minute Dictation waited 25 to 41 s at fn-up (#47). #117 decodes Parakeet's own 15 s windows while Jake talks, instead of switching to its streaming mode (the ticket allowed either): the streaming encoder is a second download of about 565 MB and scores worse in FluidAudio's benchmark, and the windows are the one-shot path's, so the words are too. It applies to every Dictation over 15 s, push-to-talk as well as hands-free; one of 15 s or less is one window decoded at fn-up, as before. On a synthetic 20-minute WAV (release builds, one run a side) fn-up to text was 388 ms against main's 8,964 ms, with the same text. The p95 verdict is a Live checks run on a quiet Mac. Proposed: Jake was not asked about windows over streaming mode, or about push-to-talk.
+- **45.** Long Dictations: a 20-minute Dictation waited 25 to 41 s at fn-up (#47). #117 decodes Parakeet's own 15 s windows while Jake talks, instead of switching to its streaming mode (the ticket allowed either): the streaming encoder is a second download of about 565 MB and scores worse in FluidAudio's benchmark, and the windows are the one-shot path's, so the words are too. It applies to every Dictation over 15 s, push-to-talk as well as hands-free; one that fits in one window (up to 14.96 s: 15 s in whole 80 ms encoder frames) is decoded at fn-up, as before. On a synthetic 20-minute WAV (release builds, one run a side) fn-up to text was 388 ms against main's 8,964 ms, with the same text. The p95 verdict is a Live checks run on a quiet Mac. Proposed: Jake was not asked about windows over streaming mode, or about push-to-talk.
 - **46.** Quit and the clipboard restore: quitting right after a paste, or during item 26's 2 s hold, can leave Dictation text on the clipboard. #132 (M1).
 - **47.** The "same app and under 5 s" late-text fallback for apps whose field can't be detected: not built. #60 (M1).
 - **48.** The audio retention sweep runs at launch only, not on a rolling schedule. No ticket yet.
@@ -297,6 +297,7 @@ The spec's own supersessions, written when it was published; each names the plan
 - **"Never put text on the clipboard behind Jake's back", restored within 8 s** (spec story 26), by item 26's 2 s hold, its one exception.
 - **One active fn tap** (the spec), by item 34 and ADR 0004.
 - **The local model loads on fn-down only** (the spec, ADR 0001), by item 36.
+- **Long Dictations switch to Parakeet's streaming mode** (the spec, Local residency), by item 45's windows decoded while Jake talks (Proposed).
 - **60 ms to first audio, cold or prepared** (the spec), by item 30: the budget is the prepared path.
 - **Tickets Jake can feel stay open until he closes them** (workflow.md, M0), by Q11.
 - **Jake promotes Later items himself** (review.md, M0), by Q13.
