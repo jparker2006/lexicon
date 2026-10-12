@@ -237,6 +237,8 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 **44. Our own fn state machine, not Hex's code.** Spec: copy Hex's state machine and tests (MIT). Built: a smaller fn-only machine with Hex's test scenarios; no Hex code copied. #53's builder (PR #123).
 
+**70. Esc is taken from the confirmed Dictation, not from fn-down.** #58 says the Esc hotkey is "registered at recording start". Built: it is registered when the recognizer confirms the hold (0.30 s) or the second tap, and removed when the Dictation ends, so Esc in a stray tap, an fn chord or the double-tap gap still reaches the app (and drops the tap, as any key does, item 43). Registered with and without fn, since a hold keeps fn down. #58's builder.
+
 ### Moved to a later milestone
 
 - **45.** Long hands-free Dictations: a 20-minute Dictation waits 25 to 41 s at fn-up (#47); the switch to Parakeet's streaming mode is #117 (M1).
