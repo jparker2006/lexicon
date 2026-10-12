@@ -106,7 +106,11 @@ public actor ScriptedTranscriber: LocalTranscriber {
     public var isResident: Bool { true }
     public func load() {}
     public func unload() {}
-    public func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String {
+    public nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String {
         heard.append(clip)
         return text
     }

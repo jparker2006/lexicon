@@ -13,13 +13,23 @@ public import Transcription
 /// (it over-fired in measurement; Rules fix words after transcription).
 /// About 80 ms per clip of 6 s or less, warm load 0.4-0.6 s, weights under
 /// `<root>/models/` (never in the bundle).
+///
+/// Long audio is read in FluidAudio's own grid of 15 s windows overlapping by
+/// 2 s, each decoded on its own and then merged on the overlap. Each window is
+/// decoded as soon as it is captured, so a 20-minute Dictation waits at fn-up
+/// for its last window and the merge, not for 93 windows. The windows and the
+/// merge are the one-shot path's, so the words are too. The streaming encoder
+/// is not used: it is a second 565 MB download and decodes worse.
 public actor ParakeetTranscriber: LocalTranscriber {
     public nonisolated let model: LocalModel = .parakeetUnified
     let folder: URL
     private var manager: UnifiedAsrManager?
     /// A load in flight, shared by every caller that needs the model meanwhile.
     private var loading: Task<UnifiedAsrManager, any Error>?
-    /// Every model call (transcribe, unload) runs here: one at a time, live first.
+    /// Joins windows into text. Read from the vocabulary on the first load and
+    /// kept: a few KB, and a join never needs the model itself.
+    private var words: (merge: SeamMerge, tokenizer: Tokenizer)?
+    /// Every model call (one window, unload) runs here: one at a time, live first.
     private let jobs = LocalJobQueue()
 
     /// Weights live in `<root>/models/` (this module names that folder). If they
@@ -44,6 +54,16 @@ public actor ParakeetTranscriber: LocalTranscriber {
         ModelNames.ParakeetUnified.jointDecisionFile,
         ModelNames.ParakeetUnified.vocab,
     ]
+
+    /// `UnifiedAsrManager`'s offline window: 15 s and a 2 s overlap, whole 80 ms
+    /// encoder frames. Its windows must be this grid's, or the merge would not
+    /// see the overlaps it expects.
+    static let grid: WindowGrid = {
+        let config = UnifiedConfig()
+        let window = 15 * config.sampleRate / config.frameSamples * config.frameSamples
+        let overlap = min(2 * config.sampleRate, window / 2) / config.frameSamples * config.frameSamples
+        return WindowGrid(window: window, overlap: overlap)
+    }()
 
     public var isResident: Bool { manager != nil }
 
@@ -87,11 +107,36 @@ public actor ParakeetTranscriber: LocalTranscriber {
     }
 
     /// `terms` is ignored: no FluidAudio boosting (see the type's doc).
-    public func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String {
+    public nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WindowedSession(grid: Self.grid,
+                        decode: { samples, start in try await self.decode(samples, at: start, priority: priority) },
+                        join: { windows in try await self.join(windows) })
+    }
+
+    /// One window, as its own job: a live Dictation waits behind at most one
+    /// window of a background Retry, never the whole clip.
+    private func decode(_ samples: [Int16], at start: Int, priority: LocalPriority) async throws
+        -> [SeamMerge.TokenWindow] {
         try await jobs.run(priority) {
+            // Its Dictation was cancelled, or the cloud won, while it waited its turn.
+            try Task.checkCancellation()
             let manager = try await self.loaded()
-            return try await manager.transcribe(Self.floats(clip.samples))
+            let window = try await manager.transcribeWithTimings(Self.floats(samples))
+            // Back to encoder frames counted from the clip's start, which the merge matches on.
+            let config = await manager.config
+            let secondsPerFrame = Double(config.frameSamples) / Double(config.sampleRate)
+            let offset = start / config.frameSamples
+            return window.tokenTimings.map {
+                (token: $0.tokenId, timestamp: offset + Int(($0.startTime / secondsPerFrame).rounded()),
+                 confidence: $0.confidence, duration: 0)
+            }
         }
+    }
+
+    private func join(_ windows: [[SeamMerge.TokenWindow]]) throws -> String {
+        guard !windows.isEmpty else { return "" }
+        guard let words else { throw ASRError.notInitialized }  // a decoded window loaded them
+        return words.tokenizer.decode(ids: words.merge.merge(windows).map(\.token))
     }
 
     private func loaded() async throws -> UnifiedAsrManager {
@@ -107,6 +152,10 @@ public actor ParakeetTranscriber: LocalTranscriber {
         loading = task
         defer { loading = nil }
         let manager = try await task.value
+        if words == nil {
+            let tokenizer = try Tokenizer(vocabPath: folder.appending(path: ModelNames.ParakeetUnified.vocab))
+            words = (SeamMerge(vocabulary: tokenizer.vocabulary), tokenizer)
+        }
         self.manager = manager
         return manager
     }

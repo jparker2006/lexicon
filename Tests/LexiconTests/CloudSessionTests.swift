@@ -367,6 +367,10 @@ private actor HeldModel: LocalTranscriber {
         isResident = false
     }
 
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String { "Local text." }
 }
 
@@ -410,6 +414,10 @@ private actor SlowModel: LocalTranscriber {
 
     func load() {}
     func unload() {}
+
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in await self.transcribe(clip, terms: terms, priority: priority) }
+    }
 
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async -> String {
         if !released { await withCheckedContinuation { waiters.append($0) } }

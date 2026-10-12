@@ -290,6 +290,10 @@ private actor FakeModel: LocalTranscriber {
         unloadWaiters = []
     }
 
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in try await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
         if let failure { throw failure }
         transcribed += 1
@@ -326,6 +330,10 @@ private actor SlowModel: LocalTranscriber {
         isResident = false
         for waiter in unloadWaiters { waiter.resume() }
         unloadWaiters = []
+    }
+
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in await self.transcribe(clip, terms: terms, priority: priority) }
     }
 
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String {

@@ -51,7 +51,7 @@ public actor SpeechEngine {
     /// speech). Local work for this attempt runs at `LocalPriority.live`.
     public func begin(feed: AudioFeed, plan: SpeechPlan) -> SpeechAttempt {
         SpeechAttempt(core: AttemptCore(feed: feed, plan: plan, local: local, residency: residency, cloud: cloud,
-                                         clock: clock, priority: .live))
+                                         clock: clock, priority: .live, listening: true))
     }
 
     /// Whole-clip transcription with the same race: retry, recovery, eval, and a
@@ -59,9 +59,10 @@ public actor SpeechEngine {
     /// `priority`: `.background` for recovery and Retry, so they queue behind any
     /// live Dictation on the Neural Engine; `.live` when the text may still be typed.
     public func transcribe(_ clip: AudioClip, plan: SpeechPlan, priority: LocalPriority = .background) async -> SpeechOutcome {
+        // The clip is whole already: the local session reads every window from it at `finish`.
         let attempt = SpeechAttempt(core: AttemptCore(feed: clip.replay(), plan: plan, local: local,
                                                       residency: residency, cloud: cloud, clock: clock,
-                                                      priority: priority))
+                                                      priority: priority, listening: false))
         return await attempt.finish(clip)
     }
 
@@ -234,13 +235,15 @@ public protocol LocalTranscriber: Sendable {
     /// warm the model at launch, not on a Dictation.
     func load() async throws
     func unload() async
-    /// ~80 ms for a clip of 6 s or less. `terms` may be ignored: FluidAudio
-    /// boosting hurt accuracy, so the local path relies on Rules after transcription.
+    /// Starts one Dictation's transcription at fn-down. A model that reads long
+    /// audio in windows decodes each one as soon as it is captured, so fn-up
+    /// waits only for the last. `terms` may be ignored: FluidAudio boosting hurt
+    /// accuracy, so the local path relies on Rules after transcription.
     ///
-    /// One job at a time on the Neural Engine. A `.live` call goes ahead of every
-    /// queued `.background` call (recovery, Retry), so a live Dictation never
-    /// waits behind them; a running background job is not aborted (~80 ms).
-    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String
+    /// One job at a time on the Neural Engine. A `.live` job goes ahead of every
+    /// queued `.background` one (recovery, Retry), so a live Dictation waits
+    /// behind at most the one job already running.
+    func session(terms: [Term], priority: LocalPriority) -> any LocalSession
 }
 
 /// Thrown by a `LocalTranscriber` whose weights are not on disk: the Dictation
@@ -276,13 +279,17 @@ final class AttemptCore: Sendable {
     let warmUp: Task<Void, Never>
     /// Set when `warmUp` is done, so a warm model costs fn-up no timer.
     let warm = Latch()
-    /// Hands each captured chunk to the cloud session, and always reads the feed
-    /// to its end: the clip is the RAM copy local transcribes, so the feed's own
+    /// The local model's side of this attempt, started at fn-down.
+    let localSession: (any LocalSession)?
+    /// Hands each captured chunk to the cloud and local sessions, and always
+    /// reads the feed to its end: the clip is the RAM copy, so the feed's own
     /// buffer of the same chunks is dropped as it is read.
     let drain: Task<Void, Never>
 
+    /// `listening`: the local session hears the feed as it arrives. False for a
+    /// clip that is whole already, which `finish` hands it in one piece.
     init(feed: AudioFeed, plan: SpeechPlan, local: (any LocalTranscriber)?, residency: LocalResidency?,
-         cloud link: CloudLink, clock: any Clock<Duration>, priority: LocalPriority) {
+         cloud link: CloudLink, clock: any Clock<Duration>, priority: LocalPriority, listening: Bool) {
         self.plan = plan
         let local = local.flatMap { $0.model == plan.local ? $0 : nil }
         self.local = local
@@ -305,8 +312,14 @@ final class AttemptCore: Sendable {
             await residency?.dictationBegan(plan.residency)
             _ = warm.set()
         }
+        let localSession = local?.session(terms: plan.terms, priority: priority)
+        self.localSession = localSession
+        let listener = listening ? localSession : nil
         drain = Task {
-            for await chunk in feed { session?.send(chunk) }
+            for await chunk in feed {
+                session?.send(chunk)
+                listener?.append(chunk.samples)
+            }
             if !Task.isCancelled { session?.audioEnded() }
         }
     }
@@ -332,11 +345,12 @@ final class AttemptCore: Sendable {
         let stopped = ContinuousClock.now
         let (events, post) = AsyncStream<Finished>.makeStream()
         if let session { Task { post.yield(.cloud(await session.result)) } }
-        let localRun = local.map { local in
+        let localRun = localSession.map { local in
             Task {
                 // Jake never waits out a compile at the cursor: past the limit the local
                 // side has no answer, and the attempt lets go of the model once it loads.
                 guard await loaded(within: Self.loadLimit) else {
+                    local.cancel()
                     post.yield(.local(.failed(.localModelLoading)))
                     await warmUp.value
                     await residency?.dictationEnded()
@@ -399,7 +413,10 @@ final class AttemptCore: Sendable {
         for timer in timers { timer.cancel() }
         post.finish()
         if decision != .useCloud { session?.close() }  // lost or gave up: the socket is not needed any more
-        if localState == .pending { localRun?.cancel() }  // the cloud won; the hold on the model still ends
+        if localState == .pending {  // the cloud won; the hold on the model still ends
+            localRun?.cancel()
+            localSession?.cancel()
+        }
 
         var attempts: [AttemptRecord] = []
         if let cloud {
@@ -466,9 +483,9 @@ final class AttemptCore: Sendable {
         }
     }
 
-    private func transcribe(_ clip: AudioClip, with local: any LocalTranscriber) async -> LocalEnd {
+    private func transcribe(_ clip: AudioClip, with local: any LocalSession) async -> LocalEnd {
         do {
-            return .text(try await local.transcribe(clip, terms: plan.terms, priority: priority))
+            return .text(try await local.finish(clip))
         } catch is LocalModelNotInstalled {
             return .failed(.noModel)
         } catch {
@@ -479,6 +496,7 @@ final class AttemptCore: Sendable {
     func cancel() {
         drain.cancel()
         session?.close()
+        localSession?.cancel()
         // Ends this attempt's hold on the model once its fn-down load is done.
         Task { [warmUp, residency] in
             await warmUp.value
