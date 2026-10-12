@@ -37,21 +37,17 @@ public struct RespeakResolver: Sendable {
     /// caret, in practice the last Dictation.
     public func resolve(_ spoken: String, recent: String, access: CloudAccess?) async -> RespeakResolution {
         let ranked = CandidateFinder.candidates(for: spoken, in: recent)
-        let bySound: RespeakResolution = if let best = ranked.first, best.distance <= Self.soundCutoff {
-            .pick(best)
-        } else {
-            .noMatch
-        }
         guard let question = JevQuestion.respeakTarget(
             spoken: spoken, spokenPhonetic: Phonetic.code(spoken), recent: recent,
             candidates: ranked.map { RespeakCandidate(words: $0.words, phonetic: $0.phonetic) })
-        else { return bySound }
+        else { return .noMatch }
 
-        let decision = await jev.decide(question, access: access, fallback: [])
-        guard case .jev = decision.source, let top = decision.answer.first else { return bySound }
+        // Without Jev the sound ranking decides alone, sure of its best span or of none.
+        let bySound = [RespeakPick(candidate: ranked[0].distance <= Self.soundCutoff ? 0 : nil, probability: 1)]
+        let picks = await jev.decide(question, access: access, fallback: bySound).answer
         // Jev's best guess is that Jake corrected none of them: never replace on a lesser one.
-        guard let best = top.candidate else { return .noMatch }
+        guard let top = picks.first, let best = top.candidate else { return .noMatch }
         if top.probability >= Self.sureAt { return .pick(ranked[best]) }
-        return .choices(decision.answer.compactMap(\.candidate).prefix(Self.mostChoices).map { ranked[$0] })
+        return .choices(picks.compactMap(\.candidate).prefix(Self.mostChoices).map { ranked[$0] })
     }
 }
