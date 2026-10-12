@@ -211,6 +211,11 @@ Jake: as item 57. #58 spikes the registered hotkey and falls back to (b) only if
 
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
+**75. Esc is taken from the confirmed Dictation, not from fn-down.**
+> Jake: decide whether Esc reaches your app during the first third of a second of holding fn (PR #262, DECISIONS item 75, Proposed). #58 says Lexicon takes Esc "at recording start", the moment fn goes down. The build takes it only once the hold is confirmed (0.3 s) or on the second tap of a double tap. [...] Keep the build (recommended): Esc pressed in that first 0.3 s, or between the two taps, does its normal job in the front app (closes a dialog, cancels in the terminal). The half-started take is dropped: nothing typed, nothing in History. A stray fn tap or the Globe key never eats your Esc. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6128270245))
+
+Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 16:31:39Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6128393563)). Decided: the Esc hotkey is registered when the recognizer confirms the hold (0.30 s) or the second tap, and removed when the Dictation ends; an Esc in the first 0.3 s or between the taps reaches the front app and the half-started take is dropped (item 43). Registered with and without fn, since a hold keeps fn down. Replaces #58's "registered at recording start".
+
 **76. The 20-minute cap and its 19-minute warning act 50 ms after their marks.**
 > Jake: decide whether the 20-minute cap may act 50 ms after the 20-minute mark. I recommend yes. [...] Yes (recommended): the cap stops the recording at exactly 20:00 (the audio ends there), but acts 50 ms later. So an Esc or a tap of fn pressed just before 20:00 always counts, whichever the fn tap sees first. Cost: if fn-up was lost, Quit can wait 20 minutes plus 50 ms instead of exactly 20 minutes. [...] No: the cap acts at exactly 20:00 and Quit never waits past it. Cost: an Esc pressed in the last few milliseconds before 20:00 can arrive just after the cap and be ignored, so that Dictation is typed instead of held. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6126616497))
 
@@ -223,8 +228,6 @@ Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 15:15:50Z):
 ### Proposed: built on an agent's default, never asked
 
 These stand as built until Jake confirms them as a batch or names items to change, in the next grill round.
-
-**75. Esc is taken from the confirmed Dictation, not from fn-down.** #58 says the Esc hotkey is "registered at recording start". Built: it is registered when the recognizer confirms the hold (0.30 s) or the second tap, and removed when the Dictation ends, so Esc in a stray tap, an fn chord or the double-tap gap still reaches the app (and drops the tap, as any key does, item 43). Registered with and without fn, since a hold keeps fn down. #58's builder.
 
 **34. The fn tap is listen-only.** Spec: one active, session-level CGEventTap. Built: a listen-only tap, started only when `CGPreflightListenEventAccess()` already reads true (it does with Accessibility alone, so there's no prompt). Measured live: keys reached the focused app 26 to 74 ms late through the active tap (five presses timed), 2 to 12 ms through listen-only. The orchestrator and Reviewer's choice, PR #123; Jake got a heads-up, not a question. Item 59's question, which Jake answered, kept idle typing delay at the listen-only figure. [ADR 0004](adr/0004-listen-only-fn-tap.md).
 
