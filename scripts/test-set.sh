@@ -32,9 +32,9 @@ review)
     exec scorer/testset review
     ;;
 update | baselines)
-    . scripts/lib/swift-flags.sh  # sets "$@" to the shared build flags
-    swift build "$@" --product lexicon-eval
-    bin="$(swift build "$@" --show-bin-path)"
+    . scripts/lib/swift-flags.sh
+    swift build $SWIFT_FLAGS --product lexicon-eval
+    bin="$(swift build $SWIFT_FLAGS --show-bin-path)"
     exec scorer/testset "$command" --lexicon-eval "$bin/lexicon-eval"
     ;;
 *)
