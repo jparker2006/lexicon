@@ -83,7 +83,8 @@ struct Focus {
     }
 
     static func now() -> Focus? {
-        readTwice(naming: focusedApp) { (pid, app) -> (Answer, Focus?) in
+        readTwice(naming: { focusedApp()?.pid }) { pid -> (Answer, Focus?) in
+            let app = AX.app(pid)
             var value: CFTypeRef?
             switch Answer(AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue) {
             case .unreadable:
@@ -99,17 +100,18 @@ struct Focus {
         }
     }
 
-    /// Reads once more after an unreadable answer (an app not named counts as
-    /// one): one slow or failed read is not the app's answer. Each read names the
-    /// focused app again, so a retry never uses an app focus may have left. Costs
-    /// up to two more `AX.timeout`s (300 ms), only when the first read failed.
-    static func readTwice<App, Value>(naming: () -> App?, answering: (App) -> (Answer, Value?)) -> Value? {
-        func attempt() -> (Answer, Value?) {
-            guard let app = naming() else { return (.unreadable, nil) }
-            return answering(app)
-        }
-        let first = attempt()
-        return first.0 == .unreadable ? attempt().1 : first.1
+    /// Reads once more after an unreadable answer: one slow or failed read is not
+    /// the app's answer. The retry names the focused app again and counts only if
+    /// it is the same app: focus that moved meanwhile with no key or click (an app
+    /// activating itself, a panel taking keys) never becomes the target. No app
+    /// named means nothing to retry. Costs up to two more `AX.timeout`s (300 ms),
+    /// only when the first read failed.
+    static func readTwice<App: Equatable, Value>(naming: () -> App?, answering: (App) -> (Answer, Value?)) -> Value? {
+        guard let app = naming() else { return nil }
+        let first = answering(app)
+        guard first.0 == .unreadable else { return first.1 }
+        guard naming() == app else { return nil }
+        return answering(app).1
     }
 
     /// An app's answer for its focused element, one meaning on every path. No
