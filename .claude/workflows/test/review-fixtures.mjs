@@ -166,7 +166,7 @@ test('a lens that could not finish its commands is INCOMPLETE', async () => {
   assert(/INCOMPLETE: .*gh pr list was refused/.test(r.result.markdown), 'the markdown should say why')
 })
 
-test("a critic's brief and schema say a build, test or check not run is never incomplete", async () => {
+test("a critic's brief and schema carry the CI gate", async () => {
   const { dir, sha } = fixtureRepo('ci-gate', ['Sources/Foo/a.swift'])
   const r = await run(dir, { issue: 1, sha })
   const critics = r.calls.filter(c => c.agentType && c.agentType.startsWith('critic'))
@@ -176,6 +176,13 @@ test("a critic's brief and schema say a build, test or check not run is never in
       for (const s of ['CI is the build gate', 'scripts/check.sh', 'a fixture script', 'never incomplete', 'say so in checked', 'a criterion the diff fails is still a finding']) assert(text.includes(s), `${c.label} ${what} should say "${s}"`)
     }
   }
+})
+
+test('a lens whose incomplete is a bare pair of quotes stamps the sha', async () => {
+  const { dir, sha } = fixtureRepo('quotes', ['Sources/Foo/a.swift'])
+  const r = await run(dir, { issue: 1, sha }, () => ({ ...CLEAN, incomplete: '""' }))
+  assert(r.result.complete === true, `complete should be true; ${r.result.markdown.match(/INCOMPLETE.*/)}`)
+  assert(r.result.reviewedSha === sha, 'reviewedSha should be the sha')
 })
 
 test('a newline in an INCOMPLETE reason stays on the INCOMPLETE line', async () => {
