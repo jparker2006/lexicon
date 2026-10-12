@@ -1,0 +1,36 @@
+{
+  "files": [
+    "Sources/History/HistoryStore.swift",
+    "Sources/History/Recovery.swift",
+    "Sources/History/Schema.swift",
+    "Sources/LexiconCore/Conductor+Recovery.swift",
+    "Sources/LexiconCore/Conductor+Run.swift",
+    "Sources/LexiconCore/Conductor.swift",
+    "Sources/LexiconDomain/Audio.swift",
+    "Sources/LexiconUI/IndicatorFollower.swift",
+    "Sources/Transcription/SpeechEngine.swift",
+    "Tests/LexiconTests/CrashRecoveryTests.swift",
+    "Tests/LexiconTests/HistoryRecoveryTests.swift",
+    "Tests/LexiconTests/IndicatorFollowerTests.swift",
+    "Tests/LexiconTests/UsageTests.swift"
+  ],
+  "commits": [
+    "feat(history): launch recovery finishes what a crash left (#59)\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "feat(transcription): whole-clip transcribe and the waiting retry inte…\n\n…rval (#59)\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "feat(core): recover unfinished Dictations and retry waiting ones (#59)\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "test(core): kill -9 recovery, crash mid-paste, waiting, 200 random ki…\n\n…lls (#59)\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "Merge origin/main into claude/issue-59\n\n",
+    "test(history): recovery plan table and relaunch recovery on disk (#59)\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "fix(core): late text waits for paste-last; recovery stays local; wait…\n\n…ing audio read back from disk (#59)\n\nA waiting Dictation's text, and a recovered one's, now lands untyped for\npaste-last, as the spec's never-lose rule says for text that arrives late.\nRecovered runs get no CloudAccess: whether the Dictation began in Private\nmode was decided at fn-down and not kept. A retry rebuilds its plan from\ntoday's settings, keeps the cloud only if fn-down and now both allow it,\nre-checks the row after transcribing, and keeps going if a .waiting write\nwas dropped. A waiting clip that is whole on disk is read back per try\ninstead of held in RAM, and CAF reads run off the Conductor's actor.\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "fix(history): an undated audio file is recovered only when an earlier…\n\n… row claims it (#59)\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "Merge origin/main into claude/issue-59\n\n",
+    "fix(history): a delete's first half removes every row that holds the …\n\n…Dictation's text (#59)\n\nA crash between the mark and the row drop left engine attempts, Fixes and\nthe insertion's surrounding words behind until the next launch.\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "fix(core): only a live target lets a Re-speak change another app (#59)\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "test(core): the random-kill run allows only a Dictation killed before…\n\n… its file existed (#59)\n\nThe writer creates the CAF on its queue and History commits the row\nasynchronously, a few ms after fn-down. A kill inside that window leaves\nneither, costing less audio than the 0.1 s a crash may lose; the check\nscript hit it once. Any later kill must still leave a row.\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "Merge origin/main into claude/issue-59\n\n",
+    "docs(history): what an unfinished Dictation's app is for (#59)\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "Merge origin/main into claude/issue-59\n\n# Conflicts:\n#\tTests/LexiconTests/UsageTests.swift",
+    "fix(core): a History read error keeps a waiting Dictation trying (#59)\n\nThe retry read its row through HistoryStore.dictation, whose try? made a\nfailed read look like a deleted row: one SQLite error stopped the retry,\nand after a transcription dropped the text until the next launch.\nHistory.owesText says false only for a row that is gone or has text.\n\nRefs #59\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "Merge branch 'main' into claude/issue-59\n\n"
+  ]
+}

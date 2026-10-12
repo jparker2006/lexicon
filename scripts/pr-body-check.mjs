@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+// pr-body-check: the pr skill's body rules, checked before `gh pr create` or
+// `gh pr edit`, so nobody counts words by hand or types a stale number.
+//
+//   node scripts/pr-body-check.mjs <body.md> [--base <ref>]   check; exit 1 naming each problem
+//   node scripts/pr-body-check.mjs --numbers                   print the **Check script:** line
+//
+// The commits and changed files are <base>..HEAD, base being the merge-base with
+// origin/main by default. The numbers come from .build/check-summary.json, which
+// scripts/check.sh writes, and only while it checked this content (or this
+// content less merges of origin/main on top, as scripts/ticket.sh allows).
+//
+// The rules:
+//   refs       "Refs #N" alone on the first line
+//   closing    no closing keyword before an issue, in the body or a commit
+//   headings   Summary, Evidence, Merge Danger, Install, in that order
+//   door       **Door:** one-way or two-way
+//   blast      **Blast Radius:** one word from BLAST_RADIUS
+//   check      a "Check:" line after Install; what follows it is a footer
+//   words      at most WORD_CAP words up to the Check: line. A word is a token
+//              between spaces with a letter or digit, so table rules and tree
+//              branches don't count; the footer a tool adds after Check: doesn't
+//   scores     a **Scores:** line with numbers when speech, Cleanup or the Lexicon
+//              changed (review-map.json's "Scores" paths less the eval tooling)
+//   emdash, home, handle   no em dash, no /Users/ path, no handle mention
+//   deviation  wording that departs from the spec links docs/DECISIONS.md
+//   numbers    the check summary's **Check script:** line, word for word
+import fs from 'node:fs'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+
+export const WORD_CAP = 750
+// One word each: the area a bad merge would hurt, after review.md's risk tiers.
+export const BLAST_RADIUS = [
+  'capture', 'history', 'insertion', 'fn', 'network', 'privacy', 'permissions', 'bundle',
+  'speech', 'cleanup', 'lexicon', 'ui', 'eval', 'scripts', 'agents', 'ci', 'tests', 'docs', 'none',
+]
+const HEADINGS = ['Summary', 'Evidence', 'Merge Danger', 'Install']
+
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+// The guard's pattern (.claude/hooks/guard.mjs), so the two refuse the same text.
+const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[\w.-]+\/[\w.-]+#\d+|#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)/i
+// Built from parts so this file never carries a mention itself.
+const HANDLE = new RegExp('(^|[^\\w`])@' + '(?:codex|claude)\\b', 'i')
+const DEVIATION = /\b(?:deviat\w*|diverg\w*|depart(?:s|ed|ing|ure)?\s+from)\b|\b(?:instead of|unlike|contrary to|differs? from)\s+(?:the\s+)?(?:spec\b|#36\b)/i
+
+// review-map.json's patterns: ** crosses folders, * stays in one.
+function glob(pattern) {
+  const re = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\0').replace(/\*/g, '[^/]*').replace(/\0/g, '.*')
+  return new RegExp(`^${re}$`)
+}
+// review-map.json's "Scores" paths less the eval tooling: a scorer or lexicon-eval
+// change moves how a score is measured, not what Lexicon hears or types.
+const TOOLING = new Set(['Sources/LexiconEval/**', 'scorer/**'])
+let scorePatterns
+function scorePaths() {
+  if (!scorePatterns) {
+    const map = JSON.parse(fs.readFileSync(path.join(root, '.claude/workflows/review-map.json'), 'utf8'))
+    scorePatterns = map.sections.Scores.filter(p => !TOOLING.has(p)).map(glob)
+  }
+  return scorePatterns
+}
+
+export function numbersLine(summary) {
+  const steps = Object.keys(summary.steps || {}).length
+  const t = summary.tests || { run: 0, failed: 0 }
+  const at = String(summary.sha).slice(0, 7)
+  const counts = `${steps} steps, ${t.run} tests, ${t.failed} failed.`
+  return summary.exit === 0
+    ? `**Check script:** green at ${at}: ${counts}`
+    : `**Check script:** red at ${at}: ${summary.failed || 'a step'} failed; ${counts}`
+}
+
+/** Every rule the body breaks, as {rule, message}; [] when it passes. */
+export function checkBody({ body, files = [], commits = [], summary = null }) {
+  const problems = []
+  const fail = (rule, message) => problems.push({ rule, message })
+  const text = body.replace(/\r/g, '')
+  const lines = text.split('\n')
+
+  if (!/^Refs #\d+$/.test(lines[0])) fail('refs', `the first line must be "Refs #N" alone, not "${lines[0].slice(0, 60)}"`)
+
+  if (CLOSING.test(text)) fail('closing', 'a closing keyword before an issue (such as "Fixes #12"); write Refs #N, and Jake closes the issue')
+  else {
+    const bad = commits.find(c => CLOSING.test(c))
+    if (bad) fail('closing', `the commit "${bad.split('\n')[0]}" has a closing keyword before an issue; reword it to Refs #N`)
+  }
+
+  const at = HEADINGS.map(h => lines.findIndex(l => l.trim() === `## ${h}`))
+  const missing = HEADINGS.filter((h, i) => at[i] < 0)
+  if (missing.length) fail('headings', `missing ${missing.map(h => `## ${h}`).join(', ')}`)
+  else if (at.some((v, i) => i > 0 && v < at[i - 1])) fail('headings', `the headings must run ${HEADINGS.join(', ')}`)
+
+  if (!lines.some(l => /^\*\*Door:\*\*\s*(?:one-way|two-way)\b/i.test(l))) fail('door', '**Door:** must start one-way or two-way')
+
+  const blast = lines.map(l => /^\*\*Blast Radius:\*\*\s*(.*)$/.exec(l)).find(Boolean)
+  if (!blast || !BLAST_RADIUS.includes(blast[1].trim().toLowerCase())) {
+    fail('blast', `**Blast Radius:** must be one word from: ${BLAST_RADIUS.join(', ')}${blast ? ` (not "${blast[1].trim().slice(0, 40)}")` : ''}`)
+  }
+
+  const install = at[3]
+  // A missing Install is the headings rule's; then any Check: line will do.
+  const check = lines.findIndex((l, i) => i > install && /^Check:\s*\S/.test(l))
+  if (check < 0) fail('check', 'a "Check:" line must follow ## Install, with the one thing Jake should try')
+
+  const counted = check < 0 ? lines : lines.slice(0, check + 1)
+  const words = counted.join(' ').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
+  if (words > WORD_CAP) fail('words', `${words} words, over the ${WORD_CAP}-word cap (counted up to the Check: line); cut ${words - WORD_CAP}`)
+
+  const scored = files.filter(f => scorePaths().some(re => re.test(f)))
+  if (scored.length) {
+    const line = lines.find(l => /\*\*Scores:\*\*/.test(l))
+    const value = line ? line.replace(/^.*\*\*Scores:\*\*\s*/, '') : ''
+    if (!line || !/\d/.test(value) || /^(?:none|n\/a|skipped|not run)\b/i.test(value)) {
+      fail('scores', `${scored[0]}${scored.length > 1 ? ` and ${scored.length - 1} more` : ''} changed, so Evidence needs a **Scores:** line with scripts/eval-quick.sh's numbers`)
+    }
+  }
+
+  if (text.includes('—')) fail('emdash', 'an em dash; use a comma, a colon or a new sentence')
+  if (/\/Users\//.test(text)) fail('home', 'a /Users/ path; use a repo-relative or ~ path, and never one into private data')
+  if (HANDLE.test(text)) fail('handle', 'an at-sign handle mention, which can start a cloud task; write "Codex\'s handle"')
+  if (DEVIATION.test(text) && !text.includes('DECISIONS.md')) {
+    fail('deviation', 'wording that departs from the spec, with no docs/DECISIONS.md link to the decision that allows it')
+  }
+
+  if (summary) {
+    const want = numbersLine(summary)
+    if (!lines.some(l => l.replace(/^[-*]\s+/, '').trim() === want)) fail('numbers', `Evidence must carry the check's own line: ${want}`)
+  }
+  return problems
+}
+
+const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim()
+
+// The summary, when check.sh checked HEAD's content or HEAD less merges of origin/main.
+function currentSummary() {
+  const file = path.join(root, '.build/check-summary.json')
+  if (!fs.existsSync(file)) return { error: 'no .build/check-summary.json; run scripts/check.sh' }
+  const summary = JSON.parse(fs.readFileSync(file, 'utf8'))
+  let c = git('rev-parse', 'HEAD')
+  for (;;) {
+    if (summary.tree !== 'unknown' ? git('rev-parse', `${c}^{tree}`) === summary.tree : c === summary.sha) return { summary }
+    let second
+    try { second = git('rev-parse', '-q', '--verify', `${c}^2`) } catch { second = '' }
+    let fromMain = false
+    if (second) try { git('merge-base', '--is-ancestor', second, 'origin/main'); fromMain = true } catch {}
+    if (!fromMain) return { error: `.build/check-summary.json is for ${String(summary.sha).slice(0, 7)}, not this content; run scripts/check.sh` }
+    c = git('rev-parse', `${c}^1`)
+  }
+}
+
+function main(argv) {
+  if (argv[0] === '--numbers') {
+    const { summary, error } = currentSummary()
+    if (error) { console.error(`pr-body-check: ${error}`); return 1 }
+    console.log(numbersLine(summary))
+    return 0
+  }
+  const file = argv[0]
+  if (!file || file.startsWith('--')) { console.error('usage: pr-body-check.mjs <body.md> [--base <ref>] | --numbers'); return 64 }
+  const i = argv.indexOf('--base')
+  const base = i > 0 ? argv[i + 1] : git('merge-base', 'HEAD', 'origin/main')
+  const commits = git('log', '--format=%B%x00', `${base}..HEAD`).split('\0').map(s => s.trim()).filter(Boolean)
+  const files = git('diff', '--name-only', base, 'HEAD').split('\n').filter(Boolean)
+  const { summary, error } = currentSummary()
+  const problems = checkBody({ body: fs.readFileSync(file, 'utf8'), files, commits, summary })
+  if (error) problems.push({ rule: 'numbers', message: error })
+  for (const p of problems) console.error(`pr-body-check: ${p.rule}: ${p.message}`)
+  if (problems.length) return 1
+  console.log('pr-body-check: the body passes')
+  return 0
+}
+
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2))

@@ -1,0 +1,20 @@
+{
+  "files": [
+    "Sources/AudioCapture/Microphone.swift",
+    "Sources/AudioCapture/Recorder.swift",
+    "Sources/History/HistoryStore.swift",
+    "Sources/LexiconCore/Conductor+Run.swift",
+    "Sources/LexiconCore/Conductor.swift",
+    "Tests/LexiconTests/FnDictationTests.swift",
+    "Tests/LexiconTests/HeadlessDictationTests.swift",
+    "Tests/LexiconTests/LiveCaptureTests.swift"
+  ],
+  "commits": [
+    "fix(audio): mic start has a 2 s limit and a fresh lane after a stuck …\n\n…one (#142)\n\nA stuck AVAudioEngine input node or start blocked the mic queue for good,\nso the Dictation sat in \"finishing\" with no row and no outcome. The start\nnow races a deadline on MicHardware's clock: past it the Dictation fails\nwith a notice and a failed row, the stuck lane is abandoned, and the next\nfn-down builds on a new queue. A late engine from the stuck lane is stopped.\nThe History row is recorded at fn-down in parallel with the mic start.\n\nRefs #142\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "Merge origin/main into claude/issue-142\n\n# Conflicts:\n#\tTests/LexiconTests/LocalModelTests.swift",
+    "fix(audio): the start limit waits out the mic permission prompt; unre…\n\n…adable files leave no row (#142)\n\nLive checks: macOS held the first start after a permission reset until\nJake answered its Allow prompt, so that Dictation hit the 2 s limit. The\nlimit now re-arms while the permission is undetermined, up to 60 s.\n\nA file that can't be read is not a Dictation: no row, status nil, so\nlexicon-eval still prints \"nothing\" and exits 1, and its path stays out\nof the log. Fake mics default to a clock that never moves, and every\nwedged test start is released even when an expectation fails.\n\nRefs #142\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "fix(audio): ask for the mic before building an engine, and remember t…\n\n…he answer (#142)\n\nLive checks: after a re-grant every engine started cold, so the permission\nmacOS reports stayed \"undetermined\" after Jake clicked Allow. With the\nprevious commit's prompt allowance, every later start would have waited\nup to 60 s, which is the post-re-grant wedge this ticket is about.\n\nWhen the permission reads undetermined, fn-down now asks for it first\n(AVAudioApplication.requestRecordPermission, up to 60 s for Jake to\nanswer), then gives the engine its 2 s. Jake's answer is kept for the\nprocess, so a stale report neither keeps engines cold nor lifts the limit.\nA late engine on an abandoned lane is not started. Fake wedges count\nengine starts, not engines made.\n\nRefs #142\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "Merge origin/main into claude/issue-142\n\n",
+    "docs(history): .began is recorded at fn-down, before the audio file (…\n\n…#142)\n\nRefs #142\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+  ]
+}
