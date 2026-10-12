@@ -31,23 +31,14 @@ cd "$(dirname "$0")/.."
 scripts/live-lane.sh check
 . scripts/lib/fn-listeners.sh
 
-# Other apps answering fn, one line each, or nothing. Every result header records it.
-fn_listeners=$(warn_fn_listeners 2>&1)
-LEXICON_FN_LISTENERS=$(printf '%s' "$fn_listeners" | tr '\n' ';')
+# Other apps answering fn, by name and pid, or nothing. Every result header records it.
+LEXICON_FN_LISTENERS=$(fn_listeners_line | sed 's/^fn listeners: //; s/^none$//')
 export LEXICON_FN_LISTENERS
 case "${1:-}" in
-check) [ -z "$fn_listeners" ] || printf '%s\n' "$fn_listeners" >&2 ;;
-wait-fn)
-    # Real fn presses reach every listener, and another's paste reads as typing in Dev.
-    # fn-listeners.sh's own refusal when it has one (#157), else this one.
-    command -v require_no_fn_listeners >/dev/null 2>&1 || require_no_fn_listeners() {
-        [ -z "$fn_listeners" ] && return 0
-        printf '%s\n' "$fn_listeners" >&2
-        echo "harness: another app answers fn, so Dev's fn results would be wrong. Quit it from its menu bar, then rerun." >&2
-        exit 1
-    }
-    require_no_fn_listeners
-    ;;
+check) warn_fn_listeners ;;
+# Real fn presses reach every listener, and another's paste reads as typing in Dev.
+# The fn and key hooks reach only Dev's own tap, so they run either way.
+wait-fn) require_no_fn_listeners || exit 1 ;;
 esac
 
 # The same debug flags as scripts/check.sh and scripts/bundle.sh, so this reuses
