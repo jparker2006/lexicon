@@ -21,8 +21,7 @@ public enum TextPass {
         var dictationStart = true
         return ruled.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
             .map { line in
-                var meaning = Fillers.Meaning()
-                let cleaned = Fillers.clean(line, dictationStart: dictationStart, rules: rules, meaning: &meaning)
+                let cleaned = Fillers.clean(line, dictationStart: dictationStart, rules: rules)
                 if !cleaned.isEmpty { dictationStart = false }
                 return cleaned
             }
@@ -60,7 +59,7 @@ enum Fillers {
     ]
 
     /// After "like", these make it a comparison or an estimate, not a filler. So does a
-    /// number word (`Token.isNumberWord`, from StructuralCheck's tables), a word with a
+    /// number word (`Fillers.isNumberWord`, from StructuralCheck's tables), a word with a
     /// digit ("like, 5 MB", "like, $5"), a name or a Term.
     static let likeKeepers: Set<String> = [
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
@@ -99,6 +98,9 @@ enum Fillers {
         "just", "if", "because", "like",
     ]
 
+    /// Capitalized, but naming nobody.
+    static let firstPerson: Set<String> = ["i", "i'm", "i'd", "i'll", "i've"]
+
     /// Titles: always followed by a name, so the capital after them never starts a sentence.
     /// ("ms" and "st" are left out: "20 ms." and "Main St." often end one.)
     static let titles: Set<String> = ["mr", "mrs", "dr"]
@@ -111,36 +113,9 @@ enum Fillers {
         "sep", "sept", "oct", "nov", "dec",
     ])
 
-    /// Fillers the rules keep because they carry meaning. AI cleanup may not drop them
-    /// either (`StructuralCheck`). A "like" kept only by a cautious keeper ("like, in") may go.
-    struct Meaning {
-        /// For each filler sound and "like", which of its occurrences in the text (from 0)
-        /// the rules keep as meaning: a sound of "uh huh" or "uh-huh", a quoted "uh", a "like"
-        /// before a number, a name or a Term ("like, eighty", "like, Postgres").
-        var kept: [String: [Int]] = [:]
-        var seen: [String: Int] = [:]
-
-        /// The filler sounds and "like"s in a word, split at hyphens and dashes the way
-        /// StructuralCheck splits words, so occurrences count the same on both sides.
-        static func parts(_ word: String) -> [String] {
-            word.split { "-\u{2010}\u{2011}\u{2012}\u{2013}\u{2014}".contains($0) }.map(String.init)
-                .filter { $0 == "like" || hard.contains($0) }
-        }
-    }
-
-    static func meaningful(in text: String, rules: RuleSet) -> Meaning {
-        var meaning = Meaning()
-        var dictationStart = true
-        for line in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-        where !clean(line, dictationStart: dictationStart, rules: rules, meaning: &meaning).isEmpty {
-            dictationStart = false
-        }
-        return meaning
-    }
-
     /// The filler pass over one line. A line always starts a sentence;
-    /// `dictationStart`: no earlier line kept anything. `meaning` collects `Meaning`.
-    static func clean(_ line: Substring, dictationStart: Bool, rules: RuleSet, meaning: inout Meaning) -> String {
+    /// `dictationStart`: no earlier line kept anything.
+    static func clean(_ line: Substring, dictationStart: Bool, rules: RuleSet) -> String {
         var tokens = line.split(whereSeparator: \.isWhitespace).map(Token.init)
         // The speech model capitalizes after a sentence end, so "etc. Um, ship it"
         // ends a sentence and "etc. um, then ship it" does not.
@@ -187,21 +162,8 @@ enum Fillers {
                 continue
             }
 
-            let parts = Meaning.parts(token.word)
-            let occurrences = parts.map { part in
-                defer { meaning.seen[part, default: 0] += 1 }
-                return meaning.seen[part, default: 0]
-            }
-            // "like, um, uh, eighty": the first word after the fillers decides whether "like" is a hedge.
-            // A sentence end ends the search: "like. Ten came" and "like, um. Ten failed" hedge nothing.
-            let likeObject = token.word == "like" && !token.endsSentence
-                ? tokens[(i + 1)...].first { !$0.isHardFiller || $0.endsSentence }
-                    .flatMap { $0.isHardFiller ? nil : $0 }
-                : nil
-            let hedge = likeObject.map { $0.keepsLike || rules.isWritten($0.text) } ?? false
-            if likeObject.map({ $0.isEstimate || $0.isName || rules.isWritten($0.text) }) == true {
-                meaning.kept["like", default: []].append(occurrences[0])
-            }
+            let hedge = token.word == "like"
+                && likeObject(tokens, at: i).map { $0.keepsLike || rules.isWritten($0.text) } == true
             // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
                                  after: i + 2 < tokens.count ? tokens[i + 2] : nil, hedge: hedge,
@@ -225,9 +187,6 @@ enum Fillers {
                 continue
             }
 
-            for (part, n) in zip(parts, occurrences) where hard.contains(part) {  // "uh huh", "uh-huh"
-                meaning.kept[part, default: []].append(n)
-            }
             var text = String(token.text)
             if sentenceKept == 0, droppedOpener, !token.isCode, !rules.isWritten(token.text) {
                 text = Token.capitalized(text)
@@ -244,6 +203,45 @@ enum Fillers {
             kept[kept.count - 1].removeLast()
         }
         return kept.joined(separator: " ")
+    }
+
+    /// The word a "like" at `i` would hedge: the next word past filler sounds and a set-off
+    /// "you know", within its sentence. "like, um, you know, eighty" hedges "eighty";
+    /// "like. Ten came" and "like, um. Ten failed" hedge nothing.
+    private static func likeObject(_ tokens: [Token], at i: Int) -> Token? {
+        guard !tokens[i].endsSentence else { return nil }
+        var j = i + 1
+        while j < tokens.count {
+            let token = tokens[j]
+            if token.isHardFiller {
+                if token.endsSentence { return nil }
+                j += 1
+            } else if token.word == "you", j + 1 < tokens.count, tokens[j + 1].word == "know",
+                      tokens[j + 1].trailing.hasPrefix(",") {
+                j += 2
+            } else {
+                return token
+            }
+        }
+        return nil
+    }
+
+    /// "5 MB", "$5", "eighty", "twenty-something", "tenths": a number or an estimate of one.
+    static func isEstimate(_ word: String) -> Bool {
+        word.contains(where: \.isNumber) || word.split(separator: "-").first.map { isNumberWord(String($0)) } ?? false
+    }
+
+    /// Cardinals, ordinals and their plurals, fractions and multiples: "ten", "third",
+    /// "thirds", "twenties", "tenths", "hundredth", "twofold", "quadruple".
+    static func isNumberWord(_ word: String) -> Bool {
+        if word.hasSuffix("uple") { return true }
+        var stems = [word]
+        if word.hasSuffix("fold") { stems.append(String(word.dropLast(4))) }
+        if word.hasSuffix("ies") { stems.append(word.dropLast(3) + "y") }
+        if word.hasSuffix("s") { stems.append(String(word.dropLast())) }
+        if word.hasSuffix("ths") { stems.append(String(word.dropLast(3))) }
+        if word.hasSuffix("th") { stems.append(String(word.dropLast(2))) }
+        return stems.contains { StructuralCheck.isCardinal($0) || StructuralCheck.ordinals[$0] != nil }
     }
 
     /// The last kept token is a "like" set off on both sides, kept as a hedge
@@ -377,30 +375,12 @@ private struct Token {
     /// "twenty", "twenty-six", "thirty-something", "two-ish": a spoken number.
     var isNumber: Bool { word.split(separator: "-").first.map { StructuralCheck.isCardinal(String($0)) } ?? false }
     /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.
-    var isName: Bool { text.contains(where: \.isUppercase) && !Token.firstPerson.contains(word) }
+    var isName: Bool { text.contains(where: \.isUppercase) && !Fillers.firstPerson.contains(word) }
     /// The speech model started a sentence here: "Um", "Then". Not "I", which is always capitalized.
-    var isCapitalized: Bool { text.first(where: \.isLetter)?.isUppercase == true && !Token.firstPerson.contains(word) }
-    var keepsLike: Bool { isEstimate || isName || Fillers.likeKeepers.contains(word) }
-    /// "5 MB", "$5", "eighty", "twenty-something", "tenths".
-    var isEstimate: Bool {
-        word.contains(where: \.isNumber)
-            || word.split(separator: "-").first.map { Token.isNumberWord(String($0)) } ?? false
+    var isCapitalized: Bool {
+        text.first(where: \.isLetter)?.isUppercase == true && !Fillers.firstPerson.contains(word)
     }
-
-    /// Cardinals, ordinals and their plurals, fractions and multiples: "ten", "third",
-    /// "thirds", "twenties", "tenths", "hundredth", "twofold", "quadruple".
-    static func isNumberWord(_ word: String) -> Bool {
-        if word.hasSuffix("uple") { return true }
-        var stems = [word]
-        if word.hasSuffix("fold") { stems.append(String(word.dropLast(4))) }
-        if word.hasSuffix("ies") { stems.append(word.dropLast(3) + "y") }
-        if word.hasSuffix("s") { stems.append(String(word.dropLast())) }
-        if word.hasSuffix("ths") { stems.append(String(word.dropLast(3))) }
-        if word.hasSuffix("th") { stems.append(String(word.dropLast(2))) }
-        return stems.contains { StructuralCheck.isCardinal($0) || StructuralCheck.ordinals[$0] != nil }
-    }
-
-    static let firstPerson: Set<String> = ["i", "i'm", "i'd", "i'll", "i've"]
+    var keepsLike: Bool { Fillers.isEstimate(word) || isName || Fillers.likeKeepers.contains(word) }
 
     static func merge(_ kept: String, _ trailing: String) -> String {
         var kept = kept

@@ -78,27 +78,21 @@ enum StructuralCheck {
             }
         }
 
-        // A filler the rules keep as meaning survives, unless retracted: the rules own that
-        // call. A sound of "uh huh" as often as the rules keep it; a hedging "like" with the
-        // word it hedges still after it ("like 80"), so another "like" kept elsewhere is no excuse.
-        let meaning = Fillers.meaningful(in: refText, rules: rules ?? RuleSet(rules: [], terms: terms, english: []))
-        var sounds: [String: Int] = [:]
-        var hedges: [String: Int] = [:]
-        for (word, occurrences) in meaning.kept {
-            let at = ref.indices.filter { ref[$0].word == word }
-            for n in occurrences where n < at.count && !retracted.contains(at[n]) {
-                if word == "like" {
-                    hedges[hedge(ref, at: at[n]), default: 0] += 1
-                } else {
-                    sounds[word, default: 0] += 1
-                }
+        // A filler the rules keep as meaning survives, unless retracted: a sound of "uh huh",
+        // and a "like" before a number, a name or a Term, with the word it hedges still after
+        // it ("like 80"), so another "like" kept elsewhere is no excuse.
+        var meant: [String: Int] = [:]
+        let names = capitalizedWords(refText)
+        for k in ref.indices where !retracted.contains(k) {
+            guard let key = meaningKey(ref, k) else { continue }
+            if ref[k].word == "like" {
+                guard ref[k].mark == ",", let object = likeObject(ref, k)?.word,
+                      Fillers.isEstimate(object) || names.contains(object) || rules?.isWritten(object) == true
+                        || terms.contains(where: { $0.text.lowercased() == object }) else { continue }
             }
+            meant[key, default: 0] += 1
         }
-        for (word, count) in sounds where out.filter({ $0.word == word }).count < count {
-            failures.insert(.droppedContentWord)
-        }
-        for (pair, count) in hedges
-        where out.indices.filter({ out[$0].word == "like" && hedge(out, at: $0) == pair }).count < count {
+        for (key, count) in meant where out.indices.filter({ meaningKey(out, $0) == key }).count < count {
             failures.insert(.droppedContentWord)
         }
 
@@ -466,9 +460,59 @@ enum StructuralCheck {
         return result
     }
 
-    /// "like 80": a "like" and the first word after it that is not a filler sound.
-    static func hedge(_ tokens: [Token], at k: Int) -> String {
-        "like " + (tokens[(k + 1)...].first { !Fillers.hard.contains($0.word) }?.word ?? "")
+    /// A filler as the rules keep it for its meaning, to find again in the output:
+    /// "uh huh" for a sound of an interjection, "like 80" for a "like" and the word
+    /// after it. nil for any other word, and for "uh" before an "oh" that is a zero
+    /// inside a number ("5 uh oh 7").
+    static func meaningKey(_ t: [Token], _ k: Int) -> String? {
+        let word = t[k].word
+        if word == "like" { return likeObject(t, k).map { "like " + $0.word } }
+        guard Fillers.hard.contains(word) else { return nil }
+        if t[k].mark == nil, k + 1 < t.count, Fillers.interjections.contains(word + " " + t[k + 1].word) {
+            let zero = t[k + 1].word == "oh" && t[k + 1].mark == nil && k + 2 < t.count && isNumber(t[k + 2].word)
+                && k > 0 && t[k - 1].mark == nil && isNumber(t[k - 1].word)
+            return zero ? nil : word + " " + t[k + 1].word
+        }
+        if k > 0, t[k - 1].mark == nil, Fillers.interjections.contains(t[k - 1].word + " " + word) {
+            return t[k - 1].word + " " + word
+        }
+        return nil
+    }
+
+    /// The word a "like" hedges, past filler sounds and a set-off "you know", within its
+    /// sentence: the search `Fillers.clean` makes, on canonical tokens.
+    static func likeObject(_ t: [Token], _ k: Int) -> Token? {
+        guard !endsSentence(t[k]) else { return nil }
+        var j = k + 1
+        while j < t.count {
+            if Fillers.hard.contains(t[j].word) {
+                if endsSentence(t[j]) { return nil }
+                j += 1
+            } else if t[j].word == "you_know", t[j].mark == "," {  // `canonical` joins "you know"
+                j += 1
+            } else {
+                return t[j]
+            }
+        }
+        return nil
+    }
+
+    /// Lowercased words written with a capital past a sentence's first word ("Postgres",
+    /// "useAuth"): names, as far as lowercased tokens can tell. "I" and its forms name nobody.
+    static func capitalizedWords(_ text: String) -> Set<String> {
+        var names = Set<String>()
+        var sentenceStart = true
+        for piece in text.split(whereSeparator: \.isWhitespace) {
+            var word = piece
+            while let c = word.first, !c.isLetter { word = word.dropFirst() }
+            while let c = word.last, !c.isLetter { word = word.dropLast() }
+            if word.dropFirst().contains(where: \.isUppercase) || !sentenceStart && word.first?.isUppercase == true,
+               !Fillers.firstPerson.contains(word.lowercased()) {
+                names.insert(word.lowercased())
+            }
+            sentenceStart = piece.last.map { ".!?".contains($0) } ?? false
+        }
+        return names
     }
 
     /// Where the rules would also drop it: "like" before a comma or a sentence

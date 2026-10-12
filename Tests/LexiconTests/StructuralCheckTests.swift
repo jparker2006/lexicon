@@ -647,6 +647,8 @@ let rejectedModelOutputs: [Pair] = [
     #expect(StructuralCheck.check("Keep the file. Huh, that's right.",
                                   ruled: "Delete the uh file, actually no, keep the file. Uh huh, that's right.",
                                   terms: []) == .droppedContentWord)
+    #expect(StructuralCheck.check("It takes eighty minutes.", ruled: "It takes, like, you know, eighty minutes.",
+                                  terms: []) == .droppedContentWord)
     // A "like" that ends its sentence hedges nothing in the next one.
     #expect(StructuralCheck.check("It is. Ten people came.", ruled: "It is, like. Ten people came.", terms: []) == nil)
     // Another "like" kept elsewhere does not excuse dropping the hedge.

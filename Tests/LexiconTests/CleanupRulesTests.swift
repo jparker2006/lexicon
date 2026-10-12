@@ -196,6 +196,7 @@ let likeKeptCases: [Case] = [
     Case("It's, like, twenty-five percent slower.", "It's, like, twenty-five percent slower."),
     Case("It takes, um, like, eighty minutes.", "It takes, like, eighty minutes."),
     Case("It takes, like, um, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("It takes, like, you know, eighty minutes.", "It takes, like, eighty minutes."),
     Case("It's, like, um, uh, Postgres.", "It's, like, Postgres."),
     Case("It takes, like, between ten and twenty minutes.", "It takes, like, between ten and twenty minutes."),
     Case("We finished, like, third in the race.", "We finished, like, third in the race."),
