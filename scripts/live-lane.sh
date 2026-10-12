@@ -415,17 +415,18 @@ sitting() {
                     quit=yes
                 fi
             fi
-            if [ -n "$handsfree" ]; then
-                mkdir -p "$STATE"
-                : > "$STATE/sitting.tsv"
-                rm -f "$STATE/sitting.txt"
-            fi
             printf 'opened=%s\nholder=%s\npid=%s\npid-started=%s\n%s' "$(TZ=UTC date '+%Y-%m-%dT%H:%M:%SZ')" "$holder" "$pid" "$since" "${handsfree:+hands-free=yes
 }" > "$MARKER"
             if [ -n "$quit" ]; then
                 ( daily quit ) || { rm -f "$MARKER"; die "the sitting didn't open: the daily Lexicon wasn't quit"; }
                 # The quit happened: put the daily Lexicon back before refusing.
                 require_no_fn_listeners || { rm -f "$MARKER"; ( daily reopen ) || true; die "the sitting didn't open: another app still answers fn"; }
+            fi
+            # Only once it is open: a refused start keeps the rendered steps.
+            if [ -n "$handsfree" ]; then
+                mkdir -p "$STATE"
+                : > "$STATE/sitting.tsv"
+                rm -f "$STATE/sitting.txt"
             fi
             : > "$STATE/sitting.acks"
             echo "live-lane: ${handsfree:+hands-free }sitting open ($(wc -l < "$STATE/sitting.tsv" | tr -d ' ') steps). $(fn_listeners_line)"

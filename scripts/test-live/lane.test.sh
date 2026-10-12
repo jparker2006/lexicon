@@ -229,6 +229,7 @@ echo '2026-10-12 09:40:01.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dicta
 echo '2026-10-12 09:40:09.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationLanded' >> "$T/log.txt"
 expect fail "is not your login home.*|the sitting didn't open: the daily Lexicon wasn't quit" "a hands-free sitting quits the daily Lexicon itself, here refused by the HOME check" "$LANE" sitting start --hands-free
 [ ! -e "$DEV/live-sitting.open" ] && pass "a hands-free sitting whose daily quit failed leaves no marker" || fail "a failed daily quit left the hands-free marker"
+[ -s "$DEV/live-lane/sitting.tsv" ] && pass "a hands-free start whose daily quit failed keeps the rendered steps" || fail "a failed daily quit lost the rendered steps"
 : > "$T/log.txt"
 stop_listeners
 expect fail 'usage: live-lane.sh sitting' "an unknown sitting start option is refused" "$LANE" sitting start --hands
