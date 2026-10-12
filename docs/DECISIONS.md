@@ -244,7 +244,7 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 ### Moved to a later milestone
 
-- **45.** Long hands-free Dictations: a 20-minute Dictation waits 25 to 41 s at fn-up (#47); the switch to Parakeet's streaming mode is #117 (M1).
+- **45.** Long Dictations: a 20-minute Dictation waited 25 to 41 s at fn-up (#47). #117 decodes Parakeet's own 15 s windows while Jake talks, instead of switching to its streaming mode (the ticket allowed either): the streaming encoder is a second download of about 565 MB and scores worse in FluidAudio's benchmark, and the windows are the one-shot path's, so the words are too. It applies to every Dictation longer than one window (14.96 s), push-to-talk as well as hands-free; one that fits in one window is decoded at fn-up, as before. On a synthetic 20-minute WAV fed at real time (release builds, one run a side, provisional) fn-up to text was 388 ms against main's 8,964 ms, the pair Jake kept when he stopped the timed runs; after the per-window decode moved into Lexicon, the PR #242 review asked for numbers at that code, and one more run in one build slot gave 197 ms, with main's text. The p95 verdict is a Live checks run on a quiet Mac. Proposed: Jake was not asked about windows over streaming mode, or about push-to-talk.
 - **46.** Quit and the clipboard restore: quitting right after a paste, or during item 26's 2 s hold, can leave Dictation text on the clipboard. #132 (M1).
 - **47.** The "same app and under 5 s" late-text fallback for apps whose field can't be detected: not built. #60 (M1).
 - **48.** The audio retention sweep runs at launch only, not on a rolling schedule. No ticket yet.
@@ -257,7 +257,7 @@ These stand as built until Jake confirms them as a batch or names items to chang
 - **52.** Launch to fn working, 150 ms: met on warm relaunches (35 to 137 ms), missed on the first launch after an install. Proposed reading, used in architecture.md Budgets and `scripts/bench.sh`: p95 of warm relaunches, with the first launch after an install reported on its own.
 - **53.** History open, 100 ms at p95: the quiet-Mac rerun gave p95 127 and 139 ms over 20 opens, a fail; #150 fixes it. Proposed reading, used the same way: p95 over every open, with the first open after launch also reported on its own.
 - **54.** Lexicon's own work, fn-up to Cmd-V, 10 ms: cold first pastes measured 7.1 to 14.0 ms (#54), under load. A quiet-Mac recheck is still owed.
-- **55.** Memory while dictating, about 160 MB: peak 66 to 68 MB on a 6 s clip, 258 MB on a 20-minute clip (#47). Proposed: keep 160 MB for normal Dictations and measure the 20-minute peak again with #117.
+- **55.** Memory while dictating, about 160 MB: peak 66 to 68 MB on a 6 s clip, 258 MB on a 20-minute clip (#47). With #117 the 20-minute peak was 108 MB, and 112 MB after the per-window decode moved into Lexicon (synthetic WAV, release, one run each), against 250 MB for main on the same WAV: a long Dictation no longer converts the whole clip at fn-up. Proposed: 160 MB holds for every Dictation.
 
 - **68.** The spec lists "`CloudAccess` is the only door to the network" among the compiler-enforced invariants. Only the key is: every cloud key comes through a `CloudAccess`, but the sockets and HTTP calls are plain `URLSession` that would take any request. architecture.md says so; keeping the network behind `CloudAccess` is a review rule (review.md).
 - **76.** Zero retention, which the spec requires before any eval sends Test set audio to a provider (spec "Privacy for eval"), is not on by default for the bake-off's speech providers. Meta's is for organization accounts only ([#111](https://github.com/jparker2006/lexicon/issues/111)); Cartesia Ink and ElevenLabs offer it on Enterprise plans only. [#166](https://github.com/jparker2006/lexicon/issues/166) enforces the spec's rule in code; whichever of these [#77](https://github.com/jparker2006/lexicon/issues/77) adds as a `CloudModel` states its status there.
@@ -303,6 +303,7 @@ The spec's own supersessions, written when it was published; each names the plan
 - **"Never put text on the clipboard behind Jake's back", restored within 8 s** (spec story 26), by item 26's 2 s hold, its one exception.
 - **One active fn tap** (the spec), by item 34 and ADR 0004.
 - **The local model loads on fn-down only** (the spec, ADR 0001), by item 36.
+- **Long Dictations switch to Parakeet's streaming mode** (the spec, Local residency), by item 45's windows decoded while Jake talks (Proposed).
 - **60 ms to first audio, cold or prepared** (the spec), by item 30: the budget is the prepared path.
 - **Tickets Jake can feel stay open until he closes them** (workflow.md, M0), by Q11.
 - **Jake promotes Later items himself** (review.md, M0), by Q13.

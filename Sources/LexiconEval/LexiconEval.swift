@@ -171,8 +171,8 @@ struct PinnedModel: LocalTranscriber {
     var isResident: Bool { get async { await parakeet.isResident } }
     func load() async throws { try await parakeet.load() }
     func unload() async {}
-    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String {
-        try await parakeet.transcribe(clip, terms: terms, priority: priority)
+    func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        parakeet.session(terms: terms, priority: priority)
     }
 }
 
