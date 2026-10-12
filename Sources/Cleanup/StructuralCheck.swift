@@ -59,10 +59,15 @@ enum StructuralCheck {
         let kept = Set(out.map(\.word))
         let retracted = retractedSpans(ref)
         let openers = openerRun(ref)
+        // A filler the rules keep as meaning ("uh huh", "like, eighty"): the rules own that call.
+        let meaningful = Fillers.meaningful(in: refText, rules: .empty)
         for (k, token) in ref.enumerated() where !retracted.contains(k) && !kept.contains(token.word) {
             let word = token.word
-            if Fillers.hard.contains(word) { continue }
-            if softFillers.contains(word) {
+            if meaningful.contains(word) {
+                failures.insert(.droppedContentWord)
+            } else if Fillers.hard.contains(word) {
+                continue
+            } else if softFillers.contains(word) {
                 if !softFillerMayGo(ref, k, inOpener: openers[k]) { failures.insert(.droppedContentWord) }
             } else if mustKeep.contains(word) {
                 failures.insert(.droppedContentWord)

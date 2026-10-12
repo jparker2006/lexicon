@@ -245,7 +245,7 @@ let newCases: [Accepted] = [
              [
               "Keep the last 14 days of logs, and archive anything older than 1 year.",
              ]),
-    // ramble
+    // ramble (r01's gold keeps "like, ten": a hedge before a number)
     Accepted("r01",
              "Okay so, um, here's the migration plan. First we freeze writes for, like, ten minutes, "
              + "and then we run the backfill, which takes about an hour. After that we switch the reads "
@@ -254,7 +254,7 @@ let newCases: [Accepted] = [
              + "metrics job, it's fine. And then the last thing is, uh, the on-call doc needs an update "
              + "with the new runbook.",
              [
-              "Here's the migration plan. First we freeze writes for 10 minutes, and then we run the "
+              "Here's the migration plan. First we freeze writes for, like, 10 minutes, and then we run the "
                 + "backfill, which takes about an hour. After that we switch the reads over to the new "
                 + "table, and we keep the old one around for a week in case we need to roll "
                 + "back.\n\nSeparately, the dashboard is still showing the old numbers. Please don't touch the "
@@ -624,3 +624,16 @@ let rejectedModelOutputs: [Pair] = [
          ruled: "The button should say save, not submit. Make it blue, like the primary color in the theme.",
          "The button should say save, not submit. Make it blue, the primary color in the theme."),
 ]
+
+/// A filler the rules keep as meaning may not go in AI cleanup either.
+@Test func aFillerTheRulesKeepMustSurvive() {
+    #expect(StructuralCheck.check("Huh, that's right.", ruled: "Uh huh, that's right.", terms: []) == .droppedContentWord)
+    #expect(StructuralCheck.check("Oh, the build failed again.", ruled: "Uh oh, the build failed again.", terms: [])
+        == .droppedContentWord)
+    #expect(StructuralCheck.check("It takes eighty minutes.", ruled: "It takes, like, eighty minutes.", terms: [])
+        == .droppedContentWord)
+    #expect(StructuralCheck.check("It's Postgres but faster.", ruled: "It's, like, Postgres but faster.", terms: [])
+        == .droppedContentWord)
+    #expect(StructuralCheck.check("Can you explain this regex?", ruled: "Can you, like, explain this regex?", terms: [])
+        == nil)
+}

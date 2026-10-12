@@ -21,7 +21,8 @@ public enum TextPass {
         var dictationStart = true
         return ruled.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
             .map { line in
-                let cleaned = Fillers.clean(line, dictationStart: dictationStart, rules: rules)
+                var meaningful = Set<String>()
+                let cleaned = Fillers.clean(line, dictationStart: dictationStart, rules: rules, meaningful: &meaningful)
                 if !cleaned.isEmpty { dictationStart = false }
                 return cleaned
             }
@@ -112,20 +113,42 @@ enum Fillers {
 
     /// The filler pass over one line. A line always starts a sentence;
     /// `dictationStart`: no earlier line kept anything.
-    static func clean(_ line: Substring, dictationStart: Bool, rules: RuleSet) -> String {
+    /// Fillers the rules keep because they carry meaning: the "uh" of "uh huh", a "like"
+    /// before a number, a name or a Term. AI cleanup may not drop them either
+    /// (`StructuralCheck`). A "like" kept only by a cautious keeper ("like, in") may go.
+    static func meaningful(in text: String, rules: RuleSet) -> Set<String> {
+        var found = Set<String>()
+        var dictationStart = true
+        for line in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        where !clean(line, dictationStart: dictationStart, rules: rules, meaningful: &found).isEmpty {
+            dictationStart = false
+        }
+        return found
+    }
+
+    /// `meaningful` collects the words `Fillers.meaningful(in:)` describes.
+    static func clean(_ line: Substring, dictationStart: Bool, rules: RuleSet,
+                      meaningful: inout Set<String>) -> String {
         var tokens = line.split(whereSeparator: \.isWhitespace).map(Token.init)
         // The speech model capitalizes after a sentence end, so "etc. Um, ship it"
         // ends a sentence and "etc. um, then ship it" does not.
         for i in tokens.indices.dropLast() where tokens[i].isAbbreviation && !titles.contains(tokens[i].word) {
             tokens[i].endsSentence = tokens[i + 1].isCapitalized
         }
-        // "oh" is a zero in a run that touches a number: "oh oh seven", "five oh oh oh".
+        // Runs of one word with nothing between: three or more is emphasis ("go go go"),
+        // and "oh" touching a number is a zero ("oh oh seven", "five oh oh oh").
         var run = tokens.startIndex
         while run < tokens.endIndex {
-            guard tokens[run].word == "oh" else { run += 1; continue }
             var end = run + 1
-            while end < tokens.endIndex, tokens[end].word == "oh" { end += 1 }
-            if run > 0 && tokens[run - 1].isNumber || end < tokens.endIndex && tokens[end].isNumber {
+            while end < tokens.endIndex, tokens[end - 1].trailing.isEmpty, tokens[end].word == tokens[run].word {
+                end += 1
+            }
+            if end - run >= 3, !tokens[run].word.isEmpty {
+                for k in run..<end { tokens[k].isEmphasis = true }
+            }
+            if tokens[run].word == "oh",
+               run > 0 && tokens[run - 1].trailing.isEmpty && tokens[run - 1].isNumber
+                || end < tokens.endIndex && tokens[end - 1].trailing.isEmpty && tokens[end].isNumber {
                 for k in run..<end { tokens[k].isZero = true }
             }
             run = end
@@ -151,12 +174,17 @@ enum Fillers {
                 continue
             }
 
-            // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
             // "like, um, uh, eighty": the first word after the fillers decides whether "like" is a hedge.
             // A filler that ends the sentence ends the search: "like, um. Ten failed" has no hedge.
-            let hedge = token.word == "like"
-                && tokens[(i + 1)...].first { !$0.isHardFiller || $0.endsSentence }
-                    .map { !$0.isHardFiller && ($0.keepsLike || rules.isWritten($0.text)) } == true
+            let likeObject = token.word == "like"
+                ? tokens[(i + 1)...].first { !$0.isHardFiller || $0.endsSentence }
+                    .flatMap { $0.isHardFiller ? nil : $0 }
+                : nil
+            let hedge = likeObject.map { $0.keepsLike || rules.isWritten($0.text) } ?? false
+            if likeObject.map({ $0.isEstimate || $0.isName || rules.isWritten($0.text) }) == true {
+                meaningful.insert(token.word)
+            }
+            // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
                                  after: i + 2 < tokens.count ? tokens[i + 2] : nil, hedge: hedge,
                                  dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
@@ -179,6 +207,7 @@ enum Fillers {
                 continue
             }
 
+            if token.isHardFiller { meaningful.insert(token.word) }  // "uh huh", a quoted "uh"
             var text = String(token.text)
             if sentenceKept == 0, droppedOpener, !token.isCode, !rules.isWritten(token.text) {
                 text = Token.capitalized(text)
@@ -213,8 +242,10 @@ enum Fillers {
         -> Int {
         let word = token.word
         if protected.contains(word) || token.isQuoted { return 0 }
-        if let next, token.trailing.isEmpty, interjections.contains(word + " " + next.word) { return 0 }
-        if let prior, prior.trailing.isEmpty, interjections.contains(prior.word + " " + word) { return 0 }
+        if let next, token.trailing.isEmpty, !next.isZero, interjections.contains(word + " " + next.word) { return 0 }
+        if let prior, prior.trailing.isEmpty, !token.isZero, interjections.contains(prior.word + " " + word) {
+            return 0
+        }
         if token.isHardFiller { return 1 }
 
         if dictationStart, let next, !token.endsSentence {
@@ -243,7 +274,7 @@ enum Fillers {
         if let previous, token.isWord, !meantDoubles.contains(word),
            !previous.text.last!.isPunctuation, previous.word == word,
            previous.text == token.text || previous.opensSentence,
-           !token.isNumber, !token.isZero {
+           !token.isNumber, !token.isZero, !token.isEmphasis {
             return 1
         }
         return 0
@@ -263,8 +294,9 @@ private struct Token {
     var endsSentence: Bool
     /// "etc.", "e.g.", "p.m.": the period may be the abbreviation's own.
     let isAbbreviation: Bool
-    /// An "oh" read as zero (`Fillers.clean`).
+    /// An "oh" read as zero, and a word said three or more times running (`Fillers.clean`).
     var isZero = false
+    var isEmphasis = false
 
     init(_ text: Substring) {
         var body = text
@@ -326,8 +358,10 @@ private struct Token {
     var isName: Bool { text.contains(where: \.isUppercase) && !Token.firstPerson.contains(word) }
     /// The speech model started a sentence here: "Um", "Then". Not "I", which is always capitalized.
     var isCapitalized: Bool { text.first(where: \.isLetter)?.isUppercase == true && !Token.firstPerson.contains(word) }
-    var keepsLike: Bool {
-        word.contains(where: \.isNumber) || isName || Fillers.likeKeepers.contains(word)
+    var keepsLike: Bool { isEstimate || isName || Fillers.likeKeepers.contains(word) }
+    /// "5 MB", "$5", "eighty", "twenty-something", "tenths".
+    var isEstimate: Bool {
+        word.contains(where: \.isNumber)
             || word.split(separator: "-").first.map { Token.isNumberWord(String($0)) } ?? false
     }
 

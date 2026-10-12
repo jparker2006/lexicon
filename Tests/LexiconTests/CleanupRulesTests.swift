@@ -176,6 +176,9 @@ let numberRepeatCases: [Case] = [
     Case("Our team won won the hackathon.", "Our team won the hackathon."),
     Case("Ship it to to five users first.", "Ship it to five users first."),
     Case("Ha ha, very funny.", "Ha ha, very funny."),
+    // Three or more in a row is emphasis, not a stutter.
+    Case("Go go go, ship it.", "Go go go, ship it."),
+    Case("It's a no no no from me.", "It's a no no no from me."),
 ]
 
 @Test(arguments: numberRepeatCases)
@@ -236,7 +239,7 @@ func likeStaysBeforeAnyNumberOrName(_ c: Case) {
 /// "uh huh" and "mm-hmm" are answers, not fillers.
 let interjectionCases: [Case] = [
     Case("Uh huh, that's right.", "Uh huh, that's right."),
-    // Hyphenated forms already pass on main: guards for the two-word fix.
+    // Hyphenated forms are one word: guards for the two-word rule.
     Case("Uh-huh, that's right.", "Uh-huh, that's right."),
     Case("Mm-hmm, ship it.", "Mm-hmm, ship it."),
     Case("Mm hmm, let's do that.", "Mm hmm, let's do that."),
@@ -249,6 +252,9 @@ let interjectionCases: [Case] = [
     // With a comma between, the filler is a filler.
     Case("Uh, huh? I missed that.", "Huh? I missed that."),
     Case("Uh, oh no, the build broke.", "Oh no, the build broke."),
+    // An "oh" inside a number is a zero, so the "uh" before it is a filler.
+    Case("Call room five uh oh seven.", "Call room five oh seven."),
+    Case("Uh oh, five servers are down.", "Uh oh, five servers are down."),
 ]
 
 @Test(arguments: interjectionCases)
