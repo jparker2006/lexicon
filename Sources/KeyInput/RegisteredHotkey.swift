@@ -1,6 +1,7 @@
 import Carbon.HIToolbox
 import Foundation
 import os
+import LexiconDomain
 
 /// A key Lexicon takes from the system only while it is registered: the app in
 /// front never sees it, and no event tap is involved, so no key waits on
@@ -99,4 +100,8 @@ extension Hotkey {
         if modifiers.contains(.shift) { carbon |= shiftKey }
         return UInt32(carbon)
     }
+}
+
+extension HostTime {
+    init(carbonEventTime seconds: Double, now: HostTime) { self = now }
 }

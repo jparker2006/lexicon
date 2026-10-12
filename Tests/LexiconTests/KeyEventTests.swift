@@ -230,3 +230,15 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     _ = tap.handle(.keyDown, fromKeyboard(keyEvent(53)))  // a second report of it changes nothing
     #expect(asked.withLock { $0 } == [true, false])
 }
+
+@Test func aHotkeyPressIsStampedWithItsOwnEventTime() {
+    // Carbon's event time is seconds on the same uptime clock: the hotkey's Esc keeps the time it
+    // was pressed, not when two thread hops later the recognizer gets it. An unset, future or
+    // over-a-second-old time is taken as now, as for a CGEvent.
+    let now = at(0)
+    let seconds = Double(now.nanoseconds) / 1e9
+    #expect(HostTime(carbonEventTime: seconds - 0.005, now: now) == HostTime(nanoseconds: now.nanoseconds - 5_000_000))
+    #expect(HostTime(carbonEventTime: 0, now: now) == now)
+    #expect(HostTime(carbonEventTime: seconds + 1, now: now) == now)
+    #expect(HostTime(carbonEventTime: seconds - 2, now: now) == now)
+}
