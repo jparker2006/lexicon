@@ -52,6 +52,9 @@ DAILY_ID=dev.jparker.lexicon
 # Jake's items, kept from every open request seen (#233): a hands-off result
 # answers the request, and the merge closes the issue, before his sitting comes.
 JAKE="$STATE/jake-items.tsv"
+# Each Jake item passed in a sitting (issue, head, item) while its request is
+# still open, so the next look doesn't add it back.
+PASSED="$STATE/jake-passed.tsv"
 # The windows the harness posted keys in, which idle skips (idle_seconds).
 POSTED="$STATE/posted-input.tsv"
 # The unified log reader; a test sets its own, so it never reads the real Mac's.
@@ -286,23 +289,30 @@ jake_lock() {
 jake_unlock() { rm -f "$JAKE.lock"; }
 
 # Writes $ISSUES.jake: the kept Jake items (issue, head, then the item's
-# fields), first seen first, with each open request's added. An issue's newer
-# request replaces what its older head left. Only the lane's holder saves it
-# to $JAKE, on every queue, preflight and render, so an item is kept before the
-# hands-off result that answers its request; a builder's look changes nothing.
+# fields), first seen first, with each open request's added unless it passed.
+# An issue's newer request replaces what its older head left. Only the lane's
+# holder saves it to $JAKE, on every queue, preflight and render, so an item is
+# kept before the hands-off result that answers its request; a builder's look
+# changes nothing.
 remember_jake_items() {
     requests > "$ISSUES.remember"
     mine=
     if read_lock 2> /dev/null && holds; then mine=1; jake_lock; fi
     { [ ! -f "$JAKE" ] || cat "$JAKE"; } > "$ISSUES.kept"
+    { [ ! -f "$PASSED" ] || cat "$PASSED"; } > "$ISSUES.passed"
     awk -F'\t' 'FILENAME == ARGV[1] { head[$2] = $3; next } !($1 in head) || head[$1] == $2' "$ISSUES.remember" "$ISSUES.kept" > "$ISSUES.jake"
     while IFS='	' read -r created issue head index; do
         items=$(request_body "$issue" "$index" | scripts/live-request.sh items - 2> /dev/null) || continue
         printf '%s\n' "$items" | awk -F'\t' -v i="$issue" -v h="$head" '$3 == "jake" { print i "\t" h "\t" $0 }'
-    done < "$ISSUES.remember" | awk -F'\t' 'FILENAME == ARGV[1] { seen[$1 FS $2 FS $3] = 1; next } !seen[$1 FS $2 FS $3]++' "$ISSUES.jake" - >> "$ISSUES.jake"
+    done < "$ISSUES.remember" > "$ISSUES.open"
+    awk -F'\t' 'FILENAME == ARGV[1] || FILENAME == ARGV[2] { seen[$1 FS $2 FS $3] = 1; next } !seen[$1 FS $2 FS $3]++' \
+        "$ISSUES.jake" "$ISSUES.passed" "$ISSUES.open" >> "$ISSUES.jake"
     if [ -n "$mine" ]; then
         cp "$ISSUES.jake" "$JAKE.$$"
         mv "$JAKE.$$" "$JAKE"
+        # A pass is needed only while its request is open: then nothing can add it back.
+        awk -F'\t' 'FILENAME == ARGV[1] { open[$1 FS $2 FS $3] = 1; next } ($1 FS $2 FS $3) in open' "$ISSUES.open" "$ISSUES.passed" > "$PASSED.$$"
+        mv "$PASSED.$$" "$PASSED"
         jake_unlock
     fi
 }
@@ -454,12 +464,13 @@ sitting() {
                 where=; [ "$issue" = - ] || where=" (#$issue $head item $item)"
                 printf '%s\n' "$step. $title$where: ${ack:-no ack}"
             done < "$STATE/sitting.tsv"
-            # A step acked pass or fail leaves Jake's queue; a skip, or no ack, keeps it for the next sitting.
+            # A step acked pass leaves Jake's queue; a fail, a skip or no ack keeps it,
+            # since nothing installs until his items pass (Q6).
             jake_lock
             touch "$JAKE"
-            awk -F'\t' 'FILENAME == ARGV[1] { done[$1] = ($2 == "pass" || $2 == "fail"); next }
-                FILENAME == ARGV[2] { if (done[$1]) gone[$2 FS $3 FS $4] = 1; next }
-                !(($1 FS $2 FS $3) in gone)' "$STATE/sitting.acks" "$STATE/sitting.tsv" "$JAKE" > "$JAKE.$$"
+            awk -F'\t' 'FILENAME == ARGV[1] { passed[$1] = ($2 == "pass"); next }
+                passed[$1] && $2 != "-" { print $2 "\t" $3 "\t" $4 }' "$STATE/sitting.acks" "$STATE/sitting.tsv" >> "$PASSED"
+            awk -F'\t' 'FILENAME == ARGV[1] { gone[$1 FS $2 FS $3] = 1; next } !(($1 FS $2 FS $3) in gone)' "$PASSED" "$JAKE" > "$JAKE.$$"
             mv "$JAKE.$$" "$JAKE"
             jake_unlock
             rm -f "$MARKER" "$STATE/sitting.tsv" "$STATE/sitting.txt" "$STATE/sitting.acks"
@@ -625,7 +636,7 @@ timers() {
 idle_seconds() {
     hid=$(ioreg -c IOHIDSystem -d 4 | awk '/"HIDIdleTime"/ { printf "%.3f", $NF / 1000000000; exit }')
     [ -n "$hid" ] || return 0
-    { [ ! -f "$POSTED" ] || cat "$POSTED"; } | awk -F'\t' -v now="$(date +%s)" -v hid="$hid" '
+    { [ ! -f "$POSTED" ] || tail -n 50 "$POSTED"; } | awk -F'\t' -v now="$(date +%s)" -v hid="$hid" '
         { from[NR] = $1; to[NR] = $2; idle[NR] = $3 }
         END {
             last = now - hid
@@ -648,6 +659,8 @@ case "${1:-}" in
         fi
         rm -f "$LOCK.$$"
         echo "live-lane: $name holds the live-app lane (pid $me)"
+        # The harness only appends its windows; idle reads the newest few.
+        if [ -f "$POSTED" ]; then tail -n 50 "$POSTED" > "$POSTED.$$" && mv "$POSTED.$$" "$POSTED"; fi
         # A holder that ended mid-park left Dev's data aside: put it back.
         [ ! -e "$PARKED" ] || restore
         ;;

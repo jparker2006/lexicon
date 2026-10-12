@@ -34,12 +34,15 @@ enum PostedInput {
         return (value as? NSNumber).map { $0.doubleValue / 1_000_000_000 }
     }
 
-    /// Appends one window, keeping the newest 50: `idle` only ever steps back a few.
+    /// Appends one window as a single write, so two checks at once can't lose
+    /// each other's line. `live-lane.sh take` trims the file; `idle` reads the end.
     static func note(from: Double, idle: Double) {
-        let line = String(format: "%.3f\t%.3f\t%.3f", from, Date().timeIntervalSince1970, idle)
-        let kept = ((try? String(contentsOf: file, encoding: .utf8)) ?? "").split(separator: "\n").suffix(49)
+        let line = String(format: "%.3f\t%.3f\t%.3f\n", from, Date().timeIntervalSince1970, idle)
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? (kept + [Substring(line)]).joined(separator: "\n").appending("\n").write(to: file, atomically: true, encoding: .utf8)
+        let fd = open(file.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        guard fd >= 0 else { return }
+        defer { close(fd) }
+        _ = line.withCString { write(fd, $0, strlen($0)) }
     }
 }
 #endif

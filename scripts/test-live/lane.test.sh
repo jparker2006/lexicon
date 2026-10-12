@@ -114,7 +114,7 @@ stop_listeners
 
 # Sittings. Each case starts with no Jake items kept from the cases before
 # (render keeps them past their request's result, #233).
-fresh_queue() { rm -f "$DEV/live-lane/jake-items.tsv"; }
+fresh_queue() { rm -f "$DEV/live-lane/jake-items.tsv" "$DEV/live-lane/jake-passed.tsv"; }
 # #53's hold step without its speak field can't render.
 fresh_queue
 request "claude/issue-53 @ $read" "$F/53-hold-no-speak.txt" > "$T/r53b"
@@ -258,7 +258,11 @@ expect ok '^2\. Mic prompt \(#57\)' "a skipped step stays queued" "$LANE" sittin
 "$LANE" sitting start > /dev/null
 "$LANE" sitting ack 2 fail no prompt > /dev/null
 "$LANE" sitting end > /dev/null
-expect ok '^No Jake items are queued, so no sitting\.$' "a step acked pass or fail leaves the queue" "$LANE" sitting render
+expect ok '^2\. Mic prompt \(#57\)' "a failed step stays queued until it passes (Q6)" "$LANE" sitting render
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 pass > /dev/null
+"$LANE" sitting end > /dev/null
+expect ok '^No Jake items are queued, so no sitting\.$' "a step acked pass leaves the queue" "$LANE" sitting render
 # The queue is read and rewritten under a lock, so a look at it never undoes a
 # sitting end's change; a holder that died leaves a lock the next one clears.
 sleep 60 &
@@ -267,6 +271,14 @@ echo "$held" > "$DEV/live-lane/jake-items.tsv.lock"
 expect fail 'the Jake queue is locked by pid' "a second writer waits for the queue's lock, then refuses" "$LANE" queue
 kill "$held"; wait "$held" 2> /dev/null || true
 expect ok '^No Jake items are queued' "a dead holder's lock is cleared" "$LANE" sitting render
+# A pass holds while its request is still open: the next look doesn't bring it back.
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" sitting render > /dev/null
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 pass > /dev/null
+"$LANE" sitting end > /dev/null
+"$LANE" queue > /dev/null
+expect ok '^No Jake items are queued, so no sitting\.$' "a passed step stays out while its request is open" "$LANE" sitting render
 # A newer request for the issue replaces what the older head left.
 cp "$T/issues-57.json" "$T/issues.json"
 "$LANE" queue > /dev/null
@@ -288,13 +300,15 @@ expect fail 'Jake is at the keyboard \(idle 45 s, want 60 s\)' "a longer wait fo
 # The harness notes each window it posts keys in (from, to, the idle time when
 # it began; lexicon-harness's PostedInput). Input inside one is the harness's,
 # so idle steps back to the last input before it, across windows back to back.
-now=$(date +%s)
+now=1760000000
+printf '#!/bin/sh\n[ "$1" = +%%s ] && { echo %s; exit 0; }\nexec /bin/date "$@"\n' "$now" > "$T/bin/date"
+chmod +x "$T/bin/date"
 printf '%s\t%s\t%s\n' $((now - 40)) $((now - 30)) 50 $((now - 12)) $((now - 6)) 25 > "$DEV/live-lane/posted-input.tsv"
 fake_idle 7
-expect ok '^live-lane: idle (89|9[01]) s$' "a paste-check's own keys don't reset idle, nor an earlier run's" "$LANE" idle 60
+expect ok '^live-lane: idle 90 s$' "a paste-check's own keys don't reset idle, nor an earlier run's" "$LANE" idle 60
 fake_idle 2
 expect fail 'Jake is at the keyboard \(idle 2 s' "input after the window ends is Jake's" "$LANE" idle 60
-rm "$DEV/live-lane/posted-input.tsv"
+rm "$DEV/live-lane/posted-input.tsv" "$T/bin/date"
 
 # A long wait becomes a timer and frees the lane; a due timer stays queued until the holder reads it.
 expect ok 'due in 600 s; released the lane' "a long wait becomes a timer that releases the lane" "$LANE" timer 600 memory-settle
