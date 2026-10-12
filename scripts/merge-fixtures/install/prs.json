@@ -1,0 +1,17 @@
+[
+  {
+    "number": 105,
+    "state": "MERGED",
+    "headRefName": "claude/issue-45",
+    "title": "M0: Test hooks and the Accessibility harness (#45)",
+    "body": "Refs #45"
+  },
+  {
+    "number": 112,
+    "state": "MERGED",
+    "headRefName": "claude/issue-63",
+    "title": "M1: History window: rows, copy and search (#63)",
+    "body": "Refs #63\n\nTry (about 3 min): open History, click a row (it copies), play, pin, Retry.",
+    "added": "the try step the orchestrator wrote for #63 on the Try list (#178)"
+  }
+]
