@@ -466,10 +466,9 @@ dictating() {
 
 daily() {
     require_lane
-    # Only around a sitting (Q8): sitting start quits it, sitting end reopens it.
     # Only around a sitting (Q8): quit inside one, reopen only what quit closed.
     case "${1:-}" in
-        quit) sitting_open || die "daily quit runs only in an open sitting; sitting start quits it for a sitting with fn steps" ;;
+        quit) sitting_open || die "daily quit runs only in an open sitting; sitting start quits it for a sitting with fn steps, and sitting start --hands-free once Jake says \"hands free\"" ;;
         reopen) [ -e "$STATE/daily-quit" ] || die "daily reopen only reopens a daily Lexicon that daily quit closed" ;;
     esac
     # lsappinfo, System Events and open reach the real Mac whatever HOME says,
