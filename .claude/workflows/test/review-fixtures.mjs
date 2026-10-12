@@ -179,6 +179,14 @@ test("a critic's brief and schema carry the CI gate", async () => {
   }
 })
 
+test('any incomplete text, even a bare pair of quotes, leaves the run unstamped', async () => {
+  // incomplete is never filtered in code: a real refused read must always block the stamp.
+  const { dir, sha } = fixtureRepo('quotes', ['Sources/Foo/a.swift'])
+  const r = await run(dir, { issue: 1, sha }, () => ({ ...CLEAN, incomplete: '""' }))
+  assert(r.result.complete === false, 'complete should be false')
+  assert(r.result.reviewedSha === null, `reviewedSha should be null, got ${r.result.reviewedSha}`)
+})
+
 test('a newline in an INCOMPLETE reason stays on the INCOMPLETE line', async () => {
   const { dir, sha } = fixtureRepo('incomplete-newline', ['Sources/Foo/a.swift'])
   const r = await run(dir, { issue: 1, sha }, (p, o) =>
