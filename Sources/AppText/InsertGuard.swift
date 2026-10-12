@@ -21,7 +21,7 @@ public enum InsertDecision: Sendable, Hashable {
 
 /// The late-text rule (#4), the single home of it: insert only if Jake is still
 /// in the same app and field he was in at fn-up and has not typed or clicked
-/// since the mark. Applied to EVERY insert, fast or late: there is no grace
+/// since the mark; in an app that exposes no field, the same app under 5 s. Applied to EVERY insert, fast or late: there is no grace
 /// window, so a quick cloud final after an app switch can never land in the
 /// wrong app. Every `TextDestination.insert` calls this first.
 ///

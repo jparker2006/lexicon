@@ -70,7 +70,9 @@ public actor TargetApp: TextDestination {
         let focus: FocusSnapshot
         let bundleID: String?
         let mark: InputMark
-        let capturedAt: HostTime
+        /// Continuous: it keeps counting while the Mac sleeps, so a lid closed
+        /// mid-Dictation counts toward the fieldless window.
+        let capturedAt: ContinuousClock.Instant
         let field: FieldRef?
         /// What the receipt stores (`Focus.durableFingerprint`).
         let fingerprint: String?
@@ -109,8 +111,9 @@ public actor TargetApp: TextDestination {
     }
 
     public func target() async -> Target? {
-        // Both name fn-up: the mark for typing since, the time for the fieldless window.
-        let mark = input.mark(), capturedAt = HostTime.now()
+        // Both name the moment the target is taken (fn-up, or the ⌃⌘V press): the mark
+        // for typing since, the time for the fieldless window.
+        let mark = input.mark(), capturedAt = ContinuousClock.now
         guard let focus = Focus.now() else { return nil }
         // A password field never gets a Dictation, in any mode, and a link or button
         // takes none. An app that exposes no focused element at all gets the paste.
@@ -141,7 +144,7 @@ public actor TargetApp: TextDestination {
             }
             return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
                                        inputSinceMark: input.hasInput(since: target.mark),
-                                       sinceFnUp: HostTime.now().duration(since: target.capturedAt)), now)
+                                       sinceFnUp: ContinuousClock.now - target.capturedAt), now)
         }
         let paste: ClipboardKeeper.PasteID, now: Focus?
         switch order {
