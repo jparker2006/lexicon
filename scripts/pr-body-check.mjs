@@ -20,7 +20,7 @@
 //              scripts/install.sh copies to Jake's Try list) or the older "Check: ...",
 //              then at most one line of at most
 //              FOOTER_WORDS words: the footer a tool adds (the "Generated with" line)
-//   words      at most WORD_CAP words up to the Check: line. A word is a token
+//   words      at most WORD_CAP words up to the closing line. A word is a token
 //              between spaces with a letter or digit, so table rules and tree
 //              branches don't count; nor does a closed <details> block, or the
 //              footer
@@ -128,7 +128,7 @@ export function checkBody({ body, files = [], commits = [], summary = null, modu
   else {
     const after = lines.slice(check + 1).filter(l => l.trim())
     if (after.length > 1 || (after[0] || '').split(/\s+/).length > FOOTER_WORDS) {
-      fail('check', `only a footer may follow the Check: line: one line of at most ${FOOTER_WORDS} words`)
+      fail('check', `only a footer may follow the closing Try line: one line of at most ${FOOTER_WORDS} words`)
     }
   }
 
@@ -147,7 +147,7 @@ export function checkBody({ body, files = [], commits = [], summary = null, modu
   }
   const counted = upTo.filter((l, i) => !hidden.has(i))
   const words = counted.join(' ').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
-  if (words > WORD_CAP) fail('words', `${words} words, over the ${WORD_CAP}-word cap (counted up to the Check: line); cut ${words - WORD_CAP}`)
+  if (words > WORD_CAP) fail('words', `${words} words, over the ${WORD_CAP}-word cap (counted up to the closing Try line); cut ${words - WORD_CAP}`)
 
   const scored = files.filter(f => scorePaths().some(re => re.test(f)))
   if (scored.length) {
@@ -205,11 +205,14 @@ export function readModules(n, sources, gh = runGh) {
     return { modules: ticketModules(ticket, sources) }
   } catch (e) {
     if (e.code === 'ETIMEDOUT') return { modules: [], error: `no answer from gh within ${GH_TIMEOUT_MS / 1000} s reading #${n}'s Modules line; check the network and run it again` }
-    const said = String(e.stderr || e.message).trim().split('\n')[0]
+    const all = String(e.stderr || e.message).trim()
     // gh issue view says a missing issue as "GraphQL: Could not resolve ..." and
     // no access as "GraphQL: Resource not accessible ..."; the REST paths say
-    // "HTTP 403" and the like. A rate limit (even as a 403) or a 408 is transient.
-    const refused = /^GraphQL: (?:Could not resolve|Resource not accessible)|HTTP 40[0-79]/.test(said) && !/rate limit/i.test(said)
+    // "HTTP 403" and the like, on any line. A rate limit or abuse wait (even as
+    // a 403) or a 408 is transient.
+    const why = all.split('\n').find(l => /^GraphQL: (?:Could not resolve|Resource not accessible)|HTTP 40[0-79]/.test(l))
+    const refused = why && !/rate limit|abuse detection|wait a few minutes/i.test(all)
+    const said = why || all.split('\n')[0]
     if (refused) return { modules: [], error: `GitHub refused reading #${n} or has no such issue (${said}); fix the Refs line or gh's access` }
     return { modules: [], error: `couldn't read #${n}'s Modules line with gh (${said}); check gh and run it again` }
   }

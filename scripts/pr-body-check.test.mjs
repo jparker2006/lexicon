@@ -91,7 +91,7 @@ test('Blast Radius is one word from the list', () => {
 })
 
 test('the closing line may be the install step\'s Try form', () => {
-  // scripts/install.sh reads "Try (about N min): ..." into Jake's Try list.
+  // #159's install step copies "Try (about N min): ..." lines to Jake's Try list.
   assert.deepEqual(checkBody({ body: body('Check: open a PR and see the check run.', 'Try (about 2 min): open a PR and see the check run.') }), [])
   assert.deepEqual(rules(checkBody({ body: body('Check: open a PR and see the check run.', 'Try: open a PR.') })), ['check'])
 })
@@ -198,7 +198,8 @@ test("the ticket read has a deadline and names a refusal as one", () => {
   assert.match(timedOut.error, /no answer from gh within \d+ s/)
   for (const stderr of ['HTTP 403: Resource not accessible by integration',
     'GraphQL: Resource not accessible by integration (repository.issue)',
-    'GraphQL: Could not resolve to an issue or pull request with the number of 999999. (repository.issue)']) {
+    'GraphQL: Could not resolve to an issue or pull request with the number of 999999. (repository.issue)',
+    'warning: gh is out of date\nHTTP 403: Resource not accessible by integration']) {
     const refused = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr }) })
     assert.match(refused.error, /GitHub refused/)
     assert.doesNotMatch(refused.error, /again/)
