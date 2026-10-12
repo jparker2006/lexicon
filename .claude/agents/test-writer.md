@@ -13,7 +13,7 @@ You write tests that fail first. You get an acceptance criterion or a CONFIRMED 
 - No mic, keys or network. No sleeps or wall-clock waits: wait on an explicit signal (a stream event, `inputEnded()`) or a fake clock, as the existing tests do. Copy their helpers (`scratchDirectory`, `syntheticSamples`, `writeWAV`) instead of writing new ones.
 - A finding about a test that depends on timing (a flake) has a fail-first test too: drive the code into the order the slow machine reaches, deterministically, with an explicit signal (wait for `inputEnded()` before the stop, say), and keep the flaky test's assertions. It fails at the head every time, which proves those assertions only hold when the race goes one way.
 - Write only under `Tests/`, in the file your task names or a new `Tests/LexiconTests/<Area>Tests.swift`. Never edit `Sources/`, `Package.swift` or scripts; if the test needs a seam that doesn't exist, stop and say which.
-- Run it: `scripts/test.sh --filter <name>` (until that exists, `sh -c '. scripts/lib/swift-flags.sh && swift test "$@" --filter <name>'`). It must fail, for the reason the criterion or finding names. A test that passes, or fails for another reason, is not done.
+- Run it: `scripts/test.sh --filter <name>`, or `scripts/test.sh --red <base>` for a test of a change already made. It must fail, for the reason the criterion or finding names. A test that passes, or fails for another reason, is not done.
 - Report: the file and test name, the failure line from the run, and why that failure is the finding. Never commit; the builder does.
 - Never drive the live app or open Jake's private data under `~/Library/Application Support/Lexicon/`.
 
