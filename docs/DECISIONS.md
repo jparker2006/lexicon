@@ -237,6 +237,8 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 **44. Our own fn state machine, not Hex's code.** Spec: copy Hex's state machine and tests (MIT). Built: a smaller fn-only machine with Hex's test scenarios; no Hex code copied. #53's builder (PR #123).
 
+**70. A mic that gives no sound fails with "No sound from the microphone".** Neither the spec nor this file had the rule; #4 left `silentInput` ("exactly-zero samples in the first ~300 ms") declared and never raised, and #144 asked for it. Built: when every raw frame of a hold (before conversion to 16 kHz) is exactly zero, or no frame arrives at all, the Dictation is not transcribed. Its row is failed (`microphone: zeros` or `microphone: noFrames`) with its audio kept, and the pill shows "No sound from the microphone". Judged over the whole hold at fn-up, not its first 300 ms, so a device that starts with zeros and then delivers audio is still transcribed, and Jake learns of a dead mic only at fn-up (the pill shows no notice while recording). Esc on a silent hold fails the same way instead of transcribing. A file of zeros (eval, the dev hook) fails the same way. Stray taps and chord cancels stay silent. A mic that stops after delivering some audio is not caught: its Dictation transcribes what came. Proposed: #144's builder.
+
 ### Moved to a later milestone
 
 - **45.** Long hands-free Dictations: a 20-minute Dictation waits 25 to 41 s at fn-up (#47); the switch to Parakeet's streaming mode is #117 (M1).

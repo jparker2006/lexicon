@@ -146,8 +146,11 @@ func anInputThatRoundsToZeroAt16kHzIsStillTranscribed() async throws {
     let events = await system.conductor.events()
 
     let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
+    await system.conductor.recorder.settle()
 
-    #expect(result.status == .inserted)  // not a dead input, whatever the 16 kHz clip holds
+    // The clip is all zeros at 16 kHz, yet the input was not dead: it is transcribed.
+    #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples.allSatisfy { $0 == 0 })
+    #expect(result.status == .inserted)
     let heard = await notices(events)
     #expect(!heard.contains(.microphoneSilent))
 }
