@@ -19,9 +19,10 @@ export const meta = {
 //              'reviewer': Never lose and Combining with main (review-map.json's
 //              reviewerLenses) plus the PR's top risks, critic-deep on the high tier,
 //              and a blast-radius pass where review-map.json says so
-//   risks      reviewer mode: the PR's top risks, as review.md section names or free text;
-//              up to four lenses run in all, and the output names any left out. With
-//              none, the first high-tier section reached is used.
+//   risks      reviewer mode: the PR's top risks, as review.md section names or free text,
+//              one string or a list; up to four lenses run in all. A named risk left out
+//              leaves the run incomplete. With none, the high-tier sections reached fill
+//              the four, and the output names the ones that didn't fit.
 //   findings   [{path, line, claim, scenario?, cite?}] from a bot or an earlier review,
 //              verified like a critic's
 //   sideBySide run critic and critic-deep on every lens and tag who found what
@@ -36,6 +37,8 @@ const MAX_FINDINGS = 6
 const a = args || {}
 if (!a.issue || !a.sha) throw new Error('lexicon-review needs args {issue, sha}')
 const mode = a.mode === 'reviewer' ? 'reviewer' : 'builder'
+// One risk is often passed as a bare string; iterating that would make a lens per character.
+const risks = [].concat(a.risks || []).filter(Boolean)
 
 // A slot is handed straight to the next waiter, so a new caller can't slip in between.
 let running = 0
@@ -55,14 +58,14 @@ async function gated(fn) {
 const helpers = {}
 // .claude/agents types; prep and blast-radius run as untyped helpers.
 const TYPED = new Set(['critic', 'critic-deep', 'verifier'])
-// Counts the helpers that answered, by type, model and effort, for the Helpers line.
+// Counts every helper started, by type, model and effort, for the Helpers line: one that
+// died and was retried cost a helper too.
 async function hire(type, model, effort, prompt, opts) {
   const call = { ...opts, model, effort }
   if (TYPED.has(type)) call.agentType = type
-  const result = await gated(() => agent(prompt, call))
   const key = `${type} (${model} ${effort})`
-  if (result) helpers[key] = (helpers[key] || 0) + 1
-  return result
+  helpers[key] = (helpers[key] || 0) + 1
+  return gated(() => agent(prompt, call))
 }
 
 const OUT = { type: 'object', properties: { out: { type: 'string' } }, required: ['out'] }
@@ -94,8 +97,9 @@ const FINDINGS = {
     findings: { type: 'array', items: FINDING },
     notes: { type: 'array', items: { type: 'string' }, description: 'possible problems without a citation, one line each' },
     checked: { type: 'string', description: 'what you checked and found fine, briefly' },
+    incomplete: { type: 'string', description: 'a command the lens needed that was refused, failed or cut short (a list at its limit), and what it left unchecked; "" when everything ran' },
   },
-  required: ['findings', 'notes', 'checked'],
+  required: ['findings', 'notes', 'checked', 'incomplete'],
 }
 const VERDICT = {
   type: 'object',
@@ -122,8 +126,7 @@ const BLAST = {
 }
 
 // The snapshot and the diffs come from one node script, so the paths, shas and file
-// lists are computed, not typed by a model. It reads review-map.json and review.md from
-// the checkout the Workflow runs in: today's rules, even on an old sha.
+// lists are computed, not typed by a model.
 function prepCommand(input) {
   return `node --input-type=module <<'PREP'
 import { execFileSync as run } from 'node:child_process'
@@ -234,7 +237,7 @@ if (!info.main && !info.later) {
   const what = (a.reviewed ? `no change of the branch's own since \`${a.reviewed.slice(0, 7)}\`` : 'the diff is empty') + (info.note ? `; ${info.note}` : '')
   return {
     markdown: `## Review\n\nReviewed sha: \`${info.sha.slice(0, 7)}\`. Nothing to review: ${what}.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED.\n\nHelpers: 1 prep (haiku xhigh).`,
-    reviewedSha: info.sha, complete: true, confirmed: [], rows: [], snapshots: [],
+    reviewedSha: info.sha, complete: !info.note, confirmed: [], rows: [], snapshots: [],
   }
 }
 
@@ -272,19 +275,24 @@ function sectionLenses(files) {
 }
 
 const unrun = []
+const unfilled = []
 function lensesFor(files) {
   if (mode === 'builder') {
     return [...sectionLenses(files), { name: `Acceptance criteria of #${a.issue}`, files, rule: false }]
   }
   const names = [...map.reviewerLenses]
-  for (const r of a.risks || []) if (!names.includes(r)) names.push(r)
-  // With no risk named, the first high-tier section reached is the top risk.
-  if (!(a.risks || []).length) {
-    const top = sectionLenses(files).find(l => !names.includes(l.name) && reach(map.highTier, l.files).length)
-    if (top) names.push(top.name)
-  }
-  // 2 to 4 lenses (#152); any named risk past four is reported, not silently dropped.
+  for (const r of risks) if (!names.includes(r)) names.push(r)
+  // 2 to 4 lenses (#152). A named risk past four leaves the run incomplete.
   for (const name of names.slice(4)) if (!unrun.includes(name)) unrun.push(name)
+  // With no risk named, the high-tier sections reached fill the four, and the rest are
+  // named in the output, so a section like Network is never skipped without a word.
+  if (!risks.length) {
+    for (const l of sectionLenses(files)) {
+      if (names.includes(l.name) || !reach(map.highTier, l.files).length) continue
+      if (names.length < 4) names.push(l.name)
+      else if (!unfilled.includes(l.name)) unfilled.push(l.name)
+    }
+  }
   return names.slice(0, 4).map(name => ({ name, files, rule: known.has(name) }))
 }
 
@@ -308,10 +316,12 @@ function criticPrompt(lens, pass, isDelta) {
 
 ${where(pass)}
 ${isDelta ? `This is a delta pass: these commits landed after ${pass.from.slice(0, 12)} was reviewed, so review only what they changed:\n${pass.commits.map(c => '- ' + c).join('\n')}\n` : ''}Files in your slice: ${lens.files.join(', ')}.
-${lens.name === 'Combining with main' ? 'Also compare against the newest origin/main and every open PR (gh pr list; gh pr diff N --name-only): same files, same dependency lists, same status list. Name the merge order.\n' : ''}
+${lens.name === 'Combining with main' ? 'Also compare against the newest origin/main and every open PR (gh pr list --state open --limit 1000 --json number,title; gh pr diff N --name-only): same files, same dependency lists, same status list. Name the merge order.\n' : ''}
 The standard is ${standard}. Settled decisions are never findings: the spec #36 and its first comment (its supersessions)${info.decisions ? `, and ${info.decisions}` : ''}.
 
-A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes (at most 5), never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.`
+A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes (at most 5), never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.
+
+A command this lens needs that is refused, fails, or returns a list at its limit goes in incomplete, with what it left unchecked: never read it as empty or clean. Otherwise incomplete is "".`
 }
 
 function verifyPrompt(f, pass) {
@@ -325,7 +335,7 @@ Cites (${f.cite ? f.cite.kind : 'nothing'}, ${f.cite ? f.cite.source : ''}): ${f
 
 1. citationHolds: the cited line exists (in ${info.rules}, the spec #36 and its first comment, ${info.decisions || 'docs/DECISIONS.md if present'}, or issue #${a.issue}) and says what the finding needs.
 2. Trace the real path the claim depends on in the snapshot: callers, guards, and tests that already cover it. Then CONFIRMED, REFUTED or UNSURE.
-3. CONFIRMED and headless (no mic, keys, network or live app: the headless pipeline on a WAV, or a pure seam): write \`test\`, one Swift Testing test for Tests/LexiconTests (import Testing, the module's @testable import, @Test func) that fails at ${pass.to.slice(0, 12)} because of this finding. No sleeps and no wall-clock waits: use an explicit signal or a fake clock. Otherwise test is "".`
+3. CONFIRMED and headless (no mic, keys, network or live app: the headless pipeline on a WAV, or a pure seam): write \`test\`, one Swift Testing test for Tests/LexiconTests (import Testing, the module's @testable import, @Test func) that fails at ${pass.to.slice(0, 12)} for the reason this finding names, not for a missing symbol or a setup error. Test behavior at the highest public seam that shows it (the headless pipeline on a WAV, then the pure seams); a test never reads source files. No sleeps and no wall-clock waits: use an explicit signal or a fake clock. Otherwise test is "".`
 }
 
 function blastPrompt(pass) {
@@ -333,11 +343,12 @@ function blastPrompt(pass) {
 
 ${where(pass)}
 
-Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a Swift test filter, or the headless pipeline on a WAV you synthesize. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/ or any key, no network calls, and run no repo script that touches Jake's data (scripts/test-set.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set). Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
+Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a Swift test filter, or the headless pipeline on a WAV you synthesize. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/ or any key, and no network calls. Run no repo script that touches Jake's data (scripts/test-set.sh, scripts/eval-quick.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set), installs (scripts/install.sh, scripts/lib/install-app.sh, scripts/install-model.sh, scripts/install-pstack-sheet.sh), reaches the live app (scripts/dev-run.sh, scripts/harness.sh, scripts/live-lane.sh, scripts/bench.sh) or posts to GitHub (scripts/live-request.sh), and never open, launch or quit an app. Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
 }
 
 const rows = []
 const notes = []
+const checked = []
 const incomplete = []
 
 async function verify(f, pass, lensLabel) {
@@ -361,25 +372,31 @@ async function review(pass, isDelta) {
       try { r = await hire(job.critic[0], job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts) } catch {}
       // A session started before critic-deep.md existed can't find it; same rules, critic's file.
       if (r || job.critic[0] !== 'critic-deep') return r
-      log(`critic-deep not available for ${job.lens.name}; running critic on ${job.critic[1]} instead`)
-      return hire('critic', job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts)
+      log(`critic-deep gave no answer for ${job.lens.name}; running critic on ${job.critic[1]} instead`)
+      // A throw here would drop the lens before the next stage records it as INCOMPLETE.
+      return hire('critic', job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts).catch(() => null)
     },
     (r, job) => {
       const label = `${job.lens.name} (${job.critic[0]})`
       if (!r) { incomplete.push(`no reply from ${label}`); return null }
+      if (r.incomplete) incomplete.push(`${label}: ${r.incomplete}`)
+      if (r.checked) checked.push(`${label}: ${r.checked}`)
       for (const n of r.notes) notes.push(`${label}: ${n}`)
       const findings = r.findings.slice(0, MAX_FINDINGS)
       if (r.findings.length > MAX_FINDINGS) incomplete.push(`${label} returned ${r.findings.length} findings; the ${r.findings.length - MAX_FINDINGS} past the cap of ${MAX_FINDINGS} were not verified`)
       return parallel(findings.map(f => () => verify(f, pass, label)))
     },
   )
-  // Blast radius runs beside the critics, not after them.
+  // Blast radius runs beside the critics, not after them. Like a verifier, one that errors
+  // gets one more try, and a second failure is INCOMPLETE, not a crash that loses the table.
   const radius = mode === 'reviewer' && high && blast.length
-    ? hire('blast-radius', 'opus', 'high', blastPrompt(pass), { label: 'blast radius', phase: pass.phase, schema: BLAST }).then(b => {
+    ? (async () => {
+      const ask = label => hire('blast-radius', 'opus', 'high', blastPrompt(pass), { label, phase: pass.phase, schema: BLAST }).catch(() => null)
+      const b = (await ask('blast radius')) || (await ask('blast radius again'))
       if (!b) { incomplete.push('no reply from blast radius'); return null }
       pass.blast = b
       return parallel(b.findings.map(f => () => verify(f, pass, 'blast radius (opus)')))
-    })
+    })()
     : null
   await Promise.all([critiques, radius])
 }
@@ -419,10 +436,15 @@ const order = { CONFIRMED: 0, 'NO VERDICT': 1, UNSURE: 2, REFUTED: 3 }
 rows.sort((x, y) => order[x.verdict] - order[y.verdict])
 const short = s => s.slice(0, 7)
 const last = passes[passes.length - 1]
+// Only a run where every lens answered and every named risk ran stamps its sha, so a later
+// run's `reviewed` never skips code a lens missed. An incomplete delta pass keeps the sha
+// the earlier run stamped.
+const covered = incomplete.length === 0 && unrun.length === 0
+const reviewedSha = covered ? last.to : a.reviewed || null
 const lines = [
   '## Review',
   '',
-  `Reviewed sha: \`${short(last.to)}\`. ${passes.map(p => `${p.label} pass \`${short(p.from)}..${short(p.to)}\` (${p.files.length} files)`).join(', ')}. ${mode} mode, ${high ? 'high' : 'low'} tier.`,
+  `${covered ? 'Reviewed sha' : 'Not stamped (INCOMPLETE below); head'}: \`${short(last.to)}\`. ${passes.map(p => `${p.label} pass \`${short(p.from)}..${short(p.to)}\` (${p.files.length} files)`).join(', ')}. ${mode} mode, ${high ? 'high' : 'low'} tier.`,
   '',
   '| Verdict | Where | Finding | Cites | Lens |',
   '|---|---|---|---|---|',
@@ -432,19 +454,22 @@ const lines = [
 ]
 if (counted.some(r => r.v && r.v.test)) lines.push('', 'Each CONFIRMED test is written, not run: the builder runs it red before fixing.')
 lines.push('', 'A REFUTED or UNSURE finding comes back only with a test that fails first.')
-if (unrun.length) lines.push('', `Lenses not run (reviewer mode runs at most four): ${unrun.join('; ')}.`)
-if (incomplete.length) lines.push('', `INCOMPLETE: ${incomplete.join('; ')}.`)
+if (unrun.length) lines.push('', `INCOMPLETE: named risks not run (reviewer mode runs at most four lenses; name these as the risks of a second run): ${unrun.join('; ')}.`)
+if (unfilled.length) lines.push('', `High-tier sections reached but not run (no risks named; name them as risks to run them): ${unfilled.join('; ')}.`)
+if (incomplete.length) lines.push('', `INCOMPLETE: ${cell(incomplete.join('; '))}.`)
+if (!covered) lines.push('', reviewedSha ? `Re-run this review with the same args: the stamp stays \`${short(reviewedSha)}\`.` : 'Re-run the review in full, without `reviewed`: nothing is stamped.')
 if (info.note) lines.push('', `Not reviewed: ${info.note}.`)
 if (stale.length) lines.push('', `review-map.json names sections review.md no longer has: ${stale.join(', ')}. Any review.md section the map doesn't name runs on every file.`)
 if (info.fromCheckout.length) lines.push('', `Read from this checkout, not the sha (the sha predates them): ${info.fromCheckout.join(', ')}.`)
 for (const p of passes) if (p.blast) lines.push('', `Blast radius (${p.label}): ${cell(p.blast.safetyFact)} Proof: \`${cell(p.blast.proofCommand)}\`: ${cell(p.blast.proofResult)}`)
 if (notes.length) lines.push('', '<details><summary>Notes (no citation, not counted)</summary>', '', ...notes.map(n => `- ${cell(n)}`), '', '</details>')
+if (checked.length) lines.push('', '<details><summary>Checked and found fine</summary>', '', ...checked.map(n => `- ${cell(n)}`), '', '</details>')
 lines.push('', `Helpers: ${Object.entries(helpers).map(([k, n]) => `${n} ${k}`).join(', ')}.`)
 
 return {
   markdown: lines.join('\n'),
-  reviewedSha: last.to,
-  complete: incomplete.length === 0,
+  reviewedSha,
+  complete: covered && !info.note,
   confirmed: counted.map(r => ({ path: r.path, line: r.line, claim: r.claim, cite: r.cite, trigger: r.v.trigger, test: r.v.test })),
   rows: rows.map(r => ({ verdict: r.verdict, path: r.path, line: r.line, claim: r.claim, lens: r.lens, pass: r.pass, evidence: r.v ? r.v.evidence : '' })),
   snapshots: passes.map(p => p.snapshot),
