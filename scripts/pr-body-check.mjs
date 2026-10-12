@@ -134,7 +134,7 @@ export function checkBody({ body, files = [], commits = [], summary = null, modu
     const end = upTo.findIndex((l, j) => j >= i && /<\/details>\s*$/.test(l))
     if (end < 0) break
     // Another block opening first means this one never closed.
-    if (upTo.slice(i + 1, end).some(l => /^\s*<details>/.test(l))) continue
+    if (upTo.slice(i + 1, end + 1).some(l => /^\s*<details>/.test(l))) continue
     for (let j = i; j <= end; j++) hidden.add(j)
     i = end
   }
@@ -197,9 +197,10 @@ export function readModules(n, sources, gh = runGh) {
     const ticket = gh(['issue', 'view', n, '--json', 'body', '-q', '.body'], { cwd: root, encoding: 'utf8', timeout: GH_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] })
     return { modules: ticketModules(ticket, sources) }
   } catch (e) {
-    if (e.code === 'ETIMEDOUT' || e.signal) return { modules: [], error: `no answer from gh within ${GH_TIMEOUT_MS / 1000} s reading #${n}'s Modules line; check the network and run it again` }
+    if (e.code === 'ETIMEDOUT') return { modules: [], error: `no answer from gh within ${GH_TIMEOUT_MS / 1000} s reading #${n}'s Modules line; check the network and run it again` }
     const said = String(e.stderr || e.message).trim().split('\n')[0]
-    if (/HTTP 4\d\d/.test(said)) return { modules: [], error: `GitHub refused reading #${n} (${said}), so the Sketch rule can't be checked` }
+    // gh issue view says a refusal as "GraphQL: ..."; the REST paths as "HTTP 4xx".
+    if (/^GraphQL:|HTTP 4\d\d/.test(said)) return { modules: [], error: `GitHub refused reading #${n} (${said}), so the Sketch rule can't be checked` }
     return { modules: [], error: `couldn't read #${n}'s Modules line with gh (${said}); check gh and run it again` }
   }
 }
@@ -208,7 +209,12 @@ export function readModules(n, sources, gh = runGh) {
 function refsModules(body) {
   const n = /^Refs #(\d+)/.exec(body)?.[1]
   if (!n) return { modules: [] }
-  const sources = fs.readdirSync(path.join(root, 'Sources'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+  let sources
+  try {
+    sources = fs.readdirSync(path.join(root, 'Sources'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+  } catch {
+    return { modules: [], error: 'no Sources/ folder to read module names from' }
+  }
   return readModules(n, sources)
 }
 

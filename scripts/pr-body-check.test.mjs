@@ -94,11 +94,14 @@ test('the Check: line comes last, and only a footer follows it', () => {
   assert.deepEqual(rules(checkBody({ body: body('Check: open a PR and see the check run.\n', '') })), ['check'])
 })
 
-test('one footer line after Check: is not counted; more is refused', () => {
+test('one footer line of at most 12 words after Check: is not counted; more is refused', () => {
   const filler = Array.from({ length: WORD_CAP }, () => 'word').join(' ')
   assert.deepEqual(checkBody({ body: good }), [])
   assert.deepEqual(rules(checkBody({ body: good.replace('Generated with', `Generated with ${filler}`) })), ['check'])
   assert.deepEqual(rules(checkBody({ body: `${good}\nMore notes after the footer.\n` })), ['check'])
+  const footer = n => good.replace(/🤖.*\n/, `${Array.from({ length: n }, () => 'w').join(' ')}\n`)
+  assert.deepEqual(checkBody({ body: footer(12) }), [])
+  assert.deepEqual(rules(checkBody({ body: footer(13) })), ['check'])
   assert.deepEqual(rules(checkBody({ body: body('Code only.', `Code only. ${filler}`) })), ['words'])
 })
 
@@ -117,6 +120,8 @@ test('a stray <details> before a closed block hides nothing', () => {
   const filler = Array.from({ length: WORD_CAP }, () => 'word').join(' ')
   const stray = `<details>\n\n${filler}\n\n<details><summary>Findings</summary>\n\n| row |\n\n</details>\n\n## Merge Danger`
   assert.deepEqual(rules(checkBody({ body: body('## Merge Danger', stray) })), ['words'])
+  const oneLine = `<details>\n\n${filler}\n\n<details><summary>Findings</summary>| row |</details>\n\n## Merge Danger`
+  assert.deepEqual(rules(checkBody({ body: body('## Merge Danger', oneLine) })), ['words'])
 })
 
 test('a table rule or a tree branch is not a word', () => {
@@ -185,7 +190,10 @@ test("the ticket read has a deadline and names a refusal as one", () => {
   assert.ok(seen.timeout > 0 && seen.timeout <= 30000, 'gh runs with a deadline')
   const timedOut = readModules('64', sources, () => { throw Object.assign(new Error('spawnSync gh ETIMEDOUT'), { code: 'ETIMEDOUT' }) })
   assert.match(timedOut.error, /no answer from gh within \d+ s/)
-  const refused = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr: 'HTTP 403: Resource not accessible by integration' }) })
-  assert.match(refused.error, /GitHub refused/)
-  assert.doesNotMatch(refused.error, /rerun/)
+  for (const stderr of ['HTTP 403: Resource not accessible by integration',
+    'GraphQL: Could not resolve to an issue or pull request with the number of 999999. (repository.issue)']) {
+    const refused = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr }) })
+    assert.match(refused.error, /GitHub refused/)
+    assert.doesNotMatch(refused.error, /again/)
+  }
 })
