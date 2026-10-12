@@ -52,6 +52,14 @@ heavy_held() {
     [ "$heavy_probe" -eq 75 ]
 }
 
+# Succeeds while slot $1 holds a job: its holder line names a live process.
+# A probe (heavy_held, here or in scripts/machine.sh) holds the lock for an
+# instant and names none, so it never counts as a build beside which slot 3 opens.
+heavy_building() {
+    heavy_pid=$(sed -n 's/.* (pid \([0-9]*\)) running .*/\1/p' "$HEAVY_DIR/slot$1.holder" 2> /dev/null)
+    [ -n "$heavy_pid" ] && kill -0 "$heavy_pid" 2> /dev/null
+}
+
 heavy_holder() {
     cat "$HEAVY_DIR/slot$1.holder" 2>/dev/null || echo "an unknown job"
 }
@@ -162,7 +170,9 @@ heavy_run() {
             else
                 heavy_try 1 "$@"
                 heavy_try 2 "$@"
-                if heavy_room; then heavy_try 3 "$@"; else heavy_noroom=1; fi
+                if heavy_building 1 && heavy_building 2; then
+                    if heavy_room; then heavy_try 3 "$@"; else heavy_noroom=1; fi
+                fi
             fi
         fi
         if [ -z "$heavy_waited" ]; then
