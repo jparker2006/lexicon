@@ -57,15 +57,14 @@ public final class HistoryWindowPresenter: NSObject {
     /// Builds the window once, unshown, and drops it. A process's first window pays
     /// for AppKit's one-time setup (its classes, the theme's art, the table's
     /// machinery), which made the first open the slowest of a launch. Paid shortly
-    /// after launch, the first open costs what every other open does.
-    public func warmUp() {
-        guard controller == nil else { return }
-        _ = warmUpWindow()
-    }
-
+    /// after launch, the first open costs what every other open does. Returns the
+    /// window it built (nil while History is open), which the caller drops.
+    ///
     /// Its reader looks in /var/empty, which macOS keeps empty and Lexicon cannot
     /// write, so the warm-up reads nothing from History: it has no rows on screen to load.
-    func warmUpWindow() -> HistoryWindowController {
+    @discardableResult
+    public func warmUp() -> NSWindowController? {
+        guard controller == nil else { return nil }
         let nothing = HistoryReader(paths: AppPaths(root: URL(filePath: "/var/empty", directoryHint: .isDirectory)))
         return HistoryWindowController(reader: nothing, system: system, pasteboard: .general) {}
     }

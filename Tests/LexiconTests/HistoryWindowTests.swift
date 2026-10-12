@@ -13,8 +13,8 @@ import Testing
 /// Never shown: the test never orders its window front.
 @MainActor
 private func unshownController(_ paths: AppPaths) -> HistoryWindowController {
-    // Nothing here clicks a row, so nothing is copied to the pasteboard.
-    HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: .general) {}
+    // A pasteboard of its own, never Jake's clipboard, should a test ever click a row.
+    HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: .withUniqueName()) {}
 }
 
 @MainActor
@@ -22,7 +22,7 @@ private func unshownController(_ paths: AppPaths) -> HistoryWindowController {
     let paths = AppPaths.temporary()
     let presenter = HistoryWindowPresenter(paths: paths, system: nil)
     // The app drains its autorelease pool each turn of the run loop; the warm-up's window must go with it.
-    autoreleasepool { presenter.warmUp() }
+    autoreleasepool { _ = presenter.warmUp() }
 
     // AppKit refuses a frame autosave name while another live window holds it. A
     // warm-up window that outlived its drop would keep "History", and the real
@@ -42,7 +42,7 @@ private func unshownController(_ paths: AppPaths) -> HistoryWindowController {
     await store.flush()
     let presenter = HistoryWindowPresenter(paths: paths, system: nil)
     #expect(unshownController(paths).rowCount > 0, "the History the window would read has a row")
-    #expect(presenter.warmUpWindow().rowCount == 0)
+    #expect((presenter.warmUp() as? HistoryWindowController)?.rowCount == 0)
 }
 
 @MainActor

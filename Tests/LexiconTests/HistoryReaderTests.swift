@@ -474,13 +474,13 @@ private func searchTimes(_ paths: AppPaths) -> [Duration] {
 @MainActor @Test(.enabled(if: timingRun)) func speedWindowOpenWithinBudget() async throws {
     let paths = try await year().paths
     let presenter = HistoryWindowPresenter(paths: paths, system: nil)
-    autoreleasepool { presenter.warmUp() }
+    autoreleasepool { _ = presenter.warmUp() }
     /// One open, as the presenter makes it; nil times it not.
-    func open(_ clock: ContinuousClock?) -> Duration? {
+    func openOnce(_ clock: ContinuousClock?) -> Duration? {
         var took: Duration?
         autoreleasepool {
             let start = clock?.now
-            let controller = HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: .general) {}
+            let controller = HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: .withUniqueName()) {}
             controller.window?.alphaValue = 0
             controller.showWindow(nil)
             controller.window?.displayIfNeeded()
@@ -491,8 +491,8 @@ private func searchTimes(_ paths: AppPaths) -> [Duration] {
     }
     // Untimed: the app has drawn its status item and menu before History ever opens,
     // and a test process has drawn nothing, so its very first window pays for that.
-    _ = open(nil)
-    let samples = (0..<20).compactMap { _ in open(ContinuousClock()) }
+    _ = openOnce(nil)
+    let samples = (0..<20).compactMap { _ in openOnce(ContinuousClock()) }
     print("History window, open to first rows over \(perDay * yearDays) Dictations: first \(samples[0]), "
         + "p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")
     #expect(percentile(samples, 0.95) <= .milliseconds(100))
