@@ -5,10 +5,22 @@ name: CI
 # PRs from forks get no run (there are none).
 on: push
 
+# A newer push to a branch cancels its older run, which no longer says anything
+# about the head. A running main run is never cancelled; one still waiting is
+# dropped when a newer merge queues, whose run checks a head that includes it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
 jobs:
   check:
     name: CI
     runs-on: macos-26
+    # A green check takes minutes; a hang past this fails instead of holding a macOS runner.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       # The scorer's pinned Python and packages (scorer/uv.lock). The image has no uv.
