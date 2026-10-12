@@ -38,15 +38,27 @@ func anAppsFocusedElementAnswerIsAFieldNoFieldOrUnreadable(_ code: Int32, _ expe
 }
 
 // One slow or failed read is not the app's answer: the focus is read once more
-// before it is called unreadable, and each read names the focused app again, so
-// a retry never uses an app that focus may have left.
-@Test func aFocusRetryNamesTheFocusedAppAgain() {
-    var focused = ["Notes", "Finder"]  // focus moves while the first read times out
-    var named: [String] = []
-    let app = Focus.readTwice(naming: { () -> String? in named.append(focused[0]); return focused.removeFirst() },
-                              answering: { app in app == "Notes" ? (.unreadable, nil) : (.none, app) })
-    #expect(app == "Finder")
-    #expect(named == ["Notes", "Finder"])
+// before it is called unreadable, but the retry counts only if it names the same
+// app. Focus that moved meanwhile, with no key or click from Jake (an app that
+// activates itself, a panel that takes keys), never becomes the target.
+@Test func aFocusRetryOfTheSameAppIsUsed() {
+    var answers: [Focus.Answer] = [.unreadable, .element]
+    var named = 0
+    let field = Focus.readTwice(naming: { () -> String? in named += 1; return "Notes" },
+                                answering: { app in (answers.removeFirst(), "\(app) field") })
+    #expect(field == "Notes field")
+    #expect(named == 2)
+}
+
+@Test func aFocusRetryNeverTakesTheAppFocusMovedTo() {
+    var focused = ["Notes", "Finder"]
+    let target = Focus.readTwice(
+        naming: { () -> String? in focused.isEmpty ? nil : focused.removeFirst() },
+        answering: { (app: String) -> (Focus.Answer, String?) in
+            if app == "Notes" { return (.unreadable, nil) }
+            return (.element, "\(app) field")
+        })
+    #expect(target == nil)
 }
 
 @Test func aDefiniteAnswerIsReadOnce() {
@@ -64,8 +76,8 @@ func anAppsFocusedElementAnswerIsAFieldNoFieldOrUnreadable(_ code: Int32, _ expe
     #expect(reads == 2)
 }
 
-@Test func anUnnamedFocusedAppIsAskedForOnceMore() {
+@Test func withNoAppNamedThereIsNothingToRetry() {
     var asks = 0
     #expect(Focus.readTwice(naming: { () -> String? in asks += 1; return nil }, answering: { app in (.none, app) }) == nil)
-    #expect(asks == 2)
+    #expect(asks == 1)
 }
