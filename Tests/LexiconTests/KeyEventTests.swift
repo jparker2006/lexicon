@@ -218,10 +218,15 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: InputClock(),
                              continuation: continuation, secureInput: { false },
                              takeEscape: { on in asked.withLock { $0.append(on) } })
-    _ = tap.handle(.flagsChanged, flagsChanged(63, [.maskSecondaryFn]))
-    _ = tap.handle(.keyDown, keyEvent(0))  // a key after the (zero) threshold confirms the hold
-    _ = tap.handle(.keyDown, keyEvent(1))
-    _ = tap.handle(.keyDown, keyEvent(53))  // Esc cancels
-    _ = tap.handle(.keyDown, keyEvent(53))  // a second report of it changes nothing
+    /// As the keyboard sends it (pid 0): the tap drops events this process posted, its own Cmd-V.
+    func fromKeyboard(_ event: CGEvent) -> CGEvent {
+        event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+        return event
+    }
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(0)))  // a key after the (zero) threshold confirms the hold
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(1)))
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(53)))  // Esc cancels
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(53)))  // a second report of it changes nothing
     #expect(asked.withLock { $0 } == [true, false])
 }

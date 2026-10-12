@@ -23,7 +23,7 @@ let usage = """
            lexicon-harness hook privacy on|off [--always-private <bundle id>[,<bundle id>...]]
            lexicon-harness pill [--shots <dir>]
            lexicon-harness history [search word]
-           lexicon-harness relaunch [--release] [--test-hooks [--dev-data]]
+           lexicon-harness relaunch [--release] [--test-hooks [--dev-data] [--short-cap]]
            lexicon-harness wait-fn [--count <n>] [--timeout <seconds>]
            lexicon-harness fixture <text>
            lexicon-harness stats <file>
@@ -59,7 +59,7 @@ let usage = """
       relaunch  quit Lexicon Dev as Quit does (a Dictation lands first), open it again
               and print its launch timings. --release: the installed copy must be a
               release build. --test-hooks: with hooks, data in a scratch folder unless
-              --dev-data
+              --dev-data; --short-cap: the 20-minute cap is 20 s, its warning at 15 s
       wait-fn print each Dictation's outcome and lag from Lexicon Dev's log as it
               lands, until --count of them (default 1) or --timeout (default 120 s)
       fixture speak <text> into a 16 kHz WAV for `hook dictate`; prints its path

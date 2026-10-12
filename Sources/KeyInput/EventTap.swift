@@ -10,12 +10,13 @@ import LexiconDomain
 /// Listen-only: macOS hands the tap a copy and delivers every key at once. An
 /// active tap holds each key until Lexicon's thread answers: keys reached apps
 /// 26 to 74 ms after they were pressed with it, 2 to 12 ms with listen-only.
-/// M0 swallows nothing (Esc while recording comes in M1).
+/// The tap swallows nothing. Esc while recording is taken by a registered
+/// hotkey that follows the recognizer's `takesEscape` (ADR 0004).
 ///
 /// The callback (1) re-enables the tap if the system disabled it, (2) drops
 /// events Lexicon itself posted (its own Cmd-V), (3) ticks the InputClock on
 /// key-down / mouse-down, (4) feeds fn and every other key-down to `FnGesture`
-/// and yields its commands.
+/// and yields its commands, (5) takes or gives back Esc when that changed.
 ///
 /// `@unchecked Sendable` is safe because `gesture` and `deadline` are touched
 /// by one thread only: the tap thread (the callback, the timer and `perform`'s
@@ -33,8 +34,11 @@ final class EventTapThread: @unchecked Sendable {
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
     private let log = Logger(subsystem: "Lexicon", category: "fn")
-    /// Takes Esc from the app in front (true) or gives it back (false).
+    /// Takes Esc from the app in front (true) or gives it back (false): the
+    /// Esc hotkey once started, a test's recorder otherwise.
     private var takeEscape: @Sendable (Bool) -> Void
+    /// What `takeEscape` was last told, so it hears only changes.
+    private var tookEscape = false
 
     init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
          secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() },
@@ -61,6 +65,9 @@ final class EventTapThread: @unchecked Sendable {
                                           userInfo: Unmanaged.passUnretained(self).toOpaque())
         else { throw .notTrusted }
         self.tap = tap
+        // The hotkey's press is the same Esc the tap may also see: the recognizer acts on the first.
+        let escape = RegisteredHotkey(.escape) { [self] in perform(.escape(.now())) }
+        takeEscape = { escape.setRegistered($0) }
         let ready = DispatchSemaphore(value: 0)
         let thread = Thread { [self] in
             let runLoop = CFRunLoopGetCurrent()
@@ -140,6 +147,10 @@ final class EventTapThread: @unchecked Sendable {
             log.notice("fn gesture: \(String(describing: command), privacy: .public)")
         }
         if let wakeAt = output.wakeAt { schedule(wakeAt) }
+        if gesture.takesEscape != tookEscape {
+            tookEscape = gesture.takesEscape
+            takeEscape(tookEscape)
+        }
     }
 
     /// One timer slot: a new deadline replaces the old one, and a stale one that
@@ -184,7 +195,11 @@ extension KeyInput {
             self = event.flags.contains(.maskSecondaryFn)
                 ? .fnDown(at, secureInput: secureInput(), id: DictationID()) : .fnUp(at)
         case .keyDown:
-            self = .otherKey(HostTime(eventTimestamp: event.timestamp, now: now))
+            let at = HostTime(eventTimestamp: event.timestamp, now: now)
+            // Plain Esc, fn or not (a hold keeps fn down); with Cmd, Option, Control or Shift it is a shortcut.
+            let plain = event.flags.isDisjoint(with: [.maskCommand, .maskAlternate, .maskControl, .maskShift])
+            self = event.getIntegerValueField(.keyboardEventKeycode) == Int64(kVK_Escape) && plain
+                ? .escape(at) : .otherKey(at)
         default:
             return nil
         }
