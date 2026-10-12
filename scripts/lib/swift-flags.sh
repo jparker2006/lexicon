@@ -1,5 +1,6 @@
 # Sourced, not run. Sets SWIFT_FLAGS to the flags every debug `swift build`,
-# `swift test` and `swift run` here uses, unquoted so they split into words:
+# `swift test` and `swift run` here uses, unquoted so sh splits them into words
+# (zsh would not; run a test with scripts/test.sh):
 #
 #     swift build $SWIFT_FLAGS
 #
