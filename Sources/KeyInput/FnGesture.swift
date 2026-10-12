@@ -34,6 +34,7 @@ enum KeyInput: Sendable, Hashable {
 ///     recording(handsFree) --fnDown--> idle       emits .dictationStopped; its fn-up then lands in idle
 ///     recording --Esc--> idle                     emits .dictationCancelled (saved, never typed)
 ///     recording --cap--> idle                     emits .oneMinuteLeft at the warning, .dictationStopped at the cap
+///                                                 (a key stamped past a mark gets that mark first, in either order)
 ///     recording --sleep--> idle                   emits .dictationStopped
 ///     pressed or tapped --sleep--> idle           judged as a release: a press under the threshold is discarded
 ///     any --ended, same Dictation--> idle         nothing: the Conductor already ended it
@@ -195,6 +196,20 @@ struct FnGesture: Sendable {
     }
 
     private mutating func whileRecording(_ recording: Recording, _ input: KeyInput) -> Output {
+        var recording = recording
+        var warning: [KeyCommand] = []
+        if let at = input.keyTime, !recording.warned, at >= warnAt(recording) {
+            // The warning's mark came first by this key's own time, though its timer has not been handled yet.
+            recording.warned = true
+            phase = .recording(recording)
+            warning = [.oneMinuteLeft(recording.id)]
+        }
+        var output = keyWhileRecording(recording, input)
+        output.commands = warning + output.commands
+        return output
+    }
+
+    private mutating func keyWhileRecording(_ recording: Recording, _ input: KeyInput) -> Output {
         let id = recording.id
         if let at = input.keyTime, at >= capAt(recording) {
             // The cap came first, though its timer has not been handled yet.
