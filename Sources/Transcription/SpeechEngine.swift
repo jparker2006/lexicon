@@ -166,11 +166,17 @@ public struct SpeechAttempt: ~Copyable, Sendable {
     /// call, otherwise local does. A cloud that cannot run or fails hands over
     /// to local at once. Never throws: every failure is an outcome.
     public consuming func finish(_ clip: AudioClip) async -> SpeechOutcome {
-        await core.finish(clip)
+        // First, before anything can end this value's lifetime and run its deinit.
+        core.settle()
+        return await core.finish(clip)
     }
 
     /// Cancelled or discarded Dictation: close the socket, drop local work.
     public consuming func cancel() { core.cancel() }
+
+    /// Dropped with no `finish` or `cancel`: cancelled, so its hold on the local
+    /// model ends and the idle unload can arm.
+    deinit { core.drop() }
 }
 
 public enum SpeechOutcome: Sendable {
@@ -275,10 +281,19 @@ final class AttemptCore: Sendable {
     /// nil with no cloud model, or with the network down at fn-down.
     let session: CloudSession?
     let segments: AsyncStream<SpeechSegment>
+    /// This attempt's hold on the model has begun. Apart from `warmUp`, so ending
+    /// the hold waits only for this, never for a load stuck behind a hung call.
+    let began: Task<Void, Never>
     /// Loads the local model while Jake talks, so fn-up never waits on the load.
-    let warmUp: Task<Void, Never>
+    /// Fails with the load's error, which fn-up then answers with.
+    let warmUp: Task<Void, any Error>
     /// Set when `warmUp` is done, so a warm model costs fn-up no timer.
     let warm = Latch()
+    /// Set once `finish` or `cancel` has the attempt, so dropping it after does nothing.
+    private let settled = Latch()
+    /// Set by whichever of the local side or a cancel ends this attempt's hold
+    /// on the model, so it ends once.
+    private let released = Latch()
     /// The local model's side of this attempt, started at fn-down.
     let localSession: (any LocalSession)?
     /// Hands each captured chunk to the cloud and local sessions, and always
@@ -308,9 +323,12 @@ final class AttemptCore: Sendable {
             ended.finish()
             self.segments = segments
         }
+        let began = Task { [residency = self.residency] () -> Void in await residency?.dictationBegan(plan.residency) }
+        self.began = began
         warmUp = Task { [residency = self.residency, warm] in
-            await residency?.dictationBegan(plan.residency)
-            _ = warm.set()
+            defer { _ = warm.set() }
+            await began.value
+            try await residency?.loadForDictation()
         }
         let localSession = local?.session(terms: plan.terms, priority: priority)
         self.localSession = localSession
@@ -341,23 +359,43 @@ final class AttemptCore: Sendable {
     /// only a first load compiling for the Neural Engine (about 25 s) runs past this.
     static let loadLimit: Duration = .seconds(2)
 
+    /// How long the local side may take once the model is loaded: a hung CoreML
+    /// call must not leave the Dictation transcribing for good. Generous, since
+    /// past it the Dictation waits for a working model: a long clip's last
+    /// window and merge, behind a background job, fit well inside it.
+    static func answerLimit(for clip: AudioClip) -> Duration {
+        .seconds(30) + clip.duration / 4
+    }
+
     func finish(_ clip: AudioClip) async -> SpeechOutcome {
         let stopped = ContinuousClock.now
         let (events, post) = AsyncStream<Finished>.makeStream()
         if let session { Task { post.yield(.cloud(await session.result)) } }
         let localRun = localSession.map { local in
             Task {
+                defer { release() }
                 // Jake never waits out a compile at the cursor: past the limit the local
-                // side has no answer, and the attempt lets go of the model once it loads.
+                // side has no answer, and the load runs on to warm the next Dictation.
                 guard await loaded(within: Self.loadLimit) else {
                     local.cancel()
                     post.yield(.local(.failed(.localModelLoading)))
-                    await warmUp.value
-                    await residency?.dictationEnded()
                     return
                 }
-                post.yield(.local(await transcribe(clip, with: local)))
-                await residency?.dictationEnded()
+                // fn-down's load failed: loading again here could start a 25 s compile at
+                // the cursor. The waiting loop tries the model again, off the cursor.
+                if case .failure(let error) = await warmUp.result {
+                    local.cancel()
+                    post.yield(.local(.failed(Self.unavailable(error))))
+                    return
+                }
+                let limit = Self.answerLimit(for: clip)
+                if let end = await answer(clip, with: local, within: limit) {
+                    post.yield(.local(end))
+                } else if !Task.isCancelled {
+                    // A hung call can't be aborted; its later jobs leave the queue.
+                    local.cancel()
+                    post.yield(.local(.failed(.localModelFailed("no answer in \(limit)"))))
+                }
             }
         }
         var timers: [Task<Void, Never>] = []
@@ -449,8 +487,12 @@ final class AttemptCore: Sendable {
         case (.useLocal, _, .done(let text)?):
             won = (text, .local(local!.model), localLatency)
         default:
-            // A broken local model waits for a working one, whatever the cloud did.
-            if let localFailure, case .localModelFailed = localFailure { return .unavailable(localFailure) }
+            // A broken or still-loading local model waits for a working one, whatever the
+            // cloud did: once it runs, it may hear what the cloud missed.
+            switch localFailure {
+            case .localModelFailed?, .localModelLoading?: return .unavailable(localFailure!)
+            default: break
+            }
             if cloudHeardNothing { return .unavailable(.silence) }
             if cloud != nil {
                 return .unavailable(session == nil ? .offline : .providerError(cloudError ?? "failed"))
@@ -460,6 +502,25 @@ final class AttemptCore: Sendable {
         guard won.text.contains(where: { !$0.isWhitespace }) else { return .unavailable(.silence) }
         return .text(SpeechText(text: won.text, model: won.model, finalizeToText: won.latency ?? .zero,
                                 attempts: attempts))
+    }
+
+    /// The local side's answer, or nil once `limit` passes or this task is
+    /// cancelled (the cloud won). Either way the transcription is cancelled, so
+    /// its jobs still waiting leave the queue.
+    private func answer(_ clip: AudioClip, with local: any LocalSession, within limit: Duration) async -> LocalEnd? {
+        let work = Task { await transcribe(clip, with: local) }
+        let (first, post) = AsyncStream<LocalEnd?>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        let timer = Task { [clock] in
+            do { try await clock.sleep(for: limit) } catch { return }
+            post.yield(nil)
+        }
+        Task { post.yield(await work.value) }
+        // A cancelled wait on the stream ends it with nil.
+        var answers = first.makeAsyncIterator()
+        let end = await answers.next() ?? nil
+        timer.cancel()
+        work.cancel()
+        return end
     }
 
     /// True once fn-down's load is done; false if it is still running at `limit`.
@@ -476,7 +537,7 @@ final class AttemptCore: Sendable {
                 answer(false)
             }
             Task { [warmUp] in
-                await warmUp.value
+                _ = await warmUp.result
                 timer.cancel()
                 answer(true)
             }
@@ -486,22 +547,37 @@ final class AttemptCore: Sendable {
     private func transcribe(_ clip: AudioClip, with local: any LocalSession) async -> LocalEnd {
         do {
             return .text(try await local.finish(clip))
-        } catch is LocalModelNotInstalled {
-            return .failed(.noModel)
         } catch {
-            return .failed(.localModelFailed(String(describing: error)))
+            return .failed(Self.unavailable(error))
         }
     }
 
+    private static func unavailable(_ error: any Error) -> SpeechUnavailable {
+        error is LocalModelNotInstalled ? .noModel : .localModelFailed(String(describing: error))
+    }
+
+    /// Ends this attempt's hold on the model, the first time it is called. Never
+    /// waits for the load, which can sit behind an unload stuck on a hung call.
+    private func release() {
+        guard released.set() else { return }
+        Task { [began, residency] in
+            await began.value
+            await residency?.dictationEnded()
+        }
+    }
+
+    func settle() { _ = settled.set() }
+
+    func drop() {
+        if !settled.isSet { cancel() }
+    }
+
     func cancel() {
+        settle()
         drain.cancel()
         session?.close()
         localSession?.cancel()
-        // Ends this attempt's hold on the model once its fn-down load is done.
-        Task { [warmUp, residency] in
-            await warmUp.value
-            await residency?.dictationEnded()
-        }
+        release()
     }
 }
 
