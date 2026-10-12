@@ -19,6 +19,7 @@ The new process writes things M0 never wrote. Where a case needs one to reach th
 - the review Workflow's `## Review` table and blast-radius line at the reviewed sha, written from the Reviewer's real comment (#95, #102, #105, #108), and a table alone on #101 so that case turns on the blast radius;
 - each acceptance line marked met, as `scripts/ticket.sh ac` leaves it (#43, #45, #46);
 - a try step in PR #112's body, the one the orchestrator wrote for #63 on the Try list;
-- Later notes as bullets naming their owner issues, taken from the real verdict's own words (#95, #105), and a verdict for #102 at 899782b, where the real one came at 09:27 after a merge round.
+- today's verdict opening, `**Reviewer verdict: merge with notes** (head <sha7>)`, and Later notes as bullets naming their owner issues, taken from the real verdict's own words (#95, #105), and a verdict for #102 at 899782b, where the real one came at 09:27 after a merge round;
+- the owner as #178's author, which install.sh now checks.
 
 `stub-gh.mjs` makes up two kinds of sha: `cd...` is GitHub's merge of main into PR n by update-branch, and `ab...` is PR n's squash on main.

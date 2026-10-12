@@ -14,6 +14,8 @@ const NOW = '2026-10-12T12:00:00Z';
 // Made-up but recognizable shas: GitHub's merge of main into PR n, and PR n's squash on main.
 export const updatedHead = (n) => `cd${String(n).padStart(38, '0')}`;
 export const squashOf = (n) => `ab${String(n).padStart(38, '0')}`;
+// The tree of a merge of a and b, made up and deterministic: git merge-tree --write-tree and the commit's tree answer with it.
+export const mergeTreeOf = (a, b) => `tree-${a.slice(0, 7)}-${b.slice(0, 7)}`;
 
 const fail = (message) => { throw new Error(message); };
 const pick = (item, fields) => Object.fromEntries(fields.split(',').map((f) => [f, item[f]]));
@@ -23,6 +25,7 @@ const after = (args, flag) => args[args.indexOf(flag) + 1];
 export function stubGh(state) {
   state.deleted ??= [];
   state.parents ??= {};
+  state.trees ??= {};
   state.statuses ??= {};
   const calls = [];
   const pull = (n) => state.pulls.find((p) => p.number === Number(n)) ?? fail(`GraphQL: Could not resolve to a PullRequest with the number of ${n}. (repository.pullRequest)`);
@@ -47,6 +50,10 @@ export function stubGh(state) {
       if ((m = b.match(/^repos\/\{owner\}\/\{repo\}\/compare\/main\.\.\.([0-9a-f]{40})$/))) {
         return { behind_by: state.behind[m[1]] ?? fail(`gh: Not Found (HTTP 404) for ${m[1]}`), base_commit: { sha: state.main } };
       }
+      // Commits of base that head lacks: 0 when the sha is on main.
+      if ((m = b.match(/^repos\/\{owner\}\/\{repo\}\/compare\/([0-9a-f]{40})\.\.\.main$/))) {
+        return { behind_by: (m[1] === state.main || (state.onMain ?? []).includes(m[1])) ? 0 : 1 };
+      }
       if ((m = b.match(/^repos\/\{owner\}\/\{repo\}\/actions\/runs\?head_sha=([0-9a-f]{40})&per_page=100$/))) {
         const runs = state.runs.filter((r) => r.head_sha === m[1]);
         return { total_count: runs.length, workflow_runs: runs };
@@ -57,7 +64,7 @@ export function stubGh(state) {
       }
       if ((m = b.match(/^repos\/\{owner\}\/\{repo\}\/commits\/([0-9a-f]{7,40})$/))) {
         const sha = [...Object.keys(state.parents), ...(state.mainCommits ?? []).map((x) => x.sha)].find((s) => s.startsWith(m[1])) ?? fail('gh: No commit found for SHA (HTTP 422)');
-        return { sha, parents: (state.parents[sha] ?? []).map((p) => ({ sha: p })) };
+        return { sha, parents: (state.parents[sha] ?? []).map((p) => ({ sha: p })), commit: { tree: { sha: state.trees?.[sha] ?? 'unknown' } } };
       }
       if (b === 'repos/{owner}/{repo}/commits?sha=main&per_page=100') return state.mainCommits ?? fail('gh: no main history in this fixture');
     }
@@ -66,8 +73,11 @@ export function stubGh(state) {
       if (state.conflicts?.includes(p.number)) fail('X Cannot update PR branch due to conflicts');
       const head = updatedHead(p.number);
       state.parents[head] = [p.headRefOid, state.main];
+      state.trees[head] = mergeTreeOf(p.headRefOid, state.main);
       state.behind[head] = 0;
       p.headRefOid = head;
+      // GitHub applied it, but the answer was lost on the way back.
+      if (state.updateLost) fail('HTTP 502: Bad Gateway');
       return '';
     }
     if (a === 'pr' && b === 'merge') {

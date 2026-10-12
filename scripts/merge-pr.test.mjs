@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptanceGate, inUse, liveGate, mergePr, tierGate, verdictGate } from './merge-pr.mjs';
 import { waitCi } from './wait-ci.mjs';
-import { squashOf, stubGh, updatedHead } from './merge-fixtures/stub-gh.mjs';
+import { mergeTreeOf, squashOf, stubGh, updatedHead } from './merge-fixtures/stub-gh.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
@@ -33,33 +33,44 @@ const run = (id, head, conclusion, status = 'completed', pr) => ({
 const WORKTREES = (branch, at = '/Users/jakeparker/code/lexicon/.claude/worktrees/b') =>
   `worktree /Users/jakeparker/code/lexicon\nHEAD ${'1'.repeat(40)}\nbranch refs/heads/main\n\nworktree ${at}\nHEAD ${'2'.repeat(40)}\nbranch refs/heads/${branch}\n`;
 
-/** merge-pr on `state` (changed in place) from the main checkout, with stub gh, git and lanes. */
-async function merge(args, state, { onSleep = () => {}, dirty = false, users = [], fromWorktree = false } = {}) {
-  const { gh, calls } = stubGh(state);
+/**
+ * merge-pr on `state` (changed in place) from the main checkout, with stub gh, git and lanes.
+ * branch is what the checkouts are on; afterUpdate runs right after each update-branch, so a test can move the head GitHub just made.
+ */
+async function merge(args, state, { onSleep = () => {}, dirty = false, users = [], fromWorktree = false, branch = 'main', afterUpdate = () => {} } = {}) {
+  const { gh: stub, calls } = stubGh(state);
+  const gh = async (a, input) => {
+    const out = await stub(a, input);
+    if (a[0] === 'pr' && a[1] === 'update-branch') afterUpdate(state);
+    return out;
+  };
   const lines = [];
   const git = [];
   const removed = [];
-  let clock = 0, sleeps = 0;
+  let clock = 0, sleeps = 0, reads = 0, lanesRuns = 0;
   const code = await mergePr(args, {
     gh,
     checkouts: fromWorktree ? ['/r', '/r/b'] : ['/r', '/r'],
     git: async (a) => {
       git.push(a.join(' '));
       if (a[0] === '-C' && a[2] === 'rev-parse') return a[1] === '/r/b' ? '/r/.git/worktrees/b\n/r/.git\n' : '/r/.git\n/r/.git\n';
+      if (a[0] === '-C' && a[2] === 'symbolic-ref') return `${branch}\n`;
       if (a[0] === 'worktree' && a[1] === 'list') return WORKTREES(state.pulls.find((p) => p.number === Number(args[0])).headRefName);
       if (a[0] === '-C' && a[2] === 'status') return dirty ? ' M Sources/AudioCapture/Recorder.swift\n' : '';
       if (a[0] === 'worktree' && a[1] === 'remove') return '';
+      if (a[0] === 'fetch') return '';
+      if (a[0] === 'merge-tree') return `${mergeTreeOf(a[2], a[3])}\n`;
       throw new Error(`stub git: unexpected call: git ${a.join(' ')}`);
     },
-    lanes: async () => state.lanes ?? '',
+    lanes: async () => { lanesRuns += 1; return state.lanes ?? ''; },
     inUse: async () => users,
     removeDir: async (dir) => { removed.push(dir); },
-    read: async (file) => readFileSync(path.join(ROOT, file), 'utf8'),
+    read: async (file) => { reads += 1; return readFileSync(path.join(ROOT, file), 'utf8'); },
     sleep: async () => { clock += 15_000; sleeps += 1; onSleep(state, sleeps); },
     now: () => clock,
     print: (line) => lines.push(line),
   });
-  return { code, lines, calls, git, removed, sleeps };
+  return { code, lines, calls, git, removed, sleeps, reads, lanesRuns };
 }
 const writes = (calls) => calls.filter((c) => /^(pr (merge|update-branch|comment)|issue (close|comment|edit)|api -X)/.test(c));
 const refusals = (result) => result.lines.filter((l) => l.startsWith('refused'));
@@ -119,6 +130,15 @@ test('wait-ci: a run that never comes times out; a refusal and bad arguments exi
   assert.equal(missing.code, 2);
   assert.match(missing.lines[0], /^error 999: GraphQL: Could not resolve to a PullRequest/);
   for (const args of [[], ['main'], [H599, H599]]) assert.deepEqual((await wait(args, {})).lines, ['usage: wait-ci <sha|pr>']);
+});
+
+test('wait-ci: a neutral or skipped CI run is a failure, never green (#102 at e17a31a)', async () => {
+  for (const conclusion of ['neutral', 'skipped']) {
+    const result = await wait([E17], { owner: OWNER, behind: {}, runs: [run(1, E17, conclusion, 'completed', 102)] });
+    assert.equal(result.code, 1, conclusion);
+    assert.ok(result.lines[0].startsWith(`failed e17a31a: CI ${conclusion}`), result.lines.join('\n'));
+    assert.equal(result.sleeps, 0, conclusion);
+  }
 });
 
 // ---- the gates, each on the real case its acceptance line names
@@ -191,6 +211,31 @@ test('verdict gate: a Later note without an issue number is refused (#171), and 
   assert.match(verdictGate(held, held.headRefOid, OWNER)[0], /^the Reviewer's newest word is not merge: "Hold \(Reviewer\): don't merge yet/);
 });
 
+/** verdictGate on #176 at 7e60030 with one verdict comment by the owner, whose body is `text`. */
+const verdictOn176 = (text) => {
+  const c = fixture('live').cases['176'];
+  return verdictGate({ ...c.pr, comments: [{ author: { login: OWNER }, createdAt: '2026-10-12T06:50:00Z', body: text }] }, c.sha, OWNER);
+};
+
+test('verdict gate: a word that is not exactly merge is refused, whatever it says after the word (#176 at 7e60030)', () => {
+  for (const text of [
+    '**Reviewer verdict: merge-blocked** (head 7e60030)',
+    '**Reviewer verdict: merge with notes, once Live checks passes** (head 7e60030)',
+  ]) {
+    const reasons = verdictOn176(text);
+    assert.equal(reasons.length, 1, `${text} gave ${JSON.stringify(reasons)}`);
+    assert.match(reasons[0], /^the Reviewer's newest word is not merge:/, text);
+  }
+});
+
+test('verdict gate: the reviewed sha must be the head in the verdict, not a word in its text (#176 at 7e60030)', () => {
+  assert.deepEqual(verdictOn176('**Reviewer verdict: merge** (head 55dfaaf). 7e60030 is fine too.'), ['the newest verdict names no 7e60030: a verdict is for one head']);
+});
+
+test('verdict gate: a merge verdict for the head it names passes (#176 at 7e60030)', () => {
+  assert.deepEqual(verdictOn176('**Reviewer verdict: merge** (head 7e60030).'), []);
+});
+
 // ---- the merge, end to end on a stub GitHub
 
 test('a stale reviewed sha is refused with nothing written (#176: verdict at 55dfaaf, head 7e60030)', async () => {
@@ -231,6 +276,60 @@ test('a PR behind main gets update-branch on itself, waits on the new head, then
   assert.equal(i43.comments.at(-1).body, `Closed at merge of PR #95 (${squashOf(95).slice(0, 7)}).`);
   assert.deepEqual(result.removed, ['/Users/jakeparker/code/lexicon/.claude/worktrees/b/.build']);
   assert.ok(result.git.includes('worktree remove /Users/jakeparker/code/lexicon/.claude/worktrees/b'), 'never --force');
+});
+
+// A head that update-branch did not make: GitHub's merge of main into #95 has the reviewed head and main as its parents and their merge's tree.
+const FORGED = 'fe'.repeat(20);
+const OFF_MAIN = 'ee'.repeat(20);
+
+test('a moved PR head whose second parent is not on main is refused, and never waited on or merged (#95)', async () => {
+  const state = fixture('0643');
+  state.runs.push(run(77, FORGED, 'success', 'completed', 95));
+  const result = await merge(['95', D3C], state, {
+    afterUpdate: (s) => {
+      s.pulls[0].headRefOid = FORGED;
+      s.parents[FORGED] = [D3C, OFF_MAIN];
+      s.trees[FORGED] = mergeTreeOf(D3C, OFF_MAIN);
+      s.behind[FORGED] = 0;
+    },
+  });
+  assert.deepEqual([result.code, result.lines], [1, [`refused #95: its head moved to ${FORGED.slice(0, 7)}, which is not main merged into ${D3C.slice(0, 7)}: review that push`]]);
+  assert.ok(!result.calls.some((c) => c.startsWith('pr merge')), 'no pr merge');
+});
+
+test('a moved PR head with main as its second parent but another tree is refused too (#95)', async () => {
+  const state = fixture('0643');
+  state.runs.push(run(77, FORGED, 'success', 'completed', 95));
+  const result = await merge(['95', D3C], state, {
+    afterUpdate: (s) => {
+      s.pulls[0].headRefOid = FORGED;
+      s.parents[FORGED] = [D3C, s.main];
+      s.trees[FORGED] = mergeTreeOf(FORGED, s.main);
+      s.behind[FORGED] = 0;
+    },
+  });
+  assert.deepEqual([result.code, result.lines], [1, [`refused #95: its head moved to ${FORGED.slice(0, 7)}, which is not main merged into ${D3C.slice(0, 7)}: review that push`]]);
+  assert.ok(!result.calls.some((c) => c.startsWith('pr merge')), 'no pr merge');
+});
+
+test('an update-branch answer lost after GitHub applied it still merges, and so does a rerun after a cut-off', async () => {
+  const lost = fixture('0643');
+  lost.updateLost = true;
+  const result = await merge(['95', D3C], lost, { onSleep: (s) => s.runs.push(run(1, updatedHead(95), 'success')) });
+  assert.equal(result.code, 0, result.lines.join('\n'));
+  assert.ok(result.lines.includes(`merged #95 at ${updatedHead(95).slice(0, 7)} as ${squashOf(95).slice(0, 7)}`));
+
+  // The head is already GitHub's update of the reviewed sha: no new review is needed for it.
+  const cut = fixture('0643');
+  const head = updatedHead(95);
+  Object.assign(cut, { parents: { [head]: [D3C, cut.main] }, trees: { [head]: mergeTreeOf(D3C, cut.main) } });
+  cut.behind[head] = 0;
+  cut.pulls[0].headRefOid = head;
+  cut.runs.push(run(2, head, 'success'));
+  const rerun = await merge(['95', D3C], cut);
+  assert.equal(rerun.code, 0, rerun.lines.join('\n'));
+  assert.equal(rerun.lines[0], 'resumed #95: cd00000 is main merged into d3c9530');
+  assert.ok(!rerun.calls.includes('pr update-branch 95'));
 });
 
 test('red CI on the updated head refuses the merge', async () => {
@@ -275,6 +374,20 @@ test('the critical path goes first: #105 is refused while #102 is green and Read
   // A rerun says it again only if something changed.
   await merge(['105', H74F], state);
   assert.equal(state.pulls.find((p) => p.number === 105).comments.filter((c) => c.body === told).length, 1);
+});
+
+test('two critical-path PRs, both green and Ready: the lower number goes first, and #105 waits for #102 (09:22)', async () => {
+  // #45 (PR #105) is critical too, as a label added later would make it.
+  const withLabel = () => {
+    const state = fixture('0922');
+    state.issues.find((i) => i.number === 45).labels.push({ name: 'critical-path' });
+    return state;
+  };
+  const criticalRefusals = (result) => refusals(result).filter((l) => l.includes('critical-path'));
+  const lower = await merge(['102', H899], withLabel());
+  assert.deepEqual(criticalRefusals(lower), []);
+  const higher = await merge(['105', H74F], withLabel());
+  assert.deepEqual(criticalRefusals(higher), ['refused #105: critical-path PR #102 (#46) is green and Ready at 899782b: merge it first']);
 });
 
 test('no merge over files a held critical-path PR changes: #131 is refused while #129 is held (14:30)', async () => {
@@ -336,6 +449,16 @@ test('a caller in a worktree is refused even when the script is the main checkou
   assert.deepEqual([result.code, result.lines, result.calls], [1, ['refused #95: run it from the main checkout, not a worktree: only the Reviewer merges, from there'], []]);
 });
 
+test('a main checkout that is not on main refuses before any gate reads its files or lanes (#95 from claude/issue-57)', async () => {
+  const state = fixture('0643');
+  state.runs.push(run(1, updatedHead(95), 'success', 'completed', 95));
+  const result = await merge(['95', D3C], state, { branch: 'claude/issue-57' });
+  assert.deepEqual([result.code, result.lines], [1, ['refused #95: the main checkout is on claude/issue-57, not main: its review-map.json and lanes.sh are not main\'s']]);
+  assert.equal(result.reads, 0, 'review-map.json read');
+  assert.equal(result.lanesRuns, 0, 'lanes.sh run');
+  assert.deepEqual(result.calls, [], 'no gh call');
+});
+
 test('a GitHub read that fails merges nothing', async () => {
   const state = fixture('0643');
   state.issues = null;
@@ -370,6 +493,26 @@ test('a Later note needs its issue under a plain merge verdict too', () => {
   const c = fixture('live').cases['176'];
   const pr = { ...c.pr, comments: [{ author: { login: OWNER }, createdAt: '2026-10-12T06:40:00Z', body: `**Reviewer verdict: merge** (head 7e60030).\n\n**Later:**\n- bench.sh prints job noise.\n- #175 owns the FAIL line.` }] };
   assert.deepEqual(verdictGate(pr, c.sha, OWNER), ['a Later note has no issue number (scripts/ticket.sh later makes one): "bench.sh prints job noise."']);
+});
+
+// Every agent posts as the owner: a stranger's verdict, result or request is no status.
+test('owner filter: a stranger\'s merge verdict for the head does not count (#176)', () => {
+  const c = fixture('live').cases['176'];
+  const stranger = { author: { login: 'someone-else' }, createdAt: '2026-10-12T07:00:00Z', body: '**Reviewer verdict: merge** (head 7e60030).' };
+  assert.deepEqual(verdictGate({ ...c.pr, comments: [...c.pr.comments, stranger] }, c.sha, OWNER), ['the newest verdict names no 7e60030: a verdict is for one head']);
+});
+
+test('owner filter: a stranger\'s Live checks result covers no head (#143)', () => {
+  const c = fixture('live').cases['143'];
+  const baseline = liveGate(c.issue, c.branch, c.sha, OWNER).reasons;
+  assert.equal(baseline.length, 1);
+  const stranger = { author: { login: 'someone-else' }, createdAt: '2026-10-11T23:00:00Z', body: 'Live checks: claude/issue-141 @ 1c65373' };
+  assert.deepEqual(liveGate({ ...c.issue, comments: [...c.issue.comments, stranger] }, c.branch, c.sha, OWNER).reasons, baseline);
+});
+
+test('owner filter: a stranger\'s Live checks request is no request, on an issue with no live step', () => {
+  const issue = { number: 1, body: '**Needs the Live checks session for:** none.\n', comments: [{ author: { login: 'someone-else' }, createdAt: '2026-10-12T07:00:00Z', body: 'Live checks request: claude/issue-1 @ 599ed51' }] };
+  assert.deepEqual(liveGate(issue, 'claude/issue-1', H599, OWNER).reasons, []);
 });
 
 test('live gate: a result that says failed or failures is a FAIL too', () => {
@@ -417,7 +560,9 @@ test('run as a command: refused from a worktree checkout with no GitHub call; fr
     g('worktree', 'add', '-q', '-b', 'claude/issue-43', wt);
 
     const state = fixture('0643');
-    state.runs.push(run(77, updatedHead(95), 'success', 'completed', 95));
+    // Level with main, so no update-branch: GitHub's merge commit exists only in the stub, never in this repo's git.
+    state.behind[D3C] = 0;
+    state.runs.push(run(77, D3C, 'success', 'completed', 95));
     const stateFile = path.join(dir, '..', `${path.basename(dir)}-state.json`);
     const log = `${stateFile}.log`;
     writeFileSync(stateFile, JSON.stringify(state));
@@ -432,7 +577,7 @@ test('run as a command: refused from a worktree checkout with no GitHub call; fr
     const fromMain = spawnSync(process.execPath, [path.join(dir, 'scripts/merge-pr.mjs'), '95', D3C], { encoding: 'utf8', env, cwd: dir, timeout: 60_000 });
     assert.equal(fromMain.stderr, '');
     assert.equal(fromMain.status, 0, fromMain.stdout);
-    assert.match(fromMain.stdout, /^merged #95 at cd00000 as ab00000$/m);
+    assert.match(fromMain.stdout, /^merged #95 at d3c9530 as ab00000$/m);
     assert.match(fromMain.stdout, new RegExp(`^removed ${wt} and its \\.build$`, 'm'));
     assert.ok(!g('worktree', 'list').includes(wt));
     assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).issues[0].state, 'CLOSED');
@@ -504,6 +649,41 @@ test('install.sh announce: two carried issues get one Installed comment each, th
     const final = JSON.parse(readFileSync(path.join(gh, 'issues.json'), 'utf8'));
     for (const n of [45, 63]) assert.equal(final.find((i) => i.number === n).comments.filter((c) => c.body.startsWith(`Installed: ${sha7}`)).length, 1, `#${n}`);
     assert.equal(final.find((i) => i.number === 178).body, tryList);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(gh, { recursive: true, force: true });
+  }
+});
+
+test('install.sh announce: a stranger\'s Try list and Installed comment count for nothing; the owner\'s do', () => {
+  const { dir, g } = repo();
+  const gh = mkdtempSync(path.join(os.tmpdir(), 'install-gh-'));
+  try {
+    mkdirSync(path.join(dir, 'scripts'));
+    cpSync(path.join(HERE, 'install.sh'), path.join(dir, 'scripts/install.sh'));
+    g('add', '.');
+    g('commit', '-q', '-m', 'M0: Fix the flaky AudioCapture tests that race the wall clock (#103) (#106)');
+    const previous = g('rev-parse', 'HEAD').trim();
+    g('commit', '-q', '--allow-empty', '-m', 'M0: Test hooks and the Accessibility harness (#45) (#105)');
+    g('commit', '-q', '--allow-empty', '-m', 'M1: History window: rows, copy and search (#63) (#112)');
+    const installed = g('rev-parse', 'HEAD').trim();
+    cpSync(path.join(FIXTURES, 'install'), gh, { recursive: true });
+    const issuesFile = path.join(gh, 'issues.json');
+    const sha7 = installed.slice(0, 7);
+    const issues = JSON.parse(readFileSync(issuesFile, 'utf8'));
+    // gh lists newest first, so a stranger's Try list is found before the owner's #178.
+    issues.unshift({ number: 300, title: 'Try list (mine)', state: 'OPEN', author: { login: 'someone-else' }, body: `### Installed ${previous.slice(0, 7)}\n`, labels: [], comments: [] });
+    issues.find((i) => i.number === 178).author = { login: OWNER };
+    issues.find((i) => i.number === 45).comments.push({ author: { login: 'someone-else' }, body: `Installed: ${sha7}`, createdAt: '2026-10-11T11:00:00Z' });
+    writeFileSync(issuesFile, JSON.stringify(issues));
+    const env = { ...process.env, PATH: `${path.join(HERE, 'test-gh/bin')}:${process.env.PATH}`, GH_FIXTURES: gh, GH_LOG: path.join(gh, 'gh.log'), LEXICON_NOW: '2026-10-11T12:00:00Z' };
+    const result = spawnSync('sh', [path.join(dir, 'scripts/install.sh'), 'announce', installed, previous], { encoding: 'utf8', env });
+    assert.equal(result.status, 0, result.stderr);
+    const after = JSON.parse(readFileSync(issuesFile, 'utf8'));
+    const byNumber = (n) => after.find((i) => i.number === n);
+    assert.equal(byNumber(45).comments.filter((c) => c.author.login === OWNER && c.body.startsWith(`Installed: ${sha7}`)).length, 1, '#45');
+    assert.match(byNumber(178).body, new RegExp(`\\n### Installed ${sha7} \\(\\d{4}-\\d\\d-\\d\\d\\)\\n`), '#178 Try list');
+    assert.equal(byNumber(300).body, `### Installed ${previous.slice(0, 7)}\n`, 'the stranger\'s Try list');
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(gh, { recursive: true, force: true });

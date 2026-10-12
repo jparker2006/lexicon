@@ -14,7 +14,7 @@
 #
 # After the swap it comments "Installed: <sha7>" once on each issue the install
 # carries (the Refs issues of the PRs merged since the last install) and puts
-# each one with a try step on the open "Try list" issue, under a heading for
+# each one with a try step on the owner's open "Try list" issue, under a heading for
 # this install. A try step is a line in the PR's or the issue's body:
 #
 #   Try (about 2 min): hold fn in TextEdit and say a sentence; it lands at the cursor.
@@ -33,8 +33,11 @@ announce() {
     new7=$(printf %.7s "$new")
     tmp=$(mktemp -d -t install)
     trap 'rm -rf "$tmp"' EXIT
-    gh issue list --state open --limit 200 --json number,title,body > "$tmp/open.json"
-    try=$(jq -r '[.[] | select(.title | startswith("Try list"))][0].number // empty' "$tmp/open.json")
+    # The repo is public: only the owner's issues and comments count, never a stranger's look-alike.
+    owner=$(gh repo view --json owner | jq -r '.owner.login // empty')
+    [ -n "$owner" ] || die "can't read the repo's owner from gh"
+    gh issue list --state open --limit 200 --json number,title,body,author > "$tmp/open.json"
+    try=$(jq -r --arg o "$owner" '[.[] | select(.author.login == $o and (.title | startswith("Try list")))] | min_by(.number) | .number // empty' "$tmp/open.json")
     [ -n "$try" ] || die "no open issue titled \"Try list...\"; open one, then: scripts/install.sh announce $new7${2:+ $2}"
     jq -r --argjson n "$try" '.[] | select(.number == $n) | .body // ""' "$tmp/open.json" | tr -d '\r' > "$tmp/try.md"
     if grep -q "^### Installed $new7" "$tmp/try.md"; then
@@ -61,7 +64,7 @@ announce() {
     awk '!seen[$1]++' "$tmp/issues" > "$tmp/carried"
     while read -r n pr; do
         gh issue view "$n" --json title,body,comments > "$tmp/issue.json"
-        if ! jq -e --arg s "Installed: $new7" 'any(.comments[]; .body | startswith($s))' "$tmp/issue.json" > /dev/null; then
+        if ! jq -e --arg s "Installed: $new7" --arg o "$owner" 'any(.comments[]; .author.login == $o and (.body | startswith($s)))' "$tmp/issue.json" > /dev/null; then
             gh issue comment "$n" --body "Installed: $new7 (daily copy, ~/Applications/Lexicon.app). Try list: #$try." > /dev/null
             posted="$posted #$n"
         fi

@@ -48,7 +48,6 @@ const lines = (body) => String(body ?? '').replace(/\r/g, '').split('\n');
 const status = (body) => lines(body)[0].replace(/^[\s#*]+/, '');
 // Every agent posts as the repo owner; anyone else's comment is not a status.
 const own = (comments, owner) => (comments ?? []).filter((c) => c.author?.login === owner);
-const names = (text, sha) => (String(text).match(/\b[0-9a-f]{7,40}\b/g) ?? []).some((hex) => sha.startsWith(hex));
 
 /** The issues a PR's first line refers to: "Refs #159" or "Refs #61, #88". */
 export const refsOf = (body) => [...(lines(body)[0].match(/^Refs\s+(.*)$/i)?.[1].matchAll(/#(\d+)/g) ?? [])].map((m) => Number(m[1]));
@@ -56,9 +55,13 @@ export const refsOf = (body) => [...(lines(body)[0].match(/^Refs\s+(.*)$/i)?.[1]
 const VERDICT = /^(?:Reviewer verdict|Verdict):\s*(.*)$/i;
 const HOLD = /^Hold\b/i;
 const isVerdict = (body) => VERDICT.test(status(body)) || HOLD.test(status(body));
-/** What a verdict says: "merge with notes", "merge", "don't merge yet", or "hold". */
+/** What a verdict says: "merge with notes (head 5ef22b1) ...", "don't merge yet ...", or "hold". */
 const kindOf = (body) => (HOLD.test(status(body)) ? 'hold' : status(body).match(VERDICT)[1].replace(/\*/g, '').trim().toLowerCase());
-const merges = (body) => /^merge\b/.test(kindOf(body));
+// A merge verdict opens with exactly "merge" or "merge with notes", then the head it is for:
+// "**Reviewer verdict: merge with notes** (head 5ef22b1, ...)". Not "merge-blocked", not "merge, once ...".
+const OPENING = /^(merge with notes|merge)\s*(?:\(head ([0-9a-f]{7,40})\b|\.?\s*$)/;
+const merges = (body) => OPENING.test(kindOf(body));
+const headOf = (body) => kindOf(body).match(OPENING)?.[2];
 
 /** The bullets under a "Later:" line, each with its continuation lines. */
 function laterNotes(body) {
@@ -80,7 +83,7 @@ export function verdictGate(pr, sha, owner) {
   if (!newest) return [`no Reviewer verdict on it: post one that names ${short(sha)}`];
   if (!merges(newest.body)) return [`the Reviewer's newest word is not merge: "${clip(status(newest.body))}"`];
   const reasons = [];
-  if (!names(newest.body, sha)) reasons.push(`the newest verdict names no ${short(sha)}: a verdict is for one head`);
+  if (!sha.startsWith(headOf(newest.body) ?? '-')) reasons.push(`the newest verdict names no ${short(sha)}: a verdict is for one head`);
   const notes = laterNotes(newest.body);
   if (kindOf(newest.body).startsWith('merge with notes') && !notes.length) reasons.push('the verdict is merge with notes but lists no notes under "Later:"');
   for (const note of notes) {
@@ -199,8 +202,9 @@ export async function criticalGate(pr, owner, { gh, lanes }) {
     ghJson(gh, ['issue', 'list', '--state', 'open', '--label', 'critical-path', '--limit', '100', '--json', 'number']),
   ]);
   const criticalIssues = new Set(labelled.map((i) => i.number));
-  const critical = open.filter((p) => p.number !== pr.number
-    && (p.labels.some((l) => l.name === 'critical-path') || refsOf(p.body).some((n) => criticalIssues.has(n))));
+  const isCritical = (p) => p.labels.some((l) => l.name === 'critical-path') || refsOf(p.body).some((n) => criticalIssues.has(n));
+  // Between two critical-path PRs the lower number goes first, so they never wait on each other.
+  const critical = open.filter((p) => p.number !== pr.number && isCritical(p) && !(isCritical(pr) && p.number > pr.number));
   const reasons = [];
   const held = [];
   for (const p of critical) {
@@ -232,26 +236,51 @@ export async function criticalGate(pr, owner, { gh, lanes }) {
   return reasons;
 }
 
+/**
+ * Whether `moved` is GitHub's own update of `head`: main merged in and nothing
+ * else. Its first parent is the reviewed head, its second is on main, and its
+ * tree is exactly what merging the two gives, so no hand-made change rides along.
+ */
+async function isUpdateOf(moved, head, { gh, git }) {
+  try {
+    const commit = await ghJson(gh, ['api', `repos/{owner}/{repo}/commits/${moved}`]);
+    const parents = commit.parents.map((p) => p.sha);
+    if (parents.length !== 2 || parents[0] !== head) return false;
+    if ((await ghJson(gh, ['api', `repos/{owner}/{repo}/compare/${parents[1]}...main`])).behind_by !== 0) return false;
+    await git(['fetch', '-q', 'origin', head, parents[1]]);
+    const tree = (await git(['merge-tree', '--write-tree', head, parents[1]])).split('\n')[0].trim();
+    return Boolean(tree) && tree === commit.commit?.tree?.sha;
+  } catch {
+    return false;
+  }
+}
+
 /** GitHub merges main into the reviewed head; resolves to the new head, or { reason }. */
-async function updateBranch(pr, head, main, { gh, sleep, now, owner }) {
+async function updateBranch(pr, head, main, deps) {
+  const { gh, sleep, now, owner } = deps;
+  let failure;
   try {
     await gh(['pr', 'update-branch', String(pr.number)]);
   } catch (error) {
-    if (!/conflict/i.test(error.message)) throw error;
-    const body = `Merge script: PR #${pr.number} at \`${short(head)}\` conflicts with main at \`${short(main)}\`, so it was neither updated nor merged. Merge origin/main into \`${pr.headRefName}\`, resolve the conflict (what is already merged wins), push, and post a Fixed review line; the new head needs a new review.`;
-    const said = own((await ghJson(gh, ['pr', 'view', String(pr.number), '--json', 'comments'])).comments, owner).at(-1);
-    if (said?.body !== body) await gh(['pr', 'comment', String(pr.number), '--body-file', '-'], body);
-    return { reason: `it conflicts with main at ${short(main)}; the builder was told on the PR` };
+    if (!/conflict/i.test(error.message)) failure = error;
+    else {
+      const body = `Merge script: PR #${pr.number} at \`${short(head)}\` conflicts with main at \`${short(main)}\`, so it was neither updated nor merged. Merge origin/main into \`${pr.headRefName}\`, resolve the conflict (what is already merged wins), push, and post a Fixed review line; the new head needs a new review.`;
+      const said = own((await ghJson(gh, ['pr', 'view', String(pr.number), '--json', 'comments'])).comments, owner).at(-1);
+      if (said?.body !== body) await gh(['pr', 'comment', String(pr.number), '--body-file', '-'], body);
+      return { reason: `it conflicts with main at ${short(main)}; the builder was told on the PR` };
+    }
   }
+  // An error is not the last word: GitHub may have applied the update anyway, and the head says.
   const deadline = now() + 120_000;
   for (;;) {
     const moved = (await ghJson(gh, ['pr', 'view', String(pr.number), '--json', 'headRefOid'])).headRefOid;
     if (moved !== head) {
-      const parents = (await ghJson(gh, ['api', `repos/{owner}/{repo}/commits/${moved}`])).parents.map((p) => p.sha);
-      if (parents.length !== 2 || parents[0] !== head) return { reason: `its head moved to ${short(moved)}, which is not main merged into ${short(head)}: review that push` };
-      return moved;
+      return (await isUpdateOf(moved, head, deps)) ? moved : { reason: `its head moved to ${short(moved)}, which is not main merged into ${short(head)}: review that push` };
     }
-    if (now() >= deadline) return { reason: `update-branch left the head at ${short(head)} for two minutes; read the PR` };
+    if (now() >= deadline) {
+      if (failure) throw failure;
+      return { reason: `update-branch left the head at ${short(head)} for two minutes; read the PR` };
+    }
     await sleep(5_000);
   }
 }
@@ -332,6 +361,17 @@ export async function mergePr(args, deps) {
     for (const dir of deps.checkouts) {
       const [gitDir, common] = (await git(['-C', dir, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])).trim().split('\n');
       if (gitDir !== common) return refuse('run it from the main checkout, not a worktree: only the Reviewer merges, from there');
+    }
+    // The gates read review-map.json and lanes.sh from this checkout, so it must be main's.
+    for (const dir of deps.checkouts) {
+      const branch = (await git(['-C', dir, 'symbolic-ref', '--short', '-q', 'HEAD']).catch(() => '')).trim() || 'a detached HEAD';
+      if (branch !== 'main') return refuse(`the main checkout is on ${branch}, not main: its review-map.json and lanes.sh are not main's`);
+    }
+    // A run cut off after update-branch resumes from GitHub's update instead of asking for a new review.
+    const current = (await ghJson(gh, ['pr', 'view', String(number), '--json', 'headRefOid'])).headRefOid;
+    if (current !== sha && await isUpdateOf(current, sha, deps)) {
+      print(`resumed #${number}: ${short(current)} is main merged into ${short(sha)}`);
+      head = current;
     }
     read = await gates(number, sha, head, deps);
     for (const note of read.notes) print(`note #${number}: ${note}`);

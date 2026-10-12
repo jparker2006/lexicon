@@ -58,6 +58,9 @@
     "state": "OPEN",
     "body": "Things Jake can feel in his daily copy, one line each, with about how long a try takes. A ticket closes when its PR merges (#88 Q11); its \"try it\" step lands here instead of keeping the ticket open. `scripts/install.sh` appends a line for each carried issue at install (#159). Tick a line once tried; if it's wrong, say so on its issue.\n\n- [ ] #63 and #64 History (about 3 min): open History, click a row (it copies), play, pin, Retry.\n- [ ] #68 Private mode (about 1 min): turn Private mode on and off, see the outlined logo.\n\nRefs #88\n",
     "labels": [],
-    "comments": []
+    "comments": [],
+    "author": {
+      "login": "jparker2006"
+    }
   }
 ]
