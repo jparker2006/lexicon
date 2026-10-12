@@ -104,19 +104,34 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
     #expect(await deciding.value.source == .fallback(.cancelled))
 }
 
-/// A key read that waits until the test answers, as the first Keychain read
-/// can wait on a prompt nobody has seen.
+/// Key reads that wait until the test answers, as the first Keychain read can
+/// wait on a prompt nobody has seen. Past `giveUp` every read is answered, so
+/// a decide stuck on one fails its test instead of hanging the whole run.
 private final class SlowKeychain: Sendable {
     private let answered = DispatchSemaphore(value: 0)
+    private let finished = DispatchSemaphore(value: 0)
     private let entries: AsyncStream<Void>.Continuation
+    private let stuck = Mutex(false)
     let reading: AsyncStream<Void>
-    init() { (reading, entries) = AsyncStream<Void>.makeStream() }
+    /// The guard had to answer: something waited on a read that should not hold it.
+    var gaveUp: Bool { stuck.withLock { $0 } }
+    init(readers: Int = 1, giveUp seconds: Double = 30) {
+        (reading, entries) = AsyncStream<Void>.makeStream()
+        Thread.detachNewThread { [self] in
+            guard finished.wait(timeout: .now() + seconds) == .timedOut else { return }  // timing-ok: a hang guard only
+            stuck.withLock { $0 = true }
+            (0..<readers).forEach { _ in answered.signal() }
+        }
+    }
     func read(_ key: String) -> String {
         entries.yield()
         answered.wait()  // timing-ok: a synchronous Keychain read, released by the test's answer(), never by time
         return key
     }
-    func answer() { answered.signal() }
+    func answer(_ readers: Int = 1) {
+        finished.signal()
+        (0..<readers).forEach { _ in answered.signal() }
+    }
 }
 
 @Test(.timeLimit(.minutes(1))) func aKeyReadThatWaitsIsInsideTheBudget() async {
@@ -127,15 +142,12 @@ private final class SlowKeychain: Sendable {
     let clock = TestClock()
     let deciding = Task { await client(server, clock: clock).decide(question, access: access, fallback: soundRanking) }
 
-    let decision = await withTaskCancellationHandler {
-        for await _ in keychain.reading { break }
-        // The budget is already running while the key read waits.
-        await clock.waitForSleep(endingAt: JevClient.budget)
-        await clock.advance(by: JevClient.budget)
-        return await deciding.value
-    } onCancel: {
-        keychain.answer()  // a decide stuck on the read fails at the time limit instead of hanging the run
-    }
+    for await _ in keychain.reading { break }
+    // The budget is already running while the key read waits.
+    await clock.waitForSleep(endingAt: JevClient.budget)
+    await clock.advance(by: JevClient.budget)
+    let decision = await deciding.value
+    #expect(!keychain.gaveUp)
     keychain.answer()
     #expect(decision.source == .fallback(.timeout))
     #expect(decision.answer == soundRanking)
@@ -165,6 +177,34 @@ private final class SlowKeychain: Sendable {
         #expect(decision.source == .fallback(.error))
         #expect(decision.answer == soundRanking)
     }
+}
+
+@Test func prewarmHasStartedItsRequestWhenItReturns() async {
+    let server = FakeJev()
+    let session = server.session
+    JevClient(session: session, clock: TestClock(), requestTimeout: 3_600).prewarm(server.access())
+    // On the session or already at the server: never still waiting to be started.
+    let started = !(await session.allTasks).isEmpty || !server.requests.isEmpty
+    #expect(started)
+}
+
+@Test(.timeLimit(.minutes(1))) func keyReadsWaitingOnPromptsCannotStopTheBudget() async {
+    // More stuck reads than the cooperative pool has threads: the budget still runs out.
+    let readers = ProcessInfo.processInfo.activeProcessorCount + 2
+    let server = FakeJev { _ in (200, jevReply(["c1": 1])) }
+    let keychain = SlowKeychain(readers: readers)
+    let key = server.key
+    let access = CloudAccess.granted(by: .defaults, for: .app(.unknown)) { $0 == .jev ? keychain.read(key) : nil }
+    let clock = TestClock()
+    let jev = client(server, clock: clock)
+    let deciding = (0..<readers).map { _ in
+        Task { await jev.decide(question, access: access, fallback: soundRanking) }
+    }
+    await clock.waitForSleepers(readers)
+    await clock.advance(by: JevClient.budget)
+    for decision in deciding { #expect(await decision.value.source == .fallback(.timeout)) }
+    #expect(!keychain.gaveUp)
+    keychain.answer(readers)
 }
 
 @Test(.timeLimit(.minutes(1))) func prewarmOpensTheConnectionWithoutTextOrKey() async throws {
