@@ -32,8 +32,8 @@ private func viewTree(_ view: NSView) -> [NSView] {
     autoreleasepool { presenter.warmUp() }
 
     // AppKit refuses a frame autosave name while another live window holds it. A
-    // warm-up window that outlived its drop would take "History" from the real
-    // window, which would then forget its place.
+    // warm-up window that outlived its drop would keep "History", and the real
+    // window would be refused it and forget its place.
     let controller = unshownController(paths)
     #expect(controller.window?.frameAutosaveName == "History")
     // Nothing the warm-up built is on screen.

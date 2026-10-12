@@ -57,10 +57,12 @@ public final class HistoryWindowPresenter: NSObject {
     /// Builds the window once, unshown, and drops it. A process's first window pays
     /// for AppKit's one-time setup (its classes, the theme's art, the table's
     /// machinery), about 50 ms over a later open's, measured headless. Paid shortly
-    /// after launch, the first open costs what every other open does.
+    /// after launch, the first open costs what every other open does. Its reader
+    /// looks in a folder that is always empty, so launch reads nothing from History.
     public func warmUp() {
         guard controller == nil else { return }
-        _ = HistoryWindowController(reader: HistoryReader(paths: paths), system: system, pasteboard: .general) {}
+        let nothing = HistoryReader(paths: AppPaths(root: URL(filePath: "/var/empty", directoryHint: .isDirectory)))
+        _ = HistoryWindowController(reader: nothing, system: system, pasteboard: .general) {}
     }
 
     /// Never typed: the new text replaces the old in History, and a failed Dictation becomes not inserted.
