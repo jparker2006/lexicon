@@ -57,7 +57,7 @@ Jake would rather go hands-free than do things. Anything a hook, the harness, a 
 - `scripts/live-lane.sh sitting render` turns the queued Jake items into one numbered checklist. Run every hands-off part first, then send Jake the checklist, one short step per message.
 - On his go, `scripts/live-lane.sh sitting start`. When a step uses fn it quits the daily Lexicon from its menu; `sitting end` reopens it. Around a sitting you may also run `scripts/live-lane.sh daily quit` and `daily reopen`. Never kill it, and never touch its data or permissions.
 - `scripts/live-lane.sh sitting ack <step> pass|fail|skip [note]` per step, from what the logs show. Never ask Jake "done?" when a log or a row already shows it. `sitting end` prints every ack.
-- A Jake item stays queued after its request's hands-off result and after its issue closes at merge, until a sitting acks it pass or fail; a skip keeps it for the next sitting.
+- A Jake item stays queued after its request's hands-off result and after its issue closes at merge, until a sitting acks it pass; a fail or a skip keeps it for the next sitting, since nothing installs until his items pass (Q6).
 - Never take focus outside a sitting while Jake is typing: `idle` first, always.
 
 ## Asking Jake
