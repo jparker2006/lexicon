@@ -277,9 +277,11 @@ test_a_moment_without_ps_keeps_everyone_in_line() {
     hold_two
     job A
     expect_wait "number 1 in line"
+    # B joins while ps fails: it still finds A ahead of it.
     : > "$T/ps-fails"
     job B
     expect_wait "number 2 in line"
+    rm -f "$T/ps-fails"
     release H1
     expect_event "A 1 $((CORES / 2))"
     release H2

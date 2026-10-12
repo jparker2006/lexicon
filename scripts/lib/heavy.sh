@@ -63,30 +63,31 @@ heavy_holder() {
     cat "$HEAVY_DIR/slot$1.holder" 2>/dev/null || echo "an unknown job"
 }
 
-# Succeeds while process $1 runs and, when $2 (seconds since 1970) is given,
-# started no later than that: a pid is reused once its process is gone. Both
-# times are the kernel's own, read from the process and the file, never from
-# the clock, so a stall between readings changes nothing. A dead process that
-# its parent has not yet reaped (a zombie, which kill -0 still finds) is gone. A
-# ps that fails for a moment counts as running: a blip must not cost a job its
-# place.
+# Whether process $1 runs and, when $2 (seconds since 1970) is given, started
+# no later than that, since a pid is reused once its process is gone: 0 yes,
+# 1 no, 2 unknown (ps failed for a moment). Both times are the kernel's own,
+# read from the process and the file, never from the clock, so a stall between
+# readings changes nothing. A dead process its parent has not yet reaped (a
+# zombie, which kill -0 still finds) is gone.
 heavy_alive() {
     heavy_by=${2:-}
     kill -0 "$1" 2> /dev/null || return 1
-    heavy_ps=$(LC_ALL=C ps -o stat=,lstart= -p "$1" 2> /dev/null) || return 0
-    [ -n "$heavy_ps" ] || return 0
-    set -- $heavy_ps
+    heavy_ps=$(LC_ALL=C ps -o stat=,lstart= -p "$1" 2> /dev/null) || return 2
+    [ -n "$heavy_ps" ] || return 2
+    # Split by a command substitution, which zsh splits too.
+    set -- $(printf '%s\n' "$heavy_ps")
     case "$1" in Z*) return 1 ;; esac
     [ -n "$heavy_by" ] || return 0
     shift
-    heavy_since=$(LC_ALL=C date -j -f '%a %b %e %T %Y' "$*" +%s 2> /dev/null) || return 0
+    heavy_since=$(LC_ALL=C date -j -f '%a %b %e %T %Y' "$*" +%s 2> /dev/null) || return 2
     [ "$heavy_since" -le "$heavy_by" ]
 }
 
 # The line's live entries, first come first. With "prune", deletes the rest.
 # An entry is its waiter's while that pid's process runs and started before the
-# entry was written. An entry the job ahead deletes as it takes a slot just
-# drops from the list.
+# entry was written. One heavy_alive can't judge stays: a blip must not cost a
+# job its place. An entry the job ahead deletes as it takes a slot just drops
+# from the list.
 heavy_queue() {
     for heavy_q in "$HEAVY_DIR"/queue/*; do
         [ -f "$heavy_q" ] || continue
@@ -94,7 +95,9 @@ heavy_queue() {
             [ -e "$heavy_q" ] || continue
             heavy_q_written=
         }
-        if heavy_alive "${heavy_q##*.}" "$heavy_q_written"; then
+        heavy_q_alive=0
+        heavy_alive "${heavy_q##*.}" "$heavy_q_written" || heavy_q_alive=$?
+        if [ "$heavy_q_alive" -ne 1 ]; then
             echo "$heavy_q"
         elif [ "${1:-}" = prune ]; then
             rm -f "$heavy_q"
@@ -208,11 +211,12 @@ heavy() {
 
 # Runs in the slot, under lockf: leaves the line, records the holder, then
 # becomes the command. A waiter killed while its lockf took the slot has nobody
-# to run the command for, so the slot goes back unused.
+# to run the command for, so the slot goes back unused; when ps can't say, it
+# goes back too, as lockf's "not taken" (75), and a live waiter tries again.
 heavy_holding() {
     slot=$1 entry=$2
     shift 2
-    heavy_alive "${entry##*.}" || exit 0
+    heavy_alive "${entry##*.}" || exit 75
     rm -f "$entry"
     line="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)") (pid $$) running $* since $(date '+%H:%M:%S')"
     held=1
