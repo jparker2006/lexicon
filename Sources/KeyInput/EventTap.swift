@@ -94,10 +94,15 @@ final class EventTapThread: @unchecked Sendable {
         }
     }
 
-    /// Posted onto the tap thread's run loop, never run inline.
+    /// Posted onto the tap thread's run loop, never run inline. A tap never
+    /// started (tests) runs it at once, on the caller's thread.
     func perform(_ input: KeyInput) {
-        guard let runLoop else { return }
-        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) { self.feed(input) }
+        onTapThread { self.feed(input) }
+    }
+
+    func onTapThread(_ work: @escaping @Sendable () -> Void) {
+        guard let runLoop else { return work() }
+        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue, work)
         CFRunLoopWakeUp(runLoop)
     }
 
