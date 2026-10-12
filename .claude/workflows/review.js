@@ -91,13 +91,16 @@ const FINDING = {
   },
   required: ['path', 'line', 'claim', 'scenario', 'severity', 'confidence', 'cite'],
 }
+// Critics are read-only and the snapshot has no .git, so a lens that counted an unrun build
+// as incomplete would leave every clean run unstamped. CI runs those on the pushed head.
+const CI_GATE = 'CI is the build gate: a build, a test, scripts/check.sh or a scripts/checks/ step you did not run (or that needs the repo\'s .git, which the snapshot lacks) is never incomplete.'
 const FINDINGS = {
   type: 'object',
   properties: {
     findings: { type: 'array', items: FINDING },
     notes: { type: 'array', items: { type: 'string' }, description: 'possible problems without a citation, one line each' },
     checked: { type: 'string', description: 'what you checked and found fine, briefly' },
-    incomplete: { type: 'string', description: 'a command the lens needed that was refused, failed or cut short (a list at its limit), and what it left unchecked; "" when everything ran' },
+    incomplete: { type: 'string', description: `a read the lens needed that was refused, failed or cut short (a list at its limit), and what it left unchecked; "" when every read ran. ${CI_GATE}` },
   },
   required: ['findings', 'notes', 'checked', 'incomplete'],
 }
@@ -321,7 +324,7 @@ The standard is ${standard}. Settled decisions are never findings: the spec #36 
 
 A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes (at most 5), never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.
 
-A command this lens needs that is refused, fails, or returns a list at its limit goes in incomplete, with what it left unchecked: never read it as empty or clean. Otherwise incomplete is "".`
+A read this lens needs (a file, git, gh) that is refused, fails, or returns a list at its limit goes in incomplete, with what it left unchecked: never read it as empty or clean. Otherwise incomplete is "". ${CI_GATE}`
 }
 
 function verifyPrompt(f, pass) {
