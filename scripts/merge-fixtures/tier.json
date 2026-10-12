@@ -1,0 +1,126 @@
+{
+ "about": "PRs at the head they merged at. #113 touched the network with no critic; #101 deletes audio with no blast radius; #108 had the Reviewer's blast-radius proof.",
+ "owner": "jparker2006",
+ "pulls": [
+  {
+   "number": 113,
+   "state": "OPEN",
+   "isDraft": false,
+   "baseRefName": "main",
+   "headRefName": "claude/issue-81",
+   "headRefOid": "7ce479edcf15978d433eca36411beb578f5cb3db",
+   "body": "Refs #81\n\n**Live round trip unmeasured.** The p50 ~150 ms / p95 ~215 ms criterion needs a few real TypeSafe calls with Jake's key (paid API). Waiting on Jake's go-ahead for a handful of synthetic-text calls; everything else is verified against a fake server.\n\n## Summary\n\n`JevClient` in `Sources/Jev/JevClient.swift`: TypeSafe direct, `POST https://api.typesafe.ai/v1/systemone`, `jev-1.13.0` pinned, plain URLSession, one request per state with all its questions.\n\n```text\ndecide(question, access, budget = 250 ms, fallback)\n  no access (Private mode, always-private app)  -> fallback(.privateMode), no request\n  access.key(.jev, sending: question.sent)       -> Secret guard first\n    match -> fallback(.secretFound) ; no key -> fallback(.noKey)\n  race, first wins, the rest cancelled:\n    POST            -> .jev(probability)  | bad status or reply -> fallback(.error)\n    sleep(budget)   -> fallback(.timeout)\n    whenRevoked()   -> fallback(.privateMode)   (Private mode turned on mid-call)\n\nprewarm(access)   # fn-down: keyless HEAD, no text, warms TLS; no Keychain read\n```\n\n- **Budget: 250 ms** (recorded in code and the architecture Budgets table). The 0.5 s Re-speak target = speech final + Jev + replace; 250 ms covers the measured warm p95 (215 ms, #26) and leaves ~250 ms for the speech final and the replace. No retries: a second round trip can't fit.\n- **Re-speak question** `JevQuestion.respeakTarget(spoken:spokenPhonetic:recent:candidates:)`: each candidate is a 1 to 3 word range into the recent text plus a phonetic code. The body holds each candidate plus 3 words either side, for at most 4 candidates (best first by sound), never the rest of the Dictation. Both are starting values to tune on the Test set. Returns nil when no candidate is usable. The answer is every option with its probability, most likely first; \"none\" is `candidate: nil`. #82 applies the 0.75 threshold and the choices.\n- `Decision.Reason` is now `privateMode, secretFound, noKey, timeout, error`. `lowConfidence` is gone (the caller judges probabilities). The close-call question is gone (supersession 6 dropped Jev for close calls). No callers of either.\n- `Package.swift`: the test target depends on `Jev`.\n\n## Evidence\n\n- **Before:** every `JevClient` method was `fatalError(\"not implemented\")`.\n  **After:** `JevClientTests`, 11 tests, the real URLSession against a fake TypeSafe behind URLProtocol, fake keys only:\n\n```text\nsuccess            -> .jev(0.97), picks ranked, one POST, Bearer key, model jev-1.13.0, one \"target\" question\nserver hangs, 50ms -> .fallback(.timeout), answer == fallback\nPrivate mode       -> .fallback(.privateMode), zero requests (prewarm too)\nrevoke mid-call    -> .fallback(.privateMode) at once\nsecret in words    -> .fallback(.secretFound), zero requests, access revoked\nno key / 500 / junk / unknown options -> fallback\ncaller cancelled   -> fallback in ms, not the 60 s budget\nprewarm            -> one HEAD, no body, no Authorization\nno usable candidate -> nil ; ties keep candidate order\nbody window: 40 distinct words, 7 candidates (2 invalid, 1 past the cap):\n  every word is in the body iff it is within 3 words of a sent candidate\n```\n\n  The window test was checked by mutation: sending every word before a candidate turns it red.\n- `scripts/check.sh` after merging `main`: build with the import check, import-check script, 121 tests, scorer tests, `lexicon-eval` fixture run with nothing worse. No speech or Cleanup change, so no quick eval.\n- Review: Haiku critics on network/keys, correctness traps, tests/shape, spec. Fixed: key read at fn-down, call with no candidates, phonetic codes outside the Secret guard, tie order, a test pinning the cap, waits without a time limit. Blast radius: no production code constructs a `JevClient` yet (`LexiconSystem.live` is a stub, headless passes `jev: nil`), so nothing in the app changes behavior today.\n\n## Merge Danger\n\n**Door:** two-way\n\n**Blast Radius:** contained\n\n- Once `LexiconSystem` wires a `JevClient`, `Conductor+Run.swift:57` prewarms on **every** fn-down, so plain Dictations send a keyless HEAD to api.typesafe.ai (no text, no key). Recommendation: the fn+Shift trigger ticket gates `prewarm` on a Re-speak. Left alone here because it's LexiconCore, outside this lane.\n- The first `decide` after launch reads the key outside the budget, so a one-time Keychain prompt delays that Re-speak. Accepted: prewarm no longer reads keys, per the `Secrets` contract.\n- A caller that cancels gets the fallback marked `.timeout`. Nobody reads that reason yet.\n- The reply shape (`answers.target.probabilities`) comes from TypeSafe's API reference (#12) and #26's live call. The live calls above will confirm it, and whether the HEAD prewarm actually warms the POST.\n- `isRecognitionError` (Hand fix) stays a stub for the after-M1 grill.\n\n## Install\n\nCode only.\n\nCheck: nothing to try in the app yet; Jev is reached once the Re-speak tickets (#82, #83) land.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+   "labels": [],
+   "files": [
+    {
+     "path": "Package.swift"
+    },
+    {
+     "path": "Sources/Jev/JevClient.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/JevClientTests.swift"
+    },
+    {
+     "path": "docs/architecture.md"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T10:24:04Z",
+     "body": "Verdict: merge with notes.\n\nReviewed head `7ce479edcf15978d433eca36411beb578f5cb3db`, CI green, not behind main. High tier (network and keys): I read `JevClient.swift` in full and checked it against the spec's Jev and privacy sections.\n\nWhat holds:\n- The only way to a key is `access.key(.jev, sending: question.sent)`, so the Secret guard reads first. `sent` holds every caller string the body carries (re-spoken word, phonetic codes, each candidate and its window), and the rest of the body is fixed wording.\n- The body holds at most 4 candidates with 3 words either side, never the whole Dictation. A test with a mutation check proves the window.\n- Every path returns a decision: no access or revoked mid-call gives `.privateMode`, then the guard, no key, the 250 ms budget, and a bad status or reply. The three-way race cancels the losers, and there are no retries.\n- Prewarm is a HEAD with no key and no text, skipped without access. No Keychain read happens at fn-down.\n- Nothing in the app constructs a `JevClient` yet, so nothing changes today. The spec accepts TypeSafe as is (won't train on input; no retention flag exists).\n\nNot done: acceptance criterion 2, the live warm round trip, needs a few paid calls with Jake's key and his OK. Leave #81 open until it's reported.\n\nNo blockers. Notes are on the Later list (https://github.com/jparker2006/lexicon/issues/36#issuecomment-6106073553). The one that must land before Jev is wired: the skeleton Conductor prewarms Jev on every fn-down, which would contact api.typesafe.ai on every plain Dictation. Gate it on a Re-speak.\n"
+    }
+   ]
+  },
+  {
+   "number": 101,
+   "state": "OPEN",
+   "isDraft": false,
+   "baseRefName": "main",
+   "headRefName": "claude/issue-61",
+   "headRefOid": "e50074ed0ce5615842578f2b9eda38cd80704b39",
+   "body": "Refs #61\n\n## Summary\n\nHistory gets an audio retention sweep. Text is kept forever. Audio goes after 14 days, then oldest first until the rest fits in 1 GB. Pinned audio and Dictations that still need their audio (recording, transcribing, waiting, failed) are never touched and don't count toward the 1 GB.\n\n```text\nHistoryStore.sweepAudio(now)              on the writer queue, after every queued event\n  transaction\n    Retention.expire\n      candidates = unpinned rows, audio onDisk or ramOnly, status not needsAudio, oldest first\n      total = sum of their file sizes\n      for each candidate\n        if older than 14 days or total > 1 GB\n          mark audio .expired; total -= its size\n  for each expired id\n    unlink audio/<id>.caf (a failure is logged; the loop goes on)\n    notify the History window\n```\n\n```diff\n enum AudioStorage\n   case onDisk\n   case ramOnly\n-  case deleted    // removed by retention or by Delete\n+  case deleted    // removed by Delete; the row goes too\n+  case expired    // removed by retention; the row keeps its text\n```\n\n`expired` is a new case in `LexiconDomain` so that crash recovery and Delete can tell an aged-out row (keep it) from a half-deleted one (drop it). Reusing `deleted` would make recovery throw away the row's text. Nothing switches over `AudioStorage` today.\n\nCommit first, then unlink, the same order Delete uses. If the app crashes in between, the file left behind belongs to a row that already reads `expired`, so recovery deletes the file instead of adopting it as an orphan. The `RecoveryPlan` TODO now names that case, and says `expired` audio is never a reason to mark a row failed.\n\n## Evidence\n\nTests at the HistoryStore seam on a throwaway data folder, with sparse files, so \"900 MB\" costs no disk and no time. The headless pipeline is still being built in #46, and the sweep only touches History.\n\n- **Before** (sweep stubbed, and later with the ramOnly fix reverted):\n  `audioOlderThan14DaysIsRemovedAndTheTextKept`, `overOneGigabyteTheOldestUnpinnedNotNeededAudioGoesFirst`, `waitingFailedAndPinnedDictationsKeepTheirAudio` (ready, inserted, notInserted, recovered) and `aPartialFileLeftByRamOnlyCaptureAgesOutToo` all failed.\n- **After:** `scripts/check.sh` is green: build with the import check, `check-imports: OK (18 targets)`, 58 tests passed.\n\n```text\nold row (15 d)          -> audio expired, file gone, status, model and final text unchanged\nrow at exactly 14 d     -> kept\npinned 900 MB + failed 900 MB + 400 + 400 + 300 MB (all recent)\n                        -> only the oldest 400 MB goes (1,100 -> 700 MB counted)\n600 + 400 MB            -> both kept (exactly 1 GB is not over)\n15 d 600 MB + 13 d 600 MB -> only the old one goes (aged-out bytes leave the total)\neach status, 30 d old   -> audio kept iff recording/transcribing/waiting/failed; pinned always kept\nsweep twice             -> second changes nothing; Delete on an expired row drops it\n```\n\nNo `lexicon-eval`: nothing in speech, Cleanup or the Lexicon changed.\n\n## Merge Danger\n\n**Door:** two-way for this PR. Nothing calls `sweepAudio` yet, so merging deletes nothing. Once it's wired, every sweep deletes audio for good. That part is one-way, and it's why the never-touch rules are tested per status.\n\n**Blast Radius:** History\n\n- **Not wired:** `LexiconSystem.run()` (still a skeleton, LexiconCore lane) should call `history.sweepAudio(now: Date())` after `recover()` at launch, then about daily. Until then, audio is never aged out.\n- The sweep writes `audio_storage` outside the `apply` switch. That's on purpose: retention is History's own policy over many rows, not an event a caller describes about one Dictation. It runs on the same writer queue, so it orders with every event, and it never touches status, text or child rows.\n- Later: a pin on a row whose audio already expired sets `pinned` with no audio for the Test set. #64's Pin action should be greyed out there, the way play and Retry are.\n- Later: one sweep that expires over 1,024 rows while the History window is open overflows the change stream's buffer. Some rows keep a live Play button until the window reloads.\n- Later: `.ready` isn't `needsAudio`, so the sweep may expire it. Recovery has to keep turning `ready` into not-inserted when its audio is gone, as the TODO now says.\n\n## Install\n\nCode only.\n\nCheck: nothing to try until the sweep is wired into launch. After that, a Dictation older than 14 days still shows its text in History, with play and Retry greyed out.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+   "labels": [],
+   "files": [
+    {
+     "path": "Sources/History/HistoryStore.swift"
+    },
+    {
+     "path": "Sources/History/Schema.swift"
+    },
+    {
+     "path": "Sources/LexiconDomain/Dictation.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/RetentionTests.swift"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T08:59:52Z",
+     "body": "Verdict: merge with notes.\n\nReviewed head `e50074ed0ce5615842578f2b9eda38cd80704b39`, CI green, not behind main. High tier (deletes audio): I read the full diff.\n\nWhat holds:\n- Never touched: any status that `needsAudio` (recording, transcribing, waiting, failed, from the generated list) and pinned audio. The test lists the statuses by hand and runs every status.\n- Order: rows are marked `expired` in one transaction, then the files are unlinked, the same as Delete. A crash in between leaves files whose rows already read `expired`, which recovery deletes and never adopts.\n- Text, status and child rows are untouched, and Delete on an expired row still drops it.\n- `expired` is a separate case from `deleted`, so recovery can tell an aged-out row (keep it) from a half-deleted one (drop it). No code switches over `AudioStorage`.\n- Tests use a fixed `now` and sparse files, so no clock or disk cost.\n\nNo blockers. Nothing calls `sweepAudio` yet, so merging deletes nothing. Notes are on the Later list (https://github.com/jparker2006/lexicon/issues/36#issuecomment-6106073553): wire the sweep in #56, and failed or waiting audio is never counted against the 1 GB."
+    },
+    {
+     "createdAt": "2026-10-11T08:59:50Z",
+     "body": "## Review\n\nReviewed sha: `e50074e`. main pass `0000000..e50074e`. reviewer mode, high tier.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED. Dropped: 0 REFUTED, 0 UNSURE, 0 with a citation that does not hold.",
+     "author": {
+      "login": "jparker2006"
+     },
+     "added": "a review table at e50074e, so the case turns on the blast-radius line alone"
+    }
+   ]
+  },
+  {
+   "number": 108,
+   "state": "OPEN",
+   "isDraft": false,
+   "baseRefName": "main",
+   "headRefName": "claude/issue-65",
+   "headRefOid": "d9b369b408cd9b116a12e44fdd31fc3fa425b2d3",
+   "body": "Refs #65\n\n## Summary\n\nThe network door now works: the Secret guard, revoking access mid-Dictation, and keys read from the login Keychain.\n\n```text\nCloudAccess.granted(by:app:keys:)       nil in Private mode or an always-private app (unchanged)\n  key(id)                                nil once revoked; re-checked after the lookup returns\n  key(id, sending: text)                 SecretGuard.matches(text) -> revoke(.secretFound), nil\n  revoke(reason)                         first reason wins, resumes every whenRevoked waiter\n  whenRevoked() -> AccessRevoked?        nil if the waiting task is cancelled (a task group racing it can always finish)\n\nSecretGuard.matches(text)\n  \"PRIVATE KEY-----\" | known prefix + random body (sk-, ghp_, xoxb-, AKIA, AIza, SG., hf_ ...)\n  | JWT | 24+ char run with letters and digits that doesn't read as words\n  | \"password/passcode/passphrase/passwd ... is X\" | \"secret/token/PIN ... is <value with a digit>\"\n\nSecrets(.keychain(service: bundleID))\n  lookup: SecItemCopyMatching once per credential, cached (a miss too); a failed read is not cached\n  set: update in place or add; nil deletes; refreshes the cache\n```\n\n- `scripts/check-imports.swift`: `Security` may be imported only by LexiconCore.\n- README `## Keys`: the `security add-generic-password` command for `dev.jparker.lexicon.dev`, the three account names, and the `lexicon-eval` environment variables.\n\n## Evidence\n\n- **Before:** `SecretGuard.matches`, `CloudAccess.revoke`, `whenRevoked`, `Secrets` Keychain lookup and `set` were `fatalError` stubs.\n  **After:** `scripts/check.sh` green on the merged head: check-imports OK (20 targets), 100 tests pass. New tests:\n  - `knownKeyShapesMatch` (19 fake shapes, alone and inside a sentence), `passwordPhrasesMatch` (11), `ordinaryProseDoesNotMatch` (26: dates, money, versions, URLs, paths, camelCase with digits, short SHAs, \"password is wrong/not/stored/read from\", `password: String`, `password = keychain.read()`).\n  - `aTextCallWithASecretGetsNoKeyAndLaterCallsGetNothing`, `theFirstRevokeReasonWins`, waiter, cancel and race tests.\n  - Three Keychain round trips on a throwaway service per test, deleted after.\n- **One-off stress run (not committed):** 20,000 rounds of 4 waiters racing a revoke and a cancel. 41,170 got the reason and 38,830 got nil, with no double resume, hang or key after revoke.\n- **Logs:** the unified log of a test run of the new tests and the headless tests (730 lines from `swiftpm-testing-helper`) has no fake key and no Dictation text. Nothing in this diff logs.\n- **README command:** `security add-generic-password -U -s dev.jparker.lexicon.dev ...` adds an item under the dev bundle ID (checked with a throwaway account, then deleted). A reader app trusted with `-T` still got a Keychain prompt on its first read, so the README says to choose Always Allow once. Not checked: Lexicon Dev itself reading a key (no live-app lane, and nothing reads a key until #66).\n\n## Merge Danger\n\n**Door:** two-way\n\nNothing in the app reads a key yet: `CleanupPlan` and `SpeechPlan` are local only and `LexiconSystem.live` is a stub. So today this changes no Dictation.\n\n**Blast Radius:** contained\n\n- `whenRevoked()` now returns `AccessRevoked?`, and `Secrets.set` throws `KeychainError`. Neither has callers.\n- `swift test` now writes and deletes fake items under a `dev.jparker.lexicon.tests.<uuid>` service in the login Keychain. A locked Keychain would fail these tests.\n- Later list:\n  - #66: read keys off the speech actor, because the first read can block on the Keychain prompt.\n  - #66: re-run the log check with the cloud path live.\n  - #68: wire `revoke(.privateModeOn)` and `revoke(.alwaysPrivateApp)` (the Conductor+Run TODO).\n  - The app shell must build `Secrets(.keychain(service: bundleID))` in `LexiconSystem.live`.\n  - `key(_:)` without text is public, so only review keeps text calls on `key(_:sending:)`.\n  - The guard misses most all-lowercase random keys. It still matches a full 40-hex SHA, a UUID and `iPhone15ProMaxWithUSBc2024`. Tune on the Test set.\n\n## Install\n\nCode only.\n\nCheck: run `security add-generic-password -U -s dev.jparker.lexicon.dev -a jev -w` with any fake value, see it under that service in Keychain Access, then delete it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+   "labels": [],
+   "files": [
+    {
+     "path": "README.md"
+    },
+    {
+     "path": "Sources/LexiconCore/Settings.swift"
+    },
+    {
+     "path": "Sources/LexiconDomain/Preferences.swift"
+    },
+    {
+     "path": "Sources/LexiconDomain/SecretGuard.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/CloudAccessTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/SecretGuardTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/SecretsTests.swift"
+    },
+    {
+     "path": "scripts/check-imports.swift"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T10:01:29Z",
+     "body": "Verdict: merge with notes.\n\nReviewed head `d9b369b408cd9b116a12e44fdd31fc3fa425b2d3`, CI green (100 tests, including the Keychain round trip on the runner), not behind main. High tier (the network door, keys, the Secret guard): I read the full diff and ran a blast-radius pass.\n\n**Why it's safe to merge now.** Nothing outside tests calls the changed code yet:\n- `CloudAccess.granted` stores the lookup closure and never calls it (`Preferences.swift:124-128`).\n- The Conductor only passes `secrets.lookup` to `granted` (`Conductor+Run.swift:42`, `Conductor.swift:104`).\n- `CleanupPlan.make` is `.off` and `SpeechPlan.make` sets `cloud: nil` (`SpeechEngine.swift:69`), so no cloud engine is built, and `OpenRouterCleanup` is constructed only for `.cloud`.\n- Headless and `lexicon-eval` use `Secrets(.environment)` (`Headless.swift:56`).\n- `whenRevoked()`'s new optional return has no callers.\nProof level: the lines above plus CI's full run on this head.\n\nWhat holds:\n- `key(_:)` re-checks revocation after the lookup, so a revoke that lands during a Keychain prompt still returns nil. `key(_:sending:)` checks revoked, then the guard, then revokes on a match. The first revoke reason wins.\n- `whenRevoked` registers under the lock and checks `Task.isCancelled` there, so no waiter is lost or resumed twice (backed by the 20,000-round stress run).\n- Keychain: one cached read per credential, a failed read isn't cached, `set` updates in place so Always Allow survives, and errors carry only the `OSStatus`. `Security` is limited to LexiconCore by `check-imports`. Nothing logs.\n- The README command uses `-w` with no value, so the key never lands in shell history. Test keys are fake, on throwaway services, deleted in `defer`.\n\nNo blockers. Notes for #66, #68 and the live system are on the Later list (https://github.com/jparker2006/lexicon/issues/36#issuecomment-6106073553). Most important: once cloud speech lands, the first Keychain read can block on a prompt, so it must happen off the speech actor and never on the fn path.\n\n## Review\n\nReviewed sha: `d9b369b`. main pass `0000000..d9b369b`. reviewer mode, high tier.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED. Dropped: 0 REFUTED, 0 UNSURE, 0 with a citation that does not hold.\n\nBlast radius (main): nothing outside tests calls the changed code yet: CloudAccess.granted stores the lookup closure and never calls it, and the Conductor only passes secrets.lookup to granted. Proof: `scripts/test.sh --filter CloudAccessTests`: CI ran the full suite on d9b369b.",
+     "added": "the blast-radius pass the Reviewer ran, in the Workflow's table and line format"
+    }
+   ]
+  }
+ ]
+}

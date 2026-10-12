@@ -1,0 +1,413 @@
+{
+ "about": "Each case: the Refs issue at an instant, the PR's branch, and the sha under review.",
+ "owner": "jparker2006",
+ "cases": {
+  "143": {
+   "instant": "2026-10-11T22:50:02Z",
+   "branch": "claude/issue-141",
+   "sha": "1c6537357904a1b28dbae1604cb461ef1a614eeb",
+   "issue": {
+    "number": 141,
+    "title": "M0: Real fn Dictations recorded notInserted (typedSince) though they paste",
+    "state": "OPEN",
+    "body": "## Parent\n\n#36 (Spec: Lexicon v0)\n\n**Milestone:** M0 (bug)\n**Test seam:** live app + headless (the late-text guard)\n**Modules:** LexiconCore, KeyInput, AppText\n\n## What happened\n\nLive checks, 2026-10-11: real fn Dictations are recorded `notInserted` with reason `typedSince` **even though the text pastes**. 3 of 3 on heads that carry main after ba6d600 (#57 @ 6bd8bf3, #68 @ 3cb91a6). Test-hook WAV Dictations on the same builds come out `inserted`. On #56's own earlier heads (0d3adf5, bf7c0b9) real fn Dictations were inserted (47 of 48). Jake's daily app is installed at ba6d600, so it may be affected.\n\nSuspect: the typedSince watcher counts an event caused by the fn key itself (its flagsChanged on release) or Lexicon's own Cmd-V, introduced around #56's final merge (787b841, folding #71's Lexicon into LexiconSystem) or the shared InputClock.\n\n## What to build\n\nFind the cause (bisect between bf7c0b9 and ba6d600 if needed) and fix it so Lexicon's own fn release and its own paste never count as \"typed since\". Keep the guard working for real keys and clicks from Jake. The History status must match what happened.\n\n## Acceptance criteria\n\n- [ ] A headless test reproduces it (fn release and Lexicon's own Cmd-V events through the real watcher) and fails before the fix.\n- [ ] Live checks: 10 real fn Dictations into a scratch field, all `inserted`; a real key typed between fn-up and paste still gives `notInserted`/`typedSince`.\n- [ ] State whether the daily build ba6d600 has the bug.\n\n## Blocked by\n\nNone (can start immediately).",
+    "labels": [],
+    "comments": [
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:25:36Z",
+      "body": "Building: taking this (Claude)"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:41:22Z",
+      "body": "Ready for review: PR #143, CI pending (head 5a0cdb6). Live checks pending."
+     }
+    ]
+   },
+   "about": "#143 merged at 1c65373; the only live run on #141 was at 27f2c97, after the merge."
+  },
+  "171": {
+   "instant": "2026-10-12T06:00:43Z",
+   "branch": "claude/issue-157",
+   "sha": "5ef22b162e4066ade1b0e4b0ac43ca0f8ebb2169",
+   "issue": {
+    "number": 157,
+    "title": "Retro: Live checks queue, sittings, Dev data and bench",
+    "state": "OPEN",
+    "body": "## Parent\n\n#88 (M0 retro). Every box below is one accepted retro change; its full write-up (problem, verified evidence, change, expected effect) is in \"Change details\" at the bottom.\n\n**Milestone:** retro, before M1 (wave 1)\n**Size:** L.\n**Files this ticket owns (no other retro ticket touches them):** `scripts/live-lane.sh`, `scripts/live-request.sh` (new), `scripts/dev-run.sh`, `scripts/lib/fn-listeners.sh`, `scripts/import-lexicon.sh`, `scripts/install-model.sh`, `scripts/lag-report.sh`, `scripts/bench.sh` (new), `scripts/test-live/` (new), `scripts/checks/32-live-scripts-tests.sh` (new).\n**Needs the Live checks session for:** - agent: a dry run of one queued request with two hands-off items on main; bench.sh on History open; the fake-listener refusal.\n- Jake: none (the mock sitting has zero physical steps).\n\n## What to build\n\nLive requests as typed issue comments in one queue, hands-off items that run alone, scheduled sittings with a preflight, fn checks that refuse while another listener runs, safe moves of Dev's data, and a bench that records its load.\n\n## Acceptance criteria\n\n- [ ] **1. The queue.**\n  - `scripts/live-request.sh` posts `Live checks request: <branch> @ <sha7>` with typed items: kind, gesture, target, speak, cue, observable, pass bar and needs. It refuses unpushed or dirty trees and missing fields, naming the field.\n  - `live-lane.sh queue` lists requests in arrival order.\n  - Hands-off items run once HID idle time shows Jake isn't typing (verify the ioreg reading first).\n  - Long waits become background timers that release the lane.\n  - Prove: refuses with an unpushed commit, and with an item missing its observable. #53's hold-fn step can't render without its speak field.\n- [ ] **1. Sittings and preflight.**\n  - `live-lane.sh sitting render` produces one numbered checklist with total minutes, and prerequisites as their own steps.\n  - `sitting start` writes the marker on Jake's go. Default sitting slots are 11 AM and 6 PM Pacific, moved freely; a sitting is scheduled only when physical items exist (Jake prefers hands-free: anything a hook or headless run can check never becomes a Jake item).\n  - Acks are by step number.\n  - The preflight refuses: another fn listener; a hook item on a release bundle; an item whose needed feature has no use site at the head; an item the issue marks out of scope. It prints the exact open command.\n  - Prove: refuses #64's item 8 at 113f5cc with \"nothing reads doubleTapWindow at this sha\", refuses a hook item on a release bundle, and refuses with a fake fn listener running, naming the process.\n- [ ] **30. fn listeners.**\n  - `require_no_fn_listeners` in fn-listeners.sh refuses for fn-dependent callers, and also matches a second Dev copy. dev-run.sh uses it.\n  - Result headers record \"fn listeners: none\".\n  - `live-lane.sh daily quit|reopen` (Q8: yes): lane holder only, no Dictation in progress, quits from the menu, reopens `~/Applications/Lexicon.app`.\n  - Prove: with a fake listener process, dev-run.sh's fn path refuses with the message, and WAV-hook checks still run.\n- [ ] **41. Dev data.**\n  - `import-lexicon.sh dev` writes to scratch unless `--dev-data` is passed, which runs `live-lane.sh check`.\n  - `install-model.sh dev` runs the same lane check.\n  - `live-lane.sh park` and `restore`: keep the models link, use a manifest, restore on exit, refuse foreign folders.\n  - Prove: a dev import with no flag writes nothing under Lexicon Dev; park then restore leaves models as a link with an equal file count.\n- [ ] **42.** The sitting marker the guard reads (see `sitting start`).\n- [ ] **13. Bench.**\n  - `scripts/bench.sh <budget>`: interleaved runs, at least 5 per side; the exclusion rule fixed first; a 0.5 s load sampler plus power state; a provisional label measured against background load; refusals of single runs and of a final verdict while another fn listener runs.\n  - lag-report.sh reads the sampler file.\n  - Prove: refuses one run per side. On History open (hands-off), it prints p50, p95, the load minimum, median and maximum, and PASS or PROVISIONAL.\n- [ ] Tests in `scripts/test-live/`, run by `scripts/checks/32-live-scripts-tests.sh`.\n\nEach box is done only when its \"Prove\" step passes on a real past case, as written. A check you add must fail on the named past mistake before your fix makes it pass.\n\n## Blocked by\n\nnone.",
+    "labels": [],
+    "comments": [
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T04:38:12Z",
+      "body": "Building: taking this (Claude)"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T04:43:40Z",
+      "body": "From #151 (builder): `scripts/status.sh` prints the lane line from `scripts/live-lane.sh status` and, when it exits 0, each line of `scripts/live-lane.sh queue` (one waiting request per line, arrival order). `scripts/watch-events.sh` fires LIVE-REQUEST on comments whose first line starts `Live checks request:` and LIVE-RESULT on `Live checks:`. If either format changes, comment here and I will match it."
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T05:27:33Z",
+      "body": "Live checks request: claude/issue-157 @ efd2ab4"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T05:28:09Z",
+      "body": "Ready for review: PR #171, CI pending"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T05:39:47Z",
+      "body": "Fixed review: PR #171 at 27c6dc0, CI pending"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T05:49:24Z",
+      "body": "Fixed review: PR #171 at f7b4d2d, CI pending"
+     }
+    ]
+   },
+   "result": {
+    "author": {
+     "login": "jparker2006"
+    },
+    "createdAt": "2026-10-12T05:57:30Z",
+    "body": "Live checks: claude/issue-157 @ efd2ab4\n\n`live-lane: fn listeners: the daily Lexicon (pid 9289)`. That's after the sitting: Jake's daily Lexicon is back up. During the runs the listeners were \"a copy of Lexicon (pid 9965)\", the builder's leftover, until it was gone at about 22:50.\n\n| # | Item | Result |\n|---|---|---|\n| 1a | queue | **Pass.** `1. #157 claude/issue-157 @ efd2ab4 (2026-10-12T05:27:33Z)` |\n| 1b | idle | **Pass.** `live-lane: idle 381 s`, exit 0 |\n| 1c | dev-run --no-fn | **Pass.** `dev-run: --no-fn, so no fn checks on this run; fn listeners: a copy of Lexicon (pid 9965)`, then it installs |\n| 1d | preflight 157 | **Pass**, exit 0. `preflight: #157 claude/issue-157 @ efd2ab4, 2 items; fn listeners: a copy of Lexicon (pid 9965)` and `open command: open \".../Lexicon Dev.app\" --args --test-hooks` |\n| 1e | check, hook status | **Pass.** `check` (run in the sitting): a listener warning, then ok for hooks (accessibility=true, microphone=granted), the status item by identifier, windows none open, target field reads and is cleared. `hook status` names dev.jparker.lexicon.dev, accessibility true, microphone granted, version 0.1 (60, efd2ab4). |\n| 1f | queue after this comment | **Pass, once the header was plain.** As first posted, the comment started with `## Live checks: …`, and `queue` still listed #157, because the match is `startswith(\"Live checks: \" + head)`. With the `## ` removed, `queue` prints nothing and exits 0. Finding: a Markdown heading on the result line keeps a request queued, and nothing warns about it. |\n| 2 | bench | **Pass on the output, with two findings.** `background 60` gave 6.80. `history-open … 1` refuses with \"at least 5\", exit 1. `history-open … 5` on Dev's real data printed the header lines, then `FAIL  timed out waiting for older days after scrolling to the end` and stopped, with no A or B lines. Dev's History has only a few days, so `harness.sh history` can't finish. On the 36,500-row synthetic year, swapped in and restored afterwards, it ran fully: A (branch) 105 samples, p50 79, p95 104 ms. B (main) 105 samples, p50 82, p95 98 ms. load min 4.27, median 5.49, max 8.84. Verdict `FAIL: A's p95 104 ms is over the 100 ms budget.` Fn listeners were none by then, so it's FAIL rather than PROVISIONAL. |\n| 3 | Fake-listener refusal | **Pass.** The refusal names `Lexicon Indicator is running (pid 5832, …/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicator) and answers fn, so Dev's fn results would be wrong. Quit it, then rerun.`, plus the same line for pid 9965, then the --no-fn hint. --no-fn installs and names both. The fake was killed by its PID. |\n| 4 | Park and restore | **Pass.** Dev was quit by its PID first. Park left only `live-lane.lock` and the `models` link. After restore, models is still a link with 15 files (15 before) and all 15 top-level entries are back. |\n\nFindings, as evidence only:\n1. `bench.sh` prints shell job noise when it stops its load sampler: `scripts/bench.sh: line 145: … Terminated: 15  sample \"$file\"` (in background) and `line 83: … Terminated: 15  sample \"$OUT/load.txt\"` (in history-open).\n2. On a History without older days, `history-open` ends on the harness's FAIL line, with no A or B lines and no verdict.\n3. A and B run the same app code (efd2ab4's app equals d347832's). The verdict is FAIL on A's absolute p95 of 104 ms, while B's 98 ms passes, so a 6 ms difference between identical code decides the verdict.\n"
+   },
+   "pr": {
+    "number": 171,
+    "state": "OPEN",
+    "isDraft": false,
+    "baseRefName": "main",
+    "headRefName": "claude/issue-157",
+    "headRefOid": "5ef22b162e4066ade1b0e4b0ac43ca0f8ebb2169",
+    "body": "Refs #157\n\n## Summary\n\nLive checks gets one typed queue on the issues, sittings only when Jake has physical items, fn checks that refuse instead of warn, safe moves of Dev's data, and a bench that records its load. Scripts only; no app code changes.\n\n```text\nbuilder:      scripts/live-request.sh post <issue> <items>   \"Live checks request: <branch> @ <sha7>\"\n                typed items: kind, gesture, target, speak, fn, cue, observable, pass, needs (+ minutes for Jake)\n                refuses a dirty or unpushed head, and any item missing a typed field (named)\nLive checks:  scripts/live-lane.sh\n  queue                     open requests oldest first (newest per issue, until a \"Live checks:\" result), due timers first\n  idle [s]                  HID idle time (ns from IOHIDSystem): hands-off items run once Jake isn't typing\n  timer <s> <label>         a long wait (memory settle, an eval) becomes a timer and frees the lane,\n                            unless Dev's data is parked or a sitting is open\n  preflight <issue>         refuses: another fn listener (fn items), a hook item on a release bundle,\n                            a bundle at another or dirty commit, a needed Swift name with no use site,\n                            a needed #N still open, an item the issue marks out of scope; prints the open command\n  sitting render|start|ack|end   one numbered checklist, prerequisites first, total minutes, next 11 AM / 6 PM\n                            Pacific slot; start writes live-sitting.open (the marker #154's guard reads); acks by step\n  daily quit|reopen         lane holder only, real login HOME only, no Dictation in progress,\n                            Quit from its own menu (never a kill), reopen ~/Applications/Lexicon.app\n  park | restore            Dev's data aside with a manifest; models link and lane files stay; restore on release/take;\n                            refuses a folder park didn't make\nscripts/lib/fn-listeners.sh require_no_fn_listeners (by executable path; daily, other Lexicon/Dev copies, prototypes)\nscripts/dev-run.sh          refuses on a listener; --no-fn for WAV-hook and Accessibility-only runs\nscripts/import-lexicon.sh   dev -> scratch under TMPDIR; --dev-data runs the lane check\nscripts/install-model.sh    dev runs the lane check\nscripts/bench.sh            history-open | launch, A/B interleaved, >= 5 runs per side, 0.5 s load sampler + power,\n                            PROVISIONAL over 1.5x the measured background load or while a listener runs\nscripts/lag-report.sh       --load <sampler file>\n```\n\n## Evidence\n\n- **Before:** the new tests against `main`'s scripts: dev-run's fn path runs with the daily Lexicon up (#141), a plain dev import writes into Lexicon Dev (#71), install-model dev runs without the lane. 8 FAIL.\n  **After:** `scripts/checks/32-live-scripts-tests.sh`: 99 ok, 0 FAIL (request 18, lane 58, scripts 23), in a fake HOME with fake gh, ps, lsappinfo, osascript and open.\n- `scripts/check.sh` green at efd2ab4: 454 tests, import check, scorer, eval with no worse scores.\n- Prove steps, as tests:\n  - #53's hold step without `speak`: `item 1 (Hold): no speak field`, both from `items` and from `sitting render`.\n  - an item missing its observable, and an unpushed commit: refused, nothing posted.\n  - #64's item 8 at the real 113f5cc: `nothing reads doubleTapWindow at this sha (113f5cc)`.\n  - a hook item on a release bundle; a compiled fake listener: `Lexicon Indicator is running (pid N, <path>)`.\n  - dev-run with a fake daily listener refuses with the message; `--no-fn` still runs.\n  - park then restore: models still a link, same file count; a stray file and an interrupted park still restore.\n  - real case: `import-lexicon.sh dev` on a synthetic file imported 2 Terms and 1 Rule into scratch; the real Lexicon Dev folder was unchanged.\n  - bench refuses 1 run per side; a run at #64's load (26 to 46) is PROVISIONAL.\n- HID idle verified on this Mac: nanoseconds, grows about 2 s per 2 s sample, resets on input.\n- Live checks: requested (dry run of the queued request on #157, bench.sh on History open, the fake-listener refusal, park/restore on Dev's real data). Its `Live checks:` comment on #157 is the evidence.\n\n## Merge Danger\n\n**Door:** two-way\n\nScripts only. `dev-run.sh` now refuses while the daily Lexicon runs; WAV-hook runs need `--no-fn`. Every request item now needs an `fn: yes|no` field.\n\nDuring self-review a Haiku verifier ran `daily quit` under a fake HOME and quit Jake's real daily Lexicon from its menu. Fixed here: `daily` refuses unless HOME is the login home, and the tests stub lsappinfo, osascript and open. `import-lexicon.sh dev` no longer writes into Dev unless `--dev-data`. The workflow.md, live-checks skill and implement-ticket text for the queue land with #162, #161 and #158; until then the scripts' headers are the reference. The checks/32 step runs once #153's check.sh runs `scripts/checks/*.sh`.\n\n**Blast Radius:** live-checks\n\n## Install\n\nCode only.\n\nCheck: nothing in the app; Live checks' next sitting comes from `scripts/live-lane.sh sitting render`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+    "labels": [],
+    "files": [
+     {
+      "path": "scripts/bench.sh"
+     },
+     {
+      "path": "scripts/checks/32-live-scripts-tests.sh"
+     },
+     {
+      "path": "scripts/dev-run.sh"
+     },
+     {
+      "path": "scripts/import-lexicon.sh"
+     },
+     {
+      "path": "scripts/install-model.sh"
+     },
+     {
+      "path": "scripts/lag-report.sh"
+     },
+     {
+      "path": "scripts/lib/fn-listeners.sh"
+     },
+     {
+      "path": "scripts/live-lane.sh"
+     },
+     {
+      "path": "scripts/live-request.sh"
+     },
+     {
+      "path": "scripts/test-live/fixtures/53-hold-no-speak.txt"
+     },
+     {
+      "path": "scripts/test-live/fixtures/53-hold.txt"
+     },
+     {
+      "path": "scripts/test-live/fixtures/64-item8.txt"
+     },
+     {
+      "path": "scripts/test-live/fixtures/missing-observable.txt"
+     },
+     {
+      "path": "scripts/test-live/lane.test.sh"
+     },
+     {
+      "path": "scripts/test-live/lib.sh"
+     },
+     {
+      "path": "scripts/test-live/request.test.sh"
+     },
+     {
+      "path": "scripts/test-live/scripts.test.sh"
+     }
+    ],
+    "comments": [
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T05:28:21Z",
+      "body": "Reviewer: held for a file overlap. #169 (#153) also edits `scripts/import-lexicon.sh` and `scripts/install-model.sh`, and it was Ready first. `git merge-tree` shows a content conflict in `import-lexicon.sh`. Once #169 merges, merge `origin/main` here and keep #169's `$SWIFT_FLAGS` form, since `swift-flags.sh` no longer sets `\"$@\"`. Then post Ready."
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T05:44:51Z",
+      "body": "**Reviewer verdict: don't merge yet** (head 27c6dc0). Three fixes, all small.\n\nOne critic reviewed this, and a verifier reproduced the data finding on a fake HOME. I read `daily()` and the queue's comment parsing myself. The main merge with #169 keeps `$SWIFT_FLAGS`.\n\n**What holds:**\n- **`daily` acts only on the real Mac and the real app, and never kills.** It checks that HOME is the real login home, that the running process is `~/Applications/Lexicon.app`, and that no Dictation is in progress, then quits from the app's own menu.\n- **park and restore never reach the daily folder.**\n- **`idle` reads only HIDIdleTime.**\n- **The fn-listener check** counts `Lexicon.app.old` and doesn't match the harness or Dev.\n- **No shell injection from comments.** Comment text reaches only printf, awk, jq and quoted git args.\n- **bench** alternates the two sides with at least 5 runs each.\n- **Scripts and tests.** `sh -n` passes, and the tests use a fake HOME.\n\n**Before merge:**\n1. **The queue trusts anyone's comments.** The repo is **public**, and `live-lane.sh` (`queue`, `request_body`, `issue_text`, ~lines 105-135) reads every comment with no author check. So a stranger's \"Live checks request:\" becomes a typed item the Live checks agent runs on the real Mac (fn, Accessibility, paste). A stranger's \"Live checks: <head>\" can also mark a real request done. Keep only comments whose `author.login` is the repo owner (`jparker2006`, which every session posts as), and add a test with a foreign author.\n2. **`daily quit` needs only the lane, not an open sitting** (`live-lane.sh:364-397`). Any session that takes a free lane can quit Jake's daily copy outside a sitting. The guard can't see inside the script, so #167 doesn't stop it. Jake's Q8 was \"quits and reopens the daily app around a sitting\". Require `live-sitting.open` for `daily quit`, and for `reopen` too, or have `reopen` require that a `quit` from this sitting happened.\n3. **Restore can move Dev's real History into a temp folder (verified).** `restore` (`:435-455`) first moves every non-kept file in `Lexicon Dev` into a temp folder, then puts back the manifest's entries. After an interrupted restore, the retry moves the already-restored `History.sqlite` into `$TMPDIR/lexicon-dev-unparked.*` and still prints \"restored\". A park killed after its first manifest line does the same on the next automatic `take`. Treat manifest entries already in Dev as restored, move aside only what the manifest doesn't name, and make `restore` check the folder against the manifest before it says \"restored\".\n\n**Worth fixing (medium):**\n- **Ctrl-C leaves processes running.** `bench.sh` and `test-live/lib.sh` set only an EXIT trap, which `/bin/sh` doesn't run on SIGINT, so Ctrl-C leaves the load sampler, or a fake listener in tests, running. Add `trap 'exit 130' INT TERM HUP`. A fake `Lexicon.app` from this suite (pid 9965, ppid 1, its test folder gone) is still running on the Mac now, and it will make real fn runs refuse. Whoever started it should stop it by that pid.\n- **A crash leaves the sitting marker behind.** `live-sitting.open` has no liveness check or expiry, so after a crashed sitting, Dev permission resets stay allowed until someone runs `sitting end`. Record the holder's pid in it and treat a dead pid as closed.\n- **bench under another fn listener.** It gives a PROVISIONAL verdict where #157 item 13 asks for a refusal, and `scripts.test.sh:65` pins that. Jake's call: refuse, or keep PROVISIONAL.\n- **One bad request breaks rendering.** A single open request without `fn:` makes `sitting render` exit 1 for every issue.\n\n**Later:**\n- **\"In progress\" ends at fn-up,** not at the outcome line.\n- **Two interrupts that leave a mess** (nothing is lost):\n  - a park killed before its manifest leaves a folder that both park and restore refuse;\n  - `take` exits 1 still holding the lane if its restore dies.\n- **The menu-click Quit** probably needs an Automation grant for System Events, which the Install section doesn't mention.\n"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T05:49:23Z",
+      "body": "Fixed review at f7b4d2d."
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T06:00:27Z",
+      "body": "**Reviewer verdict: merge with notes** (head 5ef22b1, f7b4d2d plus main with #170). All three fixes are read and correct:\n- **Owner-only comments.** The queue, `request_body` and `issue_text` keep only the repo owner's comments.\n- **Daily quit and reopen.** `daily quit` needs an open sitting, which `sitting_open` checks by the holder pid and its start time, clearing a dead session's marker. `daily reopen` only reopens a copy `daily quit` closed, and `sitting end` reopens it.\n- **Restore.** It keeps entries that are already back and checks that every manifest entry is in Dev before it removes the manifest; `set -eu` makes that check stop the script.\n- **Ctrl-C.** `bench` and the test lib exit on INT, TERM and HUP.\n\nLive checks passed items 1 to 4 at efd2ab4. CI is green.\n\n**Later:**\n- A `## ` heading on a `Live checks:` line keeps a request queued, with no warning. Match after stripping leading `#` and spaces, or warn.\n- `bench.sh` prints \"Terminated: 15\" job noise when it stops its sampler.\n- `history-open` on a History without older days ends on the harness's FAIL line, with no A or B lines and no verdict.\n- The bench verdict judges A's absolute p95 alone, so identical code got FAIL at 104 ms against B's 98 ms. Judge the budget against B too, or call a gap within noise a tie.\n- Jake's call: a bench under another fn listener says PROVISIONAL with no final verdict; #157 item 13 asked for a refusal. Recommend refusing."
+     }
+    ]
+   },
+   "about": "#171 merged at 5ef22b1 with the request for efd2ab4 still queued; result is its answer, posted with a plain first line."
+  },
+  "176": {
+   "instant": "2026-10-12T06:42:04Z",
+   "branch": "claude/issue-157-live-findings",
+   "sha": "7e60030c0123633121b0fccff7e22c72a074ddb7",
+   "issue": {
+    "number": 175,
+    "title": "Retro: Live checks queue and bench follow-ups from the #157 live run",
+    "state": "OPEN",
+    "body": "## Parent\n\n#88 (retro). Follow-up to #157 (PR #171 merged before these live findings were folded in).\n\n**Milestone:** retro, before M1\n**Needs the Live checks session for:** agent: rerun bench on History open after the fix. Jake: none.\n\n## What to build\n\nThe four findings from Live checks' run of #157 (see its comment on #157):\n\n- [ ] The queue clears a request only when the result comment's first line is plain \"Live checks: …\". Make the poster and the parser agree, and accept \"## Live checks: …\" too. Prove with a fixture of each form.\n- [ ] bench prints \"Terminated\" noise when it stops its sampler. Silence it, without hiding real errors.\n- [ ] The history-open bench needs a fixture History with older days, so the open time covers a real year.\n- [ ] When A and B run the same app code, the verdict uses A's absolute p95. Report the A/B difference in that case.\n\n## Blocked by\n\nNone (can start immediately).\n\nRefs #157, #88",
+    "labels": [],
+    "comments": [
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T06:02:39Z",
+      "body": "Building: taking this (Claude)"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T06:06:50Z",
+      "body": "Live checks request: claude/issue-157-live-findings @ 55dfaaf"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T06:06:56Z",
+      "body": "Ready for review: PR #176, CI pending"
+     }
+    ]
+   },
+   "pr": {
+    "number": 176,
+    "state": "OPEN",
+    "isDraft": false,
+    "baseRefName": "main",
+    "headRefName": "claude/issue-157-live-findings",
+    "headRefOid": "7e60030c0123633121b0fccff7e22c72a074ddb7",
+    "body": "Refs #175\n\n## Summary\n\nThe four findings from Live checks' run of #157 (PR #171 merged before they were folded in). Scripts only.\n\n```diff\n live-lane.sh queue\n-  a result answers its request only as a plain \"Live checks: <branch> @ <sha7>\" first line\n+  ... or as a Markdown heading (\"## Live checks: ...\")\n bench.sh history-open\n+  before the first run: install A with test hooks, wait for its scratch History, quit it,\n+  seed 36,500 synthetic Dictations (100 a day, one statement; a second seed adds nothing)\n+  prints \"A - B: p50 ±N ms, p95 ±N ms\"\n+  A and B build the same Sources: SAME APP CODE, budget read from main's numbers\n-  a failed harness run ended the bench with no A, B or verdict lines\n+  it stops with \"the harness's History check failed on A (run 1), so no verdict: <its last line>\"\n test-live/lib.sh\n+  stubs getconf, so tests' \"app temporary folder\" is their own; the fake listener is written fresh\n```\n\nThe seed goes into the test-hooks scratch root (`AppPaths.scratch`, from #156), never Lexicon Dev's own data, so no park is needed. The \"Terminated\" noise was already fixed in #171 (bench waits on its sampler). A test now pins it.\n\n## Evidence\n\n- **Before**, from Live checks' result on #157:\n  - its \"## Live checks:\" heading left the request queued;\n  - `history-open` on Dev's History ended at \"timed out waiting for older days\" with no verdict;\n  - the 36,500-row year gave FAIL (A p95 104 ms, B 98 ms) for the same app code.\n- **After:**\n  - The new tests in `scripts/test-live/` fail on #171's scripts (12 FAIL) and pass here.\n  - `scripts/checks/32-live-scripts-tests.sh`: 119 ok, 0 FAIL.\n  - `scripts/check.sh` green at 55dfaaf: 476 tests.\n- **Not checked here:** the real app reading the seeded rows. Live checks reruns the bench on History open (request on #175).\n\n## Merge Danger\n\n**Door:** two-way\n\nThe seed writes only to the test-hooks scratch History in the app's temporary folder. The synthetic rows stay there for later runs, and a second seed adds none.\n\n**Blast Radius:** live-checks\n\n## Install\n\nCode only.\n\nCheck: nothing in the app; the next History-open bench prints the seeded year and an A - B line.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+    "labels": [],
+    "files": [
+     {
+      "path": "scripts/bench.sh"
+     },
+     {
+      "path": "scripts/live-lane.sh"
+     },
+     {
+      "path": "scripts/test-live/lane.test.sh"
+     },
+     {
+      "path": "scripts/test-live/lib.sh"
+     },
+     {
+      "path": "scripts/test-live/scripts.test.sh"
+     }
+    ],
+    "comments": [
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T06:08:41Z",
+      "body": "**Reviewer verdict: merge** (head 55dfaaf).\n\n- **The queue** still keeps only the owner's comments, and now also accepts a result written as a Markdown heading: it strips leading `#`, `*` and spaces before matching `Live checks: <branch> @ <sha7>`.\n- **`bench.sh history-open`:**\n  - **Where it seeds.** It seeds the synthetic year only into `$(getconf DARWIN_USER_TEMP_DIR)Lexicon Dev scratch/history.sqlite`, which matches `AppPaths.scratch` and `history.sqlite` in HistoryStore. It never touches Dev's own data or the daily folder.\n  - **The seed.** Its ids are fixed, so a re-seed adds nothing, and the row count is checked.\n  - **The quit.** It quits only the Dev app it just installed, by pid.\n  - **The verdict.** A failed harness run now ends with a named reason. `A - B` is printed, and identical Sources, Package and `scripts/app` give SAME APP CODE, not PASS or FAIL.\n- **`lib.sh`** stubs `getconf`, so the tests' temp folder is their own.\n\nThe real app reading the seeded rows is left for Live checks' rerun."
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-12T06:41:58Z",
+      "body": "Reviewer: a light-pass review Workflow (a critic, then a verifier per finding) on 7e60030 confirmed nothing blocking; 6 findings were refuted. CI is green. Merging."
+     }
+    ]
+   },
+   "about": "#176 merged at 7e60030 with the request for 55dfaaf queued and never answered; the verdict named 55dfaaf."
+  },
+  "138-16da7d6": {
+   "instant": "2026-10-11T23:30:00Z",
+   "branch": "claude/issue-57",
+   "sha": "16da7d618bee7ab029b88786ebbc0f374097995a",
+   "issue": {
+    "number": 57,
+    "title": "M0: First-run setup and start at login",
+    "state": "OPEN",
+    "body": "## Parent\n\n#36 (Spec: Lexicon v0)\n\n**Milestone:** M0  \n**User stories:** 92, 93, 94, 95  \n**Test seam:** live app  \n**Modules:** LexiconUI, LexiconCore, LocalParakeet (install)\n\n## What to build\n\nA small setup window on first run: (1) Microphone, the macOS prompt; (2) Accessibility, opens the right System Settings page, polls trust and relaunches as soon as it's granted; (3) download the speech model (about 609 MB, with progress; the spec lists this as an assumption Jake can veto); (4) \"Hold fn and say something\", text lands in that window. It also checks the globe key setting. Only Microphone and Accessibility are requested.\n\n- Start at login via `SMAppService.mainApp`, on by default, registered on first run, with a toggle in the menu bar menu.\n- A missing or revoked permission shows a warning dot on the menu bar icon; clicking it reopens that step. No popups.\n\n## Acceptance criteria\n\n- [ ] On a fresh data folder, setup takes Jake from nothing to a working Dictation without leaving the window except for System Settings.\n- [ ] Granting Accessibility relaunches the app automatically.\n- [ ] After a reboot, Lexicon is running and fn works.\n- [ ] Revoking Microphone shows the warning dot; clicking it reopens that step.\n\n## Blocked by\n\n- #56",
+    "labels": [],
+    "comments": [
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T14:39:59Z",
+      "body": "Building: taking this (Claude)"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:25:23Z",
+      "body": "Live checks: claude/issue-57 @ 6bd8bf3\n\nLexicon Dev 0.1 (55, 6bd8bf3), debug, `scripts/dev-run.sh -- --test-hooks`. Setup as requested: Dev's data folder emptied except `live-lane.lock` (moved to `Lexicon Dev.before-57/`), then `tccutil reset Microphone` and `tccutil reset Accessibility` for `dev.jparker.lexicon.dev` only. Jake did the clicks. Restored afterward: the original data is back (the `models` link points to the daily model again). The setup run's data, including the downloaded 595 MB model, is kept in `Lexicon Dev.after-57/` and can be deleted.\n\n| # | Item | Result |\n|---|---|---|\n| 1 | Setup opens by itself | **Pass**: \"Set Up Lexicon\" (`lexicon.setup`) open at the first check after launch (not timed to the 2 s bar). Four rows: Microphone current (\"Allow Microphone\" enabled), the others greyed (\"Open System Settings\" and \"Download\" disabled). Status item AXDescription \"Lexicon: Microphone is off\". |\n| 2 | Microphone | **Pass** on the outcome: after Jake's Allow, the row reads \"Allowed.\" with a green check. Not answered: the app name in the macOS prompt, and the AXDescription between steps 2 and 3 (Jake did both quickly). |\n| 3 | Accessibility and the relaunch | **Pass**: after Jake switched Lexicon Dev on, the log shows \"relaunching to turn on fn\" (15:06:09.46, pid 54977), then a new pid 69733 with **ppid 1**. \"fn working **72 ms** after process start\", \"status item up **519 ms**\" (main at 35 ms). The setup window reopened with Microphone \"Allowed.\" and Accessibility \"Allowed. fn is on.\", and AXDescription \"Lexicon\" (no dot). Not answered: whether macOS showed its own \"control this computer\" alert. **Layout note** from Jake's screenshot: the Microphone, Accessibility and Speech model rows sit right-aligned (icon and text pushed to the right edge), unlike the Try it row. |\n| 4 | Model download | **Pass**: it started by itself after the relaunch. The percent climbed (2% → 38% …), then \"Installed. Your words are transcribed on this Mac.\" at about 15:09:19, about 2.5 min including the compile. `models/parakeet-unified-en-0.6b/` holds the 3 `.mlmodelc` folders, `vocab.json`, `config.json`, `metadata.json`; 0 `.partial` files; 595 MB. The daily `Lexicon/` folder is unchanged (mtime still 07:44). Try it's box (`lexicon.setup.tryField`) has focus. |\n| 5 | Try it | **Fail on the status bar**: Jake held fn and said \"setup test one two three\" (lag 496 ms), and History recorded the text, but with **`notInserted`, reason `typedSince`**. Not observed: whether \"It works.\" showed. Done closed the window. Real fn Dictations on #68 @ 3cb91a6 also came out notInserted/typedSince with the text pasted, so this looks like a shared issue on current main, not #57 (reported to the orchestrator). |\n| 6 | Globe key line | **Pass**: \"Globe key: set to Do Nothing.\" with `AppleFnUsageType` = 0, and still 0 after the run. |\n| 7 | Revoked Microphone | **Pass, with macOS relaunching**: switching Microphone off gave AXDescription \"Lexicon: Microphone is off\" (15:11:06). macOS then showed \"Quit & Reopen\"; Jake clicked it, Lexicon Dev quit cleanly (15:11:09) and macOS reopened it (pid 71153, ppid 1) with the dot from launch. No window or alert popped up on its own. |\n| 8 | Clicking the dot | **Pass**: Jake's left click opened the setup window (it came up behind System Settings, so Jake didn't see it at first). Microphone was current: \"Turned off for Lexicon. Turn it on in System Settings.\" with an enabled \"Open System Settings\". His right click opened the menu. An AX press also opens the menu, with \"Microphone is off: Set Up…\" and \"Start at Login\". (`scripts/harness.sh check` wasn't run.) Switching the Microphone back on cleared the dot within 2 s (15:13:18). Then at 15:13:40 the History window opened and the app quit 37 ms later. The log shows only \"quitting\", and it didn't come back, so I relaunched it. Jake may have chosen Quit from the menu; unconfirmed. |\n| 9 | Start at Login | **Partial**: unchecked at first. Jake chose it: checked on reopen, and the \"Login Item Added: Lexicon Dev will open automatically when you log in…\" notification appeared. Jake then turned it off in Login Items. The menu then read plain \"Start at Login\" unchecked, **not** \"Start at Login (turned off in System Settings)…\". Jake may have removed the item with the minus button rather than a switch (unconfirmed). The re-enable steps weren't run. |\n| 10 | After a login | **Skipped** (Jake's call). `sfltool dumpbtm` ran without sudo in under a second and lists no `dev.jparker.lexicon.dev` record, so Start at Login is off. |\n\nEvidence: the logs above; Jake's screenshots of the setup window and the \"Login Item Added\" notification (in my session).\n"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:31:05Z",
+      "body": "Live checks: claude/issue-57 @ 7ebf469 (follow-up)\n\nLexicon Dev 0.1, debug, `scripts/dev-run.sh -- --test-hooks --continue-setup` on Dev's normal data (linked model).\n\n| # | Item | Result |\n|---|---|---|\n| 1 | Layout | **Fail**: the window opens with all four rows done (three checks, Try it current). The icons sit at the left edge, but every title and detail is **right-aligned** against the right margin: \"Microphone / Allowed.\", \"Accessibility / Allowed. fn is on.\", \"Speech model / Installed…\", \"Try it\", and now also \"Globe key: set to Do Nothing.\". Only the Try it instructions and the box run left to right. Screenshot: `/private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots57/1-layout.png` |\n| 2 | Try it | **Skipped**: the main-wide notInserted/typedSince fix hasn't landed. |\n| 3 | Dot click in front of System Settings | **Not run**: it needs Jake to repeat the Microphone revoke. Queued for his next break if wanted. |\n"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:37:48Z",
+      "body": "Live checks: claude/issue-57 @ 612f959 (layout re-run)\n\n1. **Layout: Pass.** `scripts/dev-run.sh -- --test-hooks --continue-setup`: every title (Microphone, Accessibility, Speech model, Try it), every detail line and \"Globe key: set to Do Nothing.\" start at the left next to their icon; the Try it box has focus. Screenshot: `/private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots57/1-layout-612f959.png`\n2. Try it: still waiting on #141. Note for #141: the live-check notes now record that real fn Dictations come out notInserted/typedSince when Jake's daily Lexicon is also running and pastes first (its Cmd-V is typing from another pid). The earlier 'Try it' result may be that environment, not #57; a re-run with the daily Lexicon quit would settle it.\n3. Optional, not run."
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:38:10Z",
+      "body": "Ready for review: PR #138"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T23:08:19Z",
+      "body": "Fixed review: PR #138 at 16da7d6, CI pending"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T23:29:42Z",
+      "body": "## Live checks: claude/issue-57 @ 16da7d6 (budget vs main cb77430)\n\nBoth release builds, installed with `scripts/dev-run.sh --release`, then 3 warm relaunches each with `open` (quit from the status menu between). `main` was measured first, then the branch. Daily Lexicon was running (no fn used).\n\n**1. Launch time on a set-up Mac: FAIL**\n\n| | run 1 | run 2 | run 3 | median |\n|---|---|---|---|---|\n| main: status item up (main at) | 137 (25) | 129 (25) | 107 (22) | **129 ms** |\n| branch: status item up (main at) | 187 (38) | 183 (38) | 192 (41) | **187 ms** |\n| main: fn working | 54 | 46 | 41 | 46 ms |\n| branch: fn working | 72 | 69 | 71 | 71 ms |\n\n- Branch median status item is 58 ms slower than main (bar: within 20 ms). Every branch run is slower than every main run.\n- Measured from `main` to the status item, the gap is still 45 ms (main 104, branch 149), so it is not only the pre-main cost.\n- Load: about 8.3 during the main launches, about 5 during the branch launches. The branch was slower on the quieter Mac, so load does not explain it.\n- One ordering only (main, then branch). I can rerun them interleaved if you want to rule that out.\n\n**2. Idle footprint: PASS**\n\n| | ~60 s | ~11 min |\n|---|---|---|\n| main | 22 MB (load 8.7) | 22 MB (load 4.2) |\n| branch | 23 MB (load 5.1) | 23 MB (load 23.5) |\n\n- Within 1 MB of main at both points, and under the 30 MB budget at 11 min.\n- Both builds: the local model loaded at launch (main 483 ms, branch 634 ms) and unloaded after the linger time.\n"
+     }
+    ]
+   },
+   "about": "Live checks at 16da7d6 failed launch time (23:29:42)."
+  },
+  "138-d0e8a14": {
+   "instant": "2026-10-11T23:41:41Z",
+   "branch": "claude/issue-57",
+   "sha": "d0e8a146e23a8afb377a065a0a1a1d74461f1058",
+   "issue": {
+    "number": 57,
+    "title": "M0: First-run setup and start at login",
+    "state": "OPEN",
+    "body": "## Parent\n\n#36 (Spec: Lexicon v0)\n\n**Milestone:** M0  \n**User stories:** 92, 93, 94, 95  \n**Test seam:** live app  \n**Modules:** LexiconUI, LexiconCore, LocalParakeet (install)\n\n## What to build\n\nA small setup window on first run: (1) Microphone, the macOS prompt; (2) Accessibility, opens the right System Settings page, polls trust and relaunches as soon as it's granted; (3) download the speech model (about 609 MB, with progress; the spec lists this as an assumption Jake can veto); (4) \"Hold fn and say something\", text lands in that window. It also checks the globe key setting. Only Microphone and Accessibility are requested.\n\n- Start at login via `SMAppService.mainApp`, on by default, registered on first run, with a toggle in the menu bar menu.\n- A missing or revoked permission shows a warning dot on the menu bar icon; clicking it reopens that step. No popups.\n\n## Acceptance criteria\n\n- [ ] On a fresh data folder, setup takes Jake from nothing to a working Dictation without leaving the window except for System Settings.\n- [ ] Granting Accessibility relaunches the app automatically.\n- [ ] After a reboot, Lexicon is running and fn works.\n- [ ] Revoking Microphone shows the warning dot; clicking it reopens that step.\n\n## Blocked by\n\n- #56",
+    "labels": [],
+    "comments": [
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T14:39:59Z",
+      "body": "Building: taking this (Claude)"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:25:23Z",
+      "body": "Live checks: claude/issue-57 @ 6bd8bf3\n\nLexicon Dev 0.1 (55, 6bd8bf3), debug, `scripts/dev-run.sh -- --test-hooks`. Setup as requested: Dev's data folder emptied except `live-lane.lock` (moved to `Lexicon Dev.before-57/`), then `tccutil reset Microphone` and `tccutil reset Accessibility` for `dev.jparker.lexicon.dev` only. Jake did the clicks. Restored afterward: the original data is back (the `models` link points to the daily model again). The setup run's data, including the downloaded 595 MB model, is kept in `Lexicon Dev.after-57/` and can be deleted.\n\n| # | Item | Result |\n|---|---|---|\n| 1 | Setup opens by itself | **Pass**: \"Set Up Lexicon\" (`lexicon.setup`) open at the first check after launch (not timed to the 2 s bar). Four rows: Microphone current (\"Allow Microphone\" enabled), the others greyed (\"Open System Settings\" and \"Download\" disabled). Status item AXDescription \"Lexicon: Microphone is off\". |\n| 2 | Microphone | **Pass** on the outcome: after Jake's Allow, the row reads \"Allowed.\" with a green check. Not answered: the app name in the macOS prompt, and the AXDescription between steps 2 and 3 (Jake did both quickly). |\n| 3 | Accessibility and the relaunch | **Pass**: after Jake switched Lexicon Dev on, the log shows \"relaunching to turn on fn\" (15:06:09.46, pid 54977), then a new pid 69733 with **ppid 1**. \"fn working **72 ms** after process start\", \"status item up **519 ms**\" (main at 35 ms). The setup window reopened with Microphone \"Allowed.\" and Accessibility \"Allowed. fn is on.\", and AXDescription \"Lexicon\" (no dot). Not answered: whether macOS showed its own \"control this computer\" alert. **Layout note** from Jake's screenshot: the Microphone, Accessibility and Speech model rows sit right-aligned (icon and text pushed to the right edge), unlike the Try it row. |\n| 4 | Model download | **Pass**: it started by itself after the relaunch. The percent climbed (2% → 38% …), then \"Installed. Your words are transcribed on this Mac.\" at about 15:09:19, about 2.5 min including the compile. `models/parakeet-unified-en-0.6b/` holds the 3 `.mlmodelc` folders, `vocab.json`, `config.json`, `metadata.json`; 0 `.partial` files; 595 MB. The daily `Lexicon/` folder is unchanged (mtime still 07:44). Try it's box (`lexicon.setup.tryField`) has focus. |\n| 5 | Try it | **Fail on the status bar**: Jake held fn and said \"setup test one two three\" (lag 496 ms), and History recorded the text, but with **`notInserted`, reason `typedSince`**. Not observed: whether \"It works.\" showed. Done closed the window. Real fn Dictations on #68 @ 3cb91a6 also came out notInserted/typedSince with the text pasted, so this looks like a shared issue on current main, not #57 (reported to the orchestrator). |\n| 6 | Globe key line | **Pass**: \"Globe key: set to Do Nothing.\" with `AppleFnUsageType` = 0, and still 0 after the run. |\n| 7 | Revoked Microphone | **Pass, with macOS relaunching**: switching Microphone off gave AXDescription \"Lexicon: Microphone is off\" (15:11:06). macOS then showed \"Quit & Reopen\"; Jake clicked it, Lexicon Dev quit cleanly (15:11:09) and macOS reopened it (pid 71153, ppid 1) with the dot from launch. No window or alert popped up on its own. |\n| 8 | Clicking the dot | **Pass**: Jake's left click opened the setup window (it came up behind System Settings, so Jake didn't see it at first). Microphone was current: \"Turned off for Lexicon. Turn it on in System Settings.\" with an enabled \"Open System Settings\". His right click opened the menu. An AX press also opens the menu, with \"Microphone is off: Set Up…\" and \"Start at Login\". (`scripts/harness.sh check` wasn't run.) Switching the Microphone back on cleared the dot within 2 s (15:13:18). Then at 15:13:40 the History window opened and the app quit 37 ms later. The log shows only \"quitting\", and it didn't come back, so I relaunched it. Jake may have chosen Quit from the menu; unconfirmed. |\n| 9 | Start at Login | **Partial**: unchecked at first. Jake chose it: checked on reopen, and the \"Login Item Added: Lexicon Dev will open automatically when you log in…\" notification appeared. Jake then turned it off in Login Items. The menu then read plain \"Start at Login\" unchecked, **not** \"Start at Login (turned off in System Settings)…\". Jake may have removed the item with the minus button rather than a switch (unconfirmed). The re-enable steps weren't run. |\n| 10 | After a login | **Skipped** (Jake's call). `sfltool dumpbtm` ran without sudo in under a second and lists no `dev.jparker.lexicon.dev` record, so Start at Login is off. |\n\nEvidence: the logs above; Jake's screenshots of the setup window and the \"Login Item Added\" notification (in my session).\n"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:31:05Z",
+      "body": "Live checks: claude/issue-57 @ 7ebf469 (follow-up)\n\nLexicon Dev 0.1, debug, `scripts/dev-run.sh -- --test-hooks --continue-setup` on Dev's normal data (linked model).\n\n| # | Item | Result |\n|---|---|---|\n| 1 | Layout | **Fail**: the window opens with all four rows done (three checks, Try it current). The icons sit at the left edge, but every title and detail is **right-aligned** against the right margin: \"Microphone / Allowed.\", \"Accessibility / Allowed. fn is on.\", \"Speech model / Installed…\", \"Try it\", and now also \"Globe key: set to Do Nothing.\". Only the Try it instructions and the box run left to right. Screenshot: `/private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots57/1-layout.png` |\n| 2 | Try it | **Skipped**: the main-wide notInserted/typedSince fix hasn't landed. |\n| 3 | Dot click in front of System Settings | **Not run**: it needs Jake to repeat the Microphone revoke. Queued for his next break if wanted. |\n"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:37:48Z",
+      "body": "Live checks: claude/issue-57 @ 612f959 (layout re-run)\n\n1. **Layout: Pass.** `scripts/dev-run.sh -- --test-hooks --continue-setup`: every title (Microphone, Accessibility, Speech model, Try it), every detail line and \"Globe key: set to Do Nothing.\" start at the left next to their icon; the Try it box has focus. Screenshot: `/private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots57/1-layout-612f959.png`\n2. Try it: still waiting on #141. Note for #141: the live-check notes now record that real fn Dictations come out notInserted/typedSince when Jake's daily Lexicon is also running and pastes first (its Cmd-V is typing from another pid). The earlier 'Try it' result may be that environment, not #57; a re-run with the daily Lexicon quit would settle it.\n3. Optional, not run."
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T22:38:10Z",
+      "body": "Ready for review: PR #138"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T23:08:19Z",
+      "body": "Fixed review: PR #138 at 16da7d6, CI pending"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T23:29:42Z",
+      "body": "## Live checks: claude/issue-57 @ 16da7d6 (budget vs main cb77430)\n\nBoth release builds, installed with `scripts/dev-run.sh --release`, then 3 warm relaunches each with `open` (quit from the status menu between). `main` was measured first, then the branch. Daily Lexicon was running (no fn used).\n\n**1. Launch time on a set-up Mac: FAIL**\n\n| | run 1 | run 2 | run 3 | median |\n|---|---|---|---|---|\n| main: status item up (main at) | 137 (25) | 129 (25) | 107 (22) | **129 ms** |\n| branch: status item up (main at) | 187 (38) | 183 (38) | 192 (41) | **187 ms** |\n| main: fn working | 54 | 46 | 41 | 46 ms |\n| branch: fn working | 72 | 69 | 71 | 71 ms |\n\n- Branch median status item is 58 ms slower than main (bar: within 20 ms). Every branch run is slower than every main run.\n- Measured from `main` to the status item, the gap is still 45 ms (main 104, branch 149), so it is not only the pre-main cost.\n- Load: about 8.3 during the main launches, about 5 during the branch launches. The branch was slower on the quieter Mac, so load does not explain it.\n- One ordering only (main, then branch). I can rerun them interleaved if you want to rule that out.\n\n**2. Idle footprint: PASS**\n\n| | ~60 s | ~11 min |\n|---|---|---|\n| main | 22 MB (load 8.7) | 22 MB (load 4.2) |\n| branch | 23 MB (load 5.1) | 23 MB (load 23.5) |\n\n- Within 1 MB of main at both points, and under the 30 MB budget at 11 min.\n- Both builds: the local model loaded at launch (main 483 ms, branch 634 ms) and unloaded after the linger time.\n"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T23:38:45Z",
+      "body": "## Live checks: claude/issue-57 @ d0e8a14 (launch vs main f9a7756, interleaved)\n\nRelease builds, installed in turn with `scripts/dev-run.sh --release`: main, branch, main, branch, main, branch. After each install, 2 warm relaunches with `open`, quitting from the status menu in between. Times are ms after process start; \"main at\" is in brackets.\n\n**1. Launch time: PASS (provisional, load 10 to 20)**\n\n| round | main: status item (main at) | main: fn working | branch: status item (main at) | branch: fn working |\n|---|---|---|---|---|\n| 1a | 188 (45) | 84 | 183 (43) | 77 |\n| 1b | 168 (32) | 67 | 203 (40) | 71 |\n| 2a | 168 (42) | 69 | 160 (47) | 70 |\n| 2b | 194 (41) | 67 | 169 (42) | 74 |\n| 3a | 161 (43) | 68 | 170 (44) | 71 |\n| 3b | 169 (33) | 65 | 262 (53) | 95 |\n| **median** | **168.5** | **67.5** | **176.5** | **72.5** |\n\n- The branch's median status item is 8 ms slower than main's (bar: within 20 ms). \"fn working\" is 5 ms slower.\n- The last branch run (262 ms) is the only outlier, and \"main at\" was late on that run too (53 ms). Without it, the branch median is 170.\n- The 1-minute load average fell from 20 to 10 over the run. Every number is higher than in the earlier quiet-Mac round (main 129 then), so the numbers are provisional, but both sides ran under the same load.\n\n**Glance at a branch launch: PASS**\n- After a relaunch, the menu bar icon is up (AXDescription \"Lexicon\").\n- The status menu lists: Lexicon Dev 0.1 (68, d0e8a14), History, Lexicon, Start at Login, Private mode, Sounds on (checked), Quit Lexicon Dev.\n"
+     },
+     {
+      "author": {
+       "login": "jparker2006"
+      },
+      "createdAt": "2026-10-11T23:39:49Z",
+      "body": "Fixed review: PR #138 at d0e8a14, CI green"
+     }
+    ]
+   },
+   "about": "Live checks passed at d0e8a14 (23:38:45); #138 merged there at 23:41:41."
+  }
+ }
+}
