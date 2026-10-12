@@ -123,8 +123,7 @@ actor LocalResidency {
         if !(await transcriber.isResident) { try await transcriber.load() }
         // Its Dictation ended while it waited or loaded, and none holds the model
         // now: the linger that armed when it ended may have run, so start it again.
-        // One still armed is left alone; one already firing has cleared itself, and
-        // the extra unload after it finds the model gone.
+        // One still armed is left alone.
         if dictating == 0, unloadTimer == nil { armUnload() }
     }
 
