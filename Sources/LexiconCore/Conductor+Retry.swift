@@ -32,7 +32,7 @@ extension Conductor {
         // hold its place in `inFlight`, and an empty Retry would leave it with no loop.
         guard let record = await history.dictation(id), !record.status.isInFlight, record.status != .waiting,
               let clip = await history.clip(id) else { return .nothing(id) }
-        // A dead mic's audio (DECISIONS item 70): no words to find, and a model asked anyway may make some up.
+        // A dead mic's audio (DECISIONS item 75): no words to find, and a model asked anyway may make some up.
         guard InputSound(stored: clip) == .real else { return .nothing(id) }
         let preferences = preferences.snapshot()
         // Today's settings and today's access for the app it was dictated into.
