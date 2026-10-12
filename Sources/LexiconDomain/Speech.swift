@@ -2,8 +2,9 @@ import Foundation
 
 /// Cloud speech models Lexicon can stream to. THE list of providers.
 ///
-/// Adding a provider is one enum case here. The build then fails in exactly one
-/// place, `Transcription/Providers/ProviderCatalog.swift`'s exhaustive switch, until the
+/// Adding a provider is one enum case here. The build then fails in two places
+/// until the case is whole: `retention` below, and
+/// `Transcription/Providers/ProviderCatalog.swift`'s exhaustive switch until the
 /// new adapter file is written. The model picker, the Keychain account name and
 /// the stored model id all derive from this enum. Nothing else lists providers.
 public enum CloudModel: String, Sendable, Codable, CaseIterable {
@@ -15,6 +16,22 @@ public enum CloudModel: String, Sendable, Codable, CaseIterable {
         case .museVoice: "Meta Muse Voice"
         }
     }
+
+    /// Whether the provider keeps nothing Lexicon sends it: zero retention on,
+    /// training opted out. An eval sends Test set audio only to a `.confirmed`
+    /// model (#166). Set `.confirmed` only once Jake has confirmed the provider's
+    /// terms for his account; a new case starts `.unconfirmed`. Cartesia Ink and ElevenLabs offer zero retention on
+    /// Enterprise plans only, and Meta's is organization-only (#111).
+    public var retention: ZeroRetention {
+        switch self {
+        case .museVoice: .unconfirmed
+        }
+    }
+}
+
+public enum ZeroRetention: Sendable, Hashable {
+    case confirmed
+    case unconfirmed
 }
 
 /// On-device models. Exact model is #9; default per the local-model research is

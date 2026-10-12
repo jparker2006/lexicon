@@ -103,6 +103,9 @@ public enum CloudUse: Sendable, Hashable {
     /// A Dictation, or a fix, in this app.
     case app(AppContext)
     case modelInstall
+    /// A Test set eval sending audio to this model. Denied unless the model's
+    /// zero retention is confirmed; daily Dictation never takes this path.
+    case eval(CloudModel)
 }
 
 extension Preferences {
@@ -113,13 +116,20 @@ extension Preferences {
     /// app in it: when unsure, nothing leaves the Mac.
     public func cloudDenied(for use: CloudUse) -> AccessRevoked? {
         guard privacy == .standard else { return .privateModeOn }
-        guard case .app(let app) = use, !alwaysPrivateApps.isEmpty else { return nil }
-        guard let id = app.bundleID else { return .alwaysPrivateApp }
-        return alwaysPrivateApps.contains(id) ? .alwaysPrivateApp : nil
+        switch use {
+        case .modelInstall:
+            return nil
+        case .eval(let model):
+            return model.retention == .confirmed ? nil : .retentionUnconfirmed
+        case .app(let app):
+            guard !alwaysPrivateApps.isEmpty else { return nil }
+            guard let id = app.bundleID else { return .alwaysPrivateApp }
+            return alwaysPrivateApps.contains(id) ? .alwaysPrivateApp : nil
+        }
     }
 }
 
-/// Why network access ended in the middle of a Dictation (#5).
+/// Why network access was denied, or ended in the middle of a Dictation (#5).
 public enum AccessRevoked: String, Sendable, Codable, CaseIterable {
     /// Jake turned Private mode on.
     case privateModeOn
@@ -127,6 +137,9 @@ public enum AccessRevoked: String, Sendable, Codable, CaseIterable {
     case alwaysPrivateApp
     /// The Secret guard matched text from this Dictation.
     case secretFound
+    /// An eval asked for a model whose zero retention isn't confirmed (#166).
+    /// Only `CloudUse.eval` is denied this way, at grant, never mid-Dictation.
+    case retentionUnconfirmed
 }
 
 /// Permission to use the network, plus the keys to do it. The ONLY door to the
