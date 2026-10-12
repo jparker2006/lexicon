@@ -10,6 +10,7 @@ cleanup() {
     rm -rf "$T"
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 export HOME="$T/home" TMPDIR="$T/tmp" GIT_CONFIG_NOSYSTEM=1
 mkdir -p "$HOME" "$TMPDIR" "$T/bin"
 export PATH="$T/bin:$PATH"
@@ -19,12 +20,14 @@ git config --global init.defaultBranch main
 DEV="$HOME/Library/Application Support/Lexicon Dev"
 FAILED=0
 
-# A gh that answers from files: issue list prints $T/issues.json, issue comment
-# saves the body to $T/posted.<issue>, pr list finds no PR.
+# A gh that answers from files: issue list prints $T/issues.json, where an
+# issue or comment with no author is the owner's; issue comment saves the body
+# to $T/posted.<issue>; pr list finds no PR.
 cat > "$T/bin/gh" <<EOF
 #!/bin/sh
 case "\$1 \$2" in
-    "issue list") cat "$T/issues.json" ;;
+    "repo view") echo '{"owner": {"login": "jparker2006"}}' ;;
+    "issue list") jq 'map(.author //= {login: "jparker2006"} | .comments |= map(.author //= {login: "jparker2006"}))' "$T/issues.json" ;;
     "issue comment") cat > "$T/posted.\$3" ;;
     "pr list") ;;
     *) echo "fake gh: unexpected \$*" >&2; exit 1 ;;
@@ -103,7 +106,8 @@ sandbox_repo() {
 # would be killed for its signature, so it is compiled here.
 fake_listener() {
     mkdir -p "$(dirname "$1")"
-    [ -e "$T/listener" ] || printf '#include <unistd.h>\nint main(void) { for (;;) sleep(60); }\n' | cc -x c -o "$T/listener" -
+    # It exits once orphaned, so a test killed outright (no trap runs) leaves none behind.
+    [ -e "$T/listener" ] || printf '#include <unistd.h>\nint main(void) { while (getppid() != 1) sleep(1); return 0; }\n' | cc -x c -o "$T/listener" -
     cp "$T/listener" "$1"
     "$1" &
     LISTENERS="$LISTENERS $!"

@@ -17,11 +17,11 @@
 #   scripts/live-lane.sh preflight <issue>  refuse what that issue's request can't pass; print the open command
 #
 #   scripts/live-lane.sh sitting render     Jake's queued items as one numbered checklist
-#   scripts/live-lane.sh sitting start      on Jake's go: open the sitting (writes the marker)
+#   scripts/live-lane.sh sitting start      on Jake's go: open the sitting (writes the marker; quits the daily Lexicon for fn steps)
 #   scripts/live-lane.sh sitting ack <step> pass|fail|skip [note]
-#   scripts/live-lane.sh sitting end        close it and print every step's ack
+#   scripts/live-lane.sh sitting end        close it, print every step's ack, reopen the daily Lexicon if start quit it
 #
-#   scripts/live-lane.sh daily quit|reopen  quit Jake's daily Lexicon from its menu around a sitting, then reopen it
+#   scripts/live-lane.sh daily quit|reopen  quit Jake's daily Lexicon from its menu in an open sitting, then reopen it
 #   scripts/live-lane.sh park | restore     move Lexicon Dev's data aside for a fresh start, and back
 #
 # The lock names the holder's session process: the nearest Claude Code process
@@ -102,12 +102,17 @@ require_lane() { read_lock && holds || refuse; }
 # --- the queue ---------------------------------------------------------------
 
 # Every open issue with its body and comments, fetched once per command, in
-# the main shell (a fetch inside $(...) would not outlive its subshell).
+# the main shell (a fetch inside $(...) would not outlive its subshell). The
+# repo is public, so only the owner's account counts: anyone else's request,
+# result or out-of-scope line is ignored.
 ISSUES=
+OWNER=
 fetch_issues() {
     ISSUES=$(mktemp -t live-lane)
     trap 'rm -f "$ISSUES" "$ISSUES".*' EXIT
-    gh issue list --state open --limit 500 --json number,body,comments > "$ISSUES"
+    OWNER=$(gh repo view --json owner | jq -r '.owner.login // empty')
+    [ -n "$OWNER" ] || die "can't read the repo's owner from gh"
+    gh issue list --state open --limit 500 --json number,author,body,comments > "$ISSUES"
 }
 issues() { cat "$ISSUES"; }
 
@@ -115,19 +120,22 @@ issues() { cat "$ISSUES"; }
 # index. Only each issue's newest request counts (a fix sends a new one), and
 # only until a `Live checks: <branch> @ <sha7>` result answers it.
 requests() {
-    issues | jq -r '
-        .[] | .number as $n | .comments as $c
+    issues | jq -r --arg owner "$OWNER" '
+        .[] | .number as $n | [.comments[] | select(.author.login == $owner)] as $c
         | [range(0; $c | length) | select($c[.].body | startswith("Live checks request: "))] | last // empty
         | . as $i | ($c[$i].body | split("\n")[0] | ltrimstr("Live checks request: ") | rtrimstr("\r")) as $head
         | select([$c[$i + 1:][] | .body | startswith("Live checks: " + $head)] | any | not)
         | [$c[$i].createdAt, $n, $head, $i] | @tsv' | sort
 }
 
-# The comment body of request number $2 on issue $1.
-request_body() { issues | jq -r --argjson n "$1" --argjson i "$2" '.[] | select(.number == $n) | .comments[$i].body'; }
+# The body of request $2 (an index into the owner's comments) on issue $1.
+request_body() { issues | jq -r --arg owner "$OWNER" --argjson n "$1" --argjson i "$2" '.[] | select(.number == $n) | [.comments[] | select(.author.login == $owner)][$i].body'; }
 
-# The issue's body and comments, for its out-of-scope lines.
-issue_text() { issues | jq -r --argjson n "$1" '.[] | select(.number == $n) | .body, .comments[].body'; }
+# The owner's issue body and comments, for out-of-scope lines.
+issue_text() {
+    issues | jq -r --arg owner "$OWNER" --argjson n "$1" \
+        '.[] | select(.number == $n) | (select(.author.login == $owner) | .body), (.comments[] | select(.author.login == $owner) | .body)'
+}
 
 is_open() { issues | jq -e --argjson n "$1" 'any(.[]; .number == $n)' > /dev/null; }
 
@@ -310,10 +318,23 @@ sitting() {
             require_lane
             [ ! -e "$MARKER" ] || die "a sitting is already open (sitting end closes it)"
             [ -s "$STATE/sitting.tsv" ] || die "no rendered sitting with Jake's steps: run sitting render, and start one only when it has steps"
+            quit=
             if awk -F'\t' '$6 == "yes"' "$STATE/sitting.tsv" | grep -q .; then
-                require_no_fn_listeners || die "this sitting has fn steps; quit the listeners above (daily quit for the daily Lexicon), then start again"
+                # Jake's daily Lexicon is quit below, inside the sitting (Q8); any other listener refuses now.
+                others=$(fn_listeners | awk -F'|' '$2 != "the daily Lexicon"')
+                if [ -n "$others" ]; then
+                    printf '%s\n' "$others" | while IFS='|' read -r p what path; do
+                        echo "$what is running (pid $p, $path) and answers fn, so Dev's fn results would be wrong. Quit it, then rerun." >&2
+                    done
+                    die "this sitting has fn steps; it didn't open"
+                fi
+                if fn_listeners | grep -q '|the daily Lexicon|'; then quit=yes; fi
             fi
-            printf 'started=%s\nholder=%s\n' "$(TZ=UTC date '+%Y-%m-%dT%H:%M:%SZ')" "$holder" > "$MARKER"
+            printf 'started=%s\nholder=%s\nquit-daily=%s\n' "$(TZ=UTC date '+%Y-%m-%dT%H:%M:%SZ')" "$holder" "${quit:-no}" > "$MARKER"
+            if [ -n "$quit" ]; then
+                ( daily quit ) || { rm -f "$MARKER"; die "the sitting didn't open: the daily Lexicon wasn't quit"; }
+                require_no_fn_listeners || { rm -f "$MARKER"; die "the sitting didn't open: another app still answers fn"; }
+            fi
             : > "$STATE/sitting.acks"
             echo "live-lane: sitting open ($(wc -l < "$STATE/sitting.tsv" | tr -d ' ') steps). $(fn_listeners_line)"
             ;;
@@ -338,10 +359,12 @@ sitting() {
                 where=; [ "$issue" = - ] || where=" (#$issue $head item $item)"
                 printf '%s\n' "$step. $title$where: ${ack:-no ack}"
             done < "$STATE/sitting.tsv"
-            fnsteps=$(awk -F'\t' '$6 == "yes"' "$STATE/sitting.tsv")
+            quit=$(sed -n 's/^quit-daily=//p' "$MARKER")
             rm -f "$MARKER" "$STATE/sitting.tsv" "$STATE/sitting.txt" "$STATE/sitting.acks"
             echo "live-lane: sitting closed"
-            [ -z "$fnsteps" ] || echo "live-lane: if you quit the daily Lexicon for it, reopen it now: scripts/live-lane.sh daily reopen"
+            if [ "$quit" = yes ]; then
+                ( daily reopen ) || echo "live-lane: the daily Lexicon didn't reopen; run: scripts/live-lane.sh daily reopen" >&2
+            fi
             ;;
         *) echo "usage: live-lane.sh sitting render | start | ack <step> pass|fail|skip [note] | end" >&2; exit 64 ;;
     esac
@@ -362,11 +385,13 @@ dictating() {
 }
 
 daily() {
+    require_lane
+    # Only around a sitting (Q8): sitting start quits it, sitting end reopens it.
+    [ "${1:-}" != quit ] || [ -e "$MARKER" ] || die "daily quit runs only in an open sitting; sitting start quits it for a sitting with fn steps"
     # lsappinfo, System Events and open reach the real Mac whatever HOME says,
     # so a run under a test's fake HOME would quit Jake's real app: refuse it.
     real=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }')
     [ -n "$real" ] && [ "$HOME" = "$real" ] || die "HOME ($HOME) is not your login home${real:+ ($real)}; daily quit and reopen act on the real Mac, so they refuse here"
-    require_lane
     app="$HOME/Applications/Lexicon.app"
     case "${1:-}" in
         quit)

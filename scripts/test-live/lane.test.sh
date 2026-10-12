@@ -42,6 +42,15 @@ expect ok '^1\. #64 claude/issue-64' "the queue lists open requests oldest first
 expect ok '^2\. #57 claude/issue-57 @ bbbbbbb' "only an issue's newest request is queued" "$LANE" queue
 absent '#53|aaaaaaa' "an answered or superseded request is not queued" "$LANE" queue
 
+# The repo is public: a request, or a result, from anyone but the owner doesn't count.
+cp "$T/issues.json" "$T/issues-owner.json"
+jq --arg declared "$declared" --rawfile r "$T/r53" '(.[] | select(.number == 58) | .comments) = [{createdAt: "2026-10-11T05:00:00Z", author: {login: "stranger"}, body: $r}]
+    | (.[] | select(.number == 64) | .comments) += [{createdAt: "2026-10-11T16:00:00Z", author: {login: "stranger"}, body: "Live checks: claude/issue-64 @ \($declared)"}]' \
+    "$T/issues-owner.json" > "$T/issues.json"
+absent '#58' "a stranger's request is not queued" "$LANE" queue
+expect ok '^1\. #64 claude/issue-64' "a stranger's result doesn't answer a request" "$LANE" queue
+cp "$T/issues-owner.json" "$T/issues.json"
+
 # Preflight on #64's item 8, as at 113f5cc: declared, an init label and an
 # assignment, but nothing reads it.
 fake_dev_app "$declared" debug
@@ -66,6 +75,9 @@ expect ok '^open command: open ".*/Lexicon Dev.app"$' "the item passes once the 
 jq '(.[] | select(.number == 64) | .comments) += [{createdAt: "2026-10-11T22:42:00Z", body: "**Item 8 (delete refused while in flight): out of scope until #58.** Tests cover it."}]' \
     "$T/issues-read.json" > "$T/issues.json"
 expect fail 'item 1 \(Delete refused while in flight\): the issue marks it out of scope' "an item the issue marks out of scope is refused" "$LANE" preflight 64
+jq '(.[] | select(.number == 64) | .comments) += [{createdAt: "2026-10-11T22:42:00Z", author: {login: "stranger"}, body: "Item 8 (delete refused while in flight): out of scope until #58."}]' \
+    "$T/issues-read.json" > "$T/issues.json"
+expect ok '^open command' "a stranger can't mark an item out of scope" "$LANE" preflight 64
 sed 's/^needs: doubleTapWindow$/needs: doubleTapWindow; #58/' "$F/64-item8.txt" > "$T/64-needs58.txt"
 request "claude/issue-64 @ $read" "$T/64-needs58.txt" > "$T/r64b"
 only_request 64 "$T/r64b" "$T/issues-read.json"
@@ -126,13 +138,19 @@ absent 'WAV paste' "hands-off items never reach the sitting" "$LANE" sitting ren
 cp "$T/issues.json" "$T/issues-sitting.json"
 
 expect fail 'nobody holds the live-app lane' "only the lane holder starts a sitting" "$LANE" sitting start
-# daily quit and reopen act on the real Mac whatever HOME says, so under a fake HOME they refuse.
-expect fail 'is not your login home' "daily quit refuses under a test's HOME" "$LANE" daily quit
-expect fail 'is not your login home' "daily reopen refuses under a test's HOME" "$LANE" daily reopen
+expect fail 'nobody holds the live-app lane' "daily quit is the lane holder's" "$LANE" daily quit
+expect fail 'nobody holds the live-app lane' "daily reopen is the lane holder's" "$LANE" daily reopen
 take_lane "$REPO"
-expect fail 'is not your login home' "daily quit refuses under a test's HOME even for the lane holder" "$LANE" daily quit
+expect fail 'daily quit runs only in an open sitting' "daily quit needs an open sitting" "$LANE" daily quit
+# daily quit and reopen act on the real Mac whatever HOME says, so under a fake HOME they refuse.
+expect fail 'is not your login home' "daily reopen refuses under a test's HOME" "$LANE" daily reopen
+fake_listener "$T/elsewhere/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicator"
+expect fail "Lexicon Indicator is running \(pid $LISTENER" "a sitting with fn steps won't start while another app answers fn" "$LANE" sitting start
+[ ! -e "$DEV/live-sitting.open" ] && pass "a refused start leaves no marker" || fail "a refused start left the marker"
+stop_listeners
 fake_listener "$HOME/Applications/Lexicon.app/Contents/MacOS/Lexicon"
-expect fail 'The daily Lexicon is running' "a sitting with fn steps won't start while the daily Lexicon runs" "$LANE" sitting start
+expect fail "is not your login home.*|the sitting didn't open: the daily Lexicon wasn't quit" "an fn sitting quits the daily Lexicon itself, here refused by the HOME check" "$LANE" sitting start
+[ ! -e "$DEV/live-sitting.open" ] && pass "a sitting whose daily quit failed leaves no marker" || fail "a failed daily quit left the marker"
 stop_listeners
 expect ok 'sitting open \(3 steps\)\. fn listeners: none' "the sitting opens on Jake's go" "$LANE" sitting start
 [ -f "$DEV/live-sitting.open" ] && pass "the sitting marker the guard reads exists" || fail "no sitting marker at $DEV/live-sitting.open"
@@ -146,7 +164,7 @@ printf '%s\n' "$end" > "$T/end.txt"
 expect ok '^1\. click Allow.*: no ack$' "the end lists an unacked step" cat "$T/end.txt"
 expect ok '^2\. Hold \(#53 .* item 1\): pass$' "the end keeps a pass" cat "$T/end.txt"
 expect ok '^3\. Mic prompt \(#57 .* item 1\): fail: no prompt$' "the end keeps a fail and its note" cat "$T/end.txt"
-expect ok 'daily reopen' "the end of an fn sitting says to reopen the daily Lexicon" cat "$T/end.txt"
+absent 'daily' "a sitting that didn't quit the daily Lexicon doesn't reopen it" cat "$T/end.txt"
 [ ! -e "$DEV/live-sitting.open" ] && pass "the end removes the marker" || fail "the marker outlived the sitting"
 
 # A sitting of only #57's Dictation step still counts as fn.
@@ -154,8 +172,8 @@ only_request 57 "$T/r57b" "$T/issues-sitting.json"
 jq '[.[] | select(.number == 57)]' "$T/issues.json" > "$T/issues-57.json"
 cp "$T/issues-57.json" "$T/issues.json"
 "$LANE" sitting render > /dev/null
-fake_listener "$HOME/Applications/Lexicon.app/Contents/MacOS/Lexicon"
-expect fail 'The daily Lexicon is running' "a Dictation-only sitting won't start while the daily Lexicon runs" "$LANE" sitting start
+fake_listener "$T/elsewhere/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicator"
+expect fail 'Lexicon Indicator is running' "a Dictation-only sitting won't start while another app answers fn" "$LANE" sitting start
 stop_listeners
 
 jq -n --rawfile r "$T/r64c" '[{number: 64, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
