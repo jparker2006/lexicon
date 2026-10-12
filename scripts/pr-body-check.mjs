@@ -16,8 +16,8 @@
 //   headings   Summary, Evidence, Merge Danger, Install, in that order
 //   door       **Door:** one-way or two-way
 //   blast      **Blast Radius:** one word from BLAST_RADIUS
-//   check      a "Check:" line after Install, then at most one line: the footer
-//              a tool adds (the "Generated with" line)
+//   check      a "Check:" line after Install, then at most one short line: the
+//              footer a tool adds (the "Generated with" line)
 //   words      at most WORD_CAP words up to the Check: line. A word is a token
 //              between spaces with a letter or digit, so table rules and tree
 //              branches don't count; nor does a closed <details> block, or the
@@ -35,6 +35,8 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 export const WORD_CAP = 750
+// The "Generated with" line a tool adds is 5 words.
+const FOOTER_WORDS = 12
 // One word each: the area a bad merge would hurt, after review.md's risk tiers.
 export const BLAST_RADIUS = [
   'capture', 'history', 'insertion', 'fn', 'network', 'privacy', 'permissions', 'bundle',
@@ -116,8 +118,11 @@ export function checkBody({ body, files = [], commits = [], summary = null, modu
   // A missing Install is the headings rule's; then any Check: line will do.
   const check = lines.findIndex((l, i) => i > install && /^Check:\s*\S/.test(l))
   if (check < 0) fail('check', 'a "Check:" line must follow ## Install, with the one thing Jake should try')
-  else if (lines.slice(check + 1).filter(l => l.trim()).length > 1) {
-    fail('check', 'only a footer may follow the Check: line, and only one line of it')
+  else {
+    const after = lines.slice(check + 1).filter(l => l.trim())
+    if (after.length > 1 || (after[0] || '').split(/\s+/).length > FOOTER_WORDS) {
+      fail('check', `only a footer may follow the Check: line: one line of at most ${FOOTER_WORDS} words`)
+    }
   }
 
   // A collapsed block (the Review table's rows) opens only on a click, so only
@@ -128,6 +133,8 @@ export function checkBody({ body, files = [], commits = [], summary = null, modu
     if (!/^\s*<details>/.test(upTo[i])) continue
     const end = upTo.findIndex((l, j) => j >= i && /<\/details>\s*$/.test(l))
     if (end < 0) break
+    // Another block opening first means this one never closed.
+    if (upTo.slice(i + 1, end).some(l => /^\s*<details>/.test(l))) continue
     for (let j = i; j <= end; j++) hidden.add(j)
     i = end
   }
@@ -181,17 +188,28 @@ function currentSummary() {
   }
 }
 
-// The modules the Refs issue's Modules line names, read from GitHub.
+const GH_TIMEOUT_MS = 20000
+const runGh = (args, opts) => execFileSync('gh', args, opts)
+
+/** The modules issue n's Modules line names, read with gh: { modules } or { error }. */
+export function readModules(n, sources, gh = runGh) {
+  try {
+    const ticket = gh(['issue', 'view', n, '--json', 'body', '-q', '.body'], { cwd: root, encoding: 'utf8', timeout: GH_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] })
+    return { modules: ticketModules(ticket, sources) }
+  } catch (e) {
+    if (e.code === 'ETIMEDOUT' || e.signal) return { modules: [], error: `no answer from gh within ${GH_TIMEOUT_MS / 1000} s reading #${n}'s Modules line; check the network and run it again` }
+    const said = String(e.stderr || e.message).trim().split('\n')[0]
+    if (/HTTP 4\d\d/.test(said)) return { modules: [], error: `GitHub refused reading #${n} (${said}), so the Sketch rule can't be checked` }
+    return { modules: [], error: `couldn't read #${n}'s Modules line with gh (${said}); check gh and run it again` }
+  }
+}
+
+// The modules the Refs issue's Modules line names.
 function refsModules(body) {
   const n = /^Refs #(\d+)/.exec(body)?.[1]
   if (!n) return { modules: [] }
-  try {
-    const ticket = execFileSync('gh', ['issue', 'view', n, '--json', 'body', '-q', '.body'], { cwd: root, encoding: 'utf8' })
-    const sources = fs.readdirSync(path.join(root, 'Sources'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
-    return { modules: ticketModules(ticket, sources) }
-  } catch {
-    return { modules: [], error: `couldn't read #${n}'s Modules line with gh, so the Sketch rule wasn't checked; rerun when gh works` }
-  }
+  const sources = fs.readdirSync(path.join(root, 'Sources'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+  return readModules(n, sources)
 }
 
 function main(argv) {

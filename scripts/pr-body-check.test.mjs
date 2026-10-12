@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkBody, numbersLine, ticketModules, WORD_CAP } from './pr-body-check.mjs'
+import { checkBody, numbersLine, readModules, ticketModules, WORD_CAP } from './pr-body-check.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const fixture = name => fs.readFileSync(path.join(here, 'test-pr-body', name), 'utf8')
@@ -96,7 +96,8 @@ test('the Check: line comes last, and only a footer follows it', () => {
 
 test('one footer line after Check: is not counted; more is refused', () => {
   const filler = Array.from({ length: WORD_CAP }, () => 'word').join(' ')
-  assert.deepEqual(checkBody({ body: good.replace('Generated with', `Generated with ${filler}`) }), [])
+  assert.deepEqual(checkBody({ body: good }), [])
+  assert.deepEqual(rules(checkBody({ body: good.replace('Generated with', `Generated with ${filler}`) })), ['check'])
   assert.deepEqual(rules(checkBody({ body: `${good}\nMore notes after the footer.\n` })), ['check'])
   assert.deepEqual(rules(checkBody({ body: body('Code only.', `Code only. ${filler}`) })), ['words'])
 })
@@ -110,6 +111,12 @@ test('a collapsed <details> block is not counted', () => {
 test('an unclosed <details> hides nothing from the count', () => {
   const filler = Array.from({ length: WORD_CAP }, () => 'word').join(' ')
   assert.deepEqual(rules(checkBody({ body: body('## Merge Danger', `<details><summary>Findings</summary>\n\n${filler}\n\n## Merge Danger`) })), ['words'])
+})
+
+test('a stray <details> before a closed block hides nothing', () => {
+  const filler = Array.from({ length: WORD_CAP }, () => 'word').join(' ')
+  const stray = `<details>\n\n${filler}\n\n<details><summary>Findings</summary>\n\n| row |\n\n</details>\n\n## Merge Danger`
+  assert.deepEqual(rules(checkBody({ body: body('## Merge Danger', stray) })), ['words'])
 })
 
 test('a table rule or a tree branch is not a word', () => {
@@ -168,4 +175,17 @@ test("a ticket whose Modules line names 3 or more modules needs a Sketch: link",
   assert.deepEqual(checkBody({ body: sketched, modules }), [])
   assert.deepEqual(rules(checkBody({ body: body('## Evidence', 'Sketch: to come\n\n## Evidence'), modules })), ['sketch'])
   assert.deepEqual(checkBody({ body: good, modules: ticketModules('**Modules:** History\n\nCleanup and LexiconUI in prose.', sources) }), [])
+})
+
+test("the ticket read has a deadline and names a refusal as one", () => {
+  const sources = ['History', 'LexiconCore', 'LexiconUI']
+  let seen
+  const ok = readModules('64', sources, (args, opts) => { seen = opts; return '**Modules:** History, LexiconUI, LexiconCore' })
+  assert.deepEqual(ok.modules, sources)
+  assert.ok(seen.timeout > 0 && seen.timeout <= 30000, 'gh runs with a deadline')
+  const timedOut = readModules('64', sources, () => { throw Object.assign(new Error('spawnSync gh ETIMEDOUT'), { code: 'ETIMEDOUT' }) })
+  assert.match(timedOut.error, /no answer from gh within \d+ s/)
+  const refused = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr: 'HTTP 403: Resource not accessible by integration' }) })
+  assert.match(refused.error, /GitHub refused/)
+  assert.doesNotMatch(refused.error, /rerun/)
 })

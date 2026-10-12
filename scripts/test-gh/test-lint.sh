@@ -9,7 +9,7 @@ test_refuses_64_as_written() {
     expect_err "item 1 is not under a ### Headless, ### Live or ### Jake heading"
     expect_err "no \"Needs the Live checks session for:\" line"
     expect_err "no ## Open questions heading"
-    ! printf '%s\n' "$err" | grep -q 'Sketch' || fail "a ticket needs no Sketch: the builder makes it (#158)"
+    ! printf '%s\n' "$err" | grep -q 'Sketch' || fail "a ticket needs no Sketch: the builder makes it after claiming"
 }
 
 test_refuses_64_without_the_58_edge() {

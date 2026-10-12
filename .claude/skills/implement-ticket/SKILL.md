@@ -41,16 +41,16 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 
 ## 4. Review your diff
 
-The checked-in review Workflow is the whole review: CLAUDE.md's Review section and this step say the same thing.
+The checked-in review Workflow is the only code review: no critic briefs of your own. `spec-checker` beside it checks the spec, not the code. CLAUDE.md's Review section and this step say the same thing.
 
 - Commit all your work (your own files, explicit paths), then save the diff: `git diff $(git merge-base HEAD origin/main) > <scratchpad>/review.diff`. The merge-base keeps the diff yours when another session's fetch moves `origin/main`.
 - Give `spec-checker` that diff, and the final diff again before Ready when commits came after. Fix each departure, or write it into `docs/DECISIONS.md` with a link to Jake's recorded decision. A default nobody asked Jake about never ships silently: ask him (Need Jake).
 - Run the `lexicon-review` Workflow with `{issue: N, sha: <HEAD>}`. It reviews a snapshot at that sha: a `critic` per review.md section the diff reaches, the acceptance criteria as a lens, and a `verifier` per finding. Write no critic briefs of your own; nothing stands in for a verifier's verdict.
-- A CONFIRMED finding is fixed only through a test that fails first: the test in its verifier's reply or one a `test-writer` writes. Run it red, fix, run it green. REFUTED and UNSURE findings are dropped unless a test that fails first proves them. An INCOMPLETE run is run again.
+- A CONFIRMED finding is fixed only through a test that fails first: the test in its verifier's reply or one a `test-writer` writes. Run it red, fix, run it green. Only a finding no headless test can show (a sentence in a skill or a doc) is fixed on its verifier's verdict alone, and the PR says so. REFUTED and UNSURE findings are dropped unless a test that fails first proves them. An INCOMPLETE run is run again.
 - **Every commit after the reviewed sha gets a delta pass before Ready**: run the Workflow again with `{issue: N, sha: <new HEAD>, reviewed: <the sha it last reviewed>}`. That covers your fixes, a late test and a merge of `main`. The table in the PR names the head you push.
-- Run `scripts/ticket-context.sh N` again and read the new comments. Review items added while you worked are part of the job.
+- Run `scripts/ticket-context.sh N --out <scratchpad>/ctx` again and read the new comments. Review items added while you worked are part of the job.
 
-**Done:** the Workflow's last run reviewed HEAD and is complete, each CONFIRMED finding is fixed through a red test, and spec-checker found no departure in the final diff that lacks Jake's recorded decision.
+**Done:** the Workflow's last run reviewed HEAD and is complete, each CONFIRMED finding is fixed through a red test (or its verdict, for prose), and spec-checker found no departure in the final diff that lacks Jake's recorded decision.
 
 ## 5. Run the checks once
 
@@ -72,8 +72,8 @@ The checked-in review Workflow is the whole review: CLAUDE.md's Review section a
 
 - `scripts/ticket.sh ac N <n>=met:<url> ...` marks each acceptance line met (an evidence link), waived (a Decision link) or moved (#N), and ticks its box. It refuses a partial set, so with a Live checks result still to come, mark them all once it lands.
 - `scripts/ticket.sh ready N` posts `Ready for review: PR #M at <sha7>, CI pending` once and removes `building`; while a Live checks request for that head has no result, the line ends `, Live checks pending`. It refuses a dirty tree, an unpushed head or a check stamp for other content.
-- When the Live checks result lands with every item PASS, mark the acceptance lines (`ticket.sh ac`, the result comment as evidence) and you are done. A FAIL goes to step 8.
-- Never wait on CI in the foreground, and never end a turn "waiting on CI". The Reviewer owns the CI wait, and the orchestrator's watcher sends you a pointer when CI goes red, Live checks posts a FAIL or the Reviewer says don't merge. The only watch you may start is a background `gh pr checks <pr> --watch --fail-fast` on your own PR, to learn of a red check sooner.
+- When the Live checks result lands with every item PASS, mark the acceptance lines (`ticket.sh ac`, the result comment as evidence) and you are done. A FAIL goes to step 8. A jake item still waiting for a sitting holds only its own line: your Ready line and the review don't wait for it.
+- Never wait on CI in the foreground, and never end a turn "waiting on CI". The Reviewer owns the CI wait, and the orchestrator's watcher sends you a pointer when CI goes red, Live checks posts its result or the Reviewer says don't merge. The only watch you may start is a background `gh pr checks <pr> --watch --fail-fast` on your own PR, to learn of a red check sooner.
 - After your claim, comment on the issue only with a Ready line, a `Sketch:`, a Live checks request, or to ask Jake. Finish in this run: schedule no check-ins, triggers or reminders.
 
 **Done:** the issue's last comment from you starts `Ready for review: PR #M` and `building` is gone.
@@ -82,8 +82,8 @@ The checked-in review Workflow is the whole review: CLAUDE.md's Review section a
 
 A red CI run, a Live checks FAIL or a Reviewer verdict reaches you as a message or a PR comment.
 
-- Fix through a test that fails first, take the fix through steps 4 and 5 (a delta pass, then the check), push, and update the body with `pr-body-check` passing.
-- Post on the PR, never only on the issue: `gh pr comment <pr> --body "Fixed review: PR #M at <sha7>, CI pending"`, with one line per finding you answered. Every reply to a verdict goes on the PR, where the Reviewer reads. The issue keeps only the claim and Ready lines.
+- Fix through a test that fails first, take the fix through steps 4 and 5 (a delta pass, then the check), push, and update the body with `pr-body-check` passing. After a Live checks FAIL, post a new request for the new head (step 6).
+- Post on the PR, never only on the issue: `gh pr comment <pr> --body "Fixed review: PR #M at <sha7>, CI pending"`, with one line per finding you answered. After a Live checks FAIL, the fix's new request is open, so the line ends `, Live checks pending`. Every reply to a verdict goes on the PR, where the Reviewer reads. The issue keeps only the claim and Ready lines.
 
 **Done:** the PR's last comment from you starts `Fixed review: PR #M at <sha7>` and names its head.
 
