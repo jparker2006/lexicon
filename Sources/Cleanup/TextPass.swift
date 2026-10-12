@@ -58,14 +58,15 @@ enum Fillers {
         "such", "very",
     ]
 
-    /// After "like", these make it a comparison or an estimate, not a filler.
-    /// So does a number or ordinal, a word with a digit ("like, 5 MB", "like, $5") or a name.
+    /// After "like", these make it a comparison or an estimate, not a filler. So does a
+    /// number word (`Token.isNumberWord`, from StructuralCheck's tables), a word with a
+    /// digit ("like, 5 MB", "like, $5"), a name or a Term.
     static let likeKeepers: Set<String> = [
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some",
         "many", "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice",
-        "double", "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "trillion", "trillions",
-        "lots", "more", "less", "between", "upwards", "somewhere",
+        "double", "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "teens", "lots", "more",
+        "less", "between", "upwards", "somewhere",
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
@@ -150,8 +151,10 @@ enum Fillers {
 
             // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
             // "like, um, uh, eighty": the first word after the fillers decides whether "like" is a hedge.
+            // A filler that ends the sentence ends the search: "like, um. Ten failed" has no hedge.
             let hedge = token.word == "like"
-                && tokens[(i + 1)...].first { !hard.contains($0.word) }.map { $0.keepsLike || rules.isWritten($0.text) } == true
+                && tokens[(i + 1)...].first { !hard.contains($0.word) || $0.endsSentence }
+                    .map { !hard.contains($0.word) && ($0.keepsLike || rules.isWritten($0.text)) } == true
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
                                  after: i + 2 < tokens.count ? tokens[i + 2] : nil, hedge: hedge,
                                  dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
@@ -324,10 +327,11 @@ private struct Token {
             || word.split(separator: "-").first.map { Token.isNumberWord(String($0)) } ?? false
     }
 
-    /// Cardinals, ordinals and their plurals and fractions: "ten", "third", "thirds",
-    /// "twenties", "tenths", "hundredth".
+    /// Cardinals, ordinals and their plurals, fractions and multiples: "ten", "third",
+    /// "thirds", "twenties", "tenths", "hundredth", "twofold".
     static func isNumberWord(_ word: String) -> Bool {
         var stems = [word]
+        if word.hasSuffix("fold") { stems.append(String(word.dropLast(4))) }
         if word.hasSuffix("ies") { stems.append(word.dropLast(3) + "y") }
         if word.hasSuffix("s") { stems.append(String(word.dropLast())) }
         if word.hasSuffix("ths") { stems.append(String(word.dropLast(3))) }

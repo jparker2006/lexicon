@@ -199,6 +199,11 @@ let likeKeptCases: [Case] = [
     Case("It's, like, hundredth in line.", "It's, like, hundredth in line."),
     Case("It's off by, like, quarters of an inch.", "It's off by, like, quarters of an inch."),
     Case("We split it, like, halves and thirds.", "We split it, like, halves and thirds."),
+    Case("It's, like, trillionths of a cent.", "It's, like, trillionths of a cent."),
+    Case("It's, like, twofold faster.", "It's, like, twofold faster."),
+    Case("They're, like, teens.", "They're, like, teens."),
+    // A number in the next sentence does not make a filler "like" a hedge.
+    Case("It is, like, um. Postgres is fine.", "It is. Postgres is fine."),
     Case("It holds, like, dozen jobs at most.", "It holds, like, dozen jobs at most."),
     Case("We run, like, thirty-something servers.", "We run, like, thirty-something servers."),
     Case("It took, like, two-ish hours.", "It took, like, two-ish hours."),
