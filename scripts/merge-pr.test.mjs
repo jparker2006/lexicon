@@ -34,7 +34,7 @@ const WORKTREES = (branch, at = '/Users/jakeparker/code/lexicon/.claude/worktree
   `worktree /Users/jakeparker/code/lexicon\nHEAD ${'1'.repeat(40)}\nbranch refs/heads/main\n\nworktree ${at}\nHEAD ${'2'.repeat(40)}\nbranch refs/heads/${branch}\n`;
 
 /** merge-pr on `state` (changed in place) from the main checkout, with stub gh, git and lanes. */
-async function merge(args, state, { onSleep = () => {}, dirty = false, users = [], worktreeCheckout = false } = {}) {
+async function merge(args, state, { onSleep = () => {}, dirty = false, users = [], fromWorktree = false } = {}) {
   const { gh, calls } = stubGh(state);
   const lines = [];
   const git = [];
@@ -42,11 +42,12 @@ async function merge(args, state, { onSleep = () => {}, dirty = false, users = [
   let clock = 0, sleeps = 0;
   const code = await mergePr(args, {
     gh,
+    checkouts: fromWorktree ? ['/r', '/r/b'] : ['/r', '/r'],
     git: async (a) => {
       git.push(a.join(' '));
-      if (a[0] === 'rev-parse') return worktreeCheckout ? '/r/.git/worktrees/b\n/r/.git\n' : '/r/.git\n/r/.git\n';
+      if (a[0] === '-C' && a[2] === 'rev-parse') return a[1] === '/r/b' ? '/r/.git/worktrees/b\n/r/.git\n' : '/r/.git\n/r/.git\n';
       if (a[0] === 'worktree' && a[1] === 'list') return WORKTREES(state.pulls.find((p) => p.number === Number(args[0])).headRefName);
-      if (a[0] === '-C') return dirty ? ' M Sources/AudioCapture/Recorder.swift\n' : '';
+      if (a[0] === '-C' && a[2] === 'status') return dirty ? ' M Sources/AudioCapture/Recorder.swift\n' : '';
       if (a[0] === 'worktree' && a[1] === 'remove') return '';
       throw new Error(`stub git: unexpected call: git ${a.join(' ')}`);
     },
@@ -192,7 +193,7 @@ test('verdict gate: a Later note without an issue number is refused (#171), and 
 
 // ---- the merge, end to end on a stub GitHub
 
-test('a stale reviewed sha is refused before anything is read or written (#176: verdict at 55dfaaf, head 7e60030)', async () => {
+test('a stale reviewed sha is refused with nothing written (#176: verdict at 55dfaaf, head 7e60030)', async () => {
   const c = fixture('live').cases['176'];
   const state = { owner: OWNER, pulls: [c.pr], issues: [c.issue], runs: [], behind: {} };
   const result = await merge(['176', '55dfaaf95fe4cc39c64d634d640cbd4936f8e63c'], state);
@@ -312,12 +313,72 @@ test('bad arguments say how to call it and read nothing', async () => {
   }
 });
 
+test('closed, draft, missing and wrong-base PRs are refused with nothing written', async () => {
+  const cases = [
+    [(p) => { p.state = 'MERGED'; }, 'refused #95: it is already merged'],
+    [(p) => { p.state = 'CLOSED'; }, 'refused #95: it is closed'],
+    [(p) => { p.isDraft = true; }, 'refused #95: it is a draft'],
+    [(p) => { p.baseRefName = 'release'; }, 'refused #95: its base is release, not main'],
+  ];
+  for (const [change, line] of cases) {
+    const state = fixture('0643');
+    change(state.pulls[0]);
+    const result = await merge(['95', D3C], state);
+    assert.deepEqual([result.code, result.lines], [1, [line]]);
+    assert.deepEqual(writes(result.calls), []);
+  }
+  const missing = await merge(['96', D3C], fixture('0643'));
+  assert.deepEqual([missing.code, missing.lines], [2, ['error #96: GraphQL: Could not resolve to a PullRequest with the number of 96. (repository.pullRequest) Nothing was merged.']]);
+});
+
+test('a caller in a worktree is refused even when the script is the main checkout\'s', async () => {
+  const result = await merge(['95', D3C], fixture('0643'), { fromWorktree: true });
+  assert.deepEqual([result.code, result.lines, result.calls], [1, ['refused #95: run it from the main checkout, not a worktree: only the Reviewer merges, from there'], []]);
+});
+
+test('a GitHub read that fails merges nothing', async () => {
+  const state = fixture('0643');
+  state.issues = null;
+  const result = await merge(['95', D3C], state);
+  assert.equal(result.code, 2);
+  assert.match(result.lines.at(-1), /^error #95: .* Nothing was merged\.$/);
+  assert.deepEqual(writes(result.calls), []);
+});
+
+test('a hold posted while CI ran stops the merge (the gates are read again after the wait)', async () => {
+  const state = fixture('0643');
+  const result = await merge(['95', D3C], state, {
+    onSleep: (s, n) => {
+      if (n === 1) s.pulls[0].comments.push({ author: { login: OWNER }, createdAt: '2026-10-11T06:50:00Z', body: 'Hold (Reviewer): don\'t merge yet. Jake wants to try it first.' });
+      s.runs.push(run(5, updatedHead(95), 'success'));
+    },
+  });
+  assert.equal(result.code, 1);
+  assert.deepEqual(refusals(result), ['refused #95: after the CI wait, the Reviewer\'s newest word is not merge: "Hold (Reviewer): don\'t merge yet. Jake wants to try it first."']);
+  assert.ok(!result.calls.some((c) => c.startsWith('pr merge')));
+});
+
+test('a merge GitHub refuses is a refusal, not an unknown', async () => {
+  const state = fixture('0643');
+  state.mergeFails = 'GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)';
+  const result = await merge(['95', D3C], state, { onSleep: (s) => s.runs.push(run(1, updatedHead(95), 'success')) });
+  assert.equal(result.code, 1);
+  assert.equal(result.lines.at(-1), 'refused #95: GitHub refused the merge: GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)');
+});
+
+test('a Later note needs its issue under a plain merge verdict too', () => {
+  const c = fixture('live').cases['176'];
+  const pr = { ...c.pr, comments: [{ author: { login: OWNER }, createdAt: '2026-10-12T06:40:00Z', body: `**Reviewer verdict: merge** (head 7e60030).\n\n**Later:**\n- bench.sh prints job noise.\n- #175 owns the FAIL line.` }] };
+  assert.deepEqual(verdictGate(pr, c.sha, OWNER), ['a Later note has no issue number (scripts/ticket.sh later makes one): "bench.sh prints job noise."']);
+});
+
 // ---- as programs: the checkout rule needs real git, and install.sh is shell
 
 function repo() {
   const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'merge-pr-')));
   const g = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   g('init', '-q', '-b', 'main');
+  g('config', 'commit.gpgsign', 'false');
   return { dir, g };
 }
 
@@ -341,12 +402,12 @@ test('run as a command: refused from a worktree checkout with no GitHub call; fr
     writeFileSync(log, '');
     const env = { ...process.env, PATH: `${path.join(FIXTURES, 'bin')}:${process.env.PATH}`, STUB_GH_STATE: stateFile, STUB_GH_LOG: log };
 
-    const fromWorktree = spawnSync(process.execPath, [path.join(wt, 'scripts/merge-pr.mjs'), '95', D3C], { encoding: 'utf8', env });
+    const fromWorktree = spawnSync(process.execPath, [path.join(wt, 'scripts/merge-pr.mjs'), '95', D3C], { encoding: 'utf8', env, cwd: wt });
     assert.equal(fromWorktree.stdout, 'refused #95: run it from the main checkout, not a worktree: only the Reviewer merges, from there\n');
     assert.equal(fromWorktree.status, 1);
     assert.equal(readFileSync(log, 'utf8'), '');
 
-    const fromMain = spawnSync(process.execPath, [path.join(dir, 'scripts/merge-pr.mjs'), '95', D3C], { encoding: 'utf8', env, timeout: 60_000 });
+    const fromMain = spawnSync(process.execPath, [path.join(dir, 'scripts/merge-pr.mjs'), '95', D3C], { encoding: 'utf8', env, cwd: dir, timeout: 60_000 });
     assert.equal(fromMain.stderr, '');
     assert.equal(fromMain.status, 0, fromMain.stdout);
     assert.match(fromMain.stdout, /^merged #95 at cd00000 as ab00000$/m);
@@ -357,6 +418,19 @@ test('run as a command: refused from a worktree checkout with no GitHub call; fr
     rmSync(dir, { recursive: true, force: true });
     rmSync(`${dir}-state.json`, { force: true });
     rmSync(`${dir}-state.json.log`, { force: true });
+  }
+});
+
+test('wait-ci run as a command prints the one line and exits with its code', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'wait-ci-'));
+  try {
+    const stateFile = path.join(dir, 'state.json');
+    writeFileSync(stateFile, JSON.stringify({ owner: OWNER, behind: {}, runs: [run(38127361933, E17, 'failure', 'completed', 102)] }));
+    const env = { ...process.env, PATH: `${path.join(FIXTURES, 'bin')}:${process.env.PATH}`, STUB_GH_STATE: stateFile };
+    const child = spawnSync(process.execPath, [path.join(HERE, 'wait-ci.mjs'), E17], { encoding: 'utf8', env });
+    assert.deepEqual([child.status, child.stdout, child.stderr], [1, 'failed e17a31a: CI failure https://github.com/jparker2006/lexicon/actions/runs/38127361933\n', '']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -398,6 +472,16 @@ test('install.sh announce: two carried issues get one Installed comment each, th
     assert.equal(log.filter((l) => l.startsWith('gh issue comment')).length, comments);
     assert.equal(log.filter((l) => l.startsWith('gh issue edit')).length, 1);
     assert.match(again.stderr, /already on the Try list \(#178\); nothing to post/);
+
+    // A run cut off before its Try list edit: the rerun adds the entry and comments on no issue twice.
+    const cut = JSON.parse(readFileSync(path.join(gh, 'issues.json'), 'utf8'));
+    cut.find((i) => i.number === 178).body = tryList.split(`\n\n### Installed ${sha7}`)[0];
+    writeFileSync(path.join(gh, 'issues.json'), JSON.stringify(cut));
+    const resumed = announce();
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const final = JSON.parse(readFileSync(path.join(gh, 'issues.json'), 'utf8'));
+    for (const n of [45, 63]) assert.equal(final.find((i) => i.number === n).comments.filter((c) => c.body.startsWith(`Installed: ${sha7}`)).length, 1, `#${n}`);
+    assert.equal(final.find((i) => i.number === 178).body, tryList);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(gh, { recursive: true, force: true });

@@ -107,5 +107,6 @@ APP=$(scripts/bundle.sh daily)
 commit=$(plutil -extract LexiconCommit raw "$APP/Contents/Info.plist")
 echo "Installing Lexicon $commit" >&2
 scripts/lib/install-app.sh daily "$APP"
-( announce "$commit" "${previous%-dirty}" ) ||
+# Its own process, so set -e stops it at the first gh call that fails.
+scripts/install.sh announce "$commit" "${previous%-dirty}" ||
     die "installed $commit, but the Installed comments were not all posted; finish with: scripts/install.sh announce $commit${previous:+ ${previous%-dirty}}"

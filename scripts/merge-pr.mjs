@@ -81,12 +81,10 @@ export function verdictGate(pr, sha, owner) {
   if (!merges(newest.body)) return [`the Reviewer's newest word is not merge: "${clip(status(newest.body))}"`];
   const reasons = [];
   if (!names(newest.body, sha)) reasons.push(`the newest verdict names no ${short(sha)}: a verdict is for one head`);
-  if (kindOf(newest.body).startsWith('merge with notes')) {
-    const notes = laterNotes(newest.body);
-    if (!notes.length) reasons.push('the verdict is merge with notes but lists no notes under "Later:"');
-    for (const note of notes) {
-      if (!/#\d+/.test(note)) reasons.push(`a Later note has no issue number (scripts/ticket.sh later makes one): "${clip(note)}"`);
-    }
+  const notes = laterNotes(newest.body);
+  if (kindOf(newest.body).startsWith('merge with notes') && !notes.length) reasons.push('the verdict is merge with notes but lists no notes under "Later:"');
+  for (const note of notes) {
+    if (!/#\d+/.test(note)) reasons.push(`a Later note has no issue number (scripts/ticket.sh later makes one): "${clip(note)}"`);
   }
   return reasons;
 }
@@ -128,7 +126,7 @@ export function needsOf(body) {
 }
 function none(text) { return !text || /^none\b/i.test(text); }
 // Quoted output (`FAIL  timed out ...`) is evidence, not the verdict.
-const failed = (body) => /\bfail\b/i.test(String(body).replace(/`[^`\n]*`/g, ''));
+const failed = (body) => /\bfail(?:ed|s|ures?)?\b/i.test(String(body).replace(/`[^`\n]*`/g, ''));
 
 /**
  * { reasons, jake } for one Refs issue: a queued request blocks the merge, and
@@ -272,10 +270,47 @@ async function removeWorktree(branch, { git, inUse, removeDir }) {
   return `removed ${at} and its .build`;
 }
 
+/** Every refusal the gates find for the reviewed sha, read fresh from GitHub, and the notes for Jake. */
+async function gates(number, sha, head, deps) {
+  const { gh } = deps;
+  const owner = (await ghJson(gh, ['repo', 'view', '--json', 'owner'])).owner.login;
+  const pr = await ghJson(gh, ['pr', 'view', String(number), '--json', 'number,state,isDraft,baseRefName,headRefName,headRefOid,body,labels,comments,files']);
+  const stop = (reason) => ({ pr, owner, reasons: [reason], notes: [] });
+  if (pr.state === 'MERGED') return stop('it is already merged');
+  if (pr.state !== 'OPEN') return stop('it is closed');
+  if (pr.isDraft) return stop('it is a draft');
+  if (pr.baseRefName !== 'main') return stop(`its base is ${pr.baseRefName}, not main`);
+  if (pr.headRefOid !== head) {
+    return stop(head === sha
+      ? `its head is ${short(pr.headRefOid)}, not the reviewed ${short(sha)}: a newer push needs a new review`
+      : `its head moved to ${short(pr.headRefOid)} during the CI wait on ${short(head)}: a newer push needs a new review`);
+  }
+  const refs = refsOf(pr.body);
+  if (!refs.length) return stop('its body does not start with "Refs #N"');
+  const issues = await Promise.all(refs.map((n) => ghJson(gh, ['issue', 'view', String(n), '--json', 'number,state,body,comments'])));
+  const map = JSON.parse(await deps.read('.claude/workflows/review-map.json'));
+  const live = issues.map((issue) => liveGate(issue, pr.headRefName, sha, owner));
+  return {
+    pr, owner, issues,
+    reasons: [
+      ...verdictGate(pr, sha, owner),
+      ...issues.flatMap(acceptanceGate),
+      ...live.flatMap((l) => l.reasons),
+      ...tierGate(pr, sha, owner, map),
+      ...await criticalGate(pr, owner, deps),
+    ],
+    notes: live.filter((l) => l.jake).map((l) => `#${l.issue}'s items for Jake gate the install, not the merge (Q6): ${l.jake}`),
+  };
+}
+
+// A merge GitHub turned down is a definite no; anything else may have landed.
+const REFUSED = /Head branch was modified|not mergeable|HTTP 40[0-9]|HTTP 422|required status|review is required|merge conflict/i;
+
 /**
- * gh and git resolve to stdout; lanes to scripts/lanes.sh's report; inUse to
- * the processes running in a folder; read to a repo file's text; sleep, now
- * and print are the clock and stdout.
+ * gh and git resolve to stdout; checkouts are the folders that must be the
+ * main checkout (the script's own and the caller's); lanes resolves to
+ * scripts/lanes.sh's report; inUse to the processes running in a folder; read
+ * to a repo file's text; sleep, now and print are the clock and stdout.
  */
 export async function mergePr(args, deps) {
   const { gh, git, print } = deps;
@@ -290,32 +325,16 @@ export async function mergePr(args, deps) {
     return 1;
   };
 
-  let pr, head = sha, issues;
+  let read, head = sha;
   try {
     // A worktree's .git is a file and its git dir is not the common one.
-    const [gitDir, common] = (await git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])).trim().split('\n');
-    if (gitDir !== common) return refuse('run it from the main checkout, not a worktree: only the Reviewer merges, from there');
-    const owner = (await ghJson(gh, ['repo', 'view', '--json', 'owner'])).owner.login;
-    pr = await ghJson(gh, ['pr', 'view', String(number), '--json', 'number,state,isDraft,baseRefName,headRefName,headRefOid,body,labels,comments,files']);
-    if (pr.state === 'MERGED') return refuse('it is already merged');
-    if (pr.state !== 'OPEN') return refuse('it is closed');
-    if (pr.isDraft) return refuse('it is a draft');
-    if (pr.baseRefName !== 'main') return refuse(`its base is ${pr.baseRefName}, not main`);
-    if (pr.headRefOid !== sha) return refuse(`its head is ${short(pr.headRefOid)}, not the reviewed ${short(sha)}: a newer push needs a new review`);
-    const refs = refsOf(pr.body);
-    if (!refs.length) return refuse('its body does not start with "Refs #N"');
-    issues = await Promise.all(refs.map((n) => ghJson(gh, ['issue', 'view', String(n), '--json', 'number,state,body,comments'])));
-    const map = JSON.parse(await deps.read('.claude/workflows/review-map.json'));
-    const live = issues.map((issue) => liveGate(issue, pr.headRefName, sha, owner));
-    const reasons = [
-      ...verdictGate(pr, sha, owner),
-      ...issues.flatMap(acceptanceGate),
-      ...live.flatMap((l) => l.reasons),
-      ...tierGate(pr, sha, owner, map),
-      ...await criticalGate(pr, owner, deps),
-    ];
-    for (const l of live) if (l.jake) print(`note #${number}: #${l.issue}'s items for Jake gate the install, not the merge (Q6): ${l.jake}`);
-    if (reasons.length) return refuse(reasons);
+    for (const dir of deps.checkouts) {
+      const [gitDir, common] = (await git(['-C', dir, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])).trim().split('\n');
+      if (gitDir !== common) return refuse('run it from the main checkout, not a worktree: only the Reviewer merges, from there');
+    }
+    read = await gates(number, sha, head, deps);
+    for (const note of read.notes) print(`note #${number}: ${note}`);
+    if (read.reasons.length) return refuse(read.reasons);
 
     // Wait on the exact head that lands; if main moved meanwhile, update and wait again.
     for (let round = 0; ; round += 1) {
@@ -324,7 +343,7 @@ export async function mergePr(args, deps) {
       if (compare.behind_by === 0 && round > 0) break;
       if (compare.behind_by > 0) {
         if (round === 3) return refuse('main moved during three CI waits in a row; run it again');
-        const updated = await updateBranch(pr, head, compare.base_commit?.sha ?? 'main', { ...deps, owner });
+        const updated = await updateBranch(read.pr, head, compare.base_commit?.sha ?? 'main', { ...deps, owner: read.owner });
         if (typeof updated !== 'string') return refuse(updated.reason);
         print(`updated #${number}: main merged into ${short(head)} as ${short(updated)}`);
         head = updated;
@@ -334,10 +353,14 @@ export async function mergePr(args, deps) {
       if (code !== 0) return refuse(`CI on ${short(head)}: ${said.join(' ')}`);
       print(`ci #${number}: ${said.join(' ')}`);
     }
+    // The wait can take most of an hour: a hold, a live request or a critical-path PR may have come meanwhile.
+    read = await gates(number, sha, head, deps);
+    if (read.reasons.length) return refuse(read.reasons.map((reason) => `after the CI wait, ${reason}`));
   } catch (error) {
     print(`error #${number}: ${error.message} Nothing was merged.`);
     return 2;
   }
+  const { pr, issues } = read;
 
   try {
     await gh(['pr', 'merge', String(number), '--squash', '--match-head-commit', head]);
@@ -345,6 +368,7 @@ export async function mergePr(args, deps) {
     // GitHub pins the head itself; a refusal or a lost answer is read, never retried.
     const after = await ghJson(gh, ['pr', 'view', String(number), '--json', 'state']).catch(() => null);
     if (after?.state !== 'MERGED') {
+      if (REFUSED.test(error.message)) return refuse(`GitHub refused the merge: ${error.message}`);
       print(`unknown #${number}: ${error.message} Read the PR before trying again; nothing was retried.`);
       return 1;
     }
@@ -380,7 +404,7 @@ const run = (command, args, options = {}) => new Promise((resolve, reject) => {
 /** "<command> (pid N)" for each process whose working directory is in the folder. */
 async function inUse(folder) {
   // lsof exits 1 when it lists nothing.
-  const out = await run('lsof', ['-a', '-d', 'cwd', '-F', 'pcn']).catch(() => '');
+  const out = await run('lsof', ['-a', '-d', 'cwd', '-F', 'pcn'], { timeout: 60_000 }).catch(() => '');
   const found = [];
   let pid, command;
   for (const line of out.split('\n')) {
@@ -394,7 +418,8 @@ async function inUse(folder) {
 if (isMain(import.meta.url)) {
   process.exitCode = await mergePr(process.argv.slice(2), {
     gh: cliGh(ROOT),
-    git: (args) => run('git', args),
+    git: (args) => run('git', args, { timeout: 120_000 }),
+    checkouts: [ROOT, process.cwd()],
     lanes: () => run(path.join(ROOT, 'scripts/lanes.sh'), [], { timeout: 300_000 }),
     inUse,
     removeDir: (folder) => rm(folder, { recursive: true, force: true }),
