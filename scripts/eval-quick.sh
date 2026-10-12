@@ -5,8 +5,8 @@
 #   scripts/eval-quick.sh [--baseline <run.jsonl>] [--keep <run.jsonl>] [--lexicon <file>]
 #                         [--manifest <manifest.jsonl>] [--scripted-gold]
 #
-# 1. The lag sample: the 30 lowest ids of the everyday split not in review (ids
-#    are random, so a fixed draw), at the speed of speech.
+# 1. The lag sample: the 30 lowest ids of the everyday clips scored (ids are
+#    random, so a fixed draw), at the speed of speech.
 # 2. Words and Terms: the whole everyday split at fast pace, with no lag. Local
 #    Parakeet hears a clip the same at any pace; the run checks that on the
 #    sample's clips and says so when they differ. No key reaches lexicon-eval, so
@@ -16,14 +16,16 @@
 #    "no baseline yet" (scorer/score quick). The baseline is --baseline, else the
 #    latest saved local Parakeet baseline (scripts/test-set.sh baselines).
 #
-# Clips still in Jake's gold review are left out with their sessions, and the
-# scores say partial. --keep saves this run (the fast-pace lines, with the
-# sample's realtime lines in their place) as a baseline for a later run: run it
-# on main with --keep, then on the branch with --baseline. The Test set's runs
-# never go in a git work tree.
+# Clips still in Jake's gold review are left out with their sessions, never
+# spoken, and the scores say partial. --keep saves this run (the fast-pace
+# lines, with the sample's realtime lines in their place) as a baseline for a
+# later run: run it on main with --keep, then on the branch with --baseline. A
+# run holds no gold, so one kept mid-review compares as well later. It never
+# goes in a git work tree. --lexicon imports a Lexicon file into every
+# Dictation; the saved baselines use none, so leave it off to compare with them.
 #
 # The eval stops at 30 minutes. It takes a build slot (scripts/lib/heavy.sh)
-# when that exists. Defaults: the private Test set and the starter Lexicon. It
+# when that exists. The manifest is the private Test set unless given. It
 # prints counts, scores and paths only, never a clip: lexicon-eval's other
 # messages can name one, so they are hidden. --manifest
 # scorer/fixtures/manifest.jsonl --scripted-gold runs it on the public fixture
@@ -63,22 +65,18 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ -f "$manifest" ] || { echo "eval-quick: no manifest at $manifest" >&2; exit 1; }
-if [ -z "$lexicon" ] && [ "$manifest" = "$DATA/test-set/manifest.jsonl" ] && [ -f "$DATA/starter-lexicon.txt" ]; then
-    lexicon="$DATA/starter-lexicon.txt"
-fi
 if [ -z "$baseline" ]; then
     # Dated folders sort in time order.
     for saved in "$(dirname "$manifest")"/baselines/*/parakeet-everyday.jsonl; do
         [ -f "$saved" ] && baseline=$saved
     done
 fi
+# Checked again where the run is written (scorer/score quick), but here before 20 minutes of speech.
 if [ -n "$keep" ]; then
     [ ! -e "$keep" ] || { echo "eval-quick: --keep $keep already exists" >&2; exit 1; }
-    repo=$(pwd -P)
-    public() { case "$(cd "$(dirname "$1")" && pwd -P)/" in "$repo"/*) return 0 ;; esac; return 1; }
-    if git -C "$(dirname "$keep")" rev-parse --is-inside-work-tree >/dev/null 2>&1 &&
-        ! { public "$manifest" && { [ -z "$lexicon" ] || public "$lexicon"; }; }; then
-        echo "eval-quick: --keep is inside a git work tree but the Test set is private" >&2
+    [ -d "$(dirname "$keep")" ] || { echo "eval-quick: no folder for --keep $keep" >&2; exit 1; }
+    if git -C "$(dirname "$keep")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "eval-quick: --keep is inside a git work tree; a run of the Test set never goes in a repo" >&2
         exit 1
     fi
 fi
@@ -111,7 +109,7 @@ eval_run() {
     # Its temporary Histories hold copies of the clips: in $work, deleted on exit.
     TMPDIR="$work" perl -e 'alarm shift; exec @ARGV or die "eval-quick: cannot run lexicon-eval\n"' "$left" \
         "$bin" "$@" > "$work/$name.json" 2> "$work/$name.err" || status=$?
-    tr '\r' '\n' < "$work/$name.err" | grep -E '^(lexicon-eval: skipping|lexicon-eval: Lexicon:|scored )' >&2 || true
+    tr '\r' '\n' < "$work/$name.err" | grep -E '^(lexicon-eval: skipping|lexicon-eval: Lexicon:|lexicon-eval: all [0-9]+ entries|scored )' >&2 || true
     case "$status" in
     0 | 3) ;;
     142) echo "eval-quick: stopped at the $LIMIT_MINUTES min limit" >&2; exit 1 ;;

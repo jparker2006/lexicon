@@ -24,7 +24,8 @@ HELD_BACK = {"s003", "s007"}
 
 
 def clip_id(n: int) -> str:
-    return f"00000000-0000-4000-8000-{n:012d}"
+    # Descending, so recording order is never id order, as with Wispr's random ids.
+    return f"00000000-0000-4000-8000-{10_000 - n:012d}"
 
 
 def make_folder(root: Path, sessions: int = 12, per_session: int = 3, agreed: int = 150) -> None:
@@ -98,9 +99,10 @@ class QueueOrder(Folder):
         # Each session's clips together, in the order they were recorded.
         runs = [s for i, s in enumerate(sessions) if i == 0 or sessions[i - 1] != s]
         self.assertEqual(len(runs), len(set(runs)))
+        recorded = list(by_id)
         for s in runs:
             ids = [c["id"] for c in clips if by_id[c["id"]]["session"] == s]
-            self.assertEqual(ids, sorted(ids))
+            self.assertEqual(ids, [i for i in recorded if by_id[i]["session"] == s])
         self.assertEqual(set(runs[:2]), HELD_BACK)
         everyday = runs[2:]
         self.assertEqual(everyday, sorted(everyday, key=rank))
@@ -162,6 +164,17 @@ class Restart(Folder):
         shutil.copytree(self.root, copy)
         copied = self.open_review(copy).state()
         self.assertEqual((copied["answers"], copied["position"]), (before["answers"], clips[20]["id"]))
+
+    def test_a_save_of_fewer_answer_lines_than_were_loaded_is_refused(self):
+        page = self.open_review()
+        page.answer(page.clips[0]["id"], "parakeet", None)
+        # The same clip twice, as a bad copy would leave it: one save would drop a line.
+        lines = _read_jsonl(self.root / "review.jsonl")
+        _write_jsonl(self.root / "review.jsonl", lines + lines)
+        before = (self.root / "review.jsonl").read_bytes()
+        with self.assertRaises(testset.TestSetError):
+            self.open_review().answer(page.clips[0]["id"], "wispr", None)
+        self.assertEqual((self.root / "review.jsonl").read_bytes(), before)
 
     def test_an_answer_whose_clip_left_the_queue_is_kept_by_the_next_save(self):
         page = self.open_review()

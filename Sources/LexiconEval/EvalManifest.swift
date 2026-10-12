@@ -8,8 +8,8 @@ import WordStore
 /// pipeline, then the scorer's report on the run.
 ///
 /// The entries are chosen before Parakeet loads or any audio plays: one still in
-/// Jake's gold review is skipped, and a held-back one refuses the run in its
-/// first second (`selectEntries`). `--sample <n>` runs the n lowest ids of the
+/// Jake's gold review is skipped with its session, and a held-back one refuses
+/// the run in its first second (`selectEntries`). `--sample <n>` runs the n lowest ids of the
 /// rest, and the scorer scores the same n (`report --sample`): the quick eval's
 /// realtime lag sample. `--pace fast` runs entries as fast as the pipeline
 /// drains them, with no lag (a lag there would not be a measurement): the quick
@@ -26,9 +26,9 @@ func evalManifest(_ manifest: URL, split: String?, sample: Int?, pace: FilePace,
     }
     let selection: ManifestSelection
     do { selection = try selectEntries(from: manifest, split: split, sample: sample) } catch { return fail("\(error)") }
-    if selection.inReview > 0 {
+    if selection.leftOut > 0 {
         FileHandle.standardError.write(Data("""
-            lexicon-eval: skipping \(selection.inReview) entries still in review; answer them with \(reviewCommand)
+            lexicon-eval: skipping \(selection.leftOut) entries left out in review; answer them with \(reviewCommand)
 
             """.utf8))
     }

@@ -18,16 +18,19 @@ struct ManifestEntry: Decodable, Sendable {
     /// Bundle ID of the app Jake was dictating into.
     let context: String?
     let split: String?
+    let session: String?
     /// "review" while Jake's gold review (#51) has not answered it: its text is
     /// only a draft, so it is never spoken for a score.
     let gold: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, text, context, split, gold
+        case id, text, context, split, session, gold
         case audioFilepath = "audio_filepath"
     }
 
     var inReview: Bool { gold == "review" }
+    /// An entry with no session is a session of its own, as in the scorer.
+    var sessionKey: String { session.map { "s:\($0)" } ?? "id:\(id)" }
 }
 
 /// One Dictation's result, as the scorer reads it (`scorer/score report`).
@@ -78,7 +81,7 @@ enum EvalError: Error, CustomStringConvertible {
         case .badLine(let n, let why): "manifest line \(n): \(why)"
         case .noEntries(let split): split.map { "no manifest entries in split \($0)" } ?? "the manifest is empty"
         case .nothingOutOfReview(let count):
-            "all \(count) entries are still in review; answer them with \(reviewCommand)"
+            "all \(count) entries are left out in review; answer them with \(reviewCommand)"
         case .heldBackInReview(let count):
             "\(count) held-back entries are still in review, and held-back runs only whole; answer them with \(reviewCommand)"
         case .missingAudio(let id): "entry \(id): audio file not found"
@@ -96,23 +99,26 @@ let reviewCommand = "scripts/test-set.sh review"
 struct ManifestSelection: Sendable {
     let entries: [ManifestEntry]
     let audio: [URL]
-    /// Entries of the split left out because Jake's review has not answered them.
-    let inReview: Int
+    /// Entries of the split left out in review: the ones still to answer and
+    /// every other entry in their sessions.
+    let leftOut: Int
 }
 
-/// The entries of `split` (all, when nil) to run, in manifest order. An entry
-/// still in review is skipped, and one in held-back refuses the run: held-back
-/// checks milestones and is scored only whole. The scorer applies the same rule,
-/// and also leaves out the rest of a session that is not fully answered
-/// (baselines.gold_state). `sample` keeps the `sample` lowest ids of the rest,
-/// the draw `scorer/score report --sample` scores. Every audio file is checked
-/// here too, so a broken manifest fails in seconds, not mid-run.
+/// The entries of `split` (all, when nil) to run, in manifest order, by the
+/// scorer's rule (scorer/lexicon_scorer/baselines.py gold_state): an entry still
+/// in review is skipped with every other entry in its session, since the scorer
+/// counts a session only once all of it is gold, and one in held-back refuses
+/// the run, since held-back checks milestones and is scored only whole.
+/// `sample` keeps the `sample` lowest ids of the rest, the draw
+/// `scorer/score report --sample` scores. Every audio file is checked here too,
+/// so a broken manifest fails in seconds, not mid-run.
 func selectEntries(from manifest: URL, split: String?, sample: Int? = nil) throws -> ManifestSelection {
     let inSplit = try readManifest(manifest).filter { split == nil || $0.split == split }
     guard !inSplit.isEmpty else { throw EvalError.noEntries(split: split) }
     let heldBack = inSplit.count { $0.inReview && $0.split == "held-back" }
     guard heldBack == 0 else { throw EvalError.heldBackInReview(heldBack) }
-    var entries = inSplit.filter { !$0.inReview }
+    let open = Set(inSplit.filter(\.inReview).map(\.sessionKey))
+    var entries = inSplit.filter { !open.contains($0.sessionKey) }
     guard !entries.isEmpty else { throw EvalError.nothingOutOfReview(inSplit.count) }
     if let sample {
         let drawn = Set(entries.map(\.id).sorted().prefix(sample))
@@ -124,7 +130,7 @@ func selectEntries(from manifest: URL, split: String?, sample: Int? = nil) throw
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { throw EvalError.missingAudio(id: entry.id) }
         return url
     }
-    return ManifestSelection(entries: entries, audio: audio, inReview: inSplit.count { $0.inReview })
+    return ManifestSelection(entries: entries, audio: audio, leftOut: inSplit.count { open.contains($0.sessionKey) })
 }
 
 /// Runs every selected entry through the real headless pipeline, one at a time

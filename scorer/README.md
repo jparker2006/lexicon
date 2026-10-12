@@ -44,7 +44,7 @@ scorer/score report --gold gold.jsonl --run run.jsonl [--baseline wispr.jsonl] [
 
 Exit codes: 0 when `worse` is empty, 3 when it is not (the report prints first), 1 for a bad input.
 
-The baseline covers every split, so before scoring, its rows for ids outside the scored gold are dropped. The two runs are compared on the scored entries both hold (`compared`), and both summaries count those: a baseline from before the Test set grew still compares. `--sample N` scores the N lowest ids of the split's entries not in review, less any left out in review: the same draw as `lexicon-eval --manifest --sample N`. The optional run fields (`status`, `lag_ms`, `cleanup`, `engine`, `lost`) are checked only by `report`, and a bad type is an error.
+The baseline covers every split, so before scoring, its rows for ids outside the scored gold are dropped. The two runs are compared on the scored entries both hold (`compared`), and both summaries count those: a baseline from before the Test set grew still compares. `--sample N` scores the N lowest ids of the entries scored: the same draw as `lexicon-eval --manifest --sample N`, which skips the same entries left out in review before any audio plays. The optional run fields (`status`, `lag_ms`, `cleanup`, `engine`, `lost`) are checked only by `report`, and a bad type is an error.
 
 `report` never prints text: no ids, speech, inserted text or Terms, only numbers and labels.
 

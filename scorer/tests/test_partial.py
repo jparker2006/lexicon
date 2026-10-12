@@ -100,14 +100,15 @@ class Partial(unittest.TestCase):
     def test_an_id_outside_the_split_is_still_an_error(self):
         gold = [entry(0, 1), entry(1, 2, split="held-back")]
         path = self.write("gold.jsonl", gold)
-        self.refused("score", "--gold", path, "--run", self.write("run.jsonl", heard(gold)), "--split", "everyday")
+        message = self.refused("score", "--gold", path, "--run", self.write("run.jsonl", heard(gold)), "--split", "everyday")
+        self.assertIn("ids not in the gold scored (check --split)", message)
 
     def test_a_fixture_shaped_like_pr_127_scores_the_rest(self):
         gold = pr_127()
         path = self.write("manifest.jsonl", gold)
         # What lexicon-eval runs on the split: every clip not in review.
         run = self.write("run.jsonl", heard([g for g in gold if g["split"] == "everyday" and g["gold"] != "review"]))
-        # A baseline from the same Test set, worse on 20 of the 170 scored clips.
+        # A baseline from the same Test set, worse on 22 of the 170 scored clips.
         worse = {f"e{n:03d}" for n in range(0, 170, 8)}
         baseline = self.write("baseline.jsonl", heard(gold, wrong=worse, lag=600))
 
@@ -239,6 +240,16 @@ class Quick(unittest.TestCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
             main(["quick", "--fast-report", fast_report, "--fast-run", fast, "--realtime-report", realtime_report,
                   "--realtime-run", realtime, "--keep", str(kept)])
+
+    def test_a_run_is_never_kept_in_a_git_work_tree(self):
+        fast, fast_report, realtime, realtime_report = self.runs()
+        inside = Path(__file__).resolve().parent / "kept-by-a-test.jsonl"
+        self.addCleanup(inside.unlink, missing_ok=True)
+        with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(io.StringIO()):
+            main(["quick", "--fast-report", fast_report, "--fast-run", fast, "--realtime-report", realtime_report,
+                  "--realtime-run", realtime, "--keep", str(inside)])
+        self.assertIn("inside a git work tree", e.exception.code)
+        self.assertFalse(inside.exists())
 
     def test_it_prints_no_ids_or_text(self):
         code, text = self.quick(*self.runs(self.write("baseline.jsonl", heard(self.gold))))

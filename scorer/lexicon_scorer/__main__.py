@@ -28,9 +28,8 @@ or null), "cleanup" and "engine" (string or null), "lost" (bool, missing is fals
 A baseline (`report --baseline`) is an earlier run in the same format, such as
 Wispr's scores from its logs. It covers every split, so its rows for ids not in
 the scored gold are dropped.
-`--sample N` scores the N lowest ids of the split's entries not in review, the
-same N that `lexicon-eval --manifest --sample N` runs (scripts/eval-quick.sh's
-lag sample), less any left out in review.
+`--sample N` scores the N lowest ids of the entries scored, the same N that
+`lexicon-eval --manifest --sample N` runs (scripts/eval-quick.sh's lag sample).
 Terms: optional text file, one Term per line: the whole Lexicon, so a Term
 written where it was not said counts as a false alarm even if no gold entry
 lists it.
@@ -52,10 +51,11 @@ import os
 import sys
 import unicodedata
 from collections import Counter
+from pathlib import Path
 
 from .baselines import REVIEW, gold_state
 from .score import _quantile, lag_bootstrap, paired_bootstrap, score_entry, term_counts, totals
-from .testset import TestSetError
+from .testset import TestSetError, _in_git_work_tree
 
 
 def _lines(path: str) -> list[str]:
@@ -148,8 +148,9 @@ def _gold(args) -> tuple[dict, dict, dict]:
               "in_review": state.in_review}
     line = f"scored {len(scored)} of {len(gold)}, {state.left_out} left out in review"
     if getattr(args, "sample", None) is not None:
-        # The same draw as lexicon-eval's --sample: its ids sort the same in Swift.
-        drawn = set(sorted(id for id, g in gold.items() if g.get("gold") != "review")[:args.sample])
+        # The same draw as lexicon-eval's --sample, after the same session rule:
+        # its ids sort the same in Swift.
+        drawn = set(sorted(scored)[:args.sample])
         scored = {id: g for id, g in scored.items() if id in drawn}
         counts |= {"sample": args.sample, "scored": len(scored)}
         line = f"scored {len(scored)} of a sample of {args.sample}, {state.left_out} of {len(gold)} left out in review"
@@ -277,7 +278,11 @@ def _json_file(path: str) -> dict:
 
 
 def _keep(path: str, rows: dict[str, dict]) -> None:
-    # Never over a file: it may be a baseline or Jake's data. Owner-only: it holds his words.
+    # The run holds what Jake said, so never in a repo, never over a file (it
+    # may be a baseline or his data), and owner-only. A run holds no gold, so
+    # one kept while the review is part done compares just as well later.
+    if _in_git_work_tree(Path(path).parent):
+        raise SystemExit(f"{path} is inside a git work tree; a run of the Test set never goes in a repo")
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except OSError as e:
@@ -363,7 +368,7 @@ def main(argv=None) -> int:
     r.add_argument("--run", required=True)
     r.add_argument("--baseline")
     r.add_argument("--split")
-    r.add_argument("--sample", type=int, help="score only the N lowest ids not in review, as lexicon-eval --sample")
+    r.add_argument("--sample", type=int, help="score only the N lowest ids scored, as lexicon-eval --sample")
     r.add_argument("--terms")
     r.add_argument("--seed", type=int, default=0)
     r.add_argument("--resamples", type=int, default=10_000, help="at least 1000, with --baseline")

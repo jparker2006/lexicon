@@ -160,21 +160,24 @@ class Review:
         """`repair` rebuilds the manifest and marks from the answers; off, it only reads."""
         self.root = root
         self.lexicon = lexicon
-        # In file order (recording order) within a session; sorted is stable.
-        disagreements = sorted(_read_jsonl(root / "disagreements.jsonl"),
-                               key=lambda c: (c["split"] != "held-back", rank(c["session"])))
-        audit = [c for c in sorted(_read_jsonl(root / "audit.jsonl"), key=lambda c: rank(c["id"]))]
+        disagreements = _read_jsonl(root / "disagreements.jsonl")
+        audit = sorted(_read_jsonl(root / "audit.jsonl"), key=lambda c: rank(c["id"]))
+        manifest = {e["id"]: e for e in _read_jsonl(root / "manifest.jsonl")}
+        missing = sum(c["id"] not in manifest for c in disagreements + audit)
+        if missing:
+            raise TestSetError(f"{missing} review clips have no manifest entry; run scripts/test-set.sh first")
+        # By the manifest's session and split, the ones the scorer reads; in
+        # file order (recording order) within a session, since sorted is stable.
+        disagreements.sort(key=lambda c: (manifest[c["id"]]["split"] != "held-back",
+                                          rank(manifest[c["id"]]["session"])))
         self.audit = {c["id"] for c in audit}
         queued = {d["id"] for d in disagreements}
         self.clips = disagreements + [c for c in audit if c["id"] not in queued]
         self.by_id = {c["id"]: c for c in self.clips}
-        manifest = {e["id"] for e in _read_jsonl(root / "manifest.jsonl")}
-        missing = sum(c["id"] not in manifest for c in self.clips)
-        if missing:
-            raise TestSetError(f"{missing} review clips have no manifest entry; run scripts/test-set.sh first")
         # Every answer, its clip in the queue or not: one save must never drop one.
-        self.answers = {a["id"]: a for a in _read_jsonl(root / "review.jsonl")}
-        self.loaded = len(self.answers)
+        lines = _read_jsonl(root / "review.jsonl")
+        self.answers = {a["id"]: a for a in lines}
+        self.loaded = len(lines)
         state = root / "review-state.json"
         saved = json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
         self.position = saved.get("position")
@@ -280,7 +283,8 @@ class Review:
         rows = [self.answers[c["id"]] for c in self.clips if c["id"] in self.answers]
         rows += [a for i, a in self.answers.items() if i not in self.by_id]
         if len(rows) < self.loaded:
-            raise TestSetError(f"refusing to save {len(rows)} answers over the {self.loaded} loaded")
+            raise TestSetError(f"refusing to save {len(rows)} answer lines over the {self.loaded} loaded; "
+                               "review.jsonl holds a clip twice")
         # Answers first: the manifest and marks are rebuilt from them, so a
         # crash after this line loses nothing.
         _write_jsonl(self.root / "review.jsonl", rows)
@@ -355,7 +359,9 @@ class Server(http.server.ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         # Never the traceback's text: it can quote a clip.
         error = sys.exception()
-        print(f"review: {type(error).__name__} answering a request", file=sys.stderr)
+        # A TestSetError's message holds no private text.
+        detail = str(error) if isinstance(error, TestSetError) else type(error).__name__
+        print(f"review: {detail} answering a request", file=sys.stderr)
 
     def __init__(self, review: Review, port: int = 0):
         super().__init__(("127.0.0.1", port), Handler)
@@ -560,16 +566,25 @@ def status(root: Path, out=None) -> None:
     if not manifest:
         raise TestSetError(f"no Test set at {root}; run scripts/test-set.sh first")
     review = Review(root, Lexicon((), ()), repair=False)
-    duration = {e["id"]: e["duration"] for e in manifest}
+    entries = {e["id"]: e for e in manifest}
+
+    def minutes(clips: list[dict]) -> int:
+        return round(sum(entries[c["id"]]["duration"] for c in clips) / 60)
+
     queue = [c for c in review.clips if c["id"] not in review.audit]
     left = [c for c in queue if not review.answered(c["id"])]
     say(f"review: {len(queue) - len(left)} of {len(queue)} clips answered, {len(left)} left")
     for split in ("held-back", "everyday"):
-        mine = [c for c in queue if c["split"] == split]
+        mine = [c for c in queue if entries[c["id"]]["split"] == split]
         done = sum(review.answered(c["id"]) for c in mine)
         say(f"  {split}: {done} of {len(mine)} answered, {len(mine) - done} left")
-    say(f"audio left to hear: {round(sum(duration[c['id']] for c in left) / 60)} min")
+    say(f"audio left to hear: {minutes(left)} min")
     say(f"at the page's first guess of {PAGE_PACE} s a clip: {time_left(len(left))}")
+    # The page counts the audit too.
+    page_left = [c for c in review.clips if not review.answered(c["id"])]
+    if len(page_left) != len(left):
+        say(f"with the audit, as the page counts: {len(page_left)} clips left, {minutes(page_left)} min of audio, "
+            f"{time_left(len(page_left))}")
 
     clips, answered, corrected = review.audit_counts()
     if not clips:

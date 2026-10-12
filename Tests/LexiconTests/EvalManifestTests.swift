@@ -21,10 +21,11 @@ private let sample = URL(filePath: #filePath).deletingLastPathComponent().deleti
     .deletingLastPathComponent().appending(path: "scorer/fixtures/sample-lexicon.txt")
 
 private func writeManifest(_ entries: [(id: String, text: String, split: String)], audio: String,
-                           in dir: URL, withText: Bool = true, gold: [String: String] = [:]) throws -> URL {
+                           in dir: URL, withText: Bool = true, gold: [String: String] = [:],
+                           sessions: [String: String] = [:]) throws -> URL {
     let lines = try entries.map { entry in
         var object: [String: Any] = [
-            "id": entry.id, "audio_filepath": audio, "duration": 0.5, "session": "s-\(entry.id)",
+            "id": entry.id, "audio_filepath": audio, "duration": 0.5, "session": sessions[entry.id] ?? "s-\(entry.id)",
             "terms": [String](), "speech_end": 0.5, "context": "com.anthropic.claudefordesktop", "split": entry.split,
         ]
         if withText { object["text"] = entry.text }
@@ -36,11 +37,12 @@ private func writeManifest(_ entries: [(id: String, text: String, split: String)
     return url
 }
 
-private func fixtureManifest(withText: Bool = true, gold states: [String: String] = [:]) throws -> URL {
+private func fixtureManifest(withText: Bool = true, gold states: [String: String] = [:],
+                             sessions: [String: String] = [:]) throws -> URL {
     let dir = try scratchDirectory()
     _ = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: dir)
     let wav = try #require(try FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false)).first)
-    return try writeManifest(gold, audio: wav, in: dir, withText: withText, gold: states)
+    return try writeManifest(gold, audio: wav, in: dir, withText: withText, gold: states, sessions: sessions)
 }
 
 @Test func eachEntryOfTheSplitRunsThroughThePipelineInOrder() async throws {
@@ -88,11 +90,19 @@ private func fixtureManifest(withText: Bool = true, gold states: [String: String
 
     let selection = try selectEntries(from: manifest, split: "everyday")
     #expect(selection.entries.map(\.id) == ["a"])
-    #expect(selection.inReview == 1)
+    #expect(selection.leftOut == 1)
     let lines = try await runManifest(selection, pace: .asFastAsPossible) { _ in engine }
 
     #expect(lines.map(\.id) == ["a"])
     #expect(await engine.heard.count == 1)
+}
+
+@Test func theRestOfASessionInReviewIsSkippedToo() throws {
+    // The scorer counts a session only once all of it is gold (baselines.gold_state).
+    let manifest = try fixtureManifest(gold: ["c": "review"], sessions: ["a": "s1", "c": "s1"])
+    let selection = try selectEntries(from: manifest, split: nil)
+    #expect(selection.entries.map(\.id) == ["b"])
+    #expect(selection.leftOut == 2)
 }
 
 @Test func aHeldBackEntryInReviewRefusesTheRunBeforeAnyAudioIsLookedAt() throws {
@@ -118,6 +128,9 @@ private func fixtureManifest(withText: Bool = true, gold states: [String: String
     #expect(try selectEntries(from: try fixtureManifest(), split: nil, sample: 2).entries.map(\.id) == ["a", "b"])
     let reviewed = try fixtureManifest(gold: ["a": "review"])
     #expect(try selectEntries(from: reviewed, split: "everyday", sample: 1).entries.map(\.id) == ["c"])
+    // Drawn after the session rule, so a sample is never of clips the scorer leaves out.
+    let shared = try fixtureManifest(gold: ["a": "review"], sessions: ["a": "s1", "b": "s1"])
+    #expect(try selectEntries(from: shared, split: nil, sample: 1).entries.map(\.id) == ["c"])
 }
 
 @Test func aManifestRunRefusesABadPaceOrSample() async {
