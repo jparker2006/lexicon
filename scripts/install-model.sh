@@ -64,4 +64,4 @@ fi
 
 . scripts/lib/swift-flags.sh
 # Refused while Private mode is on in that app: a hard kill covers downloads too.
-swift run "$@" lexicon-eval --install-model "$BUNDLE_ID"
+swift run $SWIFT_FLAGS lexicon-eval --install-model "$BUNDLE_ID"
