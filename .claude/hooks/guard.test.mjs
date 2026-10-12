@@ -54,7 +54,7 @@ test('refuses starting Docker', () => {
     'open -a "Docker Desktop"',
     'open /Applications/Docker.app',
     'cd ops && sudo docker info',
-    'swift test; docker build .',
+    'scripts/check.sh; docker build .',
     'echo "$(docker ps -q)"',
     'bash -c "docker ps"',
     "bash -lc 'docker ps'",
@@ -904,5 +904,58 @@ test('review findings: the merge script names itself to builders, and --flag=val
   } finally {
     builder.cleanup();
     rmSync(reviewer, { recursive: true, force: true });
+  }
+});
+
+test('Reviewer findings: a recursive search whose roots hold a .env refuses unless it leaves .env out', (t) => {
+  const parent = mkdtempSync(path.join(tmpdir(), 'guard-envroot-'));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const repo = path.join(parent, 'lexicon');
+  mkdirSync(path.join(repo, 'docs'), { recursive: true });
+  writeFileSync(path.join(repo, '.env'), 'LEXICON_KEY=not-a-real-key\n');
+  const options = { cwd: repo, home: fakeHome(t) };
+  for (const command of [
+    'grep -rn LEXICON_KEY .',
+    `grep -rn LEXICON_KEY ${repo}`,
+    `grep -R LEXICON_KEY ${parent}`,
+    'egrep -r LEXICON_KEY',
+    'rg -uu LEXICON_KEY .',
+    'rg --hidden --no-ignore LEXICON_KEY',
+    'ag -u LEXICON_KEY .',
+  ]) assertRefused(command, /\.env/, options);
+  for (const command of [
+    "grep -rn --exclude='.env*' LEXICON_KEY .",
+    'grep -rn LEXICON_KEY docs',
+    'grep -n LEXICON_KEY README.md',
+    'rg -n LEXICON_KEY .',
+    "rg -uu -g '!.env*' LEXICON_KEY .",
+  ]) assertAllowed(command, options);
+});
+
+test('Reviewer findings: gh pr update-branch --rebase rewrites a pushed branch, so it asks for Jake', () => {
+  assertRefused('gh pr update-branch 167 --rebase', /ask Jake \(AGENTS\.md\)/);
+  assertRefused('gh pr -R jparker2006/lexicon update-branch 167 --rebase', /ask Jake \(AGENTS\.md\)/);
+  assertAllowed('gh pr update-branch 167');
+});
+
+test('Reviewer findings: a guard that cannot read its call refuses it, exiting 2', () => {
+  const result = spawnSync('node', [path.join(REPO, '.claude/hooks/guard.mjs')], { input: 'not json', encoding: 'utf8' });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /guard/);
+});
+
+test("Reviewer findings: Lexicon Dev's models link into the daily folder's models is not private data", (t) => {
+  const home = fakeHome(t);
+  const models = path.join(home, 'Library/Application Support/Lexicon/models');
+  mkdirSync(models);
+  symlinkSync(models, path.join(home, 'Library/Application Support/Lexicon Dev/models'));
+  const options = { home };
+  for (const command of [
+    'ls -ld "$HOME/Library/Application Support/Lexicon Dev/models"',
+    'ls "$HOME/Library/Application Support/Lexicon/models/"',
+  ]) assertAllowed(command, options);
+  assert.deepEqual(runTool('Read', { file_path: path.join(home, 'Library/Application Support/Lexicon Dev/models/x.mlmodelc') }, options), { allowed: true });
+  for (const command of ['ls "$HOME/Library/Application Support/Lexicon/"', 'ls "$HOME/Library/Application Support/Lexicon/"*']) {
+    assertRefused(command, /private data/, options);
   }
 });
