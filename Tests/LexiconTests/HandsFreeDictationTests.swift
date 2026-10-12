@@ -187,7 +187,8 @@ func aLostFnUpEndsAtTheCapAndQuitWaitsForIt() async throws {
     // Quit while the press is held: it returns once the cap ends the press, with the row written.
     let conductor = rig.conductor
     let quitting = Task { await conductor.idle() }
-    try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(id, at: at(10_000))])
+    // Its warning's mark was never fed, so the cap warns first, then stops.
+    try #require(rig.feed(.deadline(at(10_050))).commands == [.oneMinuteLeft(id), .dictationStopped(id, at: at(10_000))])
     await quitting.value
     await rig.settle()
 

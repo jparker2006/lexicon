@@ -45,10 +45,13 @@ enum KeyInput: Sendable, Hashable {
 /// not on when a timer happened to fire: fn-up or a key at 0.31 s still counts
 /// as a hold even if the 0.30 s deadline has not been delivered yet. Keys and
 /// timers share the tap thread, so a key stamped before a mark can be handled
-/// after the mark's timer: the double-tap window waits `lateKeyGrace` past its
-/// end before it drops the tap. The cap stops on time whichever comes first: a
-/// key stamped at or after it is handled after the cap's stop, and the cap
-/// remembers when, so a stop press stamped before it is not a new press.
+/// after the mark's timer. The two marks that end something, the double-tap
+/// window and the cap, act `lateKeyGrace` after their time; the cap's stop is
+/// still stamped at the cap, and a key stamped at or after the cap is handled
+/// after that stop. So a key gets one outcome whatever the handling order,
+/// unless it is handled more than `lateKeyGrace` after its stamp. Past that
+/// bound, the cap remembers when it stopped, so a stop press stamped before it
+/// is not a new press.
 ///
 /// Every event passes through the tap. Only Esc is ever taken from the app in
 /// front, and only while `takesEscape` (the Esc hotkey follows it).
@@ -89,9 +92,10 @@ struct FnGesture: Sendable {
     private var cappedAt: HostTime?
 
     /// How late a key may be handled after its own time and still count against the
-    /// double-tap window. Keys reach the tap 2 to 12 ms after they are pressed (ADR 0004);
-    /// one handled later than this, behind a stalled tap thread, is taken as a new press.
-    /// Nobody hears a dropped tap 50 ms late.
+    /// double-tap window and the cap. Keys reached the focused app 2 to 12 ms after they
+    /// were pressed through this listen-only tap (ADR 0004); one handled later than this,
+    /// behind a stalled tap thread, comes after the mark. Nobody hears a drop or a stop
+    /// 50 ms late, and Quit waits at most this long past the cap for a lost fn-up.
     static let lateKeyGrace: Duration = .milliseconds(50)
 
     init(_ config: KeyboardConfig) {
@@ -253,21 +257,25 @@ struct FnGesture: Sendable {
     /// The cap clock: stop at `began + cap`, warn once before it, and always say
     /// when to wake next. An early or stale deadline just asks again.
     private mutating func capDeadline(_ recording: Recording, now: HostTime) -> Output {
-        if now >= capAt(recording) { return stopAtCap(recording) }
+        let acts = capAt(recording).advanced(by: Self.lateKeyGrace)
+        if now >= acts { return stopAtCap(recording) }
         guard !recording.warned, now >= warnAt(recording) else {
-            return Output(wakeAt: recording.warned ? capAt(recording) : warnAt(recording))
+            return Output(wakeAt: recording.warned ? acts : warnAt(recording))
         }
         var warned = recording
         warned.warned = true
         phase = .recording(warned)
-        return Output(commands: [.oneMinuteLeft(recording.id)], wakeAt: capAt(recording))
+        return Output(commands: [.oneMinuteLeft(recording.id)], wakeAt: acts)
     }
 
+    /// Stops at the cap's own time, with the warning first if its mark was never handled,
+    /// so every capped Dictation is warned once and then stopped.
     private mutating func stopAtCap(_ recording: Recording) -> Output {
-        let capAt = capAt(recording)
+        let cap = capAt(recording)
         phase = .idle
-        cappedAt = capAt
-        return Output(commands: [.dictationStopped(recording.id, at: capAt)])
+        cappedAt = cap
+        let warning: [KeyCommand] = recording.warned ? [] : [.oneMinuteLeft(recording.id)]
+        return Output(commands: warning + [.dictationStopped(recording.id, at: cap)])
     }
 
     private func capAt(_ recording: Recording) -> HostTime { recording.began.advanced(by: config.cap) }
@@ -283,7 +291,7 @@ struct FnGesture: Sendable {
 
 extension KeyInput {
     /// When a key or sleep happened; nil for the recognizer's own deadline and the Conductor's end.
-    var keyTime: HostTime? {
+    fileprivate var keyTime: HostTime? {
         switch self {
         case .fnDown(let at, _, _), .fnUp(let at), .otherKey(let at), .escape(let at), .sleep(let at): at
         case .deadline, .ended: nil
