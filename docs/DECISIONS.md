@@ -62,6 +62,8 @@ Decided: yes, at most two a day, by default 11 AM and 6 PM Pacific and not fixed
 
 Decided: yes. Lives in AGENTS.md, Dev builds and the live app, and workflow.md, Live checks.
 
+A hands-free sitting (#225) is a sitting with no steps for Jake, opened only after he types "hands free" in the Live checks session, so hands-off fn items can run with his daily app quit the same way. It is in the M1 plan Jake approved on 2026-10-12, whose fillers line (marked "Jake: yes") reads "a hands-free sitting must quit the daily app" ([plan](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6120839008)). Proposed (#225's builder): it uses neither of Q7's two daily slots, since it asks nothing of his hands.
+
 **Q9. Mac habits and the lag bar's power state.**
 > Q9, Mac habits: (a) Keep the Mac awake while sessions run? I'd ask the app for it and release it when things go idle. A closed lid still sleeps. (b) Keep Low Power Mode off during builds? You just did. A script will warn if it's on. (c) Which power state counts for the lag bar? ➡️ (a) yes; (b) yes; (c) whatever state you normally dictate in, with the other one reported alongside.
 
