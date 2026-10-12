@@ -81,7 +81,18 @@ enum StructuralCheck {
         // sound of "uh huh" and each "like" with the word it hedges ("like 80") in the
         // rules-only text appears as often in the candidate, so another "like" is no excuse.
         // A pair the rules kept counts at most as often as it stands outside a retraction.
-        let rulesKept = Fillers.heldPairs(in: Fillers.pass(refText, rules: rules), rules: rules)
+        let rulesOnlyText = Fillers.pass(refText, rules: rules)
+        let rulesOnly = canonical(tokens(rulesOnlyText))
+        let heldLikes = Fillers.heldLikes(in: rulesOnlyText, rules: rules)
+        var rulesKept: [String: Int] = [:]
+        var likesSeen = 0
+        for k in rulesOnly.indices {
+            let isLike = rulesOnly[k].word == "like"
+            if let key = meaningKey(rulesOnly, k), !isLike || heldLikes.contains(likesSeen) {
+                rulesKept[key, default: 0] += 1
+            }
+            if isLike { likesSeen += 1 }
+        }
         var standing: [String: Int] = [:]
         for k in ref.indices where !retracted.contains(k) {
             if let key = meaningKey(ref, k) { standing[key, default: 0] += 1 }
@@ -455,8 +466,8 @@ enum StructuralCheck {
         return result
     }
 
-    /// The key `Fillers.heldPairs` gives a filler, read on these tokens: "uh huh" for a sound
-    /// of an interjection, "like 80" for any "like" and the word after it. nil for any other
+    /// A filler and what makes it meaning, to find again in another text: "uh huh" for a sound
+    /// of an interjection, "like 80" for a "like" and the word after it. nil for any other
     /// word, and for "uh" before an "oh" that is a zero inside a number ("5 uh oh 7").
     static func meaningKey(_ t: [Token], _ k: Int) -> String? {
         let word = t[k].word
