@@ -67,8 +67,7 @@ public struct JevClient: Sendable {
         return await withTaskCancellationHandler {
             await race.run { answer in [
                 Task {
-                    // The key read runs inside the budget: the first one can wait on a Keychain prompt.
-                    guard let key = access.key(.jev, sending: question.sent) else {
+                    guard let key = await Self.key(access, sending: question.sent) else {
                         return answer(fallingBack(access.revoked.map(Decision<Answer>.Reason.init) ?? .noKey))
                     }
                     answer(await self.ask(question, key: key, fallingBack: fallingBack))
@@ -84,6 +83,15 @@ public struct JevClient: Sendable {
             ] }
         } onCancel: {
             race.answer(fallingBack(.cancelled))
+        }
+    }
+
+    /// The key, read inside the budget and off the cooperative pool: the first
+    /// read can wait on a Keychain prompt, and a parked pool thread could keep
+    /// the budget's own timer from running.
+    private static func key(_ access: CloudAccess, sending text: String) async -> String? {
+        await withCheckedContinuation { read in
+            DispatchQueue.global(qos: .userInitiated).async { read.resume(returning: access.key(.jev, sending: text)) }
         }
     }
 
