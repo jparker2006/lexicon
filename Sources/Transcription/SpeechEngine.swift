@@ -281,6 +281,8 @@ final class AttemptCore: Sendable {
     /// nil with no cloud model, or with the network down at fn-down.
     let session: CloudSession?
     let segments: AsyncStream<SpeechSegment>
+    /// This attempt's hold on the model has begun. Quick: no load in it.
+    let began: Task<Void, Never>
     /// Loads the local model while Jake talks, so fn-up never waits on the load.
     /// Fails with the load's error, which fn-up then answers with.
     let warmUp: Task<Void, any Error>
@@ -320,9 +322,12 @@ final class AttemptCore: Sendable {
             ended.finish()
             self.segments = segments
         }
+        let began = Task { [residency = self.residency] () -> Void in await residency?.dictationBegan(plan.residency) }
+        self.began = began
         warmUp = Task { [residency = self.residency, warm] in
             defer { _ = warm.set() }
-            try await residency?.dictationBegan(plan.residency)
+            await began.value
+            try await residency?.loadForDictation()
         }
         let localSession = local?.session(terms: plan.terms, priority: priority)
         self.localSession = localSession
@@ -369,7 +374,7 @@ final class AttemptCore: Sendable {
             Task {
                 defer { release() }
                 // Jake never waits out a compile at the cursor: past the limit the local
-                // side has no answer, and the attempt lets go of the model once it loads.
+                // side has no answer, and the load runs on to warm the next Dictation.
                 guard await loaded(within: Self.loadLimit) else {
                     local.cancel()
                     post.yield(.local(.failed(.localModelLoading)))
@@ -550,12 +555,12 @@ final class AttemptCore: Sendable {
         error is LocalModelNotInstalled ? .noModel : .localModelFailed(String(describing: error))
     }
 
-    /// Ends this attempt's hold on the model once its fn-down load is done, the
-    /// first time it is called.
+    /// Ends this attempt's hold on the model, the first time it is called. Never
+    /// waits for the load, which can sit behind an unload stuck on a hung call.
     private func release() {
         guard released.set() else { return }
-        Task { [warmUp, residency] in
-            _ = await warmUp.result
+        Task { [began, residency] in
+            await began.value
             await residency?.dictationEnded()
         }
     }

@@ -92,6 +92,27 @@ import LexiconDomain
     #expect(await model.isResident)
 }
 
+@Test(.timeLimit(.minutes(1))) func aDictationCancelledBehindAStuckUnloadStillEndsItsHold() async throws {
+    // An unload can sit behind a hung model call for good. A Dictation begun meanwhile
+    // waits on it to load, but its hold on the model still ends when it is cancelled.
+    let (unloadStarts, unloadStarted) = AsyncStream<Void>.makeStream()
+    let (releases, release) = AsyncStream<Void>.makeStream()
+    let model = HeldUnloadModel(unloadStarted: unloadStarted, releases: releases)
+    let clock = TestClock()
+    let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)
+    let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
+    await engine.warmUp(tenMinuteLinger)
+    await clock.waitForSleep(endingAt: .seconds(600))
+    await clock.advance(by: .seconds(600))
+    for await _ in unloadStarts { break }
+
+    await engine.begin(feed: finishedFeed(), plan: plan).cancel()
+    // The hold ended, so the idle unload arms again. Returns at the time limit otherwise.
+    await until { await engine.residency?.unloadScheduled == true }
+    #expect(await engine.residency?.unloadScheduled == true, "the cancelled Dictation still holds the model")
+    release.yield()
+}
+
 // MARK: Helpers
 
 private let tenMinuteLinger: Preferences = {

@@ -102,14 +102,19 @@ actor LocalResidency {
         self.clock = clock
     }
 
-    /// fn-down: stop the unload timer and load if not resident. Throws the
-    /// load's error, so fn-up answers with it instead of loading again.
-    func dictationBegan(_ policy: ResidencyPolicy) async throws {
+    /// fn-down: the model stays loaded while this Dictation runs.
+    func dictationBegan(_ policy: ResidencyPolicy) {
         snapshot = policy
         dictating += 1
         unloadTimer?.cancel()
         unloadTimer = nil
-        await unloading?.value  // fn-up bounds this wait (`AttemptCore.loadLimit`)
+    }
+
+    /// fn-down's load, after `dictationBegan`. Waits for an idle unload under way
+    /// (fn-up bounds that wait, `AttemptCore.loadLimit`). Throws the load's error,
+    /// so fn-up answers with it instead of loading again.
+    func loadForDictation() async throws {
+        await unloading?.value
         if !(await transcriber.isResident) { try await transcriber.load() }
     }
 
