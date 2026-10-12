@@ -103,7 +103,7 @@ export function checkBody({ body, files = [], commits = [], summary = null, modu
 
   if (!/^Refs #\d+$/.test(lines[0])) fail('refs', `the first line must be "Refs #N" alone, not "${lines[0].slice(0, 60)}"`)
 
-  if (CLOSING.test(text)) fail('closing', 'a closing keyword before an issue (such as "Fixes #12"); write Refs #N, and Jake closes the issue')
+  if (CLOSING.test(text)) fail('closing', 'a closing keyword before an issue (such as "Fixes #12"); write Refs #N; the merge script closes the issue')
   else {
     const bad = commits.find(c => CLOSING.test(c))
     if (bad) fail('closing', `the commit "${bad.split('\n')[0]}" has a closing keyword before an issue; reword it to Refs #N`)
