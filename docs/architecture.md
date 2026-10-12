@@ -168,7 +168,7 @@ Each budget has one reading, fixed before it is measured. A timing number comes 
 |---|---|---|
 | App binary | 4 MB or less without FluidAudio; bundle 12 MB or less with it, weights outside | The release bundle from `scripts/bundle.sh` |
 | Idle memory, model unloaded | 30 MB or less (a bare AppKit status item measured 11.3 MiB) | After launch, model unloaded |
-| While dictating, model loaded | about 160 MB | A Dictation's peak: 66 to 68 MB on a 6 s clip, 108 MB on a 20-minute one (#117; 258 MB before it decoded windows while Jake talks) |
+| While dictating, model loaded | about 160 MB | A Dictation's peak: 66 to 68 MB on a 6 s clip, 112 MB on a 20-minute one (#117; 258 MB before it decoded windows while Jake talks) |
 | Launch to fn working | 150 ms or less at p95 | A warm relaunch with `open` (`bench.sh launch`). The first launch after an install, while macOS checks the new signature, is reported on its own |
 | History window, click to first rows | 100 ms or less at p95 (AppKit measured 52 ms cold) | Every open, over a year of synthetic History (`bench.sh history-open`); the first open after launch is also reported on its own. The quiet-Mac rerun missed it (#150) |
 | fn-down to first audio | 60 ms or less, logged per Dictation | The prepared path. Cold starts (74 to 212 ms, after a cut tail or the first Dictation after a mic grant) are reported separately; History's start gap shows them |
@@ -178,7 +178,7 @@ Each budget has one reading, fixed before it is measured. A timing number comes 
 | Re-speak, release to the fix landing | 0.5 s at p95 | The speech final plus the Jev call plus the replace |
 | fn-up to text, p95 ceiling | adaptive tail (up to 200 ms) + cloud cutoff (300 ms after recording stops) + Cleanup deadline (about 450 ms) + 10 ms = about 960 ms | The sum of the budgets above |
 
-The p95 ceiling sits inside 1 s, and Wispr's own logged lag on Jake's Mac is slower than this ceiling. It assumes the local text is ready by the cloud cutoff (local Parakeet measured about 80 ms for clips of 6 s or less; a long Dictation decodes its 15 s windows while Jake talks, so fn-up waits for the last window: 388 ms to text on a synthetic 20-minute WAV, one run, #117; past the 300 ms cutoff the race takes the first engine to answer, item 25) and that paste itself is fast (about 12 ms in a native field; slow apps unmeasured), so the margin is thin. The p50 estimate, roughly 500 to 550 ms, is an assumption until M2 measures it with the cloud.
+The p95 ceiling sits inside 1 s, and Wispr's own logged lag on Jake's Mac is slower than this ceiling. It assumes the local text is ready by the cloud cutoff (local Parakeet measured about 80 ms for clips of 6 s or less; a long Dictation decodes its 15 s windows while Jake talks, so fn-up waits for the last window: 197 ms to text on a synthetic 20-minute WAV, one run, #117; past the 300 ms cutoff the race takes the first engine to answer, item 25) and that paste itself is fast (about 12 ms in a native field; slow apps unmeasured), so the margin is thin. The p50 estimate, roughly 500 to 550 ms, is an assumption until M2 measures it with the cloud.
 
 ### How M0 to M5 land
 
