@@ -245,7 +245,7 @@ let newCases: [Accepted] = [
              [
               "Keep the last 14 days of logs, and archive anything older than 1 year.",
              ]),
-    // ramble (r01's gold keeps "like, ten": a hedge before a number)
+    // ramble (r01's gold keeps "like, 10": a hedge before a number)
     Accepted("r01",
              "Okay so, um, here's the migration plan. First we freeze writes for, like, ten minutes, "
              + "and then we run the backfill, which takes about an hour. After that we switch the reads "
@@ -639,6 +639,16 @@ let rejectedModelOutputs: [Pair] = [
     #expect(StructuralCheck.check("We use gstack for that.", ruled: "We use, like, gstack for that.",
                                   terms: [Term(text: "gstack")]) == .droppedContentWord)
     #expect(StructuralCheck.check("Huh, that's right.", ruled: "Uh-huh, that's right.", terms: []) == .droppedContentWord)
+    // A Rule's written side counts like a Term.
+    let rules = RuleSet([Rule(heard: "cube cuddle", written: "kubectl")])
+    #expect(StructuralCheck.check("Use kubectl for that.", ruled: "Use, like, kubectl for that.", terms: [], rules: rules)
+        == .droppedContentWord)
+    // A retracted "uh" elsewhere does not excuse dropping the "uh" of "uh huh".
+    #expect(StructuralCheck.check("Keep the file. Huh, that's right.",
+                                  ruled: "Delete the uh file, actually no, keep the file. Uh huh, that's right.",
+                                  terms: []) == .droppedContentWord)
+    // A "like" that ends its sentence hedges nothing in the next one.
+    #expect(StructuralCheck.check("It is. Ten people came.", ruled: "It is, like. Ten people came.", terms: []) == nil)
     // Another "like" kept elsewhere does not excuse dropping the hedge.
     #expect(StructuralCheck.check("Like, it takes eighty minutes.", ruled: "Like, it takes, like, eighty minutes.",
                                   terms: []) == .droppedContentWord)

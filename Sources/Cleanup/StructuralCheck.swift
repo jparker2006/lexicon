@@ -47,7 +47,9 @@ enum StructuralCheck {
     static let lengthSlack = 4
 
     /// nil = accept. Otherwise the first failing check, in the order listed above.
-    static func check(_ candidate: String, ruled: String, terms: [Term]) -> CheckFailure? {
+    /// `rules`: the RuleSet the rules pass used, so a "like" before a Rule's written side
+    /// is a hedge here too; without it, one is built from `terms`.
+    static func check(_ candidate: String, ruled: String, terms: [Term], rules: RuleSet? = nil) -> CheckFailure? {
         if hasUnspokenCode(candidate, ruled: ruled) { return .unspokenCode }
         let (outText, markers) = stripListMarkers(candidate)
         let (refText, _) = stripListMarkers(ruled)
@@ -79,15 +81,21 @@ enum StructuralCheck {
         // A filler the rules keep as meaning survives, unless retracted: the rules own that
         // call. A sound of "uh huh" as often as the rules keep it; a hedging "like" with the
         // word it hedges still after it ("like 80"), so another "like" kept elsewhere is no excuse.
-        let meaning = Fillers.meaningful(in: refText, rules: RuleSet(rules: [], terms: terms, english: []))
-        for (word, count) in meaning.fillers {
-            let retractedCount = retracted.filter { ref[$0].word == word }.count
-            if out.filter({ $0.word == word }).count < count - retractedCount { failures.insert(.droppedContentWord) }
-        }
-        let likes = ref.indices.filter { ref[$0].word == "like" }
+        let meaning = Fillers.meaningful(in: refText, rules: rules ?? RuleSet(rules: [], terms: terms, english: []))
+        var sounds: [String: Int] = [:]
         var hedges: [String: Int] = [:]
-        for n in meaning.hedges where n < likes.count && !retracted.contains(likes[n]) {
-            hedges[hedge(ref, at: likes[n]), default: 0] += 1
+        for (word, occurrences) in meaning.kept {
+            let at = ref.indices.filter { ref[$0].word == word }
+            for n in occurrences where n < at.count && !retracted.contains(at[n]) {
+                if word == "like" {
+                    hedges[hedge(ref, at: at[n]), default: 0] += 1
+                } else {
+                    sounds[word, default: 0] += 1
+                }
+            }
+        }
+        for (word, count) in sounds where out.filter({ $0.word == word }).count < count {
+            failures.insert(.droppedContentWord)
         }
         for (pair, count) in hedges
         where out.indices.filter({ out[$0].word == "like" && hedge(out, at: $0) == pair }).count < count {

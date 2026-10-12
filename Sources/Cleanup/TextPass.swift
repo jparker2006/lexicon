@@ -114,12 +114,18 @@ enum Fillers {
     /// Fillers the rules keep because they carry meaning. AI cleanup may not drop them
     /// either (`StructuralCheck`). A "like" kept only by a cautious keeper ("like, in") may go.
     struct Meaning {
-        /// Filler sounds kept in an interjection ("uh huh", "uh-huh") or a quote, by word.
-        var fillers: [String: Int] = [:]
-        /// Which "like"s, counted from 0 through the text with hyphen parts as their own
-        /// words, hedge a number, a name or a Term ("like, eighty", "like, Postgres").
-        var hedges: [Int] = []
-        var likesSeen = 0
+        /// For each filler sound and "like", which of its occurrences in the text (from 0)
+        /// the rules keep as meaning: a sound of "uh huh" or "uh-huh", a quoted "uh", a "like"
+        /// before a number, a name or a Term ("like, eighty", "like, Postgres").
+        var kept: [String: [Int]] = [:]
+        var seen: [String: Int] = [:]
+
+        /// The filler sounds and "like"s in a word, split at hyphens and dashes the way
+        /// StructuralCheck splits words, so occurrences count the same on both sides.
+        static func parts(_ word: String) -> [String] {
+            word.split { "-\u{2010}\u{2011}\u{2012}\u{2013}\u{2014}".contains($0) }.map(String.init)
+                .filter { $0 == "like" || hard.contains($0) }
+        }
     }
 
     static func meaningful(in text: String, rules: RuleSet) -> Meaning {
@@ -181,17 +187,21 @@ enum Fillers {
                 continue
             }
 
+            let parts = Meaning.parts(token.word)
+            let occurrences = parts.map { part in
+                defer { meaning.seen[part, default: 0] += 1 }
+                return meaning.seen[part, default: 0]
+            }
             // "like, um, uh, eighty": the first word after the fillers decides whether "like" is a hedge.
-            // A filler that ends the sentence ends the search: "like, um. Ten failed" has no hedge.
-            let likeObject = token.word == "like"
+            // A sentence end ends the search: "like. Ten came" and "like, um. Ten failed" hedge nothing.
+            let likeObject = token.word == "like" && !token.endsSentence
                 ? tokens[(i + 1)...].first { !$0.isHardFiller || $0.endsSentence }
                     .flatMap { $0.isHardFiller ? nil : $0 }
                 : nil
             let hedge = likeObject.map { $0.keepsLike || rules.isWritten($0.text) } ?? false
             if likeObject.map({ $0.isEstimate || $0.isName || rules.isWritten($0.text) }) == true {
-                meaning.hedges.append(meaning.likesSeen)
+                meaning.kept["like", default: []].append(occurrences[0])
             }
-            meaning.likesSeen += token.word.split(separator: "-").filter { $0 == "like" }.count
             // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
                                  after: i + 2 < tokens.count ? tokens[i + 2] : nil, hedge: hedge,
@@ -215,8 +225,8 @@ enum Fillers {
                 continue
             }
 
-            for part in token.word.split(separator: "-") where hard.contains(String(part)) {  // "uh huh", "uh-huh"
-                meaning.fillers[String(part), default: 0] += 1
+            for (part, n) in zip(parts, occurrences) where hard.contains(part) {  // "uh huh", "uh-huh"
+                meaning.kept[part, default: []].append(n)
             }
             var text = String(token.text)
             if sentenceKept == 0, droppedOpener, !token.isCode, !rules.isWritten(token.text) {
