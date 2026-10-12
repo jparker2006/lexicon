@@ -138,8 +138,10 @@ enum Fillers {
             }
 
             // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
+            // "like, um, uh, eighty": the fillers between do not decide whether "like" stays.
+            let likeObject = token.word == "like" ? tokens[(i + 1)...].first { !hard.contains($0.word) } : nil
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
-                                 after: i + 2 < tokens.count ? tokens[i + 2] : nil,
+                                 after: i + 2 < tokens.count ? tokens[i + 2] : nil, likeObject: likeObject,
                                  dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
                                  previous: sentenceKept > 0 ? (kept.last!, keptWords.last!, sentenceKept == 1) : nil)
             if drop > 0 {
@@ -185,10 +187,11 @@ enum Fillers {
     }
 
     /// How many tokens from `token` on are fillers to delete: 0, 1 or 2.
-    /// `prior`: the token just before, kept or not.
+    /// `prior`: the token just before, kept or not. `likeObject`: the first word after a "like" that is not a filler.
     /// `previous`: the last kept token in this sentence, its word, and whether it opened the sentence.
     /// `dictationStart`: nothing kept yet in the Dictation. `afterOpener`: a filler already went from this sentence's start.
-    private static func dropCount(_ token: Token, prior: Token?, next: Token?, after: Token?, dictationStart: Bool, afterOpener: Bool,
+    private static func dropCount(_ token: Token, prior: Token?, next: Token?, after: Token?, likeObject: Token?,
+                                  dictationStart: Bool, afterOpener: Bool,
                                   setOffBefore: Bool, previous: (text: String, word: String, opensSentence: Bool)?)
         -> Int {
         let word = token.word
@@ -216,17 +219,15 @@ enum Fillers {
            next.trailing.hasPrefix(","), after != nil {
             return 2
         }
-        // "like, um, eighty": the filler between does not decide.
-        if setOffBefore, word == "like", token.trailing.hasPrefix(","), let next,
-           !(hard.contains(next.word) ? after ?? next : next).keepsLike {
+        if setOffBefore, word == "like", token.trailing.hasPrefix(","), next != nil, likeObject?.keepsLike != true {
             return 1
         }
 
-        // "oh" is a zero only beside a number: "oh oh seven", "five oh five".
-        let number = token.isNumber || word == "oh" && (prior?.isNumber == true || next?.isNumber == true)
-        if let previous, token.isWord, !number, !meantDoubles.contains(word),
+        if let previous, token.isWord, !meantDoubles.contains(word),
            !previous.text.last!.isPunctuation, previous.word == word,
-           previous.text == token.text || previous.opensSentence {
+           previous.text == token.text || previous.opensSentence,
+           // "oh" is a zero only beside a number: "oh oh seven", "five oh five".
+           !token.isNumber, !(word == "oh" && (prior?.isNumber == true || next?.isNumber == true)) {
             return 1
         }
         return 0
