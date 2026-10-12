@@ -303,7 +303,7 @@ async function verify(f, pass, lensLabel) {
 async function review(pass, isDelta) {
   const jobs = []
   for (const lens of lensesFor(pass.files)) for (const c of critics()) jobs.push({ lens, critic: c })
-  await pipeline(
+  const critiques = pipeline(
     jobs,
     async job => {
       const opts = { label: `${job.critic[0]}: ${job.lens.name}`, phase: pass.phase, schema: FINDINGS }
@@ -323,14 +323,15 @@ async function review(pass, isDelta) {
       return parallel(findings.map(f => () => verify(f, pass, label)))
     },
   )
-  if (mode === 'reviewer' && high && blast.length) {
-    const b = await hire('blast-radius', 'opus', 'high', blastPrompt(pass), { label: 'blast radius', phase: pass.phase, schema: BLAST })
-    if (!b) incomplete.push('no reply from blast radius')
-    else {
+  // Blast radius runs beside the critics, not after them.
+  const radius = mode === 'reviewer' && high && blast.length
+    ? hire('blast-radius', 'opus', 'high', blastPrompt(pass), { label: 'blast radius', phase: pass.phase, schema: BLAST }).then(b => {
+      if (!b) { incomplete.push('no reply from blast radius'); return null }
       pass.blast = b
-      await parallel(b.findings.map(f => () => verify(f, pass, 'blast radius (opus)')))
-    }
-  }
+      return parallel(b.findings.map(f => () => verify(f, pass, 'blast radius (opus)')))
+    })
+    : null
+  await Promise.all([critiques, radius])
 }
 
 const passes = []
