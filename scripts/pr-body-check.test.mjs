@@ -191,13 +191,16 @@ test("the ticket read has a deadline and names a refusal as one", () => {
   const timedOut = readModules('64', sources, () => { throw Object.assign(new Error('spawnSync gh ETIMEDOUT'), { code: 'ETIMEDOUT' }) })
   assert.match(timedOut.error, /no answer from gh within \d+ s/)
   for (const stderr of ['HTTP 403: Resource not accessible by integration',
+    'GraphQL: Resource not accessible by integration (repository.issue)',
     'GraphQL: Could not resolve to an issue or pull request with the number of 999999. (repository.issue)']) {
     const refused = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr }) })
     assert.match(refused.error, /GitHub refused/)
     assert.doesNotMatch(refused.error, /again/)
   }
-  const busy = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr: 'GraphQL: API rate limit exceeded for user ID 1.' }) })
-  assert.match(busy.error, /again/)
+  for (const stderr of ['GraphQL: API rate limit exceeded for user ID 1.', 'HTTP 429: Too Many Requests', 'HTTP 408: Request Timeout']) {
+    const busy = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr }) })
+    assert.match(busy.error, /again/, stderr)
+  }
 })
 
 test("the eval tooling never needs Scores, whatever review-map's key for it", () => {

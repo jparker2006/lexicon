@@ -203,9 +203,10 @@ export function readModules(n, sources, gh = runGh) {
   } catch (e) {
     if (e.code === 'ETIMEDOUT') return { modules: [], error: `no answer from gh within ${GH_TIMEOUT_MS / 1000} s reading #${n}'s Modules line; check the network and run it again` }
     const said = String(e.stderr || e.message).trim().split('\n')[0]
-    // gh issue view says a missing issue as "GraphQL: Could not resolve ..."; the
-    // REST paths a refusal as "HTTP 403" and the like. A rate limit is transient.
-    if (/^GraphQL: Could not resolve|HTTP 40[0-7]|HTTP 409/.test(said)) return { modules: [], error: `GitHub refused reading #${n} (${said}), so the Sketch rule can't be checked` }
+    // gh issue view says a missing issue as "GraphQL: Could not resolve ..." and
+    // no access as "GraphQL: Resource not accessible ..."; the REST paths say
+    // "HTTP 403" and the like. A rate limit or a 408 is transient.
+    if (/^GraphQL: (?:Could not resolve|Resource not accessible)|HTTP 40[0-79]/.test(said)) return { modules: [], error: `GitHub refused reading #${n} (${said}), so the Sketch rule can't be checked` }
     return { modules: [], error: `couldn't read #${n}'s Modules line with gh (${said}); check gh and run it again` }
   }
 }
