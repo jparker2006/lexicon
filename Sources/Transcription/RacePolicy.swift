@@ -114,7 +114,12 @@ actor LocalResidency {
     /// (fn-up bounds that wait, `AttemptCore.loadLimit`). Throws the load's error,
     /// so fn-up answers with it instead of loading again.
     func loadForDictation() async throws {
-        await unloading?.value
+        // Another unload can start while this waits on one stuck behind a hung call.
+        var waited: Task<Void, Never>?
+        while let unload = unloading, unload != waited {
+            await unload.value
+            waited = unload
+        }
         if !(await transcriber.isResident) { try await transcriber.load() }
     }
 
