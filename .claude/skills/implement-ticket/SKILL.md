@@ -12,7 +12,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 - `scripts/ticket-context.sh N` writes the issue with every comment, the spec, the decisions (the spec's first comment, its supersessions, and every "Decision" comment), the Later list and the blockers' state to the scratchpad, and prints the paths. Read `issue.md`, `decisions.md` and `blockers.md` whole. The spec is over 60 KB: search `spec.md` for your modules and terms instead of reading it all.
 - Then `GLOSSARY.md`, the ADRs that touch your modules, `docs/DECISIONS.md` when it exists, and the Roles section of `docs/agents/workflow.md`.
 - A blocker is done when its PR has merged, whether or not its issue is closed. `blockers.md` says which are done. If one isn't, stop and say which.
-- Give `spec-checker` the ticket. A ticket that departs from the spec or a recorded decision (#53 asked for an active fn tap where the spec wants listen-only) goes to Jake before you build: see Need Jake.
+- Give `spec-checker` the ticket. A ticket that departs from the spec or a recorded decision, or rests on a choice Jake never confirmed, goes to Jake before you build: see Need Jake. (#53's fn tap went from the spec's active tap to listen-only with only the orchestrator's agreement.)
 - Note what your builder prompt says other builders own right now, and which acceptance criteria need the live app.
 
 **Done:** you can name the seam the issue tests at and list its acceptance criteria.
@@ -90,7 +90,7 @@ A red CI run, a Live checks FAIL or a Reviewer verdict reaches you as a message 
 
 When the next step is Jake's, ask in the same turn you hit it, before any other work. Swap `building` for `waiting-on-jake` and comment with the question as the first line, your recommendation, and a reply that takes it:
 
-> Jake: decide whether the fn tap may be active instead of listen-only. I recommend listen-only, as the spec says: an active tap holds every key on the Mac. Reply "yes" to take that.
+> Jake: decide whether the fn tap may be listen-only instead of the spec's active tap. I recommend listen-only: Live checks measured keys reaching apps 26 to 74 ms late through the active tap, and 2 to 12 ms through listen-only. Reply "yes" to take that.
 
 Then stop. A ticket that would change the spec's decisions goes back to the orchestrator: ask this way before building.
 
