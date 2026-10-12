@@ -90,6 +90,12 @@ test('Blast Radius is one word from the list', () => {
   assert.deepEqual(checkBody({ body: body('**Blast Radius:** agents', '**Blast Radius:** History') }), [])
 })
 
+test('the closing line may be the install step\'s Try form', () => {
+  // scripts/install.sh reads "Try (about N min): ..." into Jake's Try list.
+  assert.deepEqual(checkBody({ body: body('Check: open a PR and see the check run.', 'Try (about 2 min): open a PR and see the check run.') }), [])
+  assert.deepEqual(rules(checkBody({ body: body('Check: open a PR and see the check run.', 'Try: open a PR.') })), ['check'])
+})
+
 test('the Check: line comes last, and only a footer follows it', () => {
   assert.deepEqual(rules(checkBody({ body: body('Check: open a PR and see the check run.\n', '') })), ['check'])
 })

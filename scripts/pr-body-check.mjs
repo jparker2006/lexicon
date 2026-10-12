@@ -16,7 +16,9 @@
 //   headings   Summary, Evidence, Merge Danger, Install, in that order
 //   door       **Door:** one-way or two-way
 //   blast      **Blast Radius:** one word from BLAST_RADIUS
-//   check      a "Check:" line after Install, then at most one line of at most
+//   check      a closing line after Install, "Try (about N min): ..." (the form
+//              scripts/install.sh copies to Jake's Try list) or the older "Check: ...",
+//              then at most one line of at most
 //              FOOTER_WORDS words: the footer a tool adds (the "Generated with" line)
 //   words      at most WORD_CAP words up to the Check: line. A word is a token
 //              between spaces with a letter or digit, so table rules and tree
@@ -49,6 +51,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[\w.-]+\/[\w.-]+#\d+|#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)/i
 // Built from parts so this file never carries a mention itself.
 const HANDLE = new RegExp('(^|[^\\w`])@' + '(?:codex|claude)\\b', 'i')
+const CLOSING_LINE = /^(?:Try \(about \d+ min\):|Check:)\s*\S/
 const DECISIONS_LINK = /\]\([^)\s]*DECISIONS\.md[^)\s]*\)|https?:\/\/\S*DECISIONS\.md/
 const LINK = /https?:\/\/\S|\]\(/
 const DEVIATION = /\b(?:deviat\w*|diverg\w*|depart(?:s|ed|ing|ure)?\s+from)\b|\b(?:instead of|unlike|contrary to|differs? from)\s+(?:the\s+)?(?:spec\b|#36\b)/i
@@ -119,9 +122,9 @@ export function checkBody({ body, files = [], commits = [], summary = null, modu
   }
 
   const install = at[3]
-  // A missing Install is the headings rule's; then any Check: line will do.
-  const check = lines.findIndex((l, i) => i > install && /^Check:\s*\S/.test(l))
-  if (check < 0) fail('check', 'a "Check:" line must follow ## Install, with the one thing Jake should try')
+  // A missing Install is the headings rule's; then any closing line will do.
+  const check = lines.findIndex((l, i) => i > install && CLOSING_LINE.test(l))
+  if (check < 0) fail('check', 'a "Try (about N min): ..." line must follow ## Install, with the one thing Jake should try')
   else {
     const after = lines.slice(check + 1).filter(l => l.trim())
     if (after.length > 1 || (after[0] || '').split(/\s+/).length > FOOTER_WORDS) {
