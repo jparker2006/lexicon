@@ -40,8 +40,9 @@ setup() {
     # ps fails while $T/ps-fails exists, as it can for a moment on a busy Mac.
     printf '#!/bin/sh\n[ ! -e "%s/ps-fails" ] || exit 1\nexec /bin/ps "$@"\n' "$T" > "$T/bin/ps"
     # A waiter's next try at a slot is SIGKILLed with it while $T/kill-try
-    # exists: its lockf, already started, outlives it.
-    printf '#!/bin/sh\ncase "$*" in *--holding*) if [ -e "%s/kill-try" ]; then rm -f "%s/kill-try"; kill -KILL "$PPID"; fi ;; esac\nexec /usr/bin/lockf "$@"\n' "$T" "$T" > "$T/bin/lockf"
+    # exists: its lockf, already started, outlives it, and $T/tried appears
+    # once that lockf has ended and let go of the slot.
+    printf '#!/bin/sh\ncase "$*" in *--holding*) if [ -e "%s/kill-try" ]; then rm -f "%s/kill-try"; kill -KILL "$PPID"; /usr/bin/lockf "$@"; : > "%s/tried"; exit; fi ;; esac\nexec /usr/bin/lockf "$@"\n' "$T" "$T" "$T" > "$T/bin/lockf"
     # A queue entry can't be read for a moment while $T/read-fails exists, as
     # when the job ahead deletes its own entry as it takes a slot.
     for c in /bin/cat /usr/bin/stat; do
@@ -86,19 +87,14 @@ job_unreaped() {
     perl -e '$| = 1; $p = fork; if (!$p) { exec @ARGV or exit 127 } print "$p\n"; sleep 600' \
         scripts/lib/heavy.sh sh -c 'echo "$1 $HEAVY_SLOT $HEAVY_JOBS" > "$2/events"; read -r x < "$2/release.$1"' job "$name" "$T" > "$T/pid.$name" 2>&4 &
     PIDS="$PIDS $!"
-    eval "${name}_parent=\$!"
     until [ -s "$T/pid.$name" ]; do :; done
     eval "$name=\$(cat \"\$T/pid.\$name\")"
 }
 
 zombie() { [ "$(/bin/ps -o stat= -p "$1" 2> /dev/null | cut -c1)" = Z ]; }
 
-# Waits until nothing but job_unreaped NAME's parent and its zombie is left in
-# its process group: the lockf it started has let go of its slot.
-settled() {
-    eval "settled_parent=\$${1}_parent settled_job=\$$1"
-    while pgrep -g "$settled_parent" | grep -v -x -e "$settled_parent" -e "$settled_job" > /dev/null; do :; done
-}
+# Waits until the killed try's lockf has ended and let go of its slot.
+tried() { until [ -e "$T/tried" ]; do :; done; }
 
 # expect_event "NAME SLOT JOBS": the next job to take a slot is that one.
 expect_event() {
@@ -323,7 +319,7 @@ test_a_waiter_dead_but_unreaped_mid_try_runs_nothing() {
     : > "$T/kill-try"
     job_unreaped A
     until zombie "$A"; do :; done
-    settled A
+    tried
     job B
     expect_event "B 1 $CORES"
     release B
@@ -335,7 +331,7 @@ test_a_moment_without_ps_never_runs_a_dead_waiters_command() {
     : > "$T/ps-fails"
     job_unreaped A
     until zombie "$A"; do :; done
-    settled A
+    tried
     rm -f "$T/ps-fails"
     job B
     expect_event "B 1 $CORES"
@@ -382,9 +378,9 @@ test_a_waiter_killed_mid_try_runs_nothing() {
     export LEXICON_MACHINE_VERDICT=no
     : > "$T/kill-try"
     job A
-    # A's lockf took slot 1 for nobody and must let it go unrun: everything
-    # left in A's process group ends, and only then does B try.
-    while pgrep -g "$A" | grep -v -x "$A" > /dev/null; do :; done
+    # A's lockf took slot 1 for nobody and must let it go unrun; B tries only
+    # once that lockf has ended.
+    tried
     wait "$A" 2> /dev/null || true
     job B
     expect_event "B 1 $CORES"
