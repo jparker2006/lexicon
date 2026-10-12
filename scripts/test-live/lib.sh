@@ -108,6 +108,8 @@ fake_listener() {
     mkdir -p "$(dirname "$1")"
     # It exits once orphaned, so a test killed outright (no trap runs) leaves none behind.
     [ -e "$T/listener" ] || printf '#include <unistd.h>\nint main(void) { while (getppid() != 1) sleep(1); return 0; }\n' | cc -x c -o "$T/listener" -
+    # A new file each time: macOS can refuse to overwrite a binary that just ran.
+    rm -f "$1"
     cp "$T/listener" "$1"
     "$1" &
     LISTENERS="$LISTENERS $!"

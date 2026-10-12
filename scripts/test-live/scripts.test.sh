@@ -57,6 +57,9 @@ echo 2.50 > "$DEV/live-lane/bench-background"
 expect ok '^PASS: A.s p95 96 ms is within the 100 ms budget\.' "quiet enough and within budget passes" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
 expect ok '^load: min 2\.90, median 3\.10, max 3\.40$' "the report prints the load minimum, median and maximum" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
 expect ok '^A \(branch\): 25 samples, p50 74 ms, p95 96 ms$' "the report prints A's p50 and p95" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
+expect ok '^A - B: p50 -10 ms, p95 -10 ms$' "the report prints A against B" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
+# Live checks' synthetic-year run: the same app code on both sides, A p95 over the budget by noise.
+expect ok "^SAME APP CODE: .*Main's p95 96 ms against the 100 ms budget\.\$" "the same app code on both sides is noise, not a FAIL" "$REPO/scripts/bench.sh" report history-open "$T/b.txt" "$T/a.txt" "$T/load.txt" same
 expect fail '^FAIL: A.s p95 106 ms is over the 100 ms budget\.' "over budget fails" "$REPO/scripts/bench.sh" report history-open "$T/b.txt" "$T/a.txt" "$T/load.txt"
 # #64's History open was measured at load 26 to 46.
 printf '1 26.0\n2 31.5\n3 46.0\n' > "$T/loaded.txt"
@@ -64,6 +67,12 @@ expect ok '^PROVISIONAL, no final verdict: median load 31\.50 is over 1\.5 times
 fake_listener "$HOME/Applications/Lexicon.app/Contents/MacOS/Lexicon"
 expect ok '^PROVISIONAL, no final verdict: fn listeners: the daily Lexicon' "no final verdict while another fn listener runs" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
 stop_listeners
+
+# A harness that fails (Dev's real History had no older days) stops the bench with its reason.
+mkdir -p "$T/A.app/Contents/MacOS" "$T/B.app/Contents/MacOS"
+printf '#!/bin/sh\necho "FAIL  timed out waiting for older days" >&2\nexit 1\n' > "$REPO/scripts/harness.sh"
+expect fail "the harness's History check failed on A \\(run 1\\), so no verdict: FAIL  timed out waiting for older days" \
+    "a failed harness run stops the bench and says why" "$REPO/scripts/bench.sh" history-open "$T/A.app" "$T/B.app" 5
 
 # lag-report reads the sampler's file for the load its numbers were taken under.
 printf '#!/bin/sh\n' > "$T/bin/log"
