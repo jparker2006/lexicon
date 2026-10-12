@@ -33,7 +33,7 @@ Standing approvals (Jake, 2026-10-12), by pasting this:
 - Merge your own merge verdicts with scripts/merge-pr.mjs, one at a time, without waiting for me.
 - Reviews: "Use workflows and swarms for reviews: review open PRs in parallel, full swarm with a verifier per finding on high-risk PRs, light pass on low-risk ones." That is my standing opt-in to the lexicon-review Workflow and /pstack:swarm (#88 Q4), on the plan only (no paid API calls, usage credits or fast mode).
 - Reviews: put every blocking item in your first verdict.
-- Install: once a wave has merged and its Jake items have passed in a Live checks sitting, run scripts/install.sh on main once, without asking, unless a merged PR's Install section lists a step beyond "Code only.". Any other install waits for me to type "install" in this session, and so does the one that finishes a milestone.
+- Install: once a wave has merged and its Jake items have passed in a Live checks sitting, run scripts/install.sh on main once, without asking, unless a merged PR's Install section lists a step beyond "Code only." Any other install waits for me to type "install" in this session, and so does the one that finishes a milestone.
 Approvals the merge script doesn't cover (anything private, any spend, any other deletion) you ask me for here. Decisions go on the issue for the orchestrator to ask.
 ```
 
