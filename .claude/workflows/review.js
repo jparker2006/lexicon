@@ -263,7 +263,7 @@ ${isDelta ? `This is a delta pass: these commits landed after ${pass.from.slice(
 ${lens.name === 'Combining with main' ? 'Also compare against the newest origin/main and every open PR (gh pr list; gh pr diff N --name-only): same files, same dependency lists, same status list. Name the merge order.\n' : ''}
 The standard is ${standard}. Settled decisions are never findings: the spec #36 and its first comment (its supersessions)${info.decisions ? `, and ${info.decisions}` : ''}.
 
-A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes, never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.`
+A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes (at most 5), never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.`
 }
 
 function verifyPrompt(f, pass) {
@@ -347,8 +347,20 @@ for (const pass of passes) {
 // REFUTED and UNSURE findings stay in the table but don't count: only a test that fails
 // first can bring one back. A citation that doesn't hold turns a finding into a note.
 const cell = s => String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ')
-const counted = rows.filter(r => r.verdict === 'CONFIRMED' && (r.seeded || r.v.citationHolds))
-const uncited = rows.filter(r => r.verdict === 'CONFIRMED' && !r.seeded && !r.v.citationHolds)
+const holds = r => r.seeded || Boolean(r.v && r.v.citationHolds)
+// Lenses often land on the same line: one row per path:line and verdict, its lenses joined.
+const merged = []
+for (const r of rows) {
+  const same = merged.find(m => m.path === r.path && m.line === r.line && m.verdict === r.verdict && m.pass === r.pass)
+  if (!same) merged.push({ ...r })
+  else {
+    same.lens += `; ${r.lens}`
+    if (!holds(same) && holds(r)) Object.assign(same, { ...r, lens: same.lens })
+  }
+}
+rows.splice(0, rows.length, ...merged)
+const counted = rows.filter(r => r.verdict === 'CONFIRMED' && holds(r))
+const uncited = rows.filter(r => r.verdict === 'CONFIRMED' && !holds(r))
 const order = { CONFIRMED: 0, 'NO VERDICT': 1, UNSURE: 2, REFUTED: 3 }
 rows.sort((x, y) => order[x.verdict] - order[y.verdict])
 const short = s => s.slice(0, 7)
