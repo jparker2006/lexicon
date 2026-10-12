@@ -13,7 +13,7 @@ extension Conductor {
     /// `model` nil = the normal plan; otherwise the picker's choice. Does nothing
     /// (versions nil) while the Dictation is in flight, already being retried
     /// (here, or by the waiting loop, which keeps trying until it has text), once
-    /// its audio is gone, or when the retry hears nothing: the row keeps what it
+    /// its audio is gone or all zeros, or when the retry hears nothing: the row keeps what it
     /// had. A failed Dictation that gets text becomes not inserted (recovered, if
     /// it came from a crash).
     public func retry(_ id: DictationID, with model: SpeechModel?) async -> DictationResult {
@@ -31,6 +31,8 @@ extension Conductor {
         // hold its place in `inFlight`, and an empty Retry would leave it with no loop.
         guard let record = await history.dictation(id), !record.status.isInFlight, record.status != .waiting,
               let clip = await history.clip(id) else { return .nothing(id) }
+        // A dead mic's audio (DECISIONS item 70): no words to find, and a model asked anyway may make some up.
+        guard clip.samples.contains(where: { $0 != 0 }) else { return .nothing(id) }
         let preferences = preferences.snapshot()
         // Today's settings and today's access for the app it was dictated into.
         let access = CloudAccess.granted(by: preferences, for: .app(record.app), keys: secrets.lookup)

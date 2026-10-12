@@ -108,6 +108,36 @@ func anAllZeroDictationFailsAsASilentMicKeepsItsAudioAndIsNotTranscribed() async
     #expect(kept.allSatisfy { $0 == 0 })
     let heard = await notices(events)
     #expect(heard == [.microphoneSilent])
+
+    // The notice is its last event, as when the mic does not start: a `finished` would put
+    // "No speech heard" over it. The next Dictation's events come after anything it sent.
+    let quiet = try writeWAV(quietNoise(count: rate), rate: rate, in: try scratchDirectory())
+    let next = await system.conductor.dictate(file: quiet, pace: .asFastAsPossible)
+    var finished: [DictationID] = []
+    for await event in events {
+        guard case .finished(let id, _) = event else { continue }
+        finished.append(id)
+        if id == next.id { break }
+    }
+    #expect(finished == [next.id])
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aRetryOfASilentMicHearsNothing() async throws {
+    let wav = try writeWAV(zeroSamples(count: rate), rate: rate, in: try scratchDirectory())
+    let engine = ScriptedTranscriber(text: "Ship it")
+    let system = try headless(engine)
+    let silent = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
+    await system.history.flush()
+    await system.conductor.recorder.settle()
+
+    let retried = await system.conductor.retry(silent.id, with: nil)
+    await system.history.flush()
+
+    // Its kept audio is all zeros: no words to find, so no model is asked to make some up.
+    #expect(retried.versions == nil)
+    #expect(await engine.heard.isEmpty)
+    #expect(try #require(await system.history.dictation(silent.id)).status == .failed)
 }
 
 @Test(.timeLimit(.minutes(1)))

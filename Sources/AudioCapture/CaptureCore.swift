@@ -230,8 +230,9 @@ final class CaptureCore: @unchecked Sendable {
             #if DEBUG
             if silenced { input.floatChannelData![0].update(repeating: 0, count: count) }
             #endif
-            // A real mic's first buffer settles it as `.real`, then this is one compare per read.
-            // A dead one is scanned each read, here on the writer queue.
+            // The first non-zero frame settles it as `.real`, then this is one compare per read.
+            // Until then (a dead mic, or one that starts with zeros) each read is scanned, here on
+            // the writer queue.
             if sound != .real {
                 let frames = UnsafeBufferPointer(start: input.floatChannelData![0], count: count)
                 sound = frames.contains { $0 != 0 } ? .real : .zeros
