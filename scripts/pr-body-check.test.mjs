@@ -91,7 +91,6 @@ test('Blast Radius is one word from the list', () => {
 })
 
 test('the closing line may be the install step\'s Try form', () => {
-  // #159's install step copies "Try (about N min): ..." lines to Jake's Try list.
   assert.deepEqual(checkBody({ body: body('Check: open a PR and see the check run.', 'Try (about 2 min): open a PR and see the check run.') }), [])
   assert.deepEqual(rules(checkBody({ body: body('Check: open a PR and see the check run.', 'Try: open a PR.') })), ['check'])
 })
@@ -212,10 +211,10 @@ test("the ticket read has a deadline and names a refusal as one", () => {
 })
 
 test("the eval tooling never needs Scores, whatever review-map's key for it", () => {
-  // #211 renames the key to Sources/LexiconEval*/**.
   const scored = scoredPatterns(['Sources/LexiconEval*/**', 'scorer/**', 'Sources/Cleanup/**'])
   const hits = f => scored.some(re => re.test(f))
   assert.equal(hits('Sources/LexiconEvalCLI/main.swift'), false)
   assert.equal(hits('scorer/lexicon_scorer/score.py'), false)
   assert.equal(hits('Sources/Cleanup/Rules.swift'), true)
+  assert.deepEqual(checkBody({ body: good, files: ['Sources/LexiconEval/main.swift', 'scorer/lexicon_scorer/score.py'] }), [])
 })
