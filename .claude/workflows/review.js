@@ -91,13 +91,16 @@ const FINDING = {
   },
   required: ['path', 'line', 'claim', 'scenario', 'severity', 'confidence', 'cite'],
 }
+// Critics are read-only and the snapshot has no .git, so a lens that counted an unrun build
+// as incomplete would leave every clean run unstamped. CI runs those on the pushed head.
+const CI_GATE = 'CI is the build gate, so running code is never your job: a build, a test, a fixture script (node ...), scripts/check.sh or a scripts/checks/ step that you did not run, or that cannot run in the snapshot, is never incomplete; say so in checked. A criterion the diff cannot show (a real run, a Live checks result) is not incomplete either: name it in notes as the builder\'s to show. But a criterion the diff fails is still a finding.'
 const FINDINGS = {
   type: 'object',
   properties: {
     findings: { type: 'array', items: FINDING },
     notes: { type: 'array', items: { type: 'string' }, description: 'possible problems without a citation, one line each' },
     checked: { type: 'string', description: 'what you checked and found fine, briefly' },
-    incomplete: { type: 'string', description: 'a command the lens needed that was refused, failed or cut short (a list at its limit), and what it left unchecked; "" when everything ran' },
+    incomplete: { type: 'string', description: `a read the lens needed that was refused, failed or cut short (a list at its limit), and what it left unchecked; empty when every read ran. ${CI_GATE}` },
   },
   required: ['findings', 'notes', 'checked', 'incomplete'],
 }
@@ -321,7 +324,7 @@ The standard is ${standard}. Settled decisions are never findings: the spec #36 
 
 A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes (at most 5), never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.
 
-A command this lens needs that is refused, fails, or returns a list at its limit goes in incomplete, with what it left unchecked: never read it as empty or clean. Otherwise incomplete is "".`
+A read this lens needs (a file, git, gh) that is refused, fails, or returns a list at its limit goes in incomplete, with what it left unchecked: never read it as empty or clean. Otherwise leave incomplete empty. ${CI_GATE}`
 }
 
 function verifyPrompt(f, pass) {

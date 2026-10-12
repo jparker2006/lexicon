@@ -4,114 +4,6 @@ import Testing
 @testable import Jev
 import LexiconDomain
 
-// A fake TypeSafe server behind URLProtocol: the real URLSession, request and
-// response decoding, with no network. Fake keys only. Each fake's session tags
-// its requests, so tests run in parallel without seeing each other's.
-
-private final class FakeJev: Sendable {
-    struct Request: Sendable {
-        let method: String?
-        let url: URL?
-        let headers: [String: String]
-        let body: Data
-    }
-
-    /// nil: the request hangs until the client cancels it.
-    typealias Reply = @Sendable (Data) -> (status: Int, body: Data)?
-
-    static let servers = Mutex<[String: FakeJev]>([:])
-
-    let key = "fake-jev-key-" + UUID().uuidString
-    let reply: Reply
-    /// Fails every POST with this instead of replying, as URLSession does.
-    let failure: URLError?
-    private let received = Mutex<[Request]>([])
-    private let arrivals: AsyncStream<Void>.Continuation
-    let arrived: AsyncStream<Void>
-
-    init(failing failure: URLError? = nil, reply: @escaping Reply = { _ in nil }) {
-        self.reply = reply
-        self.failure = failure
-        (arrived, arrivals) = AsyncStream<Void>.makeStream()
-        Self.servers.withLock { $0[key] = self }
-    }
-
-    var requests: [Request] { received.withLock { $0 } }
-
-    var session: URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [FakeJevProtocol.self]
-        configuration.httpAdditionalHeaders = ["X-Fake-Jev": key]
-        return URLSession(configuration: configuration)
-    }
-
-    func access(_ preferences: Preferences = .defaults) -> CloudAccess? {
-        let key = key
-        return CloudAccess.granted(by: preferences, for: .app(.unknown)) { $0 == .jev ? key : nil }
-    }
-
-    func receive(_ request: Request) -> (status: Int, body: Data)? {
-        received.withLock { $0.append(request) }
-        arrivals.yield()
-        return request.method == "HEAD" ? (405, Data()) : reply(request.body)
-    }
-}
-
-/// `@unchecked Sendable`: URLProtocol is an Objective-C class URLSession drives
-/// from its own queue; this subclass adds no state of its own.
-private final class FakeJevProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        let tag = request.value(forHTTPHeaderField: "X-Fake-Jev") ?? ""
-        guard let server = FakeJev.servers.withLock({ $0[tag] }) else {
-            client?.urlProtocol(self, didFailWithError: URLError(.userAuthenticationRequired))
-            return
-        }
-        let received = FakeJev.Request(method: request.httpMethod, url: request.url,
-                                       headers: request.allHTTPHeaderFields ?? [:], body: bodyData())
-        let answer = server.receive(received)
-        if let failure = server.failure, received.method != "HEAD" {
-            client?.urlProtocol(self, didFailWithError: failure)
-            return
-        }
-        guard let (status, body) = answer else { return }
-        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/2", headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
-
-    /// URLSession hands a protocol the body as a stream, not `httpBody`.
-    private func bodyData() -> Data {
-        if let body = request.httpBody { return body }
-        guard let stream = request.httpBodyStream else { return Data() }
-        stream.open()
-        defer { stream.close() }
-        var data = Data()
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while stream.hasBytesAvailable {
-            let count = stream.read(&buffer, maxLength: buffer.count)
-            if count <= 0 { break }
-            data.append(buffer, count: count)
-        }
-        return data
-    }
-}
-
-private func answer(_ probabilities: [String: Double]) -> Data {
-    let json: [String: Any] = [
-        "model": "jev-1.13.0",
-        "answers": ["target": ["type": "choice", "choice": probabilities.max { $0.value < $1.value }!.key,
-                               "probabilities": probabilities, "confidence": 0.9]],
-        "usage": ["input_tokens": 300, "output_tokens": 20],
-    ]
-    return try! JSONSerialization.data(withJSONObject: json)
-}
-
 private let recent = "okay now wire the auth callback into super base and then redeploy to vercel"
 private let superBase = RespeakCandidate(words: 7..<9, phonetic: "SPRBS")
 private let callback = RespeakCandidate(words: 5..<6, phonetic: "KLBK")
@@ -127,7 +19,7 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
 }
 
 @Test(.timeLimit(.minutes(1))) func jevAnswersWithEveryCandidateRankedAndItsProbability() async throws {
-    let server = FakeJev { _ in (200, answer(["c1": 0.02, "c2": 0.97, "none": 0.01])) }
+    let server = FakeJev { _ in (200, jevReply(["c1": 0.02, "c2": 0.97, "none": 0.01])) }
     let decision = await client(server).decide(question, access: server.access(), fallback: soundRanking)
 
     #expect(decision.source == .jev(probability: 0.97))
@@ -169,7 +61,7 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
 }
 
 @Test(.timeLimit(.minutes(1))) func privateModeDecidesLocallyWithNoRequest() async {
-    let server = FakeJev { _ in (200, answer(["c1": 1])) }
+    let server = FakeJev { _ in (200, jevReply(["c1": 1])) }
     var privateMode = Preferences.defaults
     privateMode.privacy = .private
     let jev = client(server)
@@ -200,11 +92,69 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
     }
     let decision = await deciding.value
     #expect(decision.answer == soundRanking)
-    guard case .fallback = decision.source else { Issue.record("answered after the caller gave up"); return }
+    #expect(decision.source == .fallback(.cancelled))
+    #expect(server.requests.isEmpty)
+}
+
+@Test(.timeLimit(.minutes(1))) func aCallerThatGivesUpMidCallIsToldSoNotTimedOut() async {
+    let server = FakeJev()  // never answers
+    let deciding = Task { await client(server).decide(question, access: server.access(), fallback: soundRanking) }
+    for await _ in server.arrived { break }
+    deciding.cancel()
+    #expect(await deciding.value.source == .fallback(.cancelled))
+}
+
+/// Key reads that wait until the test answers, as the first Keychain read can
+/// wait on a prompt nobody has seen. Past `giveUp` every read is answered, so
+/// a decide stuck on one fails its test instead of hanging the whole run.
+private final class SlowKeychain: Sendable {
+    private let answered = DispatchSemaphore(value: 0)
+    private let finished = DispatchSemaphore(value: 0)
+    private let entries: AsyncStream<Void>.Continuation
+    private let stuck = Mutex(false)
+    let reading: AsyncStream<Void>
+    /// The guard had to answer: something waited on a read that should not hold it.
+    var gaveUp: Bool { stuck.withLock { $0 } }
+    init(readers: Int = 1, giveUp seconds: Double = 30) {
+        (reading, entries) = AsyncStream<Void>.makeStream()
+        Thread.detachNewThread { [self] in
+            guard finished.wait(timeout: .now() + seconds) == .timedOut else { return }  // timing-ok: a hang guard only
+            stuck.withLock { $0 = true }
+            (0..<readers).forEach { _ in answered.signal() }
+        }
+    }
+    func read(_ key: String) -> String {
+        entries.yield()
+        answered.wait()  // timing-ok: a synchronous Keychain read, released by the test's answer(), never by time
+        return key
+    }
+    func answer(_ readers: Int = 1) {
+        finished.signal()
+        (0..<readers).forEach { _ in answered.signal() }
+    }
+}
+
+@Test(.timeLimit(.minutes(1))) func aKeyReadThatWaitsIsInsideTheBudget() async {
+    let server = FakeJev { _ in (200, jevReply(["c1": 1])) }
+    let keychain = SlowKeychain()
+    let key = server.key
+    let access = CloudAccess.granted(by: .defaults, for: .app(.unknown)) { $0 == .jev ? keychain.read(key) : nil }
+    let clock = TestClock()
+    let deciding = Task { await client(server, clock: clock).decide(question, access: access, fallback: soundRanking) }
+
+    for await _ in keychain.reading { break }
+    // The budget is already running while the key read waits.
+    await clock.waitForSleep(endingAt: JevClient.budget)
+    await clock.advance(by: JevClient.budget)
+    let decision = await deciding.value
+    #expect(!keychain.gaveUp)
+    keychain.answer()
+    #expect(decision.source == .fallback(.timeout))
+    #expect(decision.answer == soundRanking)
 }
 
 @Test(.timeLimit(.minutes(1))) func aSecretInTheWordsSendsNothing() async throws {
-    let server = FakeJev { _ in (200, answer(["c1": 1])) }
+    let server = FakeJev { _ in (200, jevReply(["c1": 1])) }
     let access = server.access()
     let secret = "ghp_" + "aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY2zA4"
     let leaky = try #require(JevQuestion.respeakTarget(
@@ -221,12 +171,40 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
         .decide(question, access: CloudAccess.granted(by: .defaults, for: .app(.unknown)) { _ in nil }, fallback: soundRanking)
     #expect(noKey.source == .fallback(.noKey))
 
-    for reply in [(500, answer(["c1": 1])), (200, Data("not json".utf8)), (200, answer(["unknown": 1]))] {
+    for reply in [(500, jevReply(["c1": 1])), (200, Data("not json".utf8)), (200, jevReply(["unknown": 1]))] {
         let server = FakeJev { _ in reply }
         let decision = await client(server).decide(question, access: server.access(), fallback: soundRanking)
         #expect(decision.source == .fallback(.error))
         #expect(decision.answer == soundRanking)
     }
+}
+
+@Test func prewarmHasStartedItsRequestWhenItReturns() async {
+    let server = FakeJev()
+    let session = server.session
+    JevClient(session: session, clock: TestClock(), requestTimeout: 3_600).prewarm(server.access())
+    // On the session or already at the server: never still waiting to be started.
+    let started = !(await session.allTasks).isEmpty || !server.requests.isEmpty
+    #expect(started)
+}
+
+@Test(.timeLimit(.minutes(1))) func keyReadsWaitingOnPromptsCannotStopTheBudget() async {
+    // More stuck reads than the cooperative pool has threads: the budget still runs out.
+    let readers = ProcessInfo.processInfo.activeProcessorCount + 2
+    let server = FakeJev { _ in (200, jevReply(["c1": 1])) }
+    let keychain = SlowKeychain(readers: readers)
+    let key = server.key
+    let access = CloudAccess.granted(by: .defaults, for: .app(.unknown)) { $0 == .jev ? keychain.read(key) : nil }
+    let clock = TestClock()
+    let jev = client(server, clock: clock)
+    let deciding = (0..<readers).map { _ in
+        Task { await jev.decide(question, access: access, fallback: soundRanking) }
+    }
+    await clock.waitForSleepers(readers)
+    await clock.advance(by: JevClient.budget)
+    for decision in deciding { #expect(await decision.value.source == .fallback(.timeout)) }
+    #expect(!keychain.gaveUp)
+    keychain.answer(readers)
 }
 
 @Test(.timeLimit(.minutes(1))) func prewarmOpensTheConnectionWithoutTextOrKey() async throws {
@@ -248,7 +226,7 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
 }
 
 @Test(.timeLimit(.minutes(1))) func tiedAnswersKeepTheCandidateOrder() async {
-    let server = FakeJev { _ in (200, answer(["none": 0.4, "c2": 0.3, "c1": 0.3])) }
+    let server = FakeJev { _ in (200, jevReply(["none": 0.4, "c2": 0.3, "c1": 0.3])) }
     let decision = await client(server).decide(question, access: server.access(), fallback: soundRanking)
     #expect(decision.answer.map(\.candidate) == [nil, 0, 1])
 }
@@ -265,7 +243,7 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
         RespeakCandidate(words: 30..<31, phonetic: "F"),
         RespeakCandidate(words: 6..<7, phonetic: "G"),  // past the candidate cap: not sent
     ]
-    let server = FakeJev { _ in (200, answer(["c1": 1])) }
+    let server = FakeJev { _ in (200, jevReply(["c1": 1])) }
     let question = try #require(JevQuestion.respeakTarget(
         spoken: "word99", spokenPhonetic: "X", recent: words.joined(separator: " "), candidates: candidates))
     _ = await client(server).decide(question, access: server.access(), fallback: [])

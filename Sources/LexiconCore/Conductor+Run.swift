@@ -11,7 +11,8 @@ import AppText
 import Jev
 import Fixes
 
-// One Dictation, top to bottom. This file is the trace: every step is one call
+// One Dictation, top to bottom. This file is the trace, from fn-down to fn-up,
+// and `Conductor+Land.swift` carries it on to the cursor: every step is one call
 // into the module that owns that knowledge. It is written as real code (not
 // pseudocode) so the build proves the module APIs fit together.
 
@@ -56,7 +57,8 @@ extension Conductor {
         let cleanupPlan = CleanupPlan.make(preferences: start.preferences, access: access, terms: words.terms,
                                            rules: words.rules, app: context)
         let cleaning = cleanup.begin(plan: cleanupPlan, segments: attempt.segments)
-        jev?.prewarm(access)
+        // Jev only answers fixes: plain dictation never opens a connection to it.
+        if case .respeak = start.purpose { jev?.prewarm(access) }
         await fixes?.dictationStarted()
         let signals = capture.signals
         Task { if await signals.firstAudio() != nil { self.emit(.listening(id)) } }
@@ -110,163 +112,6 @@ extension Conductor {
         return context
     }
 
-    /// Capture didn't start: no mic permission, no device, Core Audio stuck past
-    /// the start limit (#142), or a file that can't be read. Nothing was captured,
-    /// so nothing can be lost; a live row says what happened, unless the press was a stray tap.
-    func startFailed(_ start: RunStart, _ error: RecorderError, ends: AsyncStream<RunEnd>) async -> DictationResult {
-        let id = start.id
-        let discarded: Bool
-        if start.origin != .live {
-            // A file that can't be read was never a Dictation: no row, and eval reports "nothing".
-            discarded = true
-        } else if id == capturingID {
-            // Give up the capture slot, or every later fn-down finds it taken and is dropped.
-            // A stop, not a discard: with fn still down the pill plays the stop sound and leaves
-            // "recording", or it would never show the notice (a press it never confirmed, it
-            // ignores). The press's own release, still to come, names this id and so ends nothing.
-            endCapture(id, .stop(at: .now()))
-            discarded = false
-        } else {
-            // Released before the mic answered: its end is already in `ends`.
-            discarded = await ends.first { _ in true }.map { !$0.isStop } ?? false
-        }
-        if discarded {
-            history.record(.discarded(id))
-        } else {
-            history.record(.failed(id, reason: "microphone: \(error)"))
-        }
-        if start.origin == .live {  // a file's error names its path, which may be the Test set's
-            log.error("Dictation \(id, privacy: .public) has no mic: \(String(describing: error), privacy: .public)")
-        }
-        emit(.notice(.microphoneUnavailable(String(describing: error))))
-        return discarded ? .nothing(id) : DictationResult(id: id, status: .failed, versions: nil, cleanup: nil,
-                                                          model: nil, lag: nil, attempts: [])
-    }
-
-    /// Text (or no text) -> cleanup -> History -> the cursor. Shared by live,
-    /// waiting, retry and recovery, so they cannot drift apart.
-    /// `run.target == nil` means never type: recovery and retry have no target.
-    func land(_ outcome: SpeechOutcome, _ run: DictationRun) async -> DictationResult {
-        let id = run.id
-        switch outcome {
-        case .unavailable(let reason) where reason.waits:
-            // Keep the audio and show "waiting"; Jake is never asked to redo it. A
-            // waiting Dictation gives up its turn, so later Dictations still insert.
-            history.record(.waiting(id, reason: String(describing: reason)))
-            log.notice("Dictation \(id, privacy: .public) waiting: \(String(describing: reason), privacy: .private)")
-            if reason.waitsForNetwork { emit(.notice(.waitingForNetwork(id))) }
-            releaseInsertTurn(id)
-            run.hold?.end()
-            await run.cleaning.cancel()  // the retry cleans with a fresh session
-            retryWhenReady(run, after: reason)
-            emit(.finished(id, .waiting))
-            return DictationResult(id: id, status: .waiting, versions: nil, cleanup: nil, model: nil, lag: nil,
-                                   attempts: [])
-
-        case .unavailable(let reason):
-            return failed(id, reason)
-
-        case .text(let heard):
-            for record in heard.attempts { history.record(.attempted(id, record)) }
-            let cleaned = await run.cleaning.finish(modelText: heard.text, deadline: run.cleanupDeadline)
-            // A filler-only answer ("Um.") gets past the engine's silence check and Cleanup strips
-            // it to nothing: that is silence too. Typed, the empty Cmd-V would replace Jake's selection.
-            // A Retry of a settled row leaves it as it was, as Retry does when the engine hears silence.
-            guard cleaned.versions.cleaned.contains(where: { !$0.isWhitespace }) else {
-                return run.previous?.isTerminal == true ? .nothing(id) : failed(id, .silence)
-            }
-            // Queued for disk BEFORE it is typed. Fire-and-forget FIFO: still no wait on SQLite.
-            let typing = run.purpose == .type && run.target != nil
-            history.record(.textReady(id, cleaned.versions, cleanup: cleaned.outcome, model: heard.model,
-                                      typing: typing))
-
-            var delivery = Delivery.historyOnly
-            var lag: Duration?
-            if typing, let target = run.target {
-                await insertTurn(id)  // Dictations insert in the order they were spoken (#18)
-                delivery = await destination.insert(cleaned.versions.cleaned, for: id, at: target)  // text at the cursor
-                lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
-            }
-            releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
-            run.hold?.end()  // the Dictation landed: App Nap may return
-
-            // Everything below is after the text landed: off the fn-up path.
-            switch delivery {
-            case .inserted(let receipt):
-                history.record(.delivered(id, receipt, lag: lag))
-                await fixes?.didInsert(id, text: cleaned.versions.cleaned, app: run.context, receipt: receipt,
-                                       access: run.access)
-            case .notInserted(let reason):
-                history.record(.notInserted(id, reason))
-                emit(.notice(.readyToPaste(id)))
-            case .historyOnly:
-                // Esc'd or late live Dictation: say it's waiting in paste-last (#18 indicator state).
-                // Not for a Retry of one already settled: Jake is looking at it in History.
-                if run.origin == .live, run.purpose == .type, run.previous?.isTerminal != true {
-                    emit(.notice(.readyToPaste(id)))
-                }
-            }
-            // Only a live target may change another app: recovered or late text is never typed (#4).
-            if case .respeak(let fixing) = run.purpose, run.target != nil {
-                _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)
-            }
-            let status = DictationStatus.landed(delivery, origin: run.origin, previous: run.previous)
-            // `lag` is the spec's number: fn-up to the target app reading the paste (scripts/lag-report.sh).
-            let lagText = lag.map { "lag \($0.milliseconds) ms, " } ?? ""
-            log.notice("""
-                Dictation \(id, privacy: .public) \(status.rawValue, privacy: .public): \(lagText, privacy: .public)\
-                engine \(heard.model.id, privacy: .public), speech \(heard.finalizeToText.milliseconds, privacy: .public) ms
-                """)
-            emit(.finished(id, status))
-            return DictationResult(id: id, status: status, versions: cleaned.versions, cleanup: cleaned.outcome,
-                                   model: heard.model, lag: lag, attempts: heard.attempts)
-        }
-    }
-
-    /// No text to land: the row keeps its audio.
-    private func failed(_ id: DictationID, _ reason: SpeechUnavailable) -> DictationResult {
-        history.record(.failed(id, reason: String(describing: reason)))
-        log.notice("Dictation \(id, privacy: .public) failed: \(String(describing: reason), privacy: .private)")
-        emit(.finished(id, .failed))
-        return DictationResult(id: id, status: .failed, versions: nil, cleanup: nil, model: nil, lag: nil,
-                               attempts: [])
-    }
-
-    /// Revokes `access` the moment the settings or, `followingFocus`, the frontmost
-    /// app deny it (`Preferences.cloudDenied`). Cancel the task when the work that
-    /// holds `access` ends. Not following focus, `app` stays the Dictation's own app.
-    func revokeWhenDenied(_ access: CloudAccess, in app: AppContext, followingFocus: Bool) -> Task<Void, Never> {
-        let store = preferences
-        let destination = destination
-        // Now, before the caller's first use: the grant read the fn-down snapshot,
-        // and Private mode may have been turned on since.
-        if let reason = store.snapshot().cloudDenied(for: .app(app)) { access.revoke(reason) }
-        return Task {
-            // Subscribed before the first check, so no change falls between the two.
-            let settingsChanges = store.changes()
-            let focusChanges = followingFocus ? await destination.appChanges() : nil
-            let (changes, post) = AsyncStream<AccessChange>.makeStream()
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { for await now in settingsChanges { post.yield(.settings(now)) } }
-                if let focusChanges {
-                    group.addTask { for await now in focusChanges { post.yield(.focus(now)) } }
-                }
-                defer { group.cancelAll() }
-                // Again once subscribed: a switch between the check above and here counts too.
-                var settings = store.snapshot()
-                var app = app
-                if let reason = settings.cloudDenied(for: .app(app)) { return access.revoke(reason) }
-                for await change in changes {
-                    switch change {
-                    case .settings(let now): settings = now
-                    case .focus(let now): app = now
-                    }
-                    if let reason = settings.cloudDenied(for: .app(app)) { return access.revoke(reason) }
-                }
-            }
-        }
-    }
-
     /// The disk was nearly full or a write failed: the Dictation finishes from
     /// RAM as normal, and Jake is told its audio was not saved (#4).
     func noteStorage(_ summary: AudioSummary) {
@@ -287,15 +132,4 @@ extension Conductor {
             return await group.next() ?? .stop(at: .now())
         }
     }
-}
-
-/// What `revokeWhenDenied` re-checks the privacy rule on.
-private enum AccessChange: Sendable {
-    case settings(Preferences)
-    case focus(AppContext)
-}
-
-extension Duration {
-    /// Whole milliseconds, for the log.
-    var milliseconds: Int64 { Int64((self / .milliseconds(1)).rounded()) }
 }

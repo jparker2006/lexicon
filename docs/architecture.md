@@ -37,7 +37,7 @@ Task.detached { await system.run() }                         // key loop, recove
 indicator.follow(await system.conductor.events(), levels: system.recorder.levels)  // pill, icon, sounds
 ```
 
-One Dictation, in `LexiconCore/Conductor+Run.swift` (abridged; this file is the trace):
+One Dictation, in `LexiconCore/Conductor+Run.swift` and, from `land`, `Conductor+Land.swift` (abridged; these files are the trace):
 
 ```swift
 let capture  = try await recorder.start(start.input, writingTo: history.audioURL(for: id))   // audio first
@@ -74,11 +74,11 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 | `Transcription` | One adapter file per cloud provider (Muse from M2), sockets, keywords, finalize, local race, residency, reachability. No reconnect after a cloud failure: local is already racing, and with no local model the Dictation waits and is transcribed again when the network returns. `CloudLink` (adapter, socket, network path) is the one seam tests replace, with a scripted fake provider | Domain |
 | `LocalParakeet` | The FluidAudio adapter (Parakeet Unified; Ultra or v3 as the multilingual pick), model install and compile. Long audio is decoded in FluidAudio's 15 s windows, each as soon as it is captured, then merged on the 2 s overlaps. The per-window decode and the merge are FluidAudio's, copied (Apache 2.0) because it keeps them internal, so each window reaches the merge raw and the words match its one-shot path; `UnifiedAsrManager` only downloads the model. No word boosting; Rules in code instead. The only FluidAudio importer | Domain, Transcription, the FluidAudio package |
 | `Cleanup` | Rules, the AI cleanup stage (OpenRouter, from M3), the structural check, the rules-only fallback | Domain |
-| `WordStore` | The Lexicon: Terms, Rules, folding, `lexicon.sqlite`, per-Dictation selection. `CodeTerms`: code Terms (names only) and the current repo, scanned at launch and followed with FSEvents on `~/code` and the skill folders | Domain, SQLiteKit |
+| `WordStore` | The Lexicon: Terms, Rules, folding, `lexicon.sqlite`, per-Dictation selection. `CandidateFinder`: Re-speak's spans of the recent text, ranked by sound (`Phonetic`). `CodeTerms`: code Terms (names only) and the current repo, scanned at launch and followed with FSEvents on `~/code` and the skill folders | Domain, SQLiteKit |
 | `History` | Every durable fact about a Dictation: `history.sqlite`, `audio/`, recovery, retention, the window's reader | Domain, SQLiteKit, AudioCapture |
 | `AppText` | Everything done to other apps' text: focus capture, `InsertGuard`, paste and restore, read, watch, replace | Domain, KeyInput |
 | `Jev` | TypeSafe direct calls, `jev-1.13.0` pinned, one request per state with all its questions, for Re-speak and Hand fixes only; every call carries a local fallback | Domain |
-| `Fixes` | Re-speak resolution and saving each Re-speak fix to the Test set; Hand fix watching and any Rules learned from Fixes, as the after-M1 grill decides | Domain, History, WordStore, AppText, Jev |
+| `Fixes` | Re-speak resolution (`RespeakResolver`: Jev's pick among the best spans by sound, or sound alone without Jev) and saving each Re-speak fix to the Test set; Hand fix watching and any Rules learned from Fixes, as the after-M1 grill decides | Domain, History, WordStore, AppText, Jev |
 | `Inbox` | Inbox file format, writer, watcher | Domain |
 | `TestHooks` | Debug builds only: the test-hook commands and replies, the harness's sender and the app's server | Domain |
 | `LexiconCore` | `Conductor`, `LexiconSystem`, `HeadlessSystem`, `PreferencesStore`, Keychain | Domain, AppText, AudioCapture, Cleanup, Fixes, History, Inbox, Jev, KeyInput, Transcription, WordStore (not SQLiteKit or LocalParakeet) |
@@ -103,7 +103,7 @@ No test target depends on an executable target: every test target links into one
 ### Invariants the compiler enforces
 
 - Recovered and retried text is never typed: `TextDestination.Target` has no public initializer, and only a live fn-up or a test file run produces one.
-- Every cloud key comes through `CloudAccess`: speech, Cleanup's LLM, Jev and model downloads all take one. Its only constructor returns nil in Private mode or for an always-private app, and Cleanup withholds it when "AI cleanup" is off. The socket and HTTP calls themselves are plain `URLSession` (`CloudLink`, `JevClient`, `CleanupModel`), so "no network call without a `CloudAccess`" is a review rule, not a compiler one.
+- Every cloud key comes through `CloudAccess`: speech, Cleanup's LLM, Jev and model downloads all take one. Its only constructor returns nil in Private mode, for an always-private app, or for a Test set eval of a speech model whose zero retention isn't confirmed (`CloudModel.retention`, an exhaustive switch), and Cleanup withholds it when "AI cleanup" is off. The socket and HTTP calls themselves are plain `URLSession` (`CloudLink`, `JevClient`, `CleanupModel`), so "no network call without a `CloudAccess`" is a review rule, not a compiler one.
 - Every Jev call has a local fallback: `decide(_:access:budget:fallback:)` has no other form.
 - A capture is stopped, and an attempt finished, at most once: both are `~Copyable` with `consuming` methods.
 - One list each, compiler-checked: providers, statuses (index predicates and retention derive from the enum), key commands, inbox messages, History events.
