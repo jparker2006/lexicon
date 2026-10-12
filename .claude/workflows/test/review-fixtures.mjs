@@ -173,6 +173,7 @@ test("a critic's brief and schema carry the CI gate", async () => {
   assert(critics.length > 0, 'critics should run')
   for (const c of critics) {
     for (const [what, text] of [['prompt', c.prompt], ['incomplete schema', c.schema.properties.incomplete.description]]) {
+      assert(!text.includes('""'), `${c.label} ${what} should not show a bare "", which a model copies into the field`)
       for (const s of ['CI is the build gate', 'scripts/check.sh', 'a fixture script', 'never incomplete', 'say so in checked', 'a criterion the diff fails is still a finding']) assert(text.includes(s), `${c.label} ${what} should say "${s}"`)
     }
   }
