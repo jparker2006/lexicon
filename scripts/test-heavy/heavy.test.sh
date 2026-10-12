@@ -33,6 +33,12 @@ setup() {
     mkdir "$T/bin"
     printf '#!/bin/sh\necho reading > "%s/readings"\necho "Pageouts: 0."\n' "$T" > "$T/bin/vm_stat"
     chmod +x "$T/bin/vm_stat"
+    # ps fails while $T/ps-fails exists, as it can for a moment on a busy Mac.
+    printf '#!/bin/sh\n[ ! -e "%s/ps-fails" ] || exit 1\nexec /bin/ps "$@"\n' "$T" > "$T/bin/ps"
+    # A waiter's next try at a slot is SIGKILLed with it while $T/kill-try
+    # exists: its lockf, already started, outlives it.
+    printf '#!/bin/sh\ncase "$*" in *--holding*) if [ -e "%s/kill-try" ]; then rm -f "%s/kill-try"; kill -KILL "$PPID"; fi ;; esac\nexec /usr/bin/lockf "$@"\n' "$T" "$T" > "$T/bin/lockf"
+    chmod +x "$T/bin/ps" "$T/bin/lockf"
     export PATH="$T/bin:$PATH"
     trap cleanup EXIT
 }
@@ -232,6 +238,33 @@ test_an_entry_whose_pid_was_reused_drops_out() {
     expect_event "A 1 $((CORES / 2))"
     release A
     release H2
+}
+
+test_a_moment_without_ps_keeps_everyone_in_line() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job A
+    expect_wait "number 1 in line"
+    : > "$T/ps-fails"
+    job B
+    expect_wait "number 2 in line"
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release H2
+    expect_event "B 2 $((CORES / 2))"
+    release A
+    release B
+}
+
+test_a_waiter_killed_mid_try_runs_nothing() {
+    export LEXICON_MACHINE_VERDICT=no
+    : > "$T/kill-try"
+    job A
+    wait "$A" 2> /dev/null || true
+    # A's lockf took slot 1 for nobody; it must let it go unrun, so B gets it.
+    job B
+    expect_event "B 1 $CORES"
+    release B
 }
 
 test_a_waiting_quiet_run_holds_no_slot() {

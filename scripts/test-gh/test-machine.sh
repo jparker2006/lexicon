@@ -25,11 +25,23 @@ test_top_processes_leave_out_lexicons_own_builds() {
     expect_no_out "Lexicon"
 }
 
-test_slots_are_unknown_without_the_slot_files() {
+test_no_slot_files_means_no_slot_in_use() {
     use_fixture machine-0636
     use_fakes
     run machine.sh
-    expect_out "build slots unknown"
+    expect_out "build slots 0 of 3 in use | queue: 0 waiting"
+}
+
+test_an_unreadable_reading_says_no() {
+    use_fixture machine-0636
+    use_fakes
+    printf '10\n{ 1.00 1.00 1.00 }\n' > "$GH_FIXTURES/cmd/sysctl"
+    echo "memory_pressure: no reading" > "$GH_FIXTURES/cmd/memory_pressure"
+    run machine.sh
+    expect_out "room for more builders: no (memory reading unknown)"
+    printf '\n' > "$GH_FIXTURES/cmd/sysctl"
+    run machine.sh
+    expect_out "room for more builders: no (load reading unknown; memory reading unknown)"
 }
 
 test_slots_in_use_are_counted() {
