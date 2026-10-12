@@ -100,6 +100,12 @@ test('words after the Check: line are a footer and not counted', () => {
   assert.deepEqual(rules(checkBody({ body: body('Code only.', `Code only. ${filler}`) })), ['words'])
 })
 
+test('a collapsed <details> block is not counted', () => {
+  const rows = Array.from({ length: WORD_CAP }, () => '| CONFIRMED | x.swift:1 | a finding |').join('\n')
+  assert.deepEqual(checkBody({ body: body('## Merge Danger', `<details><summary>Findings</summary>\n\n${rows}\n\n</details>\n\n## Merge Danger`) }), [])
+  assert.deepEqual(rules(checkBody({ body: body('## Merge Danger', `${rows}\n\n## Merge Danger`) })), ['words'])
+})
+
 test('a table rule or a tree branch is not a word', () => {
   const tree = Array.from({ length: WORD_CAP }, () => '| --- | ├── |').join('\n')
   assert.deepEqual(checkBody({ body: body('## Evidence', `${tree}\n\n## Evidence`) }), [])

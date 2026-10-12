@@ -1,6 +1,6 @@
 ---
 name: pr
-description: "Use when writing a PR body."
+description: "Write, check and post the body of a Lexicon PR: the template with Refs first, the Review table and Helpers line from the lexicon-review Workflow, numbers from the check summary, scores from scripts/eval-quick.sh, then scripts/pr-body-check.mjs before gh pr create or gh pr edit. Use whenever you open a PR in this repo or change a PR body, including implement-ticket step 6 and every fix pushed after a review."
 metadata:
   credits:
     skill: show-me
@@ -9,7 +9,7 @@ metadata:
     url: "https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"
 ---
 
-Use this template for writing the PR body:
+Write the body to a file in your scratchpad with this template, check it, then post it:
 
 ```markdown
 Refs #N
@@ -20,8 +20,13 @@ Refs #N
 
 ## Evidence
 
-- **Before:** <screenshot/output/failing test run>
-  **After:** <screenshot/output/passing test run>
+- **Before:** <the red run: `scripts/test.sh --red origin/main` or the failing test>
+  **After:** <the passing run>
+- **Scores:** <scripts/eval-quick.sh's numbers; only when speech, Cleanup or the Lexicon changed>
+
+**Check script:** <the line `node scripts/pr-body-check.mjs --numbers` prints>
+
+<the lexicon-review Workflow's markdown, its table rows collapsed, then your Fixed and Helpers lines>
 
 ## Merge Danger
 
@@ -29,7 +34,7 @@ Refs #N
 
 <optional: description>
 
-**Blast Radius:** <one-word description>
+**Blast Radius:** <one word from the list below>
 
 <optional: potential ramifications of merge>
 
@@ -40,16 +45,40 @@ Refs #N
 Check: <the one thing Jake should try once it is installed>
 ```
 
-## Lexicon additions
+Then:
 
-- **`Refs #N`** alone on the first line. It links the PR to its issue, and words after the number make it prose.
-- **Scores.** A change to speech, Cleanup or the Lexicon puts its quick `lexicon-eval` scores in Evidence (words heard right, Terms right, lag). Any score that got worse goes on the line after `Refs #N`, before Summary: `Score worse: <which score, before and after>`.
-- **`## Install`** after Merge Danger, listing every step installing it needs (a new permission, a data migration, a model download), or "Code only."
-- **`Check:`** as the last line, with the one thing Jake should try once it is installed. A footer your tool adds may follow it.
-- Keep it under about 750 words, every whitespace-separated token counted, so a long tree counts too.
+```bash
+node scripts/pr-body-check.mjs <body file> && gh pr create --base main --title "<title>" --body-file <body file>
+```
+
+The same check runs before every `gh pr edit --body-file`. It names each rule the body breaks; fix the body, never the check.
+
+## What the check holds you to
+
+- **`Refs #N`** alone on the first line. It links the PR to its issue; words after the number make it prose. Never a closing keyword (any form of close, fix or resolve before an issue, such as "Fixed #12"), in the body or in any commit: Jake closes the issue once he has used the change.
+- **The headings** Summary, Evidence, Merge Danger, Install, in that order. `**Door:**` starts one-way or two-way.
+- **`**Blast Radius:**`** is one word: capture, history, insertion, fn, network, privacy, permissions, bundle, speech, cleanup, lexicon, ui, eval, scripts, agents, ci, tests, docs or none. Pick the area a bad merge hurts most; the description below it says how.
+- **`Check:`** after Install, with the one thing Jake should try once it is installed.
+- **750 words at most.** A word is a whitespace-separated token with a letter or digit in it, so table rules and tree branches don't count but every word in a tree does. The count stops at the `Check:` line: a footer your tool adds after it (the "Generated with" line) is not counted. A collapsed `<details>` block is not counted either, because Jake opens it only when he wants it.
+- **Numbers from the check, never typed.** `node scripts/pr-body-check.mjs --numbers` prints the `**Check script:**` line from `.build/check-summary.json` (steps, tests run, failed, at which sha), and the check refuses a body without that exact line or a summary for other content. After a merge of `main`, rerun `scripts/check.sh` first. A lag, memory or speed number comes from `bench-runner`'s table, never a hand run.
+- **Scores** whenever speech, Cleanup or the Lexicon changed (the `Scores` paths in `.claude/workflows/review-map.json`, less the eval tooling): a `**Scores:**` line with `scripts/eval-quick.sh`'s numbers (words heard right, Terms right, lag). "none" fails. Any score that got worse also goes on the line after `Refs #N`, before Summary: `Score worse: <which score, before and after>`.
+- **No em dash, no `/Users/` path, no handle mention** (the at-sign before Codex's or Claude's name, which can start a cloud task on Jake's plan; write "Codex's handle").
+- **A departure from the spec links its decision.** Words like "deviates", "departs from", "unlike the spec" need a link to the `docs/DECISIONS.md` entry holding Jake's recorded decision. A departure Jake never decided doesn't ship; implement-ticket's Need Jake asks him first.
+
+## Review and Helpers
+
+Paste the lexicon-review Workflow's `markdown` from its last run (the one whose reviewed sha is the head you push). Put the table's rows in a `<details><summary>Findings</summary>` block and keep the reviewed-sha line, the Counted line and any INCOMPLETE line outside it. Under it:
+
+- **Fixed:** one line per CONFIRMED finding: where, what changed, and `red test: <test name>` (the test that failed first, then passed), or `verifier: <the verifier's label in the run>` when no headless test can show it.
+- **Helpers:** the Workflow's Helpers line, then one line per helper you started yourself (scouts, editors, test-writer, spec-checker, swarms, bench-runner): its type, model and effort, and what came of it ("test-writer (haiku xhigh): 4 red tests, kept 3").
+
+## Also
+
+- `## Install` lists every step installing it needs (a new permission, a data migration, a model download), or "Code only."
+- An architect sketch (implement-ticket step 2) is linked from Summary.
+- Live-app evidence cites the Live checks session's `Live checks: <branch> @ <sha>` comment and its screenshot paths.
 - No private data: no Test set text, Wispr text, History, starter Lexicon entries or keys. Paths only.
-
-Use `Refs`, never a closing keyword (any form of close, fix or resolve before an issue, such as "Fixed #12"), in the body and in every commit. Jake closes the issue once he has used the change.
+- Review replies go on the PR, never only on the issue: `Fixed review: PR #M at <sha7>, CI pending` after a fix, and every reply to a verdict.
 
 ## Sections
 
@@ -178,7 +207,7 @@ You may use one of these, you may use several, it is unlikely you will use all o
 
 Concrete evidence that the change works. Show a before and after.
 
-Screenshots are S-tier - when the environment is set up for it and the change is visual (the Lexicon Dev build): cite the Live checks session's comment and its screenshot paths.
+Screenshots are S-tier when the change is visual (the Lexicon Dev build): cite the Live checks session's comment and its screenshot paths.
 
 Execution-based evidence is A-tier. Test results, console output, `lexicon-eval` scores. Show the exact test that now fails and passes, using pseudocode.
 

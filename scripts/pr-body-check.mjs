@@ -19,7 +19,8 @@
 //   check      a "Check:" line after Install; what follows it is a footer
 //   words      at most WORD_CAP words up to the Check: line. A word is a token
 //              between spaces with a letter or digit, so table rules and tree
-//              branches don't count; the footer a tool adds after Check: doesn't
+//              branches don't count; nor does a collapsed <details> block, or the
+//              footer a tool adds after Check:
 //   scores     a **Scores:** line with numbers when speech, Cleanup or the Lexicon
 //              changed (review-map.json's "Scores" paths less the eval tooling)
 //   emdash, home, handle   no em dash, no /Users/ path, no handle mention
@@ -104,7 +105,15 @@ export function checkBody({ body, files = [], commits = [], summary = null }) {
   const check = lines.findIndex((l, i) => i > install && /^Check:\s*\S/.test(l))
   if (check < 0) fail('check', 'a "Check:" line must follow ## Install, with the one thing Jake should try')
 
-  const counted = check < 0 ? lines : lines.slice(0, check + 1)
+  // A collapsed block (the Review table's rows) opens only on a click, so only
+  // what shows counts.
+  let open = false
+  const counted = (check < 0 ? lines : lines.slice(0, check + 1)).filter(l => {
+    if (/^\s*<details>/.test(l)) open = true
+    const show = !open
+    if (/<\/details>\s*$/.test(l)) open = false
+    return show
+  })
   const words = counted.join(' ').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
   if (words > WORD_CAP) fail('words', `${words} words, over the ${WORD_CAP}-word cap (counted up to the Check: line); cut ${words - WORD_CAP}`)
 
