@@ -44,7 +44,10 @@ setup() {
     for c in /bin/cat /usr/bin/stat; do
         printf '#!/bin/sh\ncase "$*" in *"/heavy/queue/"*) [ ! -e "%s/read-fails" ] || exit 1 ;; esac\nexec %s "$@"\n' "$T" "$c" > "$T/bin/${c##*/}"
     done
-    chmod +x "$T/bin/ps" "$T/bin/lockf" "$T/bin/cat" "$T/bin/stat"
+    # The clock reads 5 s late while $T/clock-ahead exists, as if the Mac
+    # stalled between two readings.
+    printf '#!/bin/sh\nif [ "$*" = "+%%s" ] && [ -e "%s/clock-ahead" ]; then echo $(( $(/bin/date +%%s) + 5 )); else exec /bin/date "$@"; fi\n' "$T" > "$T/bin/date"
+    chmod +x "$T/bin/ps" "$T/bin/lockf" "$T/bin/cat" "$T/bin/stat" "$T/bin/date"
     export PATH="$T/bin:$PATH"
     trap cleanup EXIT
 }
@@ -71,6 +74,20 @@ job() {
     eval "$name=\$!"
     PIDS="$PIDS $!"
 }
+
+# job_unreaped NAME: job, under a parent that never reaps it, so once killed it
+# stays a zombie, which kill -0 still finds. Its pid is $NAME.
+job_unreaped() {
+    name=$1
+    mkfifo "$T/release.$name"
+    perl -e '$| = 1; $p = fork; if (!$p) { exec @ARGV or exit 127 } print "$p\n"; sleep 600' \
+        scripts/lib/heavy.sh sh -c 'echo "$1 $HEAVY_SLOT $HEAVY_JOBS" > "$2/events"; read -r x < "$2/release.$1"' job "$name" "$T" > "$T/pid.$name" 2>&4 &
+    PIDS="$PIDS $!"
+    until [ -s "$T/pid.$name" ]; do :; done
+    eval "$name=\$(cat \"\$T/pid.\$name\")"
+}
+
+zombie() { [ "$(ps -o stat= -p "$1" 2> /dev/null | cut -c1)" = Z ]; }
 
 # expect_event "NAME SLOT JOBS": the next job to take a slot is that one.
 # timing-ok: the 30 s read limit here and in expect_wait only bounds a hang;
@@ -277,6 +294,36 @@ test_an_entry_read_that_fails_keeps_the_line() {
     expect_event "B 2 $((CORES / 2))"
     release A
     release B
+}
+
+test_a_waiter_dead_but_unreaped_drops_out() {
+    perl -e '$| = 1; $p = fork; exit 0 unless $p; print "$p\n"; sleep 600' > "$T/pid.Z" &
+    PIDS="$PIDS $!"
+    until [ -s "$T/pid.Z" ]; do :; done
+    Z=$(cat "$T/pid.Z")
+    until zombie "$Z"; do :; done
+    mkdir -p "$SLOTS/queue"
+    : > "$SLOTS/queue/0000000001.$Z"
+    out=$(scripts/lib/heavy.sh status)
+    case "$out" in *"queue: 0 waiting"*) ;; *) fail "a dead waiter kept its place: $out" ;; esac
+}
+
+test_a_waiter_dead_but_unreaped_mid_try_runs_nothing() {
+    export LEXICON_MACHINE_VERDICT=no
+    : > "$T/kill-try"
+    job_unreaped A
+    until zombie "$A"; do :; done
+    job B
+    expect_event "B 1 $CORES"
+    release B
+}
+
+test_a_clock_read_late_keeps_a_waiter() {
+    export LEXICON_MACHINE_VERDICT=no
+    : > "$T/clock-ahead"
+    job A
+    expect_event "A 1 $CORES"
+    release A
 }
 
 test_a_waiter_killed_mid_try_runs_nothing() {
