@@ -1,0 +1,11 @@
+item: Delete refused while in flight
+kind: jake
+gesture: double-tap fn to start a hands-free Dictation, then try Delete on its History row
+target: the History window
+speak: yes
+fn: yes
+cue: the start sound
+observable: the in-flight row's Delete is greyed and refuses
+pass: Delete is greyed while recording, and the row is still there after
+needs: doubleTapWindow
+minutes: 2
