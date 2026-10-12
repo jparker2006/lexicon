@@ -116,6 +116,17 @@ enum Fillers {
         for i in tokens.indices.dropLast() where tokens[i].isAbbreviation && !titles.contains(tokens[i].word) {
             tokens[i].endsSentence = tokens[i + 1].isCapitalized
         }
+        // "oh" is a zero in a run that touches a number: "oh oh seven", "five oh oh oh".
+        var run = tokens.startIndex
+        while run < tokens.endIndex {
+            guard tokens[run].word == "oh" else { run += 1; continue }
+            var end = run + 1
+            while end < tokens.endIndex, tokens[end].word == "oh" { end += 1 }
+            if run > 0 && tokens[run - 1].isNumber || end < tokens.endIndex && tokens[end].isNumber {
+                for k in run..<end { tokens[k].isZero = true }
+            }
+            run = end
+        }
         var kept: [String] = []
         var keptWords: [String] = []
         var sentenceKept = 0          // tokens kept in the current sentence
@@ -138,10 +149,11 @@ enum Fillers {
             }
 
             // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
-            // "like, um, uh, eighty": the fillers between do not decide whether "like" stays.
-            let likeObject = token.word == "like" ? tokens[(i + 1)...].first { !hard.contains($0.word) } : nil
+            // "like, um, uh, eighty": the first word after the fillers decides whether "like" is a hedge.
+            let hedge = token.word == "like"
+                && tokens[(i + 1)...].first { !hard.contains($0.word) }.map { $0.keepsLike || rules.isWritten($0.text) } == true
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
-                                 after: i + 2 < tokens.count ? tokens[i + 2] : nil, likeObject: likeObject,
+                                 after: i + 2 < tokens.count ? tokens[i + 2] : nil, hedge: hedge,
                                  dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
                                  previous: sentenceKept > 0 ? (kept.last!, keptWords.last!, sentenceKept == 1) : nil)
             if drop > 0 {
@@ -187,10 +199,10 @@ enum Fillers {
     }
 
     /// How many tokens from `token` on are fillers to delete: 0, 1 or 2.
-    /// `prior`: the token just before, kept or not. `likeObject`: the first word after a "like" that is not a filler.
+    /// `prior`: the token just before, kept or not. `hedge`: a "like" before a number, a name or a Term.
     /// `previous`: the last kept token in this sentence, its word, and whether it opened the sentence.
     /// `dictationStart`: nothing kept yet in the Dictation. `afterOpener`: a filler already went from this sentence's start.
-    private static func dropCount(_ token: Token, prior: Token?, next: Token?, after: Token?, likeObject: Token?,
+    private static func dropCount(_ token: Token, prior: Token?, next: Token?, after: Token?, hedge: Bool,
                                   dictationStart: Bool, afterOpener: Bool,
                                   setOffBefore: Bool, previous: (text: String, word: String, opensSentence: Bool)?)
         -> Int {
@@ -219,15 +231,14 @@ enum Fillers {
            next.trailing.hasPrefix(","), after != nil {
             return 2
         }
-        if setOffBefore, word == "like", token.trailing.hasPrefix(","), next != nil, likeObject?.keepsLike != true {
+        if setOffBefore, word == "like", token.trailing.hasPrefix(","), next != nil, !hedge {
             return 1
         }
 
         if let previous, token.isWord, !meantDoubles.contains(word),
            !previous.text.last!.isPunctuation, previous.word == word,
            previous.text == token.text || previous.opensSentence,
-           // "oh" is a zero only beside a number: "oh oh seven", "five oh five".
-           !token.isNumber, !(word == "oh" && (prior?.isNumber == true || next?.isNumber == true)) {
+           !token.isNumber, !token.isZero {
             return 1
         }
         return 0
@@ -247,6 +258,8 @@ private struct Token {
     var endsSentence: Bool
     /// "etc.", "e.g.", "p.m.": the period may be the abbreviation's own.
     let isAbbreviation: Bool
+    /// An "oh" read as zero (`Fillers.clean`).
+    var isZero = false
 
     init(_ text: Substring) {
         var body = text
@@ -307,8 +320,19 @@ private struct Token {
     /// The speech model started a sentence here: "Um", "Then". Not "I", which is always capitalized.
     var isCapitalized: Bool { text.first(where: \.isLetter)?.isUppercase == true && !Token.firstPerson.contains(word) }
     var keepsLike: Bool {
-        word.contains(where: \.isNumber) || isNumber || StructuralCheck.ordinals[word] != nil || isName
-            || Fillers.likeKeepers.contains(word)
+        word.contains(where: \.isNumber) || isName || Fillers.likeKeepers.contains(word)
+            || word.split(separator: "-").first.map { Token.isNumberWord(String($0)) } ?? false
+    }
+
+    /// Cardinals, ordinals and their plurals and fractions: "ten", "third", "thirds",
+    /// "twenties", "tenths", "hundredth".
+    static func isNumberWord(_ word: String) -> Bool {
+        var stems = [word]
+        if word.hasSuffix("ies") { stems.append(word.dropLast(3) + "y") }
+        if word.hasSuffix("s") { stems.append(String(word.dropLast())) }
+        if word.hasSuffix("ths") { stems.append(String(word.dropLast(3))) }
+        if word.hasSuffix("th") { stems.append(String(word.dropLast(2))) }
+        return stems.contains { StructuralCheck.isCardinal($0) || StructuralCheck.ordinals[$0] != nil }
     }
 
     static let firstPerson: Set<String> = ["i", "i'm", "i'd", "i'll", "i've"]

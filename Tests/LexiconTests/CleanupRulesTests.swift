@@ -162,6 +162,7 @@ let numberRepeatCases: [Case] = [
     Case("Call five five five, one two one two.", "Call five five five, one two one two."),
     Case("Um, five five five is the number I need.", "Five five five is the number I need."),
     Case("Use the PIN one one one one.", "Use the PIN one one one one."),
+    Case("Dial five oh oh oh now.", "Dial five oh oh oh now."),
     Case("Oh oh seven, that's the one.", "Oh oh seven, that's the one."),
     Case("The build is version two two and it's stable.", "The build is version two two and it's stable."),
     Case("It's a hundred hundred pixels wide.", "It's a hundred hundred pixels wide."),
@@ -191,6 +192,11 @@ let likeKeptCases: [Case] = [
     Case("It's, like, um, uh, Postgres.", "It's, like, Postgres."),
     Case("It takes, like, between ten and twenty minutes.", "It takes, like, between ten and twenty minutes."),
     Case("We finished, like, third in the race.", "We finished, like, third in the race."),
+    Case("It's off by, like, tenths of a second.", "It's off by, like, tenths of a second."),
+    Case("It's from, like, the twenties.", "It's from, like, the twenties."),
+    Case("It runs in, like, twenties of milliseconds.", "It runs in, like, twenties of milliseconds."),
+    Case("It's, like, a hundredth of the size.", "It's, like, a hundredth of the size."),
+    Case("It's, like, hundredth in line.", "It's, like, hundredth in line."),
     Case("It holds, like, dozen jobs at most.", "It holds, like, dozen jobs at most."),
     Case("We run, like, thirty-something servers.", "We run, like, thirty-something servers."),
     Case("It took, like, two-ish hours.", "It took, like, two-ish hours."),
@@ -209,6 +215,11 @@ let likeKeptCases: [Case] = [
 @Test(arguments: likeKeptCases)
 func likeStaysBeforeAnyNumberOrName(_ c: Case) {
     #expect(clean(c.raw) == c.gold)
+}
+
+@Test func likeStaysBeforeALowercaseTerm() {
+    let rules = RuleSet([Rule(heard: "gee stack", written: "gstack")])
+    #expect(TextPass.run("We use, like, gstack for that.", rules: rules) == "We use, like, gstack for that.")
 }
 
 /// "uh huh" and "mm-hmm" are answers, not fillers.
