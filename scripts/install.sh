@@ -78,35 +78,47 @@ announce() {
     echo "install: Installed: $new7 posted on${posted:- no new issues}; Try list #$try updated${untried:+ (no try step:$untried)}" >&2
 }
 
+# Under the install lock: build, read the copy being replaced, swap. Prints
+# "<previous commit> <installed commit>" on stdout, everything else on stderr.
+swap() {
+    . scripts/lib/flavor.sh
+    flavor daily
+    previous=$(plutil -extract LexiconCommit raw "$APP_PATH/Contents/Info.plist" 2> /dev/null || true)
+    APP=$(scripts/bundle.sh daily)
+    commit=$(plutil -extract LexiconCommit raw "$APP/Contents/Info.plist")
+    echo "Installing Lexicon $commit" >&2
+    scripts/lib/install-app.sh daily "$APP" >&2
+    echo "${previous%-dirty} $commit"
+}
+
+USAGE="usage: install.sh | install.sh announce <installed commit> [<previous commit>]"
 case "${1:-}" in
     announce)
-        [ $# -ge 2 ] && [ $# -le 3 ] || { echo "usage: install.sh | install.sh announce <installed commit> [<previous commit>]" >&2; exit 64; }
+        [ $# -ge 2 ] && [ $# -le 3 ] || { echo "$USAGE" >&2; exit 64; }
         announce "$2" "${3:-}"
         exit 0
         ;;
+    swap)
+        [ $# -eq 1 ] && [ -n "${LEXICON_INSTALL_LOCKED:-}" ] || { echo "$USAGE" >&2; exit 64; }
+        swap
+        exit 0
+        ;;
     "") ;;
-    *) echo "usage: install.sh | install.sh announce <installed commit> [<previous commit>]" >&2; exit 64 ;;
+    *) echo "$USAGE" >&2; exit 64 ;;
 esac
 
 # The daily copy is main as merged: never a branch, and never files nobody committed.
 branch=$(git symbolic-ref --short -q HEAD || true)
 [ "$branch" = main ] || die "the daily copy installs only main; this checkout is on ${branch:-a detached HEAD}"
-[ -z "$(git status --porcelain -- Sources Package.swift Package.resolved scripts)" ] ||
-    die "uncommitted changes in Sources, Package.swift, Package.resolved or scripts; the daily copy installs only committed main"
+changed=$(git status --porcelain -- Sources Package.swift Package.resolved scripts) || die "can't read git status"
+[ -z "$changed" ] || die "uncommitted changes in Sources, Package.swift, Package.resolved or scripts; the daily copy installs only committed main"
 
 # The build runs under the lock too: bundle.sh rewrites its bundle folder, and a
-# second install building beside this one would swap in half of it.
-LOCK="${TMPDIR:-/tmp}/dev.jparker.lexicon.install.lock"
-[ -n "${LEXICON_INSTALL_LOCKED:-}" ] || exec env LEXICON_INSTALL_LOCKED=1 lockf -k -t 600 "$LOCK" scripts/install.sh
-
-. scripts/lib/flavor.sh
-flavor daily
-# Read before the swap: the copy being replaced says where this install starts.
-previous=$(plutil -extract LexiconCommit raw "$APP_PATH/Contents/Info.plist" 2> /dev/null || true)
-APP=$(scripts/bundle.sh daily)
-commit=$(plutil -extract LexiconCommit raw "$APP/Contents/Info.plist")
-echo "Installing Lexicon $commit" >&2
-scripts/lib/install-app.sh daily "$APP"
+# second install building beside this one would swap in half of it. The GitHub
+# posts come after, so a slow network never holds the lock.
+done=$(LEXICON_INSTALL_LOCKED=1 lockf -k -t 600 "${TMPDIR:-/tmp}/dev.jparker.lexicon.install.lock" scripts/install.sh swap)
+previous=${done% *}
+commit=${done##* }
 # Its own process, so set -e stops it at the first gh call that fails.
-scripts/install.sh announce "$commit" "${previous%-dirty}" ||
-    die "installed $commit, but the Installed comments were not all posted; finish with: scripts/install.sh announce $commit${previous:+ ${previous%-dirty}}"
+scripts/install.sh announce "$commit" $previous ||
+    die "installed $commit, but the Installed comments were not all posted; finish with: scripts/install.sh announce $commit${previous:+ $previous}"

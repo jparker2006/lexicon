@@ -8,7 +8,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, wri
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { acceptanceGate, liveGate, mergePr, tierGate, verdictGate } from './merge-pr.mjs';
+import { acceptanceGate, inUse, liveGate, mergePr, tierGate, verdictGate } from './merge-pr.mjs';
 import { waitCi } from './wait-ci.mjs';
 import { squashOf, stubGh, updatedHead } from './merge-fixtures/stub-gh.mjs';
 
@@ -372,6 +372,26 @@ test('a Later note needs its issue under a plain merge verdict too', () => {
   assert.deepEqual(verdictGate(pr, c.sha, OWNER), ['a Later note has no issue number (scripts/ticket.sh later makes one): "bench.sh prints job noise."']);
 });
 
+test('live gate: a result that says failed or failures is a FAIL too', () => {
+  for (const word of ['2 of 3 items failed.', 'Two failures in item 4.']) {
+    const issue = { number: 1, body: '**Needs the Live checks session for:** agent: paste.\n', comments: [{ author: { login: OWNER }, createdAt: 'x', body: `Live checks: claude/issue-1 @ 599ed51\n\n${word}` }] };
+    assert.deepEqual(liveGate(issue, 'claude/issue-1', H599, OWNER).reasons, ["#1's Live checks result at 599ed51 has a FAIL"], word);
+  }
+});
+
+test('GitHub refusals without a status code are refusals', async () => {
+  const state = fixture('0643');
+  state.mergeFails = 'GraphQL: Resource not accessible by integration (mergePullRequest)';
+  const result = await merge(['95', D3C], state, { onSleep: (s) => s.runs.push(run(1, updatedHead(95), 'success')) });
+  assert.equal(result.lines.at(-1), 'refused #95: GitHub refused the merge: GraphQL: Resource not accessible by integration (mergePullRequest)');
+});
+
+test('an lsof that times out keeps the worktree; one that lists nothing frees it', async () => {
+  await assert.rejects(inUse('/w', async () => { throw Object.assign(new Error('lsof failed'), { code: null, killed: true }); }), /kept the worktree: lsof could not say/);
+  assert.deepEqual(await inUse('/w', async () => { throw Object.assign(new Error('lsof failed'), { code: 1, killed: false, stdout: '' }); }), []);
+  assert.deepEqual(await inUse('/w', async () => 'p12\ncclaude\nfcwd\nn/w/sub\np13\nczsh\nfcwd\nn/other\n'), ['claude (pid 12)']);
+});
+
 // ---- as programs: the checkout rule needs real git, and install.sh is shell
 
 function repo() {
@@ -482,6 +502,48 @@ test('install.sh announce: two carried issues get one Installed comment each, th
     const final = JSON.parse(readFileSync(path.join(gh, 'issues.json'), 'utf8'));
     for (const n of [45, 63]) assert.equal(final.find((i) => i.number === n).comments.filter((c) => c.body.startsWith(`Installed: ${sha7}`)).length, 1, `#${n}`);
     assert.equal(final.find((i) => i.number === 178).body, tryList);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(gh, { recursive: true, force: true });
+  }
+});
+
+test('install.sh builds and swaps under the install lock, then posts from the copy it replaced', () => {
+  const { dir, g } = repo();
+  const gh = mkdtempSync(path.join(os.tmpdir(), 'install-gh-'));
+  try {
+    mkdirSync(path.join(dir, 'scripts/lib'), { recursive: true });
+    cpSync(path.join(HERE, 'install.sh'), path.join(dir, 'scripts/install.sh'));
+    cpSync(path.join(HERE, 'lib/flavor.sh'), path.join(dir, 'scripts/lib/flavor.sh'));
+    // Fakes for the build and the swap: they record whether the install lock is held, and touch only this folder.
+    writeFileSync(path.join(dir, 'scripts/bundle.sh'), `#!/bin/sh
+if lockf -s -t 0 "$TMPDIR/dev.jparker.lexicon.install.lock" true; then echo unlocked; else echo locked; fi > "$TMPDIR/bundle-lock"
+app=$TMPDIR/bundle/Lexicon.app
+mkdir -p "$app/Contents"
+plutil -create xml1 "$app/Contents/Info.plist"
+plutil -insert LexiconCommit -string "$(git rev-parse --short HEAD)" "$app/Contents/Info.plist"
+echo "$app"
+`, { mode: 0o755 });
+    writeFileSync(path.join(dir, 'scripts/lib/install-app.sh'), '#!/bin/sh\necho "swapped $2"\n', { mode: 0o755 });
+    g('add', '.');
+    g('commit', '-q', '-m', 'M0: Fix the flaky AudioCapture tests that race the wall clock (#103) (#106)');
+    const previous = g('rev-parse', '--short', 'HEAD').trim();
+    g('commit', '-q', '--allow-empty', '-m', 'M0: Test hooks and the Accessibility harness (#45) (#105)');
+    g('commit', '-q', '--allow-empty', '-m', 'M1: History window: rows, copy and search (#63) (#112)');
+    const home = path.join(gh, 'home');
+    const old = path.join(home, 'Applications/Lexicon.app/Contents');
+    mkdirSync(old, { recursive: true });
+    execFileSync('plutil', ['-create', 'xml1', path.join(old, 'Info.plist')]);
+    execFileSync('plutil', ['-insert', 'LexiconCommit', '-string', previous, path.join(old, 'Info.plist')]);
+    cpSync(path.join(FIXTURES, 'install'), gh, { recursive: true });
+    const env = { ...process.env, HOME: home, TMPDIR: gh, PATH: `${path.join(HERE, 'test-gh/bin')}:${process.env.PATH}`, GH_FIXTURES: gh, GH_LOG: path.join(gh, 'gh.log'), LEXICON_NOW: '2026-10-11T12:00:00Z' };
+    const result = spawnSync('sh', [path.join(dir, 'scripts/install.sh')], { encoding: 'utf8', env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(path.join(gh, 'bundle-lock'), 'utf8'), 'locked\n');
+    const issues = JSON.parse(readFileSync(path.join(gh, 'issues.json'), 'utf8'));
+    const sha7 = g('rev-parse', '--short=7', 'HEAD').trim();
+    for (const n of [45, 63]) assert.equal(issues.find((i) => i.number === n).comments.filter((c) => c.body.startsWith(`Installed: ${sha7}`)).length, 1, `#${n}`);
+    assert.match(result.stderr, /swapped .*Lexicon\.app/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(gh, { recursive: true, force: true });

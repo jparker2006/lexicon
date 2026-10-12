@@ -304,7 +304,8 @@ async function gates(number, sha, head, deps) {
 }
 
 // A merge GitHub turned down is a definite no; anything else may have landed.
-const REFUSED = /Head branch was modified|not mergeable|HTTP 40[0-9]|HTTP 422|required status|review is required|merge conflict/i;
+// gh's GraphQL errors carry no status code, so GitHub's own wordings are matched too.
+const REFUSED = /HTTP 4\d\d|was modified|not mergeable|required status|review is required|merge conflict|not accessible|permission|not authorized|forbidden|protected branch|already merged|is closed/i;
 
 /**
  * gh and git resolve to stdout; checkouts are the folders that must be the
@@ -396,15 +397,18 @@ export async function mergePr(args, deps) {
 
 const run = (command, args, options = {}) => new Promise((resolve, reject) => {
   execFile(command, args, { cwd: ROOT, maxBuffer: 64 << 20, ...options }, (error, stdout, stderr) => {
-    if (error) reject(new Error(String(stderr || error.message).trim().split('\n')[0]));
+    if (error) reject(Object.assign(new Error(String(stderr || error.message).trim().split('\n')[0] || `${command} failed`), { code: error.code, killed: error.killed, stdout }));
     else resolve(stdout);
   });
 });
 
 /** "<command> (pid N)" for each process whose working directory is in the folder. */
-async function inUse(folder) {
-  // lsof exits 1 when it lists nothing.
-  const out = await run('lsof', ['-a', '-d', 'cwd', '-F', 'pcn'], { timeout: 60_000 }).catch(() => '');
+export async function inUse(folder, lsof = (args) => run('lsof', args, { timeout: 60_000 })) {
+  // lsof exits 1 when it lists nothing; any other failure, a timeout included, keeps the worktree.
+  const out = await lsof(['-a', '-d', 'cwd', '-F', 'pcn']).catch((error) => {
+    if (error.code === 1 && !error.killed) return error.stdout;
+    throw new Error(`kept the worktree: lsof could not say what runs in it (${error.message})`);
+  });
   const found = [];
   let pid, command;
   for (const line of out.split('\n')) {
@@ -421,7 +425,7 @@ if (isMain(import.meta.url)) {
     git: (args) => run('git', args, { timeout: 120_000 }),
     checkouts: [ROOT, process.cwd()],
     lanes: () => run(path.join(ROOT, 'scripts/lanes.sh'), [], { timeout: 300_000 }),
-    inUse,
+    inUse: (folder) => inUse(folder),
     removeDir: (folder) => rm(folder, { recursive: true, force: true }),
     read: (file) => readFile(path.join(ROOT, file), 'utf8'),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
