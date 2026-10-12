@@ -39,7 +39,7 @@ func pill(_ arguments: [String]) async throws {
         try checkMenuBar(expectation, item: item)
         try checkFocus(expectation, app: app, focus: focus)
         if let shots, state != .hidden {
-            saveShots(in: shots, state: expectation.name, app: app, item: item)
+            await saveShots(in: shots, state: expectation.name, app: app, item: item)
         }
         if state == .landed {
             try await Task.sleep(until: asked.advanced(by: .milliseconds(700)), clock: .continuous)
@@ -169,9 +169,9 @@ func indicatorWindow(_ app: DevApp) -> AXUIElement? {
 /// Saves the pill and the menu bar icon as they look in `state`. A picture that
 /// cannot be taken is a warning: the checks have already passed.
 @MainActor
-func saveShots(in folder: URL, state: String, app: DevApp, item: AXUIElement) {
+func saveShots(in folder: URL, state: String, app: DevApp, item: AXUIElement) async {
     if let number = pillWindowNumber(pid: app.status.pid) {
-        capture(["-x", "-o", "-l\(number)", folder.appending(path: "\(state)-pill.png").path], label: "\(state) pill")
+        await capture(["-x", "-o", "-l\(number)", folder.appending(path: "\(state)-pill.png").path], label: "\(state) pill")
     } else {
         print("warn  \(state) pill: no window of Lexicon Dev is on screen")
     }
@@ -184,13 +184,13 @@ func saveShots(in folder: URL, state: String, app: DevApp, item: AXUIElement) {
     let rect = [padded.minX.rounded(.down), padded.minY.rounded(.down), padded.width.rounded(.up), padded.height.rounded(.up)]
         .map { "\(Int($0))" }
         .joined(separator: ",")
-    capture(["-x", "-R\(rect)", folder.appending(path: "\(state)-menubar.png").path], label: "\(state) menu bar icon")
+    await capture(["-x", "-R\(rect)", folder.appending(path: "\(state)-menubar.png").path], label: "\(state) menu bar icon")
 }
 
 /// `screencapture` through `run`, with a failure as a warning line.
-func capture(_ arguments: [String], label: String) {
+func capture(_ arguments: [String], label: String) async {
     do {
-        try run("/usr/sbin/screencapture", arguments)
+        try await run("/usr/sbin/screencapture", arguments)
     } catch {
         print("warn  \(label) not saved: \(error)")
     }

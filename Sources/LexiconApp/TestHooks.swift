@@ -1,13 +1,13 @@
 #if DEBUG
 import AppKit
 import os
-import LexiconCore
 import LexiconDomain
 import AppText
 import AudioCapture
 import KeyInput
 import LexiconCore
 import LexiconUI
+import LocalParakeet
 import TestHooks
 
 /// The app's end of the test hooks: debug builds only, and on only for the dev
@@ -15,13 +15,38 @@ import TestHooks
 /// none of this is in it (scripts/bundle.sh checks).
 @MainActor
 enum AppTestHooks {
-    static func start(bundleID: String, paths: AppPaths, indicator: DictationIndicator,
-                      system: LexiconSystem?, preferences: PreferencesStore) -> TestHookServer? {
-        guard bundleID == AppPaths.devBundleID,
-              CommandLine.arguments.contains(TestHookChannel.launchArgument) else { return nil }
+    static func isOn(bundleID: String) -> Bool {
+        bundleID == AppPaths.devBundleID && CommandLine.arguments.contains(TestHookChannel.launchArgument)
+    }
+
+    /// A test-hooks run's data root: a scratch folder whose models link to the
+    /// dev app's, so synthetic Dictations never land in its History. The dev
+    /// app's own folder with `--dev-data`.
+    static func dataPaths(bundleID: String) -> AppPaths {
+        let own = AppPaths.forBundle(id: bundleID)
+        let paths = TestHookChannel.dataRoot(forBundle: bundleID, arguments: CommandLine.arguments)
+        guard paths != own else { return own }
         do {
-            return try TestHookServer(channel: TestHookChannel(paths: paths)) {
-                await handle($0, indicator: indicator, system: system, preferences: preferences)
+            try ParakeetTranscriber.shareModels(of: own, with: paths)
+        } catch {
+            // Dictations wait for a model rather than the run touching the dev app's data.
+            Logger(subsystem: bundleID, category: "test-hooks")
+                .error("the scratch data root has no model: \(error.localizedDescription, privacy: .public)")
+        }
+        return paths
+    }
+
+    /// The wire is always under the dev app's own root, wherever its data
+    /// goes, so the harness finds it without knowing the run's flags.
+    static func start(bundleID: String, dataRoot: AppPaths, indicator: DictationIndicator,
+                      system: LexiconSystem?, preferences: PreferencesStore,
+                      slowModel: SlowedTranscriber?) -> TestHookServer? {
+        guard isOn(bundleID: bundleID) else { return nil }
+        let context = Context(dataRoot: dataRoot, indicator: indicator, system: system, preferences: preferences,
+                              slowModel: slowModel)
+        do {
+            return try TestHookServer(channel: TestHookChannel(paths: AppPaths.forBundle(id: bundleID))) {
+                await handle($0, in: context)
             }
         } catch {
             Logger(subsystem: bundleID, category: "test-hooks")
@@ -30,15 +55,38 @@ enum AppTestHooks {
         }
     }
 
-    static func handle(_ command: TestHookCommand, indicator: DictationIndicator,
-                       system: LexiconSystem?, preferences: PreferencesStore) async -> TestHookReply {
+    struct Context {
+        let dataRoot: AppPaths
+        let indicator: DictationIndicator
+        let system: LexiconSystem?
+        let preferences: PreferencesStore
+        let slowModel: SlowedTranscriber?
+    }
+
+    static func handle(_ command: TestHookCommand, in context: Context) async -> TestHookReply {
+        let (indicator, system, preferences) = (context.indicator, context.system, context.preferences)
         return switch command {
         case .status:
-            .status(currentStatus(preferences))
+            .status(currentStatus(preferences, dataRoot: context.dataRoot))
         case .privacy(let mode, let alwaysPrivateApps):
-            privacy(mode, alwaysPrivateApps: alwaysPrivateApps, preferences: preferences)
-        case .dictate(let wav):
-            if let system { await dictate(URL(filePath: wav), on: system) } else { closed }
+            privacy(mode, alwaysPrivateApps: alwaysPrivateApps, preferences: preferences, dataRoot: context.dataRoot)
+        case .dictate(let wav, let resultDelay):
+            if let system {
+                await dictate(URL(filePath: wav), on: system, slowing: context.slowModel, by: resultDelay)
+            } else {
+                closed
+            }
+        case .keys(let keys):
+            if let keyboard = system?.keyboard {
+                press(keys, on: keyboard)
+            } else {
+                .failed("fn is off (no Accessibility or no listen access), so no key reaches the tap")
+            }
+        case .sleep:
+            // What the app's NSWorkspace will-sleep observer calls.
+            if let system { await sleep(system) } else { closed }
+        case .silenceMic:
+            if let system { silenceMic(system) } else { closed }
         case .indicator(let state):
             showing(state, on: indicator)
         case .sound(let cue):
@@ -65,23 +113,49 @@ enum AppTestHooks {
         }
     }
 
-    private static func currentStatus(_ preferences: PreferencesStore) -> TestHookStatus {
+    private static func currentStatus(_ preferences: PreferencesStore, dataRoot: AppPaths) -> TestHookStatus {
         let settings = preferences.snapshot()
         return TestHookStatus(bundleID: Bundle.main.bundleIdentifier ?? "?",
                               version: AppDelegate.version(of: .main), pid: getpid(),
                               accessibility: AXIsProcessTrusted(),
                               microphone: Setup.microphoneName,
-                              privacy: settings.privacy, alwaysPrivateApps: settings.alwaysPrivateApps.sorted())
+                              privacy: settings.privacy, alwaysPrivateApps: settings.alwaysPrivateApps.sorted(),
+                              dataRoot: dataRoot.root.path(percentEncoded: false))
     }
 
     /// The store the menu and the Conductor read, so a change is saved and a relaunch keeps it.
     private static func privacy(_ mode: PrivacyMode, alwaysPrivateApps: [String]?,
-                                preferences: PreferencesStore) -> TestHookReply {
+                                preferences: PreferencesStore, dataRoot: AppPaths) -> TestHookReply {
         preferences.update { settings in
             settings.privacy = mode
             if let alwaysPrivateApps { settings.alwaysPrivateApps = Set(alwaysPrivateApps) }
         }
-        return .status(currentStatus(preferences))
+        return .status(currentStatus(preferences, dataRoot: dataRoot))
+    }
+
+    /// Into the fn tap's own handler, back to back on its thread, so `fn down
+    /// up down` is a double tap however slowly the harness runs. The reply
+    /// comes once they are queued; the log shows what the recognizer did.
+    private static func press(_ keys: [TestHookKey], on keyboard: Keyboard) -> TestHookReply {
+        for key in keys {
+            let synthetic: SyntheticKey = switch key {
+            case .fnDown(let shift): .fnDown(shift: shift)
+            case .fnUp(let shift): .fnUp(shift: shift)
+            case .escape: .escape
+            }
+            keyboard.press(synthetic)
+        }
+        return .done
+    }
+
+    private static func sleep(_ system: LexiconSystem) async -> TestHookReply {
+        await system.conductor.systemWillSleep()
+        return .done
+    }
+
+    private static func silenceMic(_ system: LexiconSystem) -> TestHookReply {
+        system.recorder.silenceNextMicrophoneCapture()
+        return .done
     }
 
     private static func showing(_ state: IndicatorState, on indicator: DictationIndicator) -> TestHookReply {
@@ -96,11 +170,17 @@ enum AppTestHooks {
     /// the end of the file, at the speed of speech. Test fixtures only: a file in a
     /// `fixtures` folder or the temporary folder, so a hook can never feed the Test
     /// set's audio (or anything else of Jake's) into a field.
-    private static func dictate(_ wav: URL, on system: LexiconSystem) async -> TestHookReply {
+    private static func dictate(_ wav: URL, on system: LexiconSystem, slowing model: SlowedTranscriber?,
+                                by resultDelay: Double?) async -> TestHookReply {
         guard isFixture(wav) else {
             return .failed("dictate takes a test fixture: a WAV in a fixtures folder or the temporary folder")
         }
-        let result = await system.conductor.dictate(file: wav, pace: .realtime)
+        let dictate = { @Sendable in await system.conductor.dictate(file: wav, pace: .realtime) }
+        let result = if let model, let resultDelay {
+            await model.slowing(by: .seconds(max(0, min(resultDelay, 120))), dictate)
+        } else {
+            await dictate()
+        }
         return .dictated(TestHookDictation(status: result.status?.rawValue, lagMillis: result.lag.map { micros($0) / 1_000 },
                                            model: result.model?.id, characters: result.versions?.cleaned.count))
     }

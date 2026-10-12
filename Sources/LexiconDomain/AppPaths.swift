@@ -11,7 +11,8 @@ public import Foundation
 ///         audio/<id>.caf        History owns the lifecycle; AudioCapture writes bytes while recording
 ///         lexicon.sqlite        WordStore
 ///         inbox/*.json          Inbox (read and deleted by the app)
-///         test-hooks/           TestHooks: harness requests and app replies (dev builds only)
+///         test-hooks/           TestHooks: harness requests and app replies (dev builds only;
+///                               always the dev app's own root, also in a scratch run)
 ///         models/               LocalParakeet (about 614 MB of weights, never in the bundle)
 public struct AppPaths: Sendable, Hashable {
     public let root: URL
@@ -37,6 +38,18 @@ public struct AppPaths: Sendable, Hashable {
         default: bundleID
         }
         return AppPaths(root: applicationSupport.appending(path: name, directoryHint: .isDirectory))
+    }
+
+    /// The root of a test-hooks run of the dev app: synthetic History, audio
+    /// and Lexicon go to a scratch folder under the temporary folder, never into
+    /// the dev app's own data. It outlives a relaunch, so a check can relaunch
+    /// and still find its Dictations. Debug builds only use it.
+    public static func scratch(
+        forBundle bundleID: String,
+        in temporary: URL = FileManager.default.temporaryDirectory
+    ) -> AppPaths {
+        let name = forBundle(id: bundleID).root.lastPathComponent
+        return AppPaths(root: temporary.appending(path: "\(name) scratch", directoryHint: .isDirectory))
     }
 
     /// A throwaway root for tests and `lexicon-eval` runs.

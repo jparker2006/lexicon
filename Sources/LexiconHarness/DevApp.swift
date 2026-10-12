@@ -22,7 +22,7 @@ struct DevApp {
             guard FileManager.default.fileExists(atPath: installed.path) else {
                 throw HarnessError("Lexicon Dev is not installed. Run: scripts/dev-run.sh -- --test-hooks")
             }
-            try run("/usr/bin/open", ["-g", installed.path, "--args", TestHookChannel.launchArgument])
+            try await run("/usr/bin/open", ["-g", installed.path, "--args", TestHookChannel.launchArgument])
         }
         let reply: TestHookReply
         do {
@@ -63,17 +63,6 @@ struct DevApp {
             let title = AX.string(window, kAXTitleAttribute) ?? ""
             return "\"\(title)\" [\(AX.string(window, kAXIdentifierAttribute) ?? "no identifier")]"
         }
-    }
-}
-
-func run(_ tool: String, _ arguments: [String]) throws {
-    let process = Process()
-    process.executableURL = URL(filePath: tool)
-    process.arguments = arguments
-    try process.run()
-    process.waitUntilExit()
-    guard process.terminationStatus == 0 else {
-        throw HarnessError("\(tool) \(arguments.joined(separator: " ")) exited \(process.terminationStatus)")
     }
 }
 
