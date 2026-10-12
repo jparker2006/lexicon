@@ -25,7 +25,7 @@ The orchestrator asked 19 questions in four rounds, each with its recommendation
 **Q1. Approvals reach the session that acts.**
 > Q1, relayed approvals: sessions refuse a "Jake said yes" relayed by me, so you typed things twice. Options: (a) your yes goes either into the chip you click, with its exact scope, or gets typed by you in the session that asks, and I tell you which session to answer in; (b) sessions accept my relay; (c) you type every approval in the acting session. ➡️ (a)
 
-After "A or B", the orchestrator recommended A "plus a standing install rule in the new Reviewer's starting prompt", and Jake answered "Q1 A". Decided: (a), and standing approvals go in each fresh session's start prompt, including the Reviewer's install rule. Lives in AGENTS.md, Ask Jake first.
+After "A or B", the orchestrator recommended A "plus a standing install rule in the new Reviewer's starting prompt", for example "install main after each M1 wave once its live items pass", and Jake answered "Q1 A". Decided: (a), and standing approvals go in each fresh session's start prompt, including the Reviewer's install rule. Lives in AGENTS.md, Ask Jake first.
 
 **Q2. One settings ask.**
 > Q2, the settings change: several fixes live in `.claude/settings.json`: run Bash in bash, turn fast mode off, block reads of your private folders, allow the review Workflow. Auto mode only lets an agent edit that file on your yes in its own session. Options: (a) one builder asks you once with the full list; (b) you apply it yourself; (c) one ask per setting. ➡️ (a)
@@ -120,9 +120,9 @@ Decided: (a). Lives in workflow.md, Human time.
 **61. No number measured on Jake's Wispr history goes on GitHub.**
 > Numbers on GitHub: a rule that public text never carries anything measured from your own Wispr history, while Test set sizes and scores are allowed? ➡️ yes
 
-Jake, 04:31:43Z: "publish, yes to all three". The second question, "Rewrite them to remove those?" for the old public text, was also yes; the orchestrator rewrote #19 to #22 and the #36 body, and `docs/architecture.md` lost its Wispr figures in #162. Lives in AGENTS.md, Private data.
+Jake, 04:31:43Z: "publish, yes to all three". The second question was about the old public text: "#19 to #22 and the #36 body carry a few totals derived from your Wispr history. Rewrite them to remove those?", also yes. The orchestrator removed those totals, and `docs/architecture.md` lost its Wispr lag figures with this file. Lives in AGENTS.md, Private data.
 
-**62. The Reviewer reviews Ready PRs in parallel, at a depth set by the risk tier.** Jake, 2026-10-12 06:29:41Z, after telling the Reviewer to use Workflows and swarms: "we should make that a rule in our workflow though". The orchestrator wrote the rule on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6119007942): in parallel, not in a line; the full review Workflow on high-tier PRs and a light pass on low-tier ones; every blocker in the first verdict; the opt-in carried in the start prompt. Lives in review.md, The Reviewer's duties.
+**62. The Reviewer uses Workflows and swarms, as a standing rule.** Not asked: Jake raised it himself, 2026-10-12 06:29:41Z, after telling the Reviewer to use Workflows and swarms: "we should make that a rule in our workflow though". The details are the orchestrator's, written on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6119007942), and are Proposed until Jake confirms them: in parallel, not in a line; the full review Workflow on high-tier PRs and a light pass on low-tier ones; every blocker in the first verdict; the opt-in carried in the start prompt. Lives in review.md, The Reviewer's duties.
 
 ### Earlier, while M0 was built (2026-10-11)
 
@@ -147,7 +147,7 @@ Items 25 to 60 come from the spec's first comment, part 3, "what building M0 cha
 
 ### Decided by Jake
 
-**25. Race cutoff.** Spec: the cloud wins only if its final arrives within 300 ms after recording stops; otherwise local wins. Built: the cloud is preferred for 300 ms; after that the first engine to answer wins, so a cloud final at 400 ms beats a local model still loading. A local answer still waits up to 300 ms for the cloud. Shipped in PR #127 (merged 2026-10-11 14:12Z), then asked:
+**25. Race cutoff.** Spec: the cloud wins only if its final arrives within 300 ms after recording stops; otherwise local wins. Built: the cloud is preferred for 300 ms after recording stops; after that the first engine to answer wins, so a cloud final at 400 ms beats a local model still loading. A local answer still waits up to 300 ms for the cloud. Shipped in PR #127 (merged 2026-10-11 14:12Z), then asked:
 > Race rule: keep #66's version, where after 300 ms the first answer to arrive wins.
 
 Jake, 14:24:29Z: "rec for both" (this and item 33). Recorded on [#66](https://github.com/jparker2006/lexicon/issues/66#issuecomment-6110021565).
@@ -197,14 +197,14 @@ Jake, 2026-10-12 07:25:54Z: "recs for all" (items 57, 58 and 59). Retry stores t
 **58. A common word stays a code Term when it is a code name in Jake's repos.**
 > Q3: Code names that are also dictionary words (#73). The rule "no Terms that are also common words" also drops names like Stripe and Next from Code Terms. ➡️ Rec: keep a dictionary word when it shows up as a code name in your repos (a package, import or file name).
 
-Jake: as item 57. A package, import, file or type name counts; prose and comments don't. #73 builds it.
+Jake: as item 57. Decided: a package, import or file name in his repos keeps the word. Proposed, from #36's wording of this item, which Jake was not shown: a type name counts too, and prose and comments don't. #73 builds it.
 
 **59. M1 takes Esc and ⌃⌘V with a registered hotkey first.**
 > Q1: How M1 blocks Esc and ⌃⌘V (#58, #62). Today Lexicon only listens to keys, so Esc while recording and ⌃⌘V also reach the app in front. Blocking keys the old way added 26 to 74 ms of delay to every key you typed. Options: (a) a registered hotkey for Esc, held only while recording. [...] (b) a key-blocking tap that is on only during a Dictation, with its delay per key measured. Either way, typing delay while Lexicon is idle has to stay at 2 to 12 ms. ➡️ Rec: (a). #58 tests it first and falls back to (b) only if it fails.
 
 Jake: as item 57. #58 spikes the registered hotkey and falls back to (b) only if it fails; #62 uses the same approach. [ADR 0004](adr/0004-listen-only-fn-tap.md).
 
-**60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it.
+**60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
 ### Proposed: built on an agent's default, never asked
 
@@ -222,7 +222,7 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 **39. First-run setup.** Built: four rows (Microphone, Accessibility, Speech model, Try it); the download starts by itself once both permissions are granted, and Private mode stops it; a left click on the warning dot opens the missing step, a right click the menu. The fourth row was the spec's own assumption; the rest #57's builder (PR #138).
 
-**40. Waiting retries.** Built: a retry tick every 30 s; a waiting Dictation is judged by the app it was made in; once Private mode denies its retry, it stays local even after Private mode goes off. #59's and #68's builders (PR #125, PR #140).
+**40. Waiting retries.** Built: a retry tick every 30 s; a waiting Dictation is judged by the app it was made in; once Private mode denies its retry, it stays local even after Private mode goes off, because its words are fixed and failing closed is safer. #59's and #68's builders (PR #125, PR #140); the retry cases were shown to Jake as a planning assumption, and the Reviewer listed the rules as "Jake can overrule".
 
 **41. Mic start has a time limit, with one gap.** Built: the engine gets 2 s to start (up to 60 s while the macOS mic prompt waits); after that the Dictation fails with a notice and a History row, and the next fn-down builds on a fresh queue. Gap: words spoken while the macOS mic prompt is up are never captured. Proposed: accept the gap, and have that notice say to speak again. #142's builder and the orchestrator (PR #146).
 
@@ -239,15 +239,17 @@ These stand as built until Jake confirms them as a batch or names items to chang
 - **47.** The "same app and under 5 s" late-text fallback for apps whose field can't be detected: not built. #60 (M1).
 - **48.** The audio retention sweep runs at launch only, not on a rolling schedule. No ticket yet.
 
-### Numbers the spec got wrong (facts)
+### Facts the spec got wrong
 
 - **49.** Gold review: 250 clips to review (194 everyday, 56 held back), 117 minutes of audio, against the spec's estimated 100 to 150 clips. About 2 to 2.5 hours at normal speed; the review runs in short chunks (#51).
 - **50.** Test set split: 100 held back and 360 everyday (460 clips), not 341 everyday. #78 follows 360.
 - **51.** Model download: about 614 MB in code, 595 MB on disk, not 609 MB. Proposed: the spec says about 600 MB, and the exact figure lives in one constant.
-- **52.** Launch to fn working, 150 ms: met on warm relaunches (35 to 137 ms), missed on the first launch after an install. Proposed reading, used in architecture.md Budgets and `scripts/bench.sh`: a warm relaunch, with the first launch after an install reported on its own.
+- **52.** Launch to fn working, 150 ms: met on warm relaunches (35 to 137 ms), missed on the first launch after an install. Proposed reading, used in architecture.md Budgets and `scripts/bench.sh`: p95 of warm relaunches, with the first launch after an install reported on its own.
 - **53.** History open, 100 ms at p95: the quiet-Mac rerun gave p95 127 and 139 ms over 20 opens, a fail; #150 fixes it. Proposed reading, used the same way: p95 over every open, with the first open after launch also reported on its own.
 - **54.** Lexicon's own work, fn-up to Cmd-V, 10 ms: cold first pastes measured 7.1 to 14.0 ms (#54), under load. A quiet-Mac recheck is still owed.
 - **55.** Memory while dictating, about 160 MB: peak 66 to 68 MB on a 6 s clip, 258 MB on a 20-minute clip (#47). Proposed: keep 160 MB for normal Dictations and measure the 20-minute peak again with #117.
+
+- **68.** The spec lists "`CloudAccess` is the only door to the network" among the compiler-enforced invariants. Only the key is: every cloud key comes through a `CloudAccess`, but the sockets and HTTP calls are plain `URLSession` that would take any request. architecture.md says so; keeping the network behind `CloudAccess` is a review rule (review.md).
 
 Settled since M0, no change: #81's quiet-Mac rerun (2026-10-12) kept Jev's 250 ms budget (warm p50 145 ms, p95 174 ms, 0 of 20 calls over 250 ms).
 
@@ -267,7 +269,7 @@ The spec's own supersessions, written when it was published; each names the plan
 6. **Jev for close calls** is dropped; Jev is for Re-speak and Hand fixes only.
 7. **Terms to speech:** up to 50.
 8. **Local word boosting:** dropped; Rules in code instead.
-9. **Cleanup:** AI cleanup on by default, with a deadline that keeps total lag within the pass mark (about 450 ms); Apple Foundation Models is out for now, so Private mode and offline use rules only.
+9. **Cleanup:** AI cleanup on by default, with a Cleanup deadline of about 450 ms, set so total lag stays within the pass mark; Apple Foundation Models is out for now, so Private mode and offline use rules only.
 10. **Fixes to the Test set:** every Re-speak fix becomes a Test set entry at once (Hand fixes follow in M5); when a Fix becomes a Rule is the after-M1 grill.
 11. **Head-to-head:** no BlackHole or synthetic fn; Wispr is scored from its own logs.
 12. **Wispr's lag:** taken from Wispr's own logs on Jake's Mac, which show it slower than the competitor benchmark's figure and slower than Lexicon's lag target.

@@ -51,7 +51,7 @@ This is their one home; workflow.md points here.
 - Every text-sending call passes the Secret guard first. Every Jev call has a local fallback.
 - Requests carry zero retention where the spec says (`zdr: true` on OpenRouter), and audio goes only to services Lexicon itself uses.
 - Keys come from the Keychain (`lexicon-eval` reads environment variables). No key in code, a log, a test, a fixture, a PR, a comment or a commit.
-- Private data follows AGENTS.md's Private data section, its one home. In review: nothing from Jake's private data in the diff, the PR or a comment, and no number measured on his Wispr history or his History; Test set sizes and eval scores are fine.
+- Private data follows AGENTS.md's Private data section, its one home. In review: nothing from Jake's private data in the diff, the PR or a comment, and nothing measured on his Wispr history or his History (no counts, totals, lag or word figures from it); Test set sizes and eval scores are fine.
 - No raw error text, file paths with Jake's data or private records reach the UI or a log that leaves the Mac.
 
 ## Shape and budgets
