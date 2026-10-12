@@ -28,7 +28,10 @@
       "scripts/**",
       ".claude/**",
       ".github/**",
-      ".gitignore"
+      ".gitignore",
+      "docs/**",
+      "CLAUDE.md",
+      "AGENTS.md"
     ],
     "Shape and budgets": [
       "Package.swift",
@@ -55,9 +58,11 @@
       "Tests/**",
       "scripts/**",
       ".claude/hooks/**",
+      ".claude/workflows/**",
       ".github/**"
     ],
     "Live app and permissions": [
+      "Sources/AudioCapture/**",
       "Sources/LexiconApp/**",
       "Sources/LexiconUI/**",
       "Sources/KeyInput/**",
@@ -73,7 +78,8 @@
       "scripts/live-request.sh",
       "scripts/lib/install-app.sh",
       "scripts/lib/fn-listeners.sh",
-      "scripts/lib/flavor.sh"
+      "scripts/lib/flavor.sh",
+      "scripts/checklists/**"
     ],
     "Tests and copy": [
       "**"
@@ -103,7 +109,22 @@
     "scripts/test-set.sh",
     "scripts/import-lexicon.sh",
     "scripts/install-model.sh",
-    "scripts/lib/install-app.sh"
+    "scripts/lib/install-app.sh",
+    "Sources/Fixes/**",
+    "Sources/WordStore/**",
+    "Sources/Inbox/**",
+    "Sources/TestHooks/**",
+    "Sources/LexiconHarness/**",
+    "scripts/eval-quick.sh",
+    "scripts/install-pstack-sheet.sh",
+    "scripts/dev-run.sh",
+    "scripts/harness.sh",
+    "scripts/live-lane.sh",
+    "scripts/bench.sh",
+    "scripts/live-request.sh",
+    "scripts/lib/fn-listeners.sh",
+    "scripts/lib/flavor.sh",
+    "scripts/checklists/**"
   ],
   "blastRadius": [
     "Sources/AudioCapture/**",
@@ -117,6 +138,7 @@
     "Sources/LocalParakeet/**",
     "Sources/LexiconEval/**",
     "scripts/test-set.sh",
+    "scripts/eval-quick.sh",
     "scripts/import-lexicon.sh",
     "scripts/install-model.sh"
   ],
