@@ -23,3 +23,12 @@ private func traits(_ role: String?, subrole: String? = nil, settable: Bool = fa
 func aPasteGoesOnlyWhereTheFocusedElementTakesText(traits: FieldTraits, expected: FieldTraits.Accepts) {
     #expect(FieldTraits.accepts(traits) == expected)
 }
+
+// An app that is in front but answers no Accessibility focus (#60 Live checks:
+// a key window with no focused element read as "nowhere to type") is still the
+// app Cmd-V reaches, so the fieldless 5 s rule applies to it.
+@Test func theFrontmostAppStandsInWhenAccessibilityNamesNoFocusedApp() {
+    #expect(Focus.focusedPID(accessibility: nil, frontmost: 42) == 42)
+    #expect(Focus.focusedPID(accessibility: 7, frontmost: 42) == 7)
+    #expect(Focus.focusedPID(accessibility: nil, frontmost: nil) == nil)
+}
