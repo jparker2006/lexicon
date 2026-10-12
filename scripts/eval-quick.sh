@@ -24,8 +24,8 @@
 # goes in a git work tree. --lexicon imports a Lexicon file into every
 # Dictation; the saved baselines use none, so leave it off to compare with them.
 #
-# The eval stops at 30 minutes. It takes a build slot (scripts/lib/heavy.sh)
-# when that exists. The manifest is the private Test set unless given. It
+# The eval stops at 30 minutes, in a build slot (scripts/lib/heavy.sh).
+# The manifest is the private Test set unless given. It
 # prints counts, scores and paths only, never a clip: lexicon-eval's other
 # messages can name one, so they are hidden. --manifest
 # scorer/fixtures/manifest.jsonl --scripted-gold runs it on the public fixture
@@ -33,15 +33,21 @@
 # error or at the time limit.
 set -eu
 umask 077
-cd "$(dirname "$0")/.."
-if [ -f scripts/lib/heavy.sh ]; then
-    . scripts/lib/heavy.sh
-    heavy scripts/eval-quick.sh "$@"  # runs this script again in a build slot, and exits
-fi
+# A key would let a cloud engine run, at fast pace and at a cost. Unset first,
+# so neither the run in the build slot nor lexicon-eval ever sees one.
+for name in $(env | sed -n 's/^\(LEXICON_KEY_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$name"; done
 
 SAMPLE=30
 LIMIT_MINUTES=30
 DATA="$HOME/Library/Application Support/Lexicon"
+repo=$(cd "$(dirname "$0")/.." && pwd -P)
+
+# A path as given, from where the script was started, made absolute: the run
+# goes on from the repo root, so a relative path would point elsewhere.
+absolute() {
+    folder=$(cd "$(dirname "$1")" 2>/dev/null && pwd -P) || { echo "eval-quick: no folder for $1" >&2; exit 1; }
+    printf '%s/%s\n' "$folder" "$(basename "$1")"
+}
 
 manifest="$DATA/test-set/manifest.jsonl"
 lexicon=
@@ -52,11 +58,12 @@ while [ $# -gt 0 ]; do
     case "$1" in
     --manifest | --lexicon | --baseline | --keep)
         [ $# -ge 2 ] || { echo "eval-quick: $1 needs a value" >&2; exit 2; }
+        value=$(absolute "$2")
         case "$1" in
-        --manifest) manifest=$2 ;;
-        --lexicon) lexicon=$2 ;;
-        --baseline) baseline=$2 ;;
-        --keep) keep=$2 ;;
+        --manifest) manifest=$value ;;
+        --lexicon) lexicon=$value ;;
+        --baseline) baseline=$value ;;
+        --keep) keep=$value ;;
         esac
         shift 2
         ;;
@@ -68,30 +75,36 @@ while [ $# -gt 0 ]; do
         ;;
     esac
 done
+# Every input is checked here, before 20 minutes of speech.
 [ -f "$manifest" ] || { echo "eval-quick: no manifest at $manifest" >&2; exit 1; }
+[ -z "$lexicon" ] || [ -f "$lexicon" ] || { echo "eval-quick: no Lexicon file at $lexicon" >&2; exit 1; }
+[ -z "$baseline" ] || [ -f "$baseline" ] || { echo "eval-quick: no baseline at $baseline" >&2; exit 1; }
 if [ -z "$baseline" ]; then
     # Dated folders sort in time order.
     for saved in "$(dirname "$manifest")"/baselines/*/parakeet-everyday.jsonl; do
         [ -f "$saved" ] && baseline=$saved
     done
 fi
-# Checked again where the run is written (scorer/score quick), but here before 20 minutes of speech.
+# Checked again where the run is written (scorer/score quick).
 if [ -n "$keep" ]; then
     [ ! -e "$keep" ] || { echo "eval-quick: --keep $keep already exists" >&2; exit 1; }
-    [ -d "$(dirname "$keep")" ] || { echo "eval-quick: no folder for --keep $keep" >&2; exit 1; }
     if git -C "$(dirname "$keep")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         echo "eval-quick: --keep is inside a git work tree; a run of the Test set never goes in a repo" >&2
         exit 1
     fi
 fi
 
-# A key would let a cloud engine run, at fast pace and at a cost.
-for name in $(env | sed -n 's/^\(LEXICON_KEY_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$name"; done
+cd "$repo"
+set -- --manifest "$manifest" ${scripted:+"$scripted"}
+[ -z "$lexicon" ] || set -- "$@" --lexicon "$lexicon"
+[ -z "$baseline" ] || set -- "$@" --baseline "$baseline"
+[ -z "$keep" ] || set -- "$@" --keep "$keep"
+. scripts/lib/heavy.sh
+heavy scripts/eval-quick.sh "$@"  # runs this script again in a build slot, and exits
 
-. scripts/lib/swift-flags.sh  # sets "$@" to the shared build flags, or SWIFT_FLAGS once #153 lands
-[ -z "${SWIFT_FLAGS+set}" ] || set -- $SWIFT_FLAGS
-swift build "$@" --product lexicon-eval
-bin="$(swift build "$@" --show-bin-path)/lexicon-eval"
+. scripts/lib/swift-flags.sh
+swift build $SWIFT_FLAGS --product lexicon-eval
+bin="$(swift build $SWIFT_FLAGS --show-bin-path)/lexicon-eval"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

@@ -14,7 +14,7 @@ scorer/score compare --gold gold.jsonl --run-a lexicon.jsonl --run-b wispr.jsonl
 scorer/test
 ```
 
-Input formats are in `lexicon_scorer/__main__.py`. Gold lines need `id`, `text` (word-for-word), `session` (for `compare`) and optional `terms`, `split` and `gold`. Run lines need `id`, `speech_text` and `inserted_text`. A run must cover every gold entry scored (after `--split`); a missing Dictation is an error, not a better score. `compare` scores the two runs on the entries both hold (`compared`).
+Input formats are in `lexicon_scorer/__main__.py`. Gold lines need `id`, `text` (word-for-word), `session` (for `compare`) and optional `terms`, `split` and `gold`. Run lines need `id`, `speech_text` and `inserted_text`. A run must cover every gold entry scored (after `--split`), in `compare` both runs: a missing Dictation is an error, not a better score. `score` prints each entry's error and Term counts, never the Terms: on the Test set they are Jake's.
 
 While Jake's gold review is part done, an entry whose `gold` is `review` is left out, and so is every other entry in its session: the bootstrap resamples whole sessions, so a session counts once all of it is gold (`baselines.gold_state`, the one rule). Every command prints `scored N of M, K left out in review` to stderr, and its JSON carries `gold` (those counts) and `partial` (K is not 0). A run's lines for left-out entries are ignored. The held-back split is all or nothing: one entry in review refuses the run, naming `scripts/test-set.sh review`.
 
@@ -44,7 +44,7 @@ scorer/score report --gold gold.jsonl --run run.jsonl [--baseline wispr.jsonl] [
 
 Exit codes: 0 when `worse` is empty, 3 when it is not (the report prints first), 1 for a bad input.
 
-The baseline covers every split, so before scoring, its rows for ids outside the scored gold are dropped. The two runs are compared on the scored entries both hold (`compared`), and both summaries count those: a baseline from before the Test set grew still compares. `--sample N` scores the N lowest ids of the entries scored: the same draw as `lexicon-eval --manifest --sample N`, which skips the same entries left out in review before any audio plays. The optional run fields (`status`, `lag_ms`, `cleanup`, `engine`, `lost`) are checked only by `report`, and a bad type is an error.
+The baseline covers every split, so before scoring, its rows for ids outside the scored gold are dropped. The two runs are compared on the scored entries both hold (`compared`, and stderr says how many the baseline lacks), and both summaries count those: a baseline from before the Test set grew still compares. `not_judged` lists the metrics with no verdict (too few sessions or Terms, or no data). `--sample N` scores the N lowest ids of the entries scored: the same draw as `lexicon-eval --manifest --sample N`, which skips the same entries left out in review before any audio plays. The optional run fields (`status`, `lag_ms`, `cleanup`, `engine`, `lost`) are checked only by `report`, and a bad type is an error.
 
 `report` never prints text: no ids, speech, inserted text or Terms, only numbers and labels.
 
@@ -54,7 +54,7 @@ The baseline covers every split, so before scoring, its rows for ids outside the
 scripts/eval-quick.sh [--baseline <run.jsonl>] [--keep <run.jsonl>]
 ```
 
-What "a quick `lexicon-eval`" means for a speech or Cleanup change: the everyday split at fast pace for words and Terms, a realtime sample of 30 clips for lag, the check that both paces heard the same text on those 30, and the compare with the baseline, or "no baseline yet", in about 20 minutes and never past 30. Local Parakeet only: no key reaches it. `--keep` on main saves a run that `--baseline` on a branch compares with. `scorer/score quick` prints its lines from the two reports; the script's header has the details. Tests: `tests/test_partial.py`.
+What "a quick `lexicon-eval`" means for a speech or Cleanup change: the everyday split at fast pace for words and Terms, a realtime sample of 30 clips for lag, the check that both paces heard the same text on those 30, and the compare with the baseline, or "no baseline yet". Its last line says what was worse, on how many clips, what was left out and what had too few sessions to judge, in about 20 minutes and never past 30. Local Parakeet only: no key reaches it. `--keep` on main saves a run that `--baseline` on a branch compares with. `scorer/score quick` prints its lines from the two reports; the script's header has the details. Tests: `tests/test_partial.py`.
 
 Tests use public synthetic examples only. Never point them at the private Test set. `scorer/fixtures/` holds a public example for the tests, and for the CI smoke run that will use it.
 

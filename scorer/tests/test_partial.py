@@ -132,14 +132,24 @@ class Partial(unittest.TestCase):
         self.assertIn("scored 100 of 100, 0 left out in review", err)
         self.assertFalse(out["partial"])
 
-    def test_compare_uses_the_entries_both_runs_hold(self):
+    def test_compare_still_needs_every_scored_dictation_in_both_runs(self):
+        gold = [entry(n, n + 1) for n in range(12)]
+        path = self.write("gold.jsonl", gold)
+        short = self.write("short.jsonl", heard(gold[:11]))
+        full = self.write("full.jsonl", heard(gold))
+        for a, b in ((full, short), (short, full)):
+            with self.subTest(a=a, b=b):
+                message = self.refused("compare", "--gold", path, "--run-a", a, "--run-b", b, "--resamples", "1000")
+                self.assertIn("1 gold entries have no result", message)
+
+    def test_a_short_baseline_says_how_many_it_lacks(self):
         gold = [entry(n, n + 1) for n in range(12)]
         path = self.write("gold.jsonl", gold)
         older = self.write("older.jsonl", heard(gold[:10]))  # from before the Test set grew
-        newer = self.write("newer.jsonl", heard(gold))
-        code, out, _ = self.run_cli("compare", "--gold", path, "--run-a", newer, "--run-b", older,
-                                    "--resamples", "1000")
-        self.assertEqual((out["compared"], out["a"]["entries"], out["b"]["entries"]), (10, 10, 10))
+        code, out, err = self.run_cli("report", "--gold", path, "--run", self.write("run.jsonl", heard(gold)),
+                                      "--baseline", older, "--resamples", "1000")
+        self.assertEqual(out["compared"], 10)
+        self.assertIn("compared on 10 of 12 scored, 2 not in the baseline", err)
 
     def test_a_sample_scores_the_lowest_ids_not_in_review(self):
         gold = [entry(n, n + 1) for n in range(8)]
@@ -210,7 +220,9 @@ class Quick(unittest.TestCase):
         self.assertIn("(12 clips fast, 5 realtime)", compare[0])
         self.assertIn("words wrong -", compare[0])
         self.assertIn("(better)", compare[0])
-        self.assertEqual(text.splitlines()[-1], "worse: nothing")
+        self.assertEqual(text.splitlines()[-1], "worse: nothing judged, on 12 of 12 clips; "
+                                                "not judged: Terms wrong (no data), lag p50 (too few sessions), "
+                                                "lag p95 (too few sessions)")
 
     def test_a_worse_run_exits_3(self):
         baseline = self.write("baseline.jsonl", heard(self.gold, lag=100))
@@ -223,6 +235,39 @@ class Quick(unittest.TestCase):
         self.assertIn("worse: words wrong", text)
         self.assertIn("fast and realtime speech text match on 0 of 5 clips", text)
         self.assertIn("fast pace heard differently", text)
+
+    def test_the_verdict_line_names_what_it_could_not_judge(self):
+        # Five sessions, far worse: the bootstrap gives no verdict, so it is not "nothing worse".
+        gold = self.gold[:5]
+        manifest = self.write("five.jsonl", gold)
+        baseline = self.write("perfect.jsonl", heard(gold))
+        bad = self.write("bad.jsonl", heard(gold, wrong={g["id"] for g in gold}))
+        reports = []
+        for name, run in (("fast", bad), ("realtime", bad)):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                main(["report", "--gold", manifest, "--run", run, "--baseline", baseline, "--resamples", "1000"])
+            (self.dir / f"{name}5.json").write_text(out.getvalue(), encoding="utf-8")
+            reports.append(str(self.dir / f"{name}5.json"))
+        code, text = self.quick(bad, reports[0], bad, reports[1])
+        self.assertEqual(code, 0)
+        verdict = text.splitlines()[-1]
+        self.assertTrue(verdict.startswith("worse: nothing judged, on 5 of 5 clips; not judged: words wrong (too few sessions)"),
+                        verdict)
+
+    def test_the_verdict_line_counts_the_clips_left_out(self):
+        gold = [dict(g) for g in self.gold]
+        gold[0]["gold"] = "review"
+        self.manifest = self.write("manifest.jsonl", gold)
+        baseline = self.write("baseline.jsonl", heard(self.gold))
+        fast_rows = heard(self.gold[1:])
+        for row in fast_rows:
+            row["lag_ms"] = None
+        fast = self.write("fast.jsonl", fast_rows)
+        realtime = self.write("realtime.jsonl", heard(self.gold[1:6]))
+        code, text = self.quick(fast, self.report("fast.json", fast, "--baseline", baseline), realtime,
+                                self.report("realtime.json", realtime, "--sample", "5", "--baseline", baseline))
+        self.assertIn("worse: nothing judged, on 11 of 12 clips (1 left out in review)", text.splitlines()[-1])
 
     def test_a_kept_run_is_a_baseline_for_both_parts(self):
         fast, fast_report, realtime, realtime_report = self.runs()

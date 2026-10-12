@@ -23,8 +23,9 @@ score. Its lines for entries left out in review are ignored.
 `speech_text` is the speech model's text; `inserted_text` is what was typed.
 `report` also reads, when present: "status" (string or null), "lag_ms" (number
 or null), "cleanup" and "engine" (string or null), "lost" (bool, missing is false).
-`compare`, and `report` with a baseline, compare the entries both runs hold
-(`compared`): a baseline from before the Test set grew still compares.
+`compare` needs both runs to cover every entry scored. `report --baseline`
+compares the entries both hold (`compared`, and stderr says how many the
+baseline lacks): a baseline from before the Test set grew still compares.
 A baseline (`report --baseline`) is an earlier run in the same format, such as
 Wispr's scores from its logs. It covers every split, so its rows for ids not in
 the scored gold are dropped.
@@ -39,8 +40,8 @@ the compare with the baseline, or "no baseline yet". `--keep` saves the two runs
 as one, a baseline for a later quick eval: the fast-pace lines, with the
 sample's realtime lines (and their lag) in their place.
 
-Prints JSON (`quick`: lines). `report` and `quick` print numbers and labels
-only, never an id or text. They print first and then exit 3 when a metric is
+Prints JSON (`quick`: lines). `score` prints ids and counts, never a Term or
+text; `report` and `quick` print numbers and labels only, never an id or text. They print first and then exit 3 when a metric is
 worse than the baseline, else 0.
 """
 
@@ -231,6 +232,9 @@ def _report(args, everything: dict, gold: dict, lexicon: list[str]) -> dict:
     # The baseline covers every split, so rows for entries this report does not score are dropped.
     base_rows = {id: r for id, r in _jsonl(args.baseline).items() if id in gold}
     shared = _shared(gold, base_rows)
+    if len(shared) < len(gold):
+        print(f"compared on {len(shared)} of {len(gold)} scored, {len(gold) - len(shared)} not in the baseline",
+              file=sys.stderr)
     run = [e for e in run if e.id in shared]
     base = _score_run(shared, base_rows, args.baseline, lexicon)
     try:
@@ -244,6 +248,8 @@ def _report(args, everything: dict, gold: dict, lexicon: list[str]) -> dict:
                 for m, v in {**interval, **lag}.items()}
     # In the order of the word and Term metrics, then the lag quantiles.
     worse = [m for m in interval if interval[m]["verdict"] == "worse"]
+    # No verdict (too few sessions or Terms, or no data) is not "not worse".
+    not_judged = [m for m in interval if interval[m]["verdict"] not in ("better", "worse", "tie")]
     run_summary = _summary(args.run, run, run_rows)
     base_summary = _summary(args.baseline, base, base_rows)
     if run_summary["lost"] > base_summary["lost"]:
@@ -253,6 +259,7 @@ def _report(args, everything: dict, gold: dict, lexicon: list[str]) -> dict:
         "baseline": base_summary,
         "run_minus_baseline": interval,
         "compared": len(shared),
+        "not_judged": not_judged,
         "sessions": len({e.session for e in run}),
         "seed": args.seed,
         "resamples": args.resamples,
@@ -343,8 +350,27 @@ def _quick(args) -> tuple[list[str], bool]:
     names = TEXT_METRICS | LAG_METRICS | {"lost": "lost"}
     lines.append(f"against the baseline ({fast['compared']} clips fast, {realtime['compared']} realtime): "
                  + ", ".join(f"{names[m]} {_change(m, v)}" for m, v in changes.items()))
-    lines.append(f"worse: {', '.join(names[m] for m in worse) or 'nothing'}")
+    lines.append(_verdict(worse, changes, fast, names))
     return lines, bool(worse)
+
+
+def _verdict(worse: list[str], changes: dict, fast: dict, names: dict) -> str:
+    """The line a builder pastes into a PR, so it says what was judged and on
+    how many clips: a metric with no verdict and the clips left out are where a
+    regression can hide."""
+    gold = fast["gold"]
+    left = []
+    if gold["left_out_in_review"]:
+        left.append(f"{gold['left_out_in_review']} left out in review")
+    if fast["compared"] < gold["scored"]:
+        left.append(f"{gold['scored'] - fast['compared']} not in the baseline")
+    line = (f"worse: {', '.join(names[m] for m in worse) or 'nothing judged'}, "
+            f"on {fast['compared']} of {gold['entries']} clips" + (f" ({', '.join(left)})" if left else ""))
+    unjudged = [f"{names[m]} ({v['verdict'].replace('_', ' ')})" for m, v in changes.items()
+                if v["verdict"] not in ("better", "worse", "tie")]
+    if unjudged:
+        line += f"; not judged: {', '.join(unjudged)}"
+    return line
 
 
 def main(argv=None) -> int:
@@ -400,8 +426,9 @@ def main(argv=None) -> int:
             "totals": totals(scores),
             "entries": [
                 {"id": e.id, "word_errors": e.word_errors, "ref_words": e.ref_words,
-                 "formatted_errors": e.formatted_errors, "missed_terms": e.missed_terms,
-                 "false_alarm_terms": e.false_alarm_terms}
+                 "formatted_errors": e.formatted_errors, "term_refs": e.term_refs,
+                 # Counts, never the Terms: on the Test set they are Jake's.
+                 "term_misses": e.term_misses, "term_false_alarms": e.term_false_alarms}
                 for e in scores
             ],
         }
@@ -409,14 +436,13 @@ def main(argv=None) -> int:
         rows_a, rows_b = _jsonl(args.run_a), _jsonl(args.run_b)
         _check_known(args.run_a, rows_a, everything)
         _check_known(args.run_b, rows_b, everything)
-        shared = _shared(gold, rows_a, rows_b)
-        a = _score_run(shared, rows_a, args.run_a, lexicon)
-        b = _score_run(shared, rows_b, args.run_b, lexicon)
+        a = _score_run(gold, rows_a, args.run_a, lexicon)
+        b = _score_run(gold, rows_b, args.run_b, lexicon)
         try:
             interval = paired_bootstrap(a, b, seed=args.seed, resamples=args.resamples)
         except ValueError as e:
             raise SystemExit(str(e))
-        out = {"a": totals(a), "b": totals(b), "a_minus_b": interval, "compared": len(shared),
+        out = {"a": totals(a), "b": totals(b), "a_minus_b": interval,
                "sessions": len({e.session for e in a}), "seed": args.seed, "resamples": args.resamples}
     else:
         out = _report(args, everything, gold, lexicon)
