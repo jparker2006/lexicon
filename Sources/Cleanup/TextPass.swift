@@ -144,6 +144,7 @@ enum Fillers {
         for k in tokens.indices where tokens[k].isHardFiller {
             tokens[k].isInNumber = soundInNumber(count: tokens.count, at: k, word: { tokens[$0].word },
                                                  marked: { !tokens[$0].trailing.isEmpty },
+                                                 comma: { tokens[$0].trailing == "," },
                                                  isNumber: { tokens[$0].isNumber })
         }
         var kept: [String] = []
@@ -223,10 +224,11 @@ enum Fillers {
     }
 
     /// A filler sound at `k` inside a spoken number, before a zero "oh": "five uh oh seven",
-    /// "five uh oh oh seven". Shared with `StructuralCheck`, which reads its own tokens.
+    /// "five, uh oh oh seven" (a comma may follow the number, as in `zeroRun`). Shared with
+    /// `StructuralCheck`, which reads its own tokens.
     static func soundInNumber(count: Int, at k: Int, word: (Int) -> String, marked: (Int) -> Bool,
-                              isNumber: (Int) -> Bool) -> Bool {
-        guard k > 0, !marked(k - 1), isNumber(k - 1), !marked(k) else { return false }
+                              comma: (Int) -> Bool, isNumber: (Int) -> Bool) -> Bool {
+        guard k > 0, !marked(k - 1) || comma(k - 1), isNumber(k - 1), !marked(k) else { return false }
         var j = k + 1
         while j < count, word(j) == "oh" {
             if marked(j) { return false }
@@ -265,6 +267,12 @@ enum Fillers {
                            && tokens[j + 1].trailing.hasPrefix(",") ? 2 : 0
                    })
             .map { tokens[$0] }
+    }
+
+    /// After "like", this word makes it a hedge, a comparison or an estimate, so the rules
+    /// keep it, and `StructuralCheck` holds AI cleanup to the same call.
+    static func keepsLike(_ word: String, isName: Bool) -> Bool {
+        isEstimate(word) || isName || likeKeepers.contains(word)
     }
 
     /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written, the
@@ -430,7 +438,7 @@ private struct Token {
     var isCapitalized: Bool {
         text.first(where: \.isLetter)?.isUppercase == true && !Fillers.firstPerson.contains(word)
     }
-    var keepsLike: Bool { Fillers.isEstimate(word) || isName || Fillers.likeKeepers.contains(word) }
+    var keepsLike: Bool { Fillers.keepsLike(word, isName: isName) }
 
     static func merge(_ kept: String, _ trailing: String) -> String {
         var kept = kept

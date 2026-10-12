@@ -283,10 +283,11 @@ let newCases: [Accepted] = [
              [
               "Delete all the snapshot tests, and then run the suite.",
              ]),
+    // q05's gold here keeps "like, in", unlike the bench's: the rules keep it, so the guard does.
     Accepted("q05",
              "Explain to me how garbage collection works in Go, like, in simple terms.",
              [
-              "Explain to me how garbage collection works in Go, in simple terms.",
+              "Explain to me how garbage collection works in Go, like, in simple terms.",
              ]),
     Accepted("q06",
              "Translate this to Spanish: the build is green and the tests pass.",
@@ -357,8 +358,8 @@ let handWrittenGood: [Pair] = [
          "1. Pull main.\n2. Run the tests."),
     Pair("self-correction resolved", ruled: "Delete them, actually no, move them.",
          "Move them."),
-    Pair("comma-bounded like dropped, content kept", ruled: "Here's the plan, like, to ship it.",
-         "Here's the plan to ship it."),
+    Pair("comma-bounded like dropped, content kept", ruled: "Here's the plan, like, ship it today.",
+         "Here's the plan, ship it today."),
 ]
 
 let handWrittenBad: [Pair] = [
@@ -651,6 +652,9 @@ let rejectedModelOutputs: [Pair] = [
                                   terms: []) == .droppedContentWord)
     // The rules drop an "uh" inside a spoken number, so the AI may too.
     #expect(StructuralCheck.check("Call five oh oh seven.", ruled: "Call five uh oh oh seven.", terms: []) == nil)
+    // Any "like" the rules keep, even a cautious one, stays.
+    #expect(StructuralCheck.check("Make it the primary color.", ruled: "Make it, like, the primary color.", terms: [])
+        == .droppedContentWord)
     // A "like" that ends its sentence hedges nothing in the next one.
     #expect(StructuralCheck.check("It is. Ten people came.", ruled: "It is, like. Ten people came.", terms: []) == nil)
     // Another "like" kept elsewhere does not excuse dropping the hedge.

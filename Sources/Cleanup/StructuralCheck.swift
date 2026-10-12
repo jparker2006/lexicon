@@ -78,16 +78,16 @@ enum StructuralCheck {
             }
         }
 
-        // A filler the rules keep as meaning survives, unless retracted: a sound of "uh huh",
-        // and a "like" before a number, a name or a Term, with the word it hedges still after
-        // it ("like 80"), so another "like" kept elsewhere is no excuse.
+        // A filler the rules keep survives, unless retracted: a sound of "uh huh", and a set-off
+        // "like" the rules keep (`Fillers.keepsLike`, a Term or a Rule's written side), with the
+        // word it hedges still after it ("like 80"), so another "like" kept elsewhere is no excuse.
         var meant: [String: Int] = [:]
         let names = capitalizedWords(refText)
         for k in ref.indices where !retracted.contains(k) {
             guard let key = meaningKey(ref, k) else { continue }
             if ref[k].word == "like" {
                 guard ref[k].mark == ",", let object = likeObject(ref, k)?.word,
-                      Fillers.isEstimate(object) || names.contains(object) || rules?.isWritten(object) == true
+                      Fillers.keepsLike(object, isName: names.contains(object)) || rules?.isWritten(object) == true
                         || terms.contains(where: { $0.text.lowercased() == object }) else { continue }
             }
             meant[key, default: 0] += 1
@@ -470,7 +470,7 @@ enum StructuralCheck {
         guard Fillers.hard.contains(word) else { return nil }
         if t[k].mark == nil, k + 1 < t.count, Fillers.interjections.contains(word + " " + t[k + 1].word) {
             let inNumber = Fillers.soundInNumber(count: t.count, at: k, word: { t[$0].word },
-                                                 marked: { t[$0].mark != nil },
+                                                 marked: { t[$0].mark != nil }, comma: { t[$0].mark == "," },
                                                  isNumber: { Fillers.isNumeral(t[$0].word) })
             return inNumber ? nil : word + " " + t[k + 1].word
         }

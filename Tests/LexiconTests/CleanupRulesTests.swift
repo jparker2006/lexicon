@@ -262,6 +262,7 @@ let interjectionCases: [Case] = [
     // An "oh" inside a number is a zero, so the "uh" before it is a filler.
     Case("Call room five uh oh seven.", "Call room five oh seven."),
     Case("Call room 5 uh oh 7.", "Call room 5 oh 7."),
+    Case("Call five, uh oh seven.", "Call five, oh seven."),
     Case("Uh oh, five servers are down.", "Uh oh, five servers are down."),
     Case("Uh oh five servers are down.", "Uh oh five servers are down."),
 ]
