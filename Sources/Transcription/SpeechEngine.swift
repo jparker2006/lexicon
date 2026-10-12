@@ -481,8 +481,12 @@ final class AttemptCore: Sendable {
         case (.useLocal, _, .done(let text)?):
             won = (text, .local(local!.model), localLatency)
         default:
-            // A broken local model waits for a working one, whatever the cloud did.
-            if let localFailure, case .localModelFailed = localFailure { return .unavailable(localFailure) }
+            // A broken or still-loading local model waits for a working one, whatever the
+            // cloud did: once it runs, it may hear what the cloud missed.
+            switch localFailure {
+            case .localModelFailed?, .localModelLoading?: return .unavailable(localFailure!)
+            default: break
+            }
             if cloudHeardNothing { return .unavailable(.silence) }
             if cloud != nil {
                 return .unavailable(session == nil ? .offline : .providerError(cloudError ?? "failed"))

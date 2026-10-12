@@ -50,7 +50,60 @@ import LexiconDomain
     #expect(reason.waitsForNetwork == false)
 }
 
+@Test(.timeLimit(.minutes(1))) func aCloudThatHeardNothingWhileTheLocalModelStillLoadsLeavesTheDictationWaiting() async throws {
+    // The cloud's empty final is no answer, and local may hear what it missed once it
+    // loads: the Dictation waits for the model, it does not fail as silence.
+    let clock = TestClock()
+    let model = StillLoadingModel()
+    let cloud = ScriptedCloud(clock: clock, script: Reply.finalText("", after: .milliseconds(100)))
+    let engine = SpeechEngine(local: model, cloud: cloud.link, clock: clock)
+    guard let access = CloudAccess.granted(by: cloudPreferences, for: .app(.unknown), keys: fakeKeys) else {
+        Issue.record("the cloud access was denied for a standard-privacy Dictation")
+        return
+    }
+    let plan = SpeechPlan.make(preferences: cloudPreferences, access: access, terms: [])
+
+    let finishing = Task {
+        await engine.begin(feed: finishedFeed(), plan: plan).finish(AudioClip(samples: syntheticSamples(count: 8_000)))
+    }
+    await clock.waitForSleep(endingAt: .milliseconds(100))  // the cloud's empty final
+    await clock.waitForSleep(endingAt: AttemptCore.loadLimit)
+    await clock.advance(by: AttemptCore.loadLimit)
+    let outcome = await finishing.value
+    await model.finishLoading()
+
+    guard case .unavailable(let reason) = outcome, case .localModelLoading = reason else {
+        Issue.record("expected localModelLoading, got \(outcome)")
+        return
+    }
+    #expect(reason.waits)
+}
+
 // MARK: Helpers
+
+/// A local model whose load runs until the test calls `finishLoading`.
+private actor StillLoadingModel: LocalTranscriber {
+    nonisolated let model = LocalModel.parakeetUnified
+    private(set) var isResident = false
+    private var loading: [CheckedContinuation<Void, Never>] = []
+
+    func load() async {
+        guard !isResident else { return }
+        await withCheckedContinuation { loading.append($0) }
+    }
+
+    func finishLoading() {
+        isResident = true
+        for waiter in loading { waiter.resume() }
+        loading = []
+    }
+
+    func unload() { isResident = false }
+
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { _ in "Hello." }
+    }
+}
 
 private let fakeKeys: @Sendable (CredentialID) -> String? = { _ in "fake-key" }
 
