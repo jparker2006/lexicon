@@ -233,12 +233,14 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
 
 @Test func aHotkeyPressIsStampedWithItsOwnEventTime() {
     // Carbon's event time is seconds on the same uptime clock: the hotkey's Esc keeps the time it
-    // was pressed, not when two thread hops later the recognizer gets it. An unset, future or
-    // over-a-second-old time is taken as now, as for a CGEvent.
+    // was pressed, not when thread hops later the recognizer gets it, however late that is, so a
+    // late copy of an Esc can never pass for a new one. An unset or future time is taken as now.
     let now = at(0)
     let seconds = Double(now.nanoseconds) / 1e9
     #expect(HostTime(carbonEventTime: seconds - 0.005, now: now) == HostTime(nanoseconds: now.nanoseconds - 5_000_000))
+    #expect(HostTime(carbonEventTime: seconds - 2, now: now) == HostTime(nanoseconds: now.nanoseconds - 2_000_000_000))
     #expect(HostTime(carbonEventTime: 0, now: now) == now)
     #expect(HostTime(carbonEventTime: seconds + 1, now: now) == now)
-    #expect(HostTime(carbonEventTime: seconds - 2, now: now) == now)
+    #expect(HostTime(carbonEventTime: .infinity, now: now) == now)
+    #expect(HostTime(carbonEventTime: .nan, now: now) == now)
 }
