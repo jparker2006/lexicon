@@ -1,4 +1,5 @@
 public import Foundation
+import Synchronization
 public import LexiconDomain
 
 /// Where a LiveCapture's audio comes from: the audio-source seam (#14). An enum,
@@ -52,6 +53,9 @@ public final class Recorder: Sendable {
     private let broadcaster = LevelBroadcaster()
     let microphone: Microphone
     let policy: FlushPolicy
+    #if DEBUG
+    private let silenceNext = Atomic(false)
+    #endif
 
     public convenience init() {
         self.init(hardware: .system, policy: FlushPolicy())
@@ -82,15 +86,19 @@ public final class Recorder: Sendable {
                       since keyDown: HostTime = .now()) async throws(RecorderError) -> LiveCapture {
         let source: any CaptureSource
         var policy = policy
+        var silenced = false
         switch input {
         case .microphone(let uid):
             source = try await microphone.start(deviceUID: uid, keyDown: keyDown)
+            #if DEBUG
+            silenced = silenceNext.exchange(false, ordering: .relaxed)
+            #endif
         case .file(let url, let pace):
             source = try FileSource(url: url, pace: pace)
             if pace == .asFastAsPossible { policy.drainEvery = .milliseconds(5) }
         }
         guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue, startedAt: keyDown,
-                                     onLevel: broadcaster.send) else {
+                                     silenced: silenced, onLevel: broadcaster.send) else {
             source.stop()
             throw .engineFailed("no converter from \(source.firstSegment.rate) Hz to 16 kHz")
         }
@@ -108,6 +116,13 @@ public final class Recorder: Sendable {
     /// is a new stream (any number of observers) that keeps only the newest level,
     /// so a slow observer never backs up the writer.
     public var levels: AsyncStream<AudioLevel> { broadcaster.subscribe() }
+
+    #if DEBUG
+    /// The `mic zeros` test hook: the next microphone capture records digital
+    /// zeros, as a dead or contended mic delivers. The engine starts and runs as
+    /// usual; its samples are zeroed before anything reads them.
+    public func silenceNextMicrophoneCapture() { silenceNext.store(true, ordering: .relaxed) }
+    #endif
 }
 
 /// How a LiveCapture ends.
