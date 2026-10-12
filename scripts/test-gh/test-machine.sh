@@ -39,9 +39,10 @@ test_an_unreadable_reading_says_no() {
     echo "memory_pressure: no reading" > "$GH_FIXTURES/cmd/memory_pressure"
     run machine.sh
     expect_out "room for more builders: no (memory reading unknown)"
+    use_fixture machine-0636
     printf '\n' > "$GH_FIXTURES/cmd/sysctl"
     run machine.sh
-    expect_out "room for more builders: no (load reading unknown; memory reading unknown)"
+    expect_out "room for more builders: no (load reading unknown)"
 }
 
 test_slots_in_use_are_counted() {

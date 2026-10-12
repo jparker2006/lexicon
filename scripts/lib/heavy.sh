@@ -66,26 +66,29 @@ heavy_holder() {
 
 # When process $1 started, to the second. With its pid, it names one process:
 # a pid alone may be reused once the process is gone.
-heavy_started() { ps -o lstart= -p "$1" 2> /dev/null; }
+heavy_started() { ps -o lstart= -p "$1" 2> /dev/null || true; }
 
 # The line's live entries, first come first. With "prune", deletes the rest.
+# A start time ps couldn't read, then or now, never drops an entry whose pid is
+# alive: a moment without ps must not cost a job its place.
 heavy_queue() {
     for heavy_q in "$HEAVY_DIR"/queue/*; do
         [ -f "$heavy_q" ] || continue
-        if kill -0 "${heavy_q##*.}" 2> /dev/null && [ "$(cat "$heavy_q" 2> /dev/null)" = "$(heavy_started "${heavy_q##*.}")" ]; then
-            echo "$heavy_q"
-        elif [ "${1:-}" = prune ]; then
-            rm -f "$heavy_q"
+        heavy_q_pid=${heavy_q##*.}
+        if kill -0 "$heavy_q_pid" 2> /dev/null; then
+            heavy_q_then=$(cat "$heavy_q" 2> /dev/null)
+            heavy_q_now=$(heavy_started "$heavy_q_pid")
+            if [ -z "$heavy_q_then" ] || [ -z "$heavy_q_now" ] || [ "$heavy_q_then" = "$heavy_q_now" ]; then
+                echo "$heavy_q"
+                continue
+            fi
         fi
+        if [ "${1:-}" = prune ]; then rm -f "$heavy_q"; fi
     done
 }
 
 # One line for scripts/machine.sh and scripts/status.sh.
 heavy_summary() {
-    if [ ! -d "$HEAVY_DIR" ]; then
-        echo "build slots unknown"
-        return
-    fi
     heavy_used=0
     for heavy_n in 1 2 3; do
         if heavy_held "$heavy_n"; then heavy_used=$((heavy_used + 1)); fi
@@ -189,10 +192,12 @@ heavy() {
 }
 
 # Runs in the slot, under lockf: leaves the line, records the holder, then
-# becomes the command.
+# becomes the command. A waiter killed while its lockf took the slot has nobody
+# to run the command for, so the slot goes back unused.
 heavy_holding() {
     slot=$1 entry=$2
     shift 2
+    kill -0 "${entry##*.}" 2> /dev/null || exit 0
     rm -f "$entry"
     line="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)") (pid $$) running $* since $(date '+%H:%M:%S')"
     held=1
