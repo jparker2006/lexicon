@@ -110,7 +110,7 @@ func theCapWarnsOnceThenStopsAndInsertsAHandsFreeDictation() async throws {
     try #require(rig.feed(.deadline(at(8_000))).commands == [.oneMinuteLeft(first)])
     seen += await readUntil(&events) { event in if case .oneMinuteLeft(let who) = event { who == first } else { false } }
     // The cap mark: began + cap.
-    try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(first, at: at(10_000))])
+    try #require(rig.feed(.deadline(at(10_000))).commands == [.dictationStopped(first, at: at(10_000))])
     seen += await readUntil(&events) { event in if case .finished = event { true } else { false } }
     await rig.settle()
 
@@ -155,7 +155,7 @@ func theCapWarnsAndStopsAHeldDictationToo() async throws {
     seen += await readUntil(&events) { event in if case .confirmed(let who, .hold) = event { who == id } else { false } }
     try #require(rig.feed(.deadline(at(8_000))).commands == [.oneMinuteLeft(id)])
     seen += await readUntil(&events) { event in if case .oneMinuteLeft(let who) = event { who == id } else { false } }
-    try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(id, at: at(10_000))])
+    try #require(rig.feed(.deadline(at(10_000))).commands == [.dictationStopped(id, at: at(10_000))])
     seen += await readUntil(&events) { event in if case .finished = event { true } else { false } }
     await rig.settle()
 
@@ -173,7 +173,7 @@ func theCapWarnsAndStopsAHeldDictationToo() async throws {
 @Test(.timeLimit(.minutes(1)))
 func aLostFnUpEndsAtTheCapAndQuitWaitsForIt() async throws {
     // No fn-up ever comes: the tap was disabled and nothing said so. The cap ends the hold at
-    // 10 s, and Quit (`idle`) returns once it has.
+    // 10 s, its timer's own time, and Quit (`idle`) returns once it has: no later.
     let rig = try HandsFreeRig(config: KeyboardConfig(cap: .seconds(10), capWarning: .seconds(2)))
     var events = await rig.conductor.events().makeAsyncIterator()
     let id = DictationID()
@@ -187,7 +187,7 @@ func aLostFnUpEndsAtTheCapAndQuitWaitsForIt() async throws {
     // Quit while the press is held: it returns once the cap ends the press, with the row written.
     let conductor = rig.conductor
     let quitting = Task { await conductor.idle() }
-    try #require(rig.feed(.deadline(at(10_050))).commands == [.dictationStopped(id, at: at(10_000))])
+    try #require(rig.feed(.deadline(at(10_000))).commands == [.dictationStopped(id, at: at(10_000))])
     await quitting.value
     await rig.settle()
 

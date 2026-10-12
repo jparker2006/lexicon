@@ -165,10 +165,10 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     }
     let warning = gesture.handle(.deadline(at(8_000)))
     #expect(warning.commands == [.oneMinuteLeft(a)])
-    #expect(warning.wakeAt == at(10_050))
+    #expect(warning.wakeAt == at(10_000))
     // Once only: the same mark again sends nothing, and the stop is still due at 10 s.
     #expect(gesture.handle(.deadline(at(8_000))).commands.isEmpty)
-    #expect(gesture.handle(.deadline(at(10_050))).commands == [.dictationStopped(a, at: at(10_000))])
+    #expect(gesture.handle(.deadline(at(10_000))).commands == [.dictationStopped(a, at: at(10_000))])
     #expect(!gesture.isRecording)
 }
 
@@ -195,7 +195,7 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     // No release ever arrives: the warning and then the cap end the Dictation, and a
     // release after that does nothing.
     var gesture = FnGesture(shortCap)
-    #expect(run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000)), .deadline(at(10_050))],
+    #expect(run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000)), .deadline(at(10_000))],
                 gesture: &gesture)
         == [.dictationBegan(a, at: at(0)), .dictationConfirmed(a, .hold), .oneMinuteLeft(a), .dictationStopped(a, at: at(10_000))])
     #expect(!gesture.isRecording)
@@ -268,14 +268,17 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     #expect(gesture.handle(.fnDown(at(335), secureInput: false, id: b)).commands == [.dictationConfirmed(a, .handsFree)])
 }
 
-@Test func aStopPressStampedBeforeTheCapStopsAtItsOwnTimeWhenTheCapsMarkIsHandledFirst() {
-    // As for the window: the stop press stamped at 9.99 s stops the Dictation there, and is
-    // never taken for the first press of a new one.
+@Test func aStopPressStampedBeforeTheCapIsNotANewPressWhenTheCapsMarkIsHandledFirst() {
+    // The cap stops the Dictation on time. A stop press stamped at 9.99 s but handled after the
+    // cap's timer was meant for that Dictation: by its own time it is ignored, never taken for the
+    // first press of a new one. A press stamped after the cap begins one.
     var gesture = FnGesture(shortCap)
     _ = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90)), .fnDown(at(200), secureInput: false, id: b),
              .deadline(at(8_000))], gesture: &gesture)
-    #expect(gesture.handle(.deadline(at(10_000))).commands.isEmpty)
-    #expect(gesture.handle(.fnDown(at(9_990), secureInput: false, id: b)).commands == [.dictationStopped(a, at: at(9_990))])
+    #expect(gesture.handle(.deadline(at(10_000))).commands == [.dictationStopped(a, at: at(10_000))])
+    #expect(gesture.handle(.fnDown(at(9_990), secureInput: false, id: b)) == FnGesture.Output())
+    #expect(gesture.handle(.fnUp(at(10_040))) == FnGesture.Output())
+    #expect(gesture.handle(.fnDown(at(10_100), secureInput: false, id: b)).commands == [.dictationBegan(b, at: at(10_100))])
 }
 
 @Test func aSecondTapWithSecureInputOnDropsTheTap() {
