@@ -1,109 +1,117 @@
-# How we work: Jake, the orchestrator, builders and the Reviewer
+# How we work: Jake, the orchestrator, builders, Live checks and the Reviewer
 
-Lexicon is built by Claude Code sessions running locally on Jake's Mac. No cloud builders. Jake decides what gets built and when it's installed; agents do the rest, toward the v0 spec ([#36](https://github.com/jparker2006/lexicon/issues/36)).
+Lexicon is built by Claude Code sessions running locally on Jake's Mac. No cloud builders. Jake decides what gets built and when it's installed; agents do the rest, toward the v0 spec ([#36](https://github.com/jparker2006/lexicon/issues/36)) and `docs/DECISIONS.md`.
 
 ## Roles
 
-- **Jake** answers grills, approves, and says "install". He is the bottleneck on purpose: keep his decisions small, clear and few.
-- **Orchestrator** (one long-running Claude Code session, Opus high, in its own worktree): keeps the map of issues, grills Jake on cross-cutting work, writes specs, tickets and builder prompts, and starts builders. It never merges and never installs.
-- **Builders** (Claude Code, Opus high, each in its own worktree): build one ticket, or an approved sequence from one spec in dependency order, with the implement-ticket skill. A ticket boundary does not need a fresh session. A builder ends at an open PR and a Ready comment; it never merges.
-- **Live checks** (one Claude Code session, Opus high, in its own worktree): the only session that builds, launches or drives Lexicon Dev, and the only one that asks Jake to do something physical (press fn, focus a field). It holds the live-app lane, runs builders' checklists on their branches as [Live checks](#live-checks) says, and posts the results on their issues. It never commits to a builder's branch, fixes what fails, or merges.
-- **Reviewer** (one Claude Code session, Opus high, in the main checkout `~/code/lexicon`): Jake starts it there, with no worktree, when PRs need review; the orchestrator writes its prompt. It reviews every green PR against [review.md](review.md) and gives one verdict per PR: merge, merge with notes, or don't merge. It is the only one who merges, one PR at a time, as [Merging](#merging) says, and it merges its own merge verdicts without waiting for Jake. It never merges a "don't merge" and holds what Jake says to hold. It names the merge order, resolves trivial conflicts without force-pushing, and puts non-blocking notes on the parent spec's Later list. There is no Deployer: on Jake's "install", the Reviewer runs the install command, as [Installing](#installing) says. Past about 1,500 messages, or when it slows down, it hands off with `/orchestrator-handoff reviewer`.
+- **Jake** answers grills, approves, and says "install". He is the bottleneck on purpose: keep his decisions small, clear and few, and his physical steps in sittings.
+- **Orchestrator** (one long-running Claude Code session, Opus high, in its own worktree): keeps the map of issues, grills Jake on cross-cutting work, writes specs, tickets and builder chips, and starts builders as [Concurrency](#concurrency) allows. **It is the one session that asks Jake for decisions** (grill Q5): in one numbered round, a recommendation on each, after reading the issue and PR comments for an answer already given. It records each answer the same minute as one `Decision (Jake, <date>):` comment on the issue, with his words. It holds the Mac awake while any Lexicon session runs (`mcp__ccd_host__request_keep_awake`, grill Q9). It never merges and never installs.
+- **Builders** (Claude Code, Opus high, each in its own worktree): build one ticket, or an approved sequence from one spec in dependency order, with the implement-ticket skill. A ticket boundary does not need a fresh session. A builder ends at an open PR and a Ready line; it never merges. A builder that needs Jake's decision posts the question on its issue with `waiting-on-jake` and stops (implement-ticket's Need Jake); the orchestrator puts it in front of Jake.
+- **Live checks** (one Claude Code session, Opus high, in its own worktree): the only session that builds, launches or drives Lexicon Dev, and the only one that asks Jake to do something physical (press fn, focus a field), always in a sitting. It holds the live-app lane, runs the request queue as [Live checks](#live-checks) says, and posts the results on the issues. It never commits to a builder's branch, fixes what fails, or merges.
+- **Reviewer** (one Claude Code session, Opus high, in the main checkout `~/code/lexicon`): Jake starts it there, with no worktree, from its start prompt. It reviews every Ready PR against [review.md](review.md), whose Reviewer's duties section is its standing job, and gives one verdict per PR naming the head it reviewed: merge, merge with notes, or don't merge. It is the only one who merges, with `scripts/merge-pr.mjs` as [Merging](#merging) says, and it merges its own merge verdicts without waiting for Jake. It never merges a "don't merge" and holds what Jake says to hold. Its non-blocking notes become `later` issues. There is no Deployer: the Reviewer installs as [Installing](#installing) says. Past about 1,500 messages, or when it slows down, it hands off with `/orchestrator-handoff reviewer`.
 
-The guard hook (`.claude/hooks/guard.mjs`) backs this up: it refuses every push to `main`, and refuses a merge from any session not started in the main checkout. That is why builders and the orchestrator always run in worktrees, and only the Reviewer runs in `~/code/lexicon`.
+The guard hook (`.claude/hooks/guard.mjs`) backs this up: it refuses every push to `main`, any merge from a session not started in the main checkout, and any merge except `scripts/merge-pr.mjs`. That is why builders, Live checks and the orchestrator always run in worktrees, and only the Reviewer runs in `~/code/lexicon`.
 
-A role session posts a finding on its issue before asking Jake about it, and asks in plain text, never with AskUserQuestion or another blocking question tool. Continuity between role sessions goes only through `/orchestrator-handoff [role]`.
+State lives on GitHub, not in chat: requests and decisions are issue comments, verdicts go on the PR, merge order is the `critical-path` label. A `SendMessage` between sessions is a short pointer to that comment, one complete message per decision. Approvals follow AGENTS.md's "Ask Jake first": never relayed. A role session asks in plain text, never with AskUserQuestion or another blocking question tool. Continuity between role sessions goes only through `/orchestrator-handoff [role]`.
 
 ## Models and helpers
 
-- The orchestrator, builders and the Reviewer run Opus at high effort.
-- Each fans its work out to Haiku 5.5 helpers at xhigh effort (`.claude/agents/`): `Explore` scouts, `editor` changes its own disjoint files, `critic` reviews one review.md section, `verifier` tries to disprove one finding. Size single helpers to the work, up to about 15 on a hard ticket; a `/pstack:swarm` run goes much wider (see pstack below). Helpers may start their own helpers. Use a Sonnet or Opus subagent where judgment matters.
-- The session itself runs every commit, push, GitHub write and heavy build (the check script, `lexicon-eval`), once.
+`CLAUDE.md` is the one home for models, the helper sizing table by ticket type, when to swarm, and the rules every helper brief carries; `docs/agents/pstack-models.md` sets each pstack role's model. Two things it doesn't say:
+
+- **Which cap governs what.** A Workflow's agents in one run: the batch size named in the workflow file (`BATCH_SIZE` in `.claude/workflows/review.js`), under Claude Code's limit of 16 at once, which changes (`CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS`) only if Jake picks a higher number after a quiet-Mac reading. A session's own helpers: 20 at once (CLAUDE.md). Builder sessions and heavy jobs: [Concurrency](#concurrency).
+- **A new agents directory needs a restart.** The first file in a new `.claude/agents/` directory loads only in a session started after it exists; until then `Agent type 'critic' not found` (#37, #42).
 
 ## pstack
 
-pstack is poteto's skill set, installed as a Claude Code plugin. The Matt Pocock skills run the loop below; a pstack skill is a tool for one job inside it and runs only when someone calls it by name. Its session routing hook stays off (`session hook: off` in `~/.claude/pstack-models.md`, which also sets the model for each pstack role).
+pstack is poteto's skill set, installed as a Claude Code plugin. The Matt Pocock skills run the loop below; a pstack skill is a tool for one job inside it and runs only when someone calls it by name. Its session routing hook stays off (`session hook: off` in `docs/agents/pstack-models.md`, which `scripts/install-pstack-sheet.sh` copies to `~/.claude/pstack-models.md`).
 
 | Tool | Who | When |
 |---|---|---|
-| `/pstack:swarm` | Builders | The default way to fan out when a task splits into parallel pieces: Haiku workers at xhigh, each with a standalone brief, drained into one report. Go wide (below). |
-| `/pstack:architect` | Orchestrator | Before it writes or starts a ticket that touches 3 or more modules, and when builders keep working around the design. A builder that hits the scrap rule in `docs/architecture.md` stops and hands back as implement-ticket's Need Jake says, so the rerun goes through the orchestrator. |
-| `/pstack:blast-radius` | Reviewer | On high-risk PRs that touch audio capture, History, insertion, network access or private data. It looks for what the change breaks outside the diff and proves the one fact it is safe because of by running code. |
+| `/pstack:swarm` | Builders, the Reviewer | By job type, not by how small the job feels: the triggers are CLAUDE.md's Swarms list. Haiku workers at xhigh, each with a standalone brief carrying the helper rules, drained into one report. Cut the work fine (one file, one test case, one lens or one Term per worker); when pieces run out before the count does, race several workers on one brief and declare `best-of` or `rank all` up front. Worker results are leads: a finding counts only after a verifier or your own read confirms it. |
+| `/pstack:architect` | Builders, the orchestrator | A builder whose ticket names 3 or more modules runs it before any code and posts the `Sketch:` (implement-ticket step 2). The orchestrator runs it before it writes such a ticket, and when builders keep working around the design. A builder that hits the scrap rule in `docs/architecture.md` stops and hands back through Need Jake, so the rerun goes through the orchestrator. |
+| `/pstack:blast-radius` | The Reviewer, the review Workflow | On high-tier PRs that touch audio capture, History, insertion, network access or private data (`blastRadius` in `review-map.json`). It looks for what the change breaks outside the diff and proves the one fact it is safe because of by running code. |
 | `/pstack:benchmark-checklist` | Whoever reports a lag, memory or speed number | Before the number goes into a PR, an issue or a decision. |
-| `/pstack:create-verification-skill` | The Live checks session, once | After the test hooks and Accessibility harness ([#45](https://github.com/jparker2006/lexicon/issues/45)) land. It writes the repo's skill for driving Lexicon Dev the way Jake does. |
-| `/pstack:maintain-verification-skill` | The Live checks session | At the end of each milestone after that, to keep the verification skill true. Its live pass drives the app, so it needs the lane. |
-| `/pstack:correct`, `/pstack:reflect` | Jake and the orchestrator | At the end of each milestone, in its retro (M0's is [#88](https://github.com/jparker2006/lexicon/issues/88)). `correct` turns mistakes agents keep repeating into checks that catch them; `reflect` turns a session's lessons into edits on existing skills. |
+| `/pstack:create-verification-skill` | The live-checks skill's builder (#161), once | It seeds `.claude/skills/live-checks/`, trimmed to the harness and live-lane commands. M0 never ran it: the harness and `scripts/checklists/` did that job. |
+| `/pstack:maintain-verification-skill` | The Live checks session | At the end of each milestone, to keep the live-checks skill true. Its live pass drives the app, so it needs the lane. |
+| `/pstack:correct`, `/pstack:reflect` | Jake and the orchestrator | In each milestone's retro, which runs `/mattpocock-skills:retro` (bare `/retro` is gstack's weekly retro; M0's is [#88](https://github.com/jparker2006/lexicon/issues/88)). `correct` turns mistakes agents keep repeating into checks that catch them; `reflect` turns a session's lessons into edits on existing skills. When a prose rule breaks twice, it moves into the guard or a check. |
 | `/pstack:unslop` | Whoever writes it | On text Jake reads: UI copy, notices, onboarding, the README. |
 | `/pstack:how`, `/pstack:why` | Anyone | Investigation: `how` traces how code runs, `why` digs through history for the reasons behind its shape. |
 
-**Swarms go wide.** Workers run on Haiku because it is cheap and fast, and that only pays off in numbers. Ask for at least 10 workers, normally 20 to 40, up to about 50. Cut the work fine: one file, one function, one test case, one review lens or one Term per worker. When the pieces run out before the count does, race several workers on the same brief and declare `best-of` or `rank all` up front. Only a job with fewer than about 5 pieces that can't be cut finer goes to single `editor` helpers instead. The step 4 review keeps its `critic` and `verifier` helpers.
-
-- The worker model comes from the `swarm workers` line in `~/.claude/pstack-models.md`, set to `haiku @xhigh`. If that line goes missing, pstack falls back to Opus.
-- pstack gives workers every tool, so each brief carries the helper rules: no commits, pushes, GitHub writes, check script, `lexicon-eval` or bundle script; no live app; no private data; write only your own files or output folder.
-- Worker results are leads, like any helper's: the builder reviews every diff, and a finding counts only after a verifier or the builder's own read confirms it.
+Repo skills copy implement-ticket's style: each tool call is named ("call the Skill tool with ..."), each step ends on one **Done** line, and a skill is model-invoked only when an agent launches it. `scripts/check-skills.mjs` checks their shape.
 
 Deliberately not used:
 
 - `poteto-mode` and the routing hook: they take over the session and would replace the Matt Pocock flow.
-- `babysit` and `fix-merge-conflicts`: `babysit` shepherds a PR to mergeable and `fix-merge-conflicts` resolves conflicts on its own terms. Merging is the Reviewer's alone, and builders bring `main` in as implement-ticket step 5 says.
+- `babysit` and `fix-merge-conflicts`: `babysit` shepherds a PR to mergeable and `fix-merge-conflicts` resolves conflicts on its own terms. Merging is the Reviewer's alone, through `scripts/merge-pr.mjs`, and builders bring `main` in only to resolve a conflict (implement-ticket step 5).
+- `implement-spec`'s integration branch: one branch collecting a spec's tickets would bypass the Reviewer-only merge, CI on every PR's own head, and the one live-app lane.
 - `interrogate`: left out for now. The grill dropped it because it needed the Codex and Grok CLIs; the installed version (0.9.81) runs Claude subagents instead, so it can come back if `blast-radius` proves too narrow.
 - pstack's `tdd`: Matt Pocock's `tdd` skill already covers test-first.
 
+## Topology
+
+Separate Claude Code sessions, each in its own worktree on Jake's Mac, one per role or ticket ([worktrees](https://code.claude.com/docs/en/common-workflows)), with subagents and Workflows inside a session ([subagents](https://code.claude.com/docs/en/sub-agents)). No [agent teams](https://code.claude.com/docs/en/agent-teams): the Desktop app doesn't run them. No cloud builders. Everything runs on Jake's plan, so the levers that remain are the plan-covered ones: fan-out within the caps, Monitor waits on a script instead of polling (`scripts/watch-events.sh`, `scripts/wait-ci.mjs`), one model and effort per wave so sibling sessions share the prompt cache, and evals at fast pace (`scripts/eval-quick.sh`). Fast mode and usage credits are out (AGENTS.md, Ask Jake first).
+
 ## Concurrency
 
-- Up to 8 builders at once, raised only if disk, memory and the CI queue hold up. GitHub runs at most 5 macOS CI jobs at once on this repo.
-- Builders that edit the same files don't run side by side. The orchestrator checks this before starting one.
+- **Heavy jobs: 2 at once,** through the two build slots (`scripts/lib/heavy.sh`), shared by every worktree. `scripts/check.sh`, `scripts/test.sh`, `scripts/bundle.sh` and eval runs each take one, and a job that waits names the holder's session, pid, command and start time. The guard refuses a bare `swift build`, `swift test` or `swift run` outside them. Live checks takes both slots for a timing run (`heavy.sh --quiet`).
+- **Builder sessions: up to 8** (Jake, 2026-10-11: "up to 8 and see how it is at 8"), and only while `scripts/machine.sh` says "room for more builders: yes". The orchestrator runs it before each chip. It also reads the plan's usage before each chip and starts no new builder at or over 90% of the 5-hour window or 95% of the week (CLAUDE.md's standing approvals, grill Q3). Both gates cover new starts only; a running builder is never held.
+- **Haiku helpers have no machine cap:** they rarely compile. Their cap is CLAUDE.md's 20 at once per session.
+- Builders that edit the same files don't run side by side: the orchestrator reads `scripts/lanes.sh` before starting one.
 - **One live-app lane, held by the Live checks session.** Only it drives the live app: fn, the mic, paste, Accessibility, the Lexicon Dev window. Everyone else stays headless (the real pipeline on a WAV, no mic, keys or network).
-- Worktrees share SwiftPM's one dependency cache. Each has its own `.build/`. Once a ticket merges, its worktree and build folder are deleted.
+- **CI:** GitHub runs at most 5 macOS CI jobs at once on this repo. A newer push to a branch cancels that branch's older run; on `main`, a running run is never cancelled, and a waiting one is dropped when a newer merge queues, whose run checks a head that includes it. `scripts/wait-ci.mjs` judges each commit by its own run, or by the later `main` run that contains it.
+- Worktrees share SwiftPM's one dependency cache. Each has its own `.build/`; the merge script removes a merged PR's worktree and build folder, and the orchestrator removes any it skipped (dirty or in use) once that builder is done.
+- **The Mac:** Low Power Mode stays off during builds (Jake changes it, never an agent; `scripts/machine.sh` warns while it's on), and the orchestrator holds keep-awake while any session runs. A closed lid still sleeps.
+- **`.claude/settings.json` is Jake's to approve.** Auto mode refuses an agent's edit to it unless Jake says yes in that session, so a ticket that changes it asks him before it is built (`scripts/ticket.sh claim` refuses it without a recorded yes).
 
 ## Live checks
 
-The lane is a lock: `scripts/live-lane.sh take "Live checks"` writes `~/Library/Application Support/Lexicon Dev/live-lane.lock` with the holder's name and its session's PID. `scripts/dev-run.sh` and `scripts/harness.sh` refuse to run for any other session, naming the holder. A lock whose process has ended is stale and cleared on the next read. `status` shows the holder; `release` gives the lane back.
+The lane is a lock: `scripts/live-lane.sh take "Live checks"` writes `~/Library/Application Support/Lexicon Dev/live-lane.lock` with the holder's session process. `scripts/dev-run.sh` and `scripts/harness.sh` refuse to run for any other session, naming the holder. A lock whose process has ended is stale and cleared on the next read. `status` shows the holder; `release` gives the lane back.
 
-A builder whose ticket needs the live app sends the Live checks session one request once its branch is pushed, with `SendMessage` to the session named `Live checks` (`ListAgents` shows it):
+**Requests.** A builder asks only after its own review and a green check, on its pushed head (implement-ticket step 6): `scripts/live-request.sh post N <items file>` posts one comment on its issue headed `Live checks request: <branch> @ <sha7>`, never a message. Each item is typed (the format is in the script's header): hands-off or Jake, the gesture, target, whether Jake speaks, the cue, the observable, the pass bar and what it needs. Anything a hook, the harness or a script can check is hands-off: Jake would rather go hands-free than do it. The head stays frozen until the result lands, and the builder's Ready line says "Live checks pending". A physical item holds only its own acceptance line, never the whole ticket.
 
-- the issue, branch, PR (or "no PR yet") and head sha;
-- a numbered checklist, one observable behavior per item, each with its pass bar ("3. Paste into TextEdit's empty document: the text lands at the cursor and the clipboard is restored");
-- anything Jake must do by hand, so the Live checks session can batch it with other asks.
+**The queue.** The Live checks session reads requests in arrival order, the critical path first (`scripts/live-lane.sh queue`). `live-lane.sh preflight N` refuses what can't pass: another app answering fn, a hook item on a release bundle, an item whose feature has no use site at the head, or an item the issue puts out of scope. Hands-off items run as soon as the head is pushed and Jake isn't typing (`live-lane.sh idle`). Any wait over 2 minutes, such as a memory settle or an eval, becomes a timer (`live-lane.sh timer`) and the lane moves on. Each request gets one comment headed `Live checks: <branch> @ <sha7>`: pass or fail per item, the numbers, and file paths, with dictated text shown only as its length and hash. A failure comes with the evidence, not a fix; the builder fixes it and posts a new request, which replaces the old one.
 
-The Live checks session takes requests in arrival order (the orchestrator's critical path first). For each, it checks out that sha detached in its own worktree, launches it with `scripts/dev-run.sh -- --test-hooks`, runs each item with the harness, and posts one comment on the builder's issue headed `Live checks: <branch> @ <sha>`: pass or fail per item, the numbers, and screenshot paths. A failure comes with the evidence, not a fix; the builder fixes it and sends a new request. The PR cites that comment as its live-app evidence.
+**Sittings** (grill Q7). Jake's items wait for a sitting: at most two a day, by default 11 AM and 6 PM Pacific and not fixed, and only when there are physical items. `live-lane.sh sitting render` turns the queued Jake items into one numbered checklist with the total minutes up front, prerequisites as their own steps. Jake answers by number. Nothing physical reaches him outside a sitting, and he is never asked "done?" when the log can already show the result.
 
-For any check where Jake presses fn into a field, he quits his daily Lexicon first (and Lexicon Indicator or RespeakProto, if running) and reopens it after; only Jake quits them. Each answers fn too, so it dictates every press as well, and its paste makes Lexicon Dev hold its own text as typedSince ([#141](https://github.com/jparker2006/lexicon/issues/141)). `scripts/dev-run.sh` and `scripts/harness.sh check` warn while one is running.
+**Jake's daily copy** (grill Q8). For a sitting with fn steps, `sitting start` quits his daily Lexicon from its own menu, only while no Dictation is in progress, and `sitting end` reopens it; nobody force-kills it. Other apps that answer fn (Lexicon Indicator, RespeakProto) are Jake's to quit; `scripts/dev-run.sh` and `scripts/harness.sh check` warn while one runs, because its paste makes Lexicon Dev hold its own text as typed-since ([#141](https://github.com/jparker2006/lexicon/issues/141)).
+
+**What a result gates** (grill Q6). A PR merges on its headless checks plus the hands-off items' result for its exact head (`scripts/merge-pr.mjs` checks it). Items that need Jake's hands are checked on `main` in his next sitting and gate the install: nothing installs on his daily copy until they pass. review.md Risk tiers has the rule for high-tier merges.
+
+**Numbers.** Live checks posts timing numbers only as `scripts/bench.sh` output, read as `docs/architecture.md` Budgets says. The lag bar ([#79](https://github.com/jparker2006/lexicon/issues/79)) is read in the power state Jake normally dictates in, with the other state reported beside it (grill Q9).
+
+**Standing items.** Any change to `Sources/KeyInput/EventTap.swift` gets a Live checks item: typing delay with Lexicon idle stays at the listen-only 2 to 12 ms ([ADR 0004](../adr/0004-listen-only-fn-tap.md)).
+
+## Human time
+
+- Any task that needs more than 15 minutes of Jake's time carries "Jake time: N items x S s = M min", with N counted from the data and S his measured pace, never a guess. `scripts/ticket-lint.sh` checks the line on a ticket's Jake items.
+- Any page or task for Jake that runs over 15 minutes ships only after a 10-item trial run with him (grill Q19). M0's gold page was too busy on first use, and its estimate was 3 to 5 times too low.
 
 ## The loop
 
 1. **Issue.** Every real change starts as a GitHub issue, labeled and commented as [triage-labels.md](triage-labels.md) says. The first line of every comment states the status.
-2. **Grill** (Jake plus an agent), in rounds of numbered questions, each with a recommendation. New terms go into `GLOSSARY.md` as they settle; hard-to-reverse decisions become ADRs in `docs/adr/`. The decisions are posted **on the issue**: if it's not on the issue, it didn't happen.
-   - The orchestrator grills work that spans areas, decides priorities, or changes the architecture.
-   - A builder grills a self-contained issue it will build next, posts the decisions on the issue and **waits for Jake's OK** before building.
-3. **Spec and tickets** (orchestrator): small vertical slices, each `ready-for-agent`, each naming its test seam, modules and blockers. The spec issue itself gets no triage label.
-4. **Builder prompt** (orchestrator): "Build issue #N with the implement-ticket skill.", plus the exact scope, the files other builders own right now, and which acceptance criteria need the Live checks session. Keep linear tickets in one builder; use separate builders for independent work.
+2. **Grill** (Jake plus the orchestrator), in rounds of numbered questions written as AGENTS.md's Working with Jake says, each with a recommendation. New terms go into `GLOSSARY.md` as they settle; hard-to-reverse decisions become ADRs in `docs/adr/`. Each answer is posted on the issue as one `Decision (Jake, <date>):` comment with his words, in the same minute: if it's not on the issue, it didn't happen. The PR that builds the behavior records it in `docs/DECISIONS.md`. A builder never grills Jake itself: it posts its question and waits, as Roles says.
+3. **Spec and tickets** (orchestrator): small vertical slices, each `ready-for-agent` only once `scripts/ticket-lint.sh` passes, each naming its test seam, modules and blockers. The spec issue itself gets no triage label.
+4. **Chips** (orchestrator): `scripts/unblocked.sh` lists the unblocked tickets and drafts a one-line chip for each, carrying the ticket's Needs line and any approved scope ("Build issue #N with the implement-ticket skill."). A wave's chips go up together, so Jake clicks them in one go (grill Q15). Keep linear tickets in one builder; use separate builders for independent work.
 5. **Build** (builder): the implement-ticket skill, from claim to a PR ready for review, then the next approved unblocked ticket. It stops for a real blocker, an unresolved decision or the end of its sequence.
-6. **Review and merge** (Reviewer): every PR says `Refs #N` and never a closing keyword. The Reviewer merges as below.
-7. **Install** (Reviewer, only after Jake says "install").
-8. **Closing.** Plumbing tickets (build, docs, workflow, stores, scorers, anything Jake can't feel in the app) are closed as soon as they merge; the orchestrator closes them. Tickets Jake can feel (fn, paste, the pill, setup, Cleanup quality, Re-speak) stay open until **Jake closes them** after using the change in his daily copy.
+6. **Review and merge** (Reviewer): every PR starts `Refs #N` (AGENTS.md has the closing-keyword rule). The Reviewer reviews as review.md says and merges as below.
+7. **Install** (Reviewer), as below.
+8. **Closing** (grill Q11). Every ticket closes when its PR merges: `scripts/merge-pr.mjs` closes each Refs issue with a comment naming the PR and the sha. Something Jake can feel (fn, paste, the pill, setup, Cleanup quality, Re-speak) goes on the pinned Try list issue at install, and Jake ticks it off once he has used it. A blocker is done when its PR has merged ([issue-tracker.md](issue-tracker.md) has the one definition).
+
+**A milestone's finish line freezes** (grill Q14). One checklist comment per milestone is its only gate list, and it freezes when the milestone's last planned ticket starts. A new find joins only if it loses a Dictation or damages Jake's text or data in the daily copy, and only with Jake's one-line yes, asked with a recommendation. Everything else goes to the next milestone.
 
 ## Merging
 
-The Reviewer merges one PR at a time, only on its own merge verdict, with plain `gh`:
+The Reviewer merges with one command, from the main checkout, once its verdict naming the reviewed head is on the PR:
 
 ```bash
-gh pr view <pr> --json headRefOid,baseRefName,state,isDraft,mergeable
-gh pr checks <pr> --watch --fail-fast
-gh api repos/jparker2006/lexicon/compare/main...<head sha> --jq .behind_by
-gh pr merge <pr> --squash --match-head-commit <head sha>
+scripts/merge-pr.mjs <pr> <full reviewed head sha>
 ```
 
-- The head sha is the one it reviewed. A newer push means a new review.
-- `gh pr checks` must show the `CI` check passed on that head. Right after a push, CI may show no run yet: wait, never call it a failure. A newer push cancels a waiting run; judge a commit by its own runs.
-- `behind_by` must be 0. When the branch is behind `main`, the Reviewer merges `main` into it (in a temporary worktree, `git merge origin/main`, never a rebase) and pushes. That new head needs only a look at what the merge changed (its conflict resolutions), then green CI, before the Reviewer merges with the new sha.
-- `--match-head-commit` makes GitHub refuse the merge if anyone pushed after the review. On any refusal or unknown result, it reads the PR again; it never retries blindly.
-- After each merge, the next PR is behind `main` until it is brought up to date. The Reviewer deletes the merged branch (`git push origin --delete <branch>`), and the builder's worktree and `.build/` once that builder is done.
+- It reads every gate first and prints every refusal at once: the verdict names that sha, and a "merge with notes" lists each note under "Later:" with its issue; every acceptance line of each Refs issue is marked met, waived or moved (`scripts/ticket.sh ac`); the live gate (above); the high-tier review table and blast-radius proof (review.md); and the critical path, so no other merge goes while a green, Ready `critical-path` PR waits, and none that shares files with a held one.
+- A PR behind `main` is not refused: it runs `gh pr update-branch` on this PR only, just before merging, and waits for CI on that exact new head (`scripts/wait-ci.mjs`). A conflict goes back to the builder as a PR comment.
+- It squash-merges with `--match-head-commit`, so GitHub refuses the merge if anyone pushed after the review; deletes the branch; closes the Refs issues; and removes the builder's worktree and `.build/`, unless it is dirty or a process still runs in it.
+- Exit 0 merged, 1 refused or unknown, 2 bad arguments or GitHub unreadable. On a refusal or an unknown result it reads the PR again; it never retries blindly.
 
 ## Installing
 
-Jake says "install" and the Reviewer runs the install command for one commit on `main` whose CI passed; one "install" covers one install. The command (it lands with the bundle scripts ticket) builds a release, waits if a Dictation is in progress, swaps it into `~/Applications/Lexicon.app` and relaunches it, keeping its permissions. Afterwards it comments `Installed: <sha>` on each issue that commit carries. Nobody else installs over the daily copy, and nobody installs without his word.
-
-## Dev builds
-
-The Live checks session runs **Lexicon Dev**: its own bundle ID and data folder (`~/Library/Application Support/Lexicon Dev/`), signed with the "Lexicon Dev" certificate so its permissions persist across rebuilds, installed at `~/Applications/Lexicon Dev.app` and launched with `open`. It never touches the daily copy or its permissions.
+Jake says "install" in the Reviewer's session, or the standing install rule in the Reviewer's start prompt applies (grill Q1: after each wave merges, once its Jake items pass). The Reviewer then runs `scripts/install.sh` from a clean `main` checkout whose CI passed; one "install" covers one install. It builds a release, waits if a Dictation is in progress, swaps it into `~/Applications/Lexicon.app` and relaunches it, keeping its permissions. Then it comments `Installed: <sha7>` on each issue the install carries and adds each one with a try step to the Try list. Nobody else installs over the daily copy, and nobody installs without his word.

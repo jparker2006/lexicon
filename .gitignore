@@ -7,3 +7,9 @@ xcuserdata/
 .env.*
 .claude/worktrees/
 .scratch/
+# gstack's /browse appends this line; having it already makes that a no-op.
+.gstack/
+# The Test set and its baselines live in Jake's data folder, and the scripts
+# refuse a path inside a work tree; these are the second guard.
+test-set/
+baselines/

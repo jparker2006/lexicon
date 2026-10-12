@@ -59,3 +59,23 @@ _Avoid_: Star, favorite, bookmark
 **Secret guard**:
 A check on the Mac that keeps keys, tokens and passwords out of every text call and cuts the speech stream once one is heard. Audio already streamed can't be recalled.
 _Avoid_: Redaction, filter
+
+**Missed paste**:
+A paste no app reads within 1 s. The Dictation is marked not inserted and waits for paste-last; its text stays on the clipboard until 2 s after the write, so a late Cmd-V still pastes it, then the user's own clipboard comes back.
+_Avoid_: Failed paste, dropped text
+
+**Structural check**:
+The check in code that AI cleanup's output kept the meaning of the rules-only text: no content word added or dropped, negations and numbers intact. Failing it types the rules-only text.
+_Avoid_: verify(), meaning check
+
+**verify()**:
+The research's earlier meaning check, "output equals the raw text minus listed fillers". Replaced by the structural check, which allows AI cleanup. Only old research uses the word.
+_Avoid_: Using it for the structural check
+
+**Jev**:
+TypeSafe's decision model, called directly with one pinned version, that picks the right candidate for a Re-speak fix or a Hand fix. Every call has a local fallback, and no call happens during plain dictation.
+_Avoid_: The LLM, the AI
+
+**Hook**:
+A command one program runs when something happens in another. In these docs it means a Claude Code hook, such as the guard hook that refuses unsafe agent commands, or a test hook, a debug-only command the harness sends Lexicon Dev. Lexicon itself has no product hooks unless the after-M1 grill brings them back.
+_Avoid_: Plugin, callback, trigger
