@@ -10,7 +10,8 @@ enum KeyInput: Sendable, Hashable {
     /// so they never get here: Shift with fn never cancels (it is the Re-speak trigger in M4).
     case otherKey(HostTime)
     /// Plain Esc. Reported by the tap and, while it is registered, by the Esc
-    /// hotkey: the same press can arrive twice, and the second finds nothing to end.
+    /// hotkey: the same press can arrive twice. The second finds nothing to end,
+    /// or a newer press that began after its stamp, which it leaves alone.
     case escape(HostTime)
     /// A timer the recognizer asked for has fired.
     case deadline(HostTime)
@@ -33,7 +34,7 @@ enum KeyInput: Sendable, Hashable {
 ///     recording(hold) --fnUp--> idle              emits .dictationStopped
 ///     recording(handsFree) --fnDown--> idle       emits .dictationStopped; its fn-up then lands in idle
 ///     recording --Esc--> idle                     emits .dictationCancelled (saved, never typed)
-///     any --Esc stamped before this press--> same  nothing: the second report of an Esc that ended the last one
+///     any --Esc stamped before this Dictation began--> same  nothing: the second report of an Esc that ended the last one
 ///     recording --cap--> idle                     emits .oneMinuteLeft at the warning, .dictationStopped at the cap
 ///                                                 (a key stamped past a mark gets that mark first, in either order)
 ///     recording --sleep--> idle                   emits .dictationStopped

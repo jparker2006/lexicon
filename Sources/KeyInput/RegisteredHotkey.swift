@@ -1,5 +1,4 @@
 import Carbon.HIToolbox
-import CoreGraphics
 import Foundation
 import os
 import LexiconDomain
@@ -109,10 +108,14 @@ extension Hotkey {
 
 extension HostTime {
     /// A Carbon event's time: seconds on the same uptime clock as `HostTime`, so a press
-    /// keeps the time it happened, not when the recognizer got it. Judged as a CGEvent's
-    /// stamp is: unset, in the future or over a second old reads as `now`.
+    /// keeps the time it happened however late it is handled; a late copy of an Esc then
+    /// can never pass for a newer one. Unset, not a number or in the future reads as `now`.
     init(carbonEventTime seconds: Double, now: HostTime) {
-        let valid = seconds.isFinite && seconds > 0 && seconds < Double(now.nanoseconds) / 1e9 + 1
-        self.init(eventTimestamp: valid ? CGEventTimestamp((seconds * 1e9).rounded()) : 0, now: now)
+        let nanoseconds = seconds * 1e9
+        guard nanoseconds.isFinite, nanoseconds > 0, nanoseconds <= Double(now.nanoseconds) else {
+            self = now
+            return
+        }
+        self.init(nanoseconds: UInt64(nanoseconds.rounded()))
     }
 }
