@@ -18,11 +18,11 @@ import LexiconDomain
 /// key-down / mouse-down, (4) feeds fn and every other key-down to `FnGesture`
 /// and yields its commands, (5) takes or gives back Esc when that changed.
 ///
-/// `@unchecked Sendable` is safe because `gesture` and `deadline` are touched
-/// by one thread only: the tap thread (the callback, the timer and `perform`'s
-/// blocks all run on its run loop), or a test's thread for a tap never started.
-/// `tap` and `runLoop` are written once in `start()` before it returns, ordered
-/// by the semaphore.
+/// `@unchecked Sendable` is safe because `gesture`, `deadline` and `tookEscape`
+/// are touched by one thread only: the tap thread (the callback, the timer and
+/// `perform`'s blocks all run on its run loop), or a test's thread for a tap
+/// never started. `tap`, `runLoop` and `takeEscape` are written once in
+/// `start()` before it returns, ordered by the semaphore.
 final class EventTapThread: @unchecked Sendable {
     private var gesture: FnGesture
     private var deadline: CFRunLoopTimer?
