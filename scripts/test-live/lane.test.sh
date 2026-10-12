@@ -115,7 +115,7 @@ stop_listeners
 # Sittings. #53's hold step without its speak field can't render.
 request "claude/issue-53 @ $read" "$F/53-hold-no-speak.txt" > "$T/r53b"
 jq -n --rawfile r "$T/r53b" '[{number: 53, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
-expect fail 'item 1 \(Hold\): no speak field' "#53's hold step can't render without its speak field" "$LANE" sitting render
+expect ok "^not in a sitting: #53 claude/issue-53 @ $read: the request can't be read: item 1 \\(Hold\\): no speak field\$" "#53's hold step can't render without its speak field" "$LANE" sitting render
 
 # #57's Dictation step uses fn without saying so in its gesture.
 printf 'item: Mic prompt\nkind: jake\ngesture: say one sentence after the reset\ntarget: TextEdit\nspeak: yes\nfn: yes\ncue: the Microphone prompt\nobservable: the prompt, then text\npass: the text lands\nneeds: click Allow on Lexicon Dev'"'"'s Microphone prompt\nminutes: 3\n\n' > "$T/57.txt"
@@ -143,7 +143,11 @@ expect fail 'nobody holds the live-app lane' "daily reopen is the lane holder's"
 take_lane "$REPO"
 expect fail 'daily quit runs only in an open sitting' "daily quit needs an open sitting" "$LANE" daily quit
 # daily quit and reopen act on the real Mac whatever HOME says, so under a fake HOME they refuse.
+expect fail 'only reopens a daily Lexicon that daily quit closed' "daily reopen reopens only what daily quit closed" "$LANE" daily reopen
+mkdir -p "$DEV/live-lane"
+echo 1 > "$DEV/live-lane/daily-quit"
 expect fail 'is not your login home' "daily reopen refuses under a test's HOME" "$LANE" daily reopen
+rm "$DEV/live-lane/daily-quit"
 fake_listener "$T/elsewhere/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicator"
 expect fail "Lexicon Indicator is running \(pid $LISTENER" "a sitting with fn steps won't start while another app answers fn" "$LANE" sitting start
 [ ! -e "$DEV/live-sitting.open" ] && pass "a refused start leaves no marker" || fail "a refused start left the marker"
@@ -166,6 +170,10 @@ expect ok '^2\. Hold \(#53 .* item 1\): pass$' "the end keeps a pass" cat "$T/en
 expect ok '^3\. Mic prompt \(#57 .* item 1\): fail: no prompt$' "the end keeps a fail and its note" cat "$T/end.txt"
 absent 'daily' "a sitting that didn't quit the daily Lexicon doesn't reopen it" cat "$T/end.txt"
 [ ! -e "$DEV/live-sitting.open" ] && pass "the end removes the marker" || fail "the marker outlived the sitting"
+# A session that crashed mid-sitting leaves its marker; the next look clears it.
+printf 'opened=2026-10-11T21:46:00Z\nholder=crashed\npid=999999\npid-started=Sun Oct 11 21:40:00 2026\n' > "$DEV/live-sitting.open"
+expect ok 'cleared the marker of a sitting whose session ended' "a dead session's sitting marker is cleared" "$LANE" status
+[ ! -e "$DEV/live-sitting.open" ] && pass "the guard no longer sees a crashed sitting as open" || fail "a crashed sitting's marker survived"
 
 # A sitting of only #57's Dictation step still counts as fn.
 only_request 57 "$T/r57b" "$T/issues-sitting.json"
@@ -209,8 +217,13 @@ expect ok 'parked 2 entries' "park moves Dev's data aside" "$LANE" park
 expect ok 'the lane stays held \(parked data' "a timer while data is parked keeps the lane" "$LANE" timer 600 settle
 echo setup > "$DEV/Preferences.plist"
 echo finder > "$PARKED/.DS_Store"
-echo 'entry=interrupted' >> "$PARKED/manifest"
+# A park cut off after listing an entry but before moving it, and a restore
+# cut off after moving one back: both stay where they are.
+echo late > "$DEV/Notes.txt"
+echo 'entry=Notes.txt' >> "$PARKED/manifest"
+mv "$PARKED/History.sqlite" "$DEV/History.sqlite"
 expect ok 'restored Lexicon Dev.s data; what the parked run wrote is in ' "restore puts it back, moving the run's files and strays aside" "$LANE" restore
+[ -f "$DEV/Notes.txt" ] && [ -f "$DEV/History.sqlite" ] && pass "entries already back after an interrupt stay in Dev" || fail "restore moved an entry that was already back"
 [ -L "$DEV/models" ] && [ "$(find -L "$DEV/models" -type f | wc -l | tr -d ' ')" = "$models_before" ] && pass "models is still a link with $models_before files" || fail "models changed"
 [ -f "$DEV/History.sqlite" ] && [ -f "$DEV/audio/1.caf" ] && [ ! -e "$DEV/Preferences.plist" ] && [ ! -e "$PARKED" ] && pass "the parked data is back and the parked folder is gone" || fail "restore lost data or left the parked folder"
 mkdir -p "$PARKED"

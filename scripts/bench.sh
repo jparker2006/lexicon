@@ -100,7 +100,7 @@ report() {
     listeners=$(fn_listeners_line)
     [ "$listeners" = "fn listeners: none" ] || provisional="${provisional:+$provisional; }$listeners"
     if [ -n "$provisional" ]; then
-        echo "PROVISIONAL: $provisional. A's p95 $a95 ms against the $TARGET ms budget."
+        echo "PROVISIONAL, no final verdict: $provisional. A's p95 $a95 ms against the $TARGET ms budget."
     elif [ "$a95" -le "$TARGET" ]; then
         echo "PASS: A's p95 $a95 ms is within the $TARGET ms budget."
     else
@@ -150,8 +150,10 @@ case "${1:-}" in
         sample "$file" &
         sampler=$!
         trap 'kill "$sampler" 2>/dev/null || true; rm -f "$file"' EXIT
+        trap 'exit 130' INT TERM HUP
         sleep "$seconds"
         kill "$sampler"
+        wait "$sampler" 2>/dev/null || true
         median=$(load_stats < "$file" | cut -d' ' -f2)
         rm -f "$file"
         mkdir -p "$(dirname "$BACKGROUND")"
@@ -190,6 +192,7 @@ case "${1:-}" in
         sample "$OUT/load.txt" &
         sampler=$!
         trap 'kill "$sampler" 2>/dev/null || true' EXIT
+        trap 'exit 130' INT TERM HUP
         : > "$OUT/A.txt"
         : > "$OUT/B.txt"
         i=0
@@ -201,6 +204,7 @@ case "${1:-}" in
             fi
         done
         kill "$sampler"
+        wait "$sampler" 2>/dev/null || true
         power >> "$OUT/load.txt"
         report "$BUDGET" "$OUT/A.txt" "$OUT/B.txt" "$OUT/load.txt"
         ;;

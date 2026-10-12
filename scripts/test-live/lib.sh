@@ -10,7 +10,7 @@ cleanup() {
     rm -rf "$T"
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT TERM HUP
 export HOME="$T/home" TMPDIR="$T/tmp" GIT_CONFIG_NOSYSTEM=1
 mkdir -p "$HOME" "$TMPDIR" "$T/bin"
 export PATH="$T/bin:$PATH"

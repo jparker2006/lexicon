@@ -51,7 +51,7 @@ take_lane "$REPO"
 seq 50 2 98 > "$T/a.txt"
 seq 60 2 108 > "$T/b.txt"
 printf '# power: AC Power, low power mode 0\n1 3.10\n2 2.90\n3 3.40\n' > "$T/load.txt"
-expect ok '^PROVISIONAL: no background load measured' "with no background measured, the verdict is provisional" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
+expect ok '^PROVISIONAL, no final verdict: no background load measured' "with no background measured, the verdict is provisional" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
 mkdir -p "$DEV/live-lane"
 echo 2.50 > "$DEV/live-lane/bench-background"
 expect ok '^PASS: A.s p95 96 ms is within the 100 ms budget\.' "quiet enough and within budget passes" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
@@ -60,9 +60,9 @@ expect ok '^A \(branch\): 25 samples, p50 74 ms, p95 96 ms$' "the report prints 
 expect fail '^FAIL: A.s p95 106 ms is over the 100 ms budget\.' "over budget fails" "$REPO/scripts/bench.sh" report history-open "$T/b.txt" "$T/a.txt" "$T/load.txt"
 # #64's History open was measured at load 26 to 46.
 printf '1 26.0\n2 31.5\n3 46.0\n' > "$T/loaded.txt"
-expect ok '^PROVISIONAL: median load 31\.50 is over 1\.5 times the background 2\.50' "a run under load is provisional, not a pass" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/loaded.txt"
+expect ok '^PROVISIONAL, no final verdict: median load 31\.50 is over 1\.5 times the background 2\.50' "a run under load is provisional, not a pass" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/loaded.txt"
 fake_listener "$HOME/Applications/Lexicon.app/Contents/MacOS/Lexicon"
-expect ok '^PROVISIONAL: fn listeners: the daily Lexicon' "no final verdict while another fn listener runs" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
+expect ok '^PROVISIONAL, no final verdict: fn listeners: the daily Lexicon' "no final verdict while another fn listener runs" "$REPO/scripts/bench.sh" report history-open "$T/a.txt" "$T/b.txt" "$T/load.txt"
 stop_listeners
 
 # lag-report reads the sampler's file for the load its numbers were taken under.

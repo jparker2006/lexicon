@@ -99,6 +99,19 @@ refuse() {
 
 require_lane() { read_lock && holds || refuse; }
 
+# A sitting is open while its marker names a live session. A session that
+# crashed mid-sitting leaves a marker the guard would keep honoring, so the
+# next look clears it.
+sitting_open() {
+    [ -e "$MARKER" ] || return 1
+    mpid=$(sed -n 's/^pid=//p' "$MARKER")
+    msince=$(sed -n 's/^pid-started=//p' "$MARKER")
+    if [ -n "$mpid" ] && [ -n "$msince" ] && [ "$(started "$mpid")" = "$msince" ]; then return 0; fi
+    rm -f "$MARKER"
+    echo "live-lane: cleared the marker of a sitting whose session ended" >&2
+    return 1
+}
+
 # --- the queue ---------------------------------------------------------------
 
 # Every open issue with its body and comments, fetched once per command, in
@@ -249,7 +262,7 @@ next_slot() {
 # Writes $STATE/sitting.tsv (step, issue, head, item, title, fn) and prints the checklist.
 sitting_render() {
     # Acks are by step number, so the numbers stay fixed while a sitting is open.
-    [ ! -e "$MARKER" ] || die "a sitting is open; end it before rendering the next one"
+    ! sitting_open || die "a sitting is open; end it before rendering the next one"
     mkdir -p "$STATE"
     steps=$(mktemp -t live-sitting)
     out=$(mktemp -t live-sitting)
@@ -257,7 +270,11 @@ sitting_render() {
     requests > "$ISSUES.requests"
     while IFS='	' read -r created issue head index; do
         sha=${head##* @ }
-        items=$(items_of "$issue" "$index")
+        # A request that can't be read stays out of the sitting, named, and the rest go on.
+        if ! items=$(request_body "$issue" "$index" | scripts/live-request.sh items - 2> "$ISSUES.err"); then
+            printf 'skip\t#%s %s: the request can'"'"'t be read: %s\n' "$issue" "$head" "$(sed 's/^live-request: //' "$ISSUES.err" | paste -sd ';' - | sed 's/;/; /g')"
+            continue
+        fi
         printf '%s\n' "$items" | while IFS= read -r item; do
             kind=$(printf '%s\n' "$item" | cut -f3)
             [ "$kind" = jake ] || continue
@@ -316,7 +333,7 @@ sitting() {
         render) fetch_issues; sitting_render ;;
         start)
             require_lane
-            [ ! -e "$MARKER" ] || die "a sitting is already open (sitting end closes it)"
+            ! sitting_open || die "a sitting is already open (sitting end closes it)"
             [ -s "$STATE/sitting.tsv" ] || die "no rendered sitting with Jake's steps: run sitting render, and start one only when it has steps"
             quit=
             if awk -F'\t' '$6 == "yes"' "$STATE/sitting.tsv" | grep -q .; then
@@ -330,7 +347,7 @@ sitting() {
                 fi
                 if fn_listeners | grep -q '|the daily Lexicon|'; then quit=yes; fi
             fi
-            printf 'started=%s\nholder=%s\nquit-daily=%s\n' "$(TZ=UTC date '+%Y-%m-%dT%H:%M:%SZ')" "$holder" "${quit:-no}" > "$MARKER"
+            printf 'opened=%s\nholder=%s\npid=%s\npid-started=%s\n' "$(TZ=UTC date '+%Y-%m-%dT%H:%M:%SZ')" "$holder" "$pid" "$since" > "$MARKER"
             if [ -n "$quit" ]; then
                 ( daily quit ) || { rm -f "$MARKER"; die "the sitting didn't open: the daily Lexicon wasn't quit"; }
                 require_no_fn_listeners || { rm -f "$MARKER"; die "the sitting didn't open: another app still answers fn"; }
@@ -340,7 +357,7 @@ sitting() {
             ;;
         ack)
             require_lane
-            [ -e "$MARKER" ] || die "no sitting is open"
+            sitting_open || die "no sitting is open"
             step=${2:-}
             verdict=${3:-}
             case "$verdict" in pass | fail | skip) ;; *) die "usage: sitting ack <step> pass|fail|skip [note]" ;; esac
@@ -352,17 +369,16 @@ sitting() {
             ;;
         end)
             require_lane
-            [ -e "$MARKER" ] || die "no sitting is open"
+            sitting_open || die "no sitting is open"
             [ -s "$STATE/sitting.tsv" ] || die "the open sitting has lost its steps ($STATE/sitting.tsv); its acks are in $STATE/sitting.acks"
             while IFS='	' read -r step issue head item title fn; do
                 ack=$(awk -F'\t' -v s="$step" '$1 == s { a = $2 ($3 != "" ? ": " $3 : "") } END { print a }' "$STATE/sitting.acks")
                 where=; [ "$issue" = - ] || where=" (#$issue $head item $item)"
                 printf '%s\n' "$step. $title$where: ${ack:-no ack}"
             done < "$STATE/sitting.tsv"
-            quit=$(sed -n 's/^quit-daily=//p' "$MARKER")
             rm -f "$MARKER" "$STATE/sitting.tsv" "$STATE/sitting.txt" "$STATE/sitting.acks"
             echo "live-lane: sitting closed"
-            if [ "$quit" = yes ]; then
+            if [ -e "$STATE/daily-quit" ]; then
                 ( daily reopen ) || echo "live-lane: the daily Lexicon didn't reopen; run: scripts/live-lane.sh daily reopen" >&2
             fi
             ;;
@@ -387,7 +403,11 @@ dictating() {
 daily() {
     require_lane
     # Only around a sitting (Q8): sitting start quits it, sitting end reopens it.
-    [ "${1:-}" != quit ] || [ -e "$MARKER" ] || die "daily quit runs only in an open sitting; sitting start quits it for a sitting with fn steps"
+    # Only around a sitting (Q8): quit inside one, reopen only what quit closed.
+    case "${1:-}" in
+        quit) sitting_open || die "daily quit runs only in an open sitting; sitting start quits it for a sitting with fn steps" ;;
+        reopen) [ -e "$STATE/daily-quit" ] || die "daily reopen only reopens a daily Lexicon that daily quit closed" ;;
+    esac
     # lsappinfo, System Events and open reach the real Mac whatever HOME says,
     # so a run under a test's fake HOME would quit Jake's real app: refuse it.
     real=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }')
@@ -410,11 +430,13 @@ daily() {
                 ticks=$((ticks + 1))
                 [ "$ticks" -lt 150 ] || die "the daily Lexicon is still running 30 s after Quit"
             done
-            echo "live-lane: quit the daily Lexicon (pid $pid); reopen it with: scripts/live-lane.sh daily reopen"
+            echo "$pid" > "$STATE/daily-quit"
+            echo "live-lane: quit the daily Lexicon (pid $pid); sitting end reopens it (or: scripts/live-lane.sh daily reopen)"
             ;;
         reopen)
-            [ -z "$(daily_pid)" ] || { echo "live-lane: the daily Lexicon is already running"; return 0; }
+            if [ -n "$(daily_pid)" ]; then rm -f "$STATE/daily-quit"; echo "live-lane: the daily Lexicon is already running"; return 0; fi
             open "$app"
+            rm -f "$STATE/daily-quit"
             echo "live-lane: reopened $app"
             ;;
         *) echo "usage: live-lane.sh daily quit|reopen" >&2; exit 64 ;;
@@ -457,11 +479,14 @@ restore() {
     ! dev_running || die "$NAME is running; quit it before moving its data"
     # Whatever the parked run wrote, and anything in the parked folder the
     # manifest doesn't name (a Finder .DS_Store), goes aside, never deleted.
+    # An entry the manifest names that is no longer parked is already back
+    # (an interrupted restore, or a park interrupted before its move): it stays.
     leftovers=$(mktemp -d "${TMPDIR:-/tmp}/lexicon-dev-unparked.XXXXXX")
     for path in "$DATA"/* "$DATA"/.[!.]*; do
         [ -e "$path" ] || [ -L "$path" ] || continue
         entry=${path##*/}
         kept "$entry" && continue
+        if grep -qxF "entry=$entry" "$PARKED/manifest" && [ ! -e "$PARKED/$entry" ] && [ ! -L "$PARKED/$entry" ]; then continue; fi
         mv "$path" "$leftovers/$entry"
     done
     for path in "$PARKED"/* "$PARKED"/.[!.]*; do
@@ -473,6 +498,10 @@ restore() {
     sed -n 's/^entry=//p' "$PARKED/manifest" | while IFS= read -r entry; do
         [ -e "$PARKED/$entry" ] || [ -L "$PARKED/$entry" ] || continue
         mv "$PARKED/$entry" "$DATA/$entry"
+    done
+    # Every entry the manifest names is back in Dev's folder before the manifest goes.
+    sed -n 's/^entry=//p' "$PARKED/manifest" | while IFS= read -r entry; do
+        [ -e "$DATA/$entry" ] || [ -L "$DATA/$entry" ] || die "$entry is in neither $DATA nor $PARKED; the manifest is left in place"
     done
     rm "$PARKED/manifest"
     rmdir "$PARKED"
@@ -524,14 +553,14 @@ case "${1:-}" in
     release)
         if ! read_lock; then echo "live-lane: nobody holds the live-app lane"; exit 0; fi
         holds || refuse
-        [ ! -e "$MARKER" ] || die "a sitting is open; sitting end closes it first"
+        ! sitting_open || die "a sitting is open; sitting end closes it first"
         restore
         rm -f "$LOCK"
         echo "live-lane: $holder released the live-app lane"
         ;;
     status)
         if read_lock; then echo "live-lane: held by $holder (pid $pid)"; else echo "live-lane: free"; fi
-        [ ! -e "$MARKER" ] || echo "live-lane: a sitting is open ($(sed -n 's/^started=//p' "$MARKER"))"
+        ! sitting_open || echo "live-lane: a sitting is open (since $(sed -n 's/^opened=//p' "$MARKER"))"
         [ ! -e "$PARKED" ] || echo "live-lane: $NAME's data is parked"
         echo "live-lane: $(fn_listeners_line)"
         ;;
@@ -557,7 +586,7 @@ case "${1:-}" in
         echo $(($(date +%s) + $2)) > "$STATE/timer.$(printf %s "$3" | tr -c 'A-Za-z0-9._-' -)"
         # A long wait doesn't hold the lane, unless Dev's data is parked or a
         # sitting is open: those belong to the holder until it ends them.
-        if [ -e "$PARKED" ] || [ -e "$MARKER" ]; then
+        if [ -e "$PARKED" ] || sitting_open; then
             echo "live-lane: timer $3 due in $2 s; the lane stays held (parked data or an open sitting). queue shows it when due"
         else
             rm -f "$LOCK"
