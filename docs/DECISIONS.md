@@ -211,10 +211,14 @@ Jake: as item 57. #58 spikes the registered hotkey and falls back to (b) only if
 
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
-**76. The 20-minute cap acts 50 ms after its mark.**
+**76. The 20-minute cap and its 19-minute warning act 50 ms after their marks.**
 > Jake: decide whether the 20-minute cap may act 50 ms after the 20-minute mark. I recommend yes. [...] Yes (recommended): the cap stops the recording at exactly 20:00 (the audio ends there), but acts 50 ms later. So an Esc or a tap of fn pressed just before 20:00 always counts, whichever the fn tap sees first. Cost: if fn-up was lost, Quit can wait 20 minutes plus 50 ms instead of exactly 20 minutes. [...] No: the cap acts at exactly 20:00 and Quit never waits past it. Cost: an Esc pressed in the last few milliseconds before 20:00 can arrive just after the cap and be ignored, so that Dictation is typed instead of held. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6126616497))
 
 Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 14:54:52Z): "cap yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6126756110)). Decided: the cap's stop is stamped at the cap and acts 50 ms later, as the double-tap window's drop does; #58's "Quit waits no longer than the cap" becomes "no longer than the cap plus 50 ms". `FnGesture.lateKeyGrace`.
+
+> Jake: decide whether the 19-minute warning sound may also play 50 ms after 19:00, the same as your "cap yes" for the cap. I recommend yes. [...] Yes (recommended): a key pressed just before 19:00 always counts the same way, whichever the fn tap sees first. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127087016))
+
+Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 15:15:50Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127137470)). Decided: the 19-minute warning acts 50 ms after its mark too.
 
 ### Proposed: built on an agent's default, never asked
 
