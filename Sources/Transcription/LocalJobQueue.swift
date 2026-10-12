@@ -15,6 +15,9 @@ public actor LocalJobQueue {
     /// Jobs waiting for their turn, not counting the one running.
     var waiting: Int { live.count + background.count }
 
+    /// Callers parked in `untilWaiting`.
+    var watching: Int { watchers.count }
+
     /// Returns once at least `count` jobs wait for their turn: a test's signal that
     /// a job is queued, with no clock and no polling. Also returns when its task is
     /// cancelled, so a test whose job never queues fails at its time limit, not hangs.

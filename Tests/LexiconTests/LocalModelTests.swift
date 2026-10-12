@@ -156,6 +156,8 @@ import LexiconDomain
     // cancels the test's work, not hang the whole run.
     let queue = LocalJobQueue()
     let waiter = Task { await queue.untilWaiting(atLeast: 1) }
+    // Parked first, so the cancel has to wake it, not just stop it before it starts.
+    while await queue.watching == 0 { await Task.yield() }
     waiter.cancel()
     await waiter.value
 }
