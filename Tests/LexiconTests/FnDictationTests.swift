@@ -194,7 +194,7 @@ func quitDoesNotWaitForeverOnADictationStuckInTheModel() async throws {
         await rig.conductor.handle(command)
     }
     await model.waitForCalls(1)
-    await rig.conductor.idle(finishingWithin: .milliseconds(100))
+    await rig.conductor.idle(finishingWithin: .milliseconds(100))  // timing-ok: the model never lets go, so it always runs out
 
     // Not lost: the row and its audio are on disk for launch recovery.
     #expect(await rig.history.dictation(id)?.status == .transcribing)
@@ -384,7 +384,7 @@ private struct FnRig {
         self.history = history
         self.destination = destination
         conductor = Conductor(
-            recorder: recorder, speech: SpeechEngine(local: local), cleanup: Cleanup(),
+            recorder: recorder, speech: SpeechEngine(local: local, clock: TestClock()), cleanup: Cleanup(),
             lexicon: try Lexicon(paths: paths), history: history, destination: destination,
             preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
             keyboard: keyboard, fixes: nil, jev: nil)

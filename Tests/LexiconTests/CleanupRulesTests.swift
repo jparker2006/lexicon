@@ -205,7 +205,7 @@ func hardFillersGoAnywhere(_ c: Case) {
 
 @Test func theCleanupStageTypesRulesOnlyText() async {
     let plan = CleanupPlan.make(preferences: .defaults, access: nil, terms: [], rules: .empty, app: .unknown)
-    let cleaned = await Cleanup().clean("Um, so ship it, uh, today.", plan: plan, deadline: .milliseconds(450))
+    let cleaned = await Cleanup().clean("Um, so ship it, uh, today.", plan: plan, deadline: Preferences.defaults.cleanupDeadline)
     #expect(cleaned.versions == TextVersions(model: "Um, so ship it, uh, today.", cleaned: "Ship it, today."))
     #expect(cleaned.outcome == .rulesOnly(.off))
 }
@@ -259,10 +259,10 @@ func researchCasesKeepEveryProtectedWord(_ c: Case) {
     #expect(protectedCounts(clean(c.raw)) == protectedCounts(c.raw))
 }
 
-// Speed: under 1 ms on a 100-word Dictation. Off in CI, since tests never depend
-// on machine speed; run it with `LEXICON_TIMING=1 swift test --filter runsUnder`.
+// Speed: under 1 ms on a 100-word Dictation. A timing run only, since the check
+// must not depend on machine speed: `LEXICON_TIMING=1 scripts/test.sh --filter runsUnder`.
 
-@Test(.enabled(if: ProcessInfo.processInfo.environment["LEXICON_TIMING"] != nil))
+@Test(.enabled(if: timingRun))
 func runsUnderOneMillisecondOnAHundredWords() {
     let dictation = Array(repeating: "Um, so I need you to, uh, look at the the payments webhook, you know, it's double charging.",
                           count: 7).joined(separator: " ")

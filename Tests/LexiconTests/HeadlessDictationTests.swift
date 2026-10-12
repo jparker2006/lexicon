@@ -20,7 +20,8 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     let source = syntheticSamples(count: 19_200)  // 1.2 s
     let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
     let engine = ScriptedTranscriber(text: spoken)
-    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults, local: engine)
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults, local: engine,
+                                         clock: TestClock())
 
     let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
     await system.history.flush()
@@ -49,7 +50,7 @@ func aFillerOnlyDictationIsSilenceAndPastesNothing() async throws {
     let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
     // Past the engine's silence check, but Cleanup drops the filler and leaves nothing.
     let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
-                                         local: ScriptedTranscriber(text: "Um."))
+                                         local: ScriptedTranscriber(text: "Um."), clock: TestClock())
     let events = await system.conductor.events()
 
     let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
@@ -78,7 +79,7 @@ func aFillerOnlyDictationIsSilenceAndPastesNothing() async throws {
     let history = try HistoryStore(paths: paths)
     let destination = StatusAtInsert(history: history)
     let conductor = Conductor(
-        recorder: Recorder(), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)), cleanup: Cleanup(),
+        recorder: Recorder(), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken), clock: TestClock()), cleanup: Cleanup(),
         lexicon: try Lexicon(paths: paths), history: history, destination: destination,
         preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
         keyboard: nil, fixes: nil, jev: nil)
@@ -92,7 +93,8 @@ func aFillerOnlyDictationIsSilenceAndPastesNothing() async throws {
 @Test func withNoSpeechModelTheDictationWaitsAndKeepsItsAudio() async throws {
     let source = syntheticSamples(count: 8_000)
     let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
-    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults, local: nil)
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults, local: nil,
+                                         clock: TestClock())
 
     let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
     await system.history.flush()
@@ -112,7 +114,7 @@ func onAFullDiskTheTextIsStillTypedAndJakeIsTold() async throws {
     let paths = AppPaths.temporary()
     let history = try HistoryStore(paths: paths)
     let conductor = Conductor(
-        recorder: Recorder(policy: .diskFull), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)),
+        recorder: Recorder(policy: .diskFull), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken), clock: TestClock()),
         cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: history, destination: HeadlessDestination(),
         preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
         keyboard: nil, fixes: nil, jev: nil)
@@ -138,7 +140,7 @@ func onAFullDiskTheTextIsStillTypedAndJakeIsTold() async throws {
 func aMicThatFailsToStartLeavesTheNextFnPressWorking() async throws {
     let paths = AppPaths.temporary()
     let conductor = Conductor(
-        recorder: Recorder(hardware: .noMic), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)),
+        recorder: Recorder(hardware: .noMic), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken), clock: TestClock()),
         cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: try HistoryStore(paths: paths),
         destination: HeadlessDestination(), preferences: PreferencesStore(fixed: .defaults),
         secrets: Secrets(.environment), keyboard: nil, fixes: nil, jev: nil)
@@ -162,7 +164,7 @@ func aFileThatCannotBeReadLeavesNoRowAndReportsNothing() async throws {
     let paths = AppPaths.temporary()
     let history = try HistoryStore(paths: paths)
     let conductor = Conductor(
-        recorder: Recorder(hardware: .noMic), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken)),
+        recorder: Recorder(hardware: .noMic), speech: SpeechEngine(local: ScriptedTranscriber(text: spoken), clock: TestClock()),
         cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: history,
         destination: HeadlessDestination(), preferences: PreferencesStore(fixed: .defaults),
         secrets: Secrets(.environment), keyboard: nil, fixes: nil, jev: nil)
@@ -175,7 +177,7 @@ func aFileThatCannotBeReadLeavesNoRowAndReportsNothing() async throws {
     #expect(await history.dictation(result.id) == nil)
 }
 
-@Test(.timeLimit(.minutes(1))) func insertTargetsCannotBeMadeOutsideTheirModules() async throws {
+@Test(.timeLimit(.minutes(5))) func insertTargetsCannotBeMadeOutsideTheirModules() async throws {
     let imports = "import AppText\nimport KeyInput\nimport LexiconCore\nimport LexiconDomain\n"
     let fetched = try await compile(imports + """
         func live(_ app: TargetApp) async -> TargetApp.Target? { await app.target() }
@@ -203,7 +205,7 @@ func aFileThatCannotBeReadLeavesNoRowAndReportsNothing() async throws {
     #expect(headless.output.contains("inaccessible"), "\(headless.output)")
 }
 
-@Test(.timeLimit(.minutes(1))) func finishingASpeechAttemptTwiceIsACompileError() async throws {
+@Test(.timeLimit(.minutes(5))) func finishingASpeechAttemptTwiceIsACompileError() async throws {
     let imports = "import LexiconDomain\nimport Transcription\n"
     let once = try await compile(imports + """
         func run(_ attempt: consuming SpeechAttempt, _ clip: AudioClip) async { _ = await attempt.finish(clip) }

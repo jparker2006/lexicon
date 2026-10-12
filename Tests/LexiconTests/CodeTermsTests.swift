@@ -10,9 +10,9 @@ import LexiconDomain
 // the fixture also goes to a scripted file-event source as the events FSEvents
 // reports for it, so no test waits on FSEvents (the smoke test at the end does,
 // once). Every wait is on an explicit signal (`CodeTerms.changes`), and each
-// touch goes to a repo that is not current yet, so the wait is real. The
-// deadline only stops a failing test from hanging. The scripted replay ends with
-// HistoryDone at once, so CodeTerms' replay deadline decides no result either.
+// touch goes to a repo that is not current yet, so the wait is real. Each test's
+// time limit only stops a failing test from hanging. The scripted replay ends
+// with HistoryDone at once, so CodeTerms' replay deadline decides no result either.
 
 /// File events the fixture sends, delivered the moment it sends them. Like
 /// FSEvents, a watch with history first replays every event sent before it,
@@ -151,31 +151,20 @@ private struct Fixture {
     }
 }
 
-/// True once `condition` holds, checked now and after each change; false after
-/// 120 s. The limit only stops a failing test from hanging: on a loaded 3-core CI
-/// runner a test can wait over 10 s for a thread.
+/// True once `condition` holds, checked now and after each change. It waits on
+/// the changes alone, with no deadline of its own: each test's time limit stops
+/// a hang, and on a loaded 3-core CI runner a test can wait over 10 s for a thread.
 private func eventually(_ terms: CodeTerms, _ condition: @escaping @Sendable () async -> Bool) async -> Bool {
     if await condition() { return true }
-    return await withTaskGroup(of: Bool.self) { group in
-        group.addTask {
-            for await _ in terms.changes where await condition() { return true }
-            return false
-        }
-        group.addTask {
-            try? await Task.sleep(for: .seconds(120))
-            return false
-        }
-        let first = await group.next() ?? false
-        group.cancelAll()
-        return first
-    }
+    for await _ in terms.changes where await condition() { return true }
+    return false
 }
 
 private func current(_ terms: CodeTerms, is repo: String?) async -> Bool {
     await eventually(terms) { await terms.currentRepo == repo }
 }
 
-@Test func codeTermsAreNamesNeverIdentifiersOrFileNames() async throws {
+@Test(.timeLimit(.minutes(1))) func codeTermsAreNamesNeverIdentifiersOrFileNames() async throws {
     let fixture = try Fixture()
     try fixture.write("code/zorblax/Package.swift", """
         // swift-tools-version: 6.2
@@ -239,7 +228,7 @@ private func current(_ terms: CodeTerms, is repo: String?) async -> Bool {
     await fixture.finish(terms)
 }
 
-@Test func touchingAFileMakesItsRepoCurrent() async throws {
+@Test(.timeLimit(.minutes(1))) func touchingAFileMakesItsRepoCurrent() async throws {
     let fixture = try Fixture()
     try fixture.write("code/zentrik/main.rs")
     try fixture.write("code/zentrik/.git/HEAD")
@@ -268,7 +257,7 @@ private func current(_ terms: CodeTerms, is repo: String?) async -> Bool {
     await fixture.finish(terms)
 }
 
-@Test func atLaunchTheRepoChangedLastIsCurrent() async throws {
+@Test(.timeLimit(.minutes(1))) func atLaunchTheRepoChangedLastIsCurrent() async throws {
     let fixture = try Fixture()
     try fixture.write("code/zentrik/main.rs")
     try fixture.write("code/quaxly/main.py")
@@ -281,7 +270,7 @@ private func current(_ terms: CodeTerms, is repo: String?) async -> Bool {
     await fixture.finish(terms)
 }
 
-@Test func theNamesFollowTheFiles() async throws {
+@Test(.timeLimit(.minutes(1))) func theNamesFollowTheFiles() async throws {
     let fixture = try Fixture()
     try fixture.write("code/quaxly/main.py")
     try fixture.write("code/zentrik/package.json", #"{"dependencies": {"blorpkit": "1"}}"#)
@@ -315,7 +304,7 @@ private func current(_ terms: CodeTerms, is repo: String?) async -> Bool {
     await fixture.finish(terms)
 }
 
-@Test func withNoCodeFolderHomeSkillsStillFollowTheFiles() async throws {
+@Test(.timeLimit(.minutes(1))) func withNoCodeFolderHomeSkillsStillFollowTheFiles() async throws {
     let fixture = try Fixture()
     try fixture.remove("code")
     try fixture.write("home/.claude/skills/old-skill/SKILL.md")
@@ -345,8 +334,8 @@ func fsEventsReachCodeTerms() async throws {
     for repo in ["zentrik", "quaxly"] {
         try fixture.write("code/\(repo)/main.txt", repo)
         #expect(await current(terms, is: repo), """
-            No write reached CodeTerms through real FSEvents in 120 s. A very busy Mac can stall \
-            fseventsd this long; on an idle one, look at FSEventsSource and the real paths.
+            No write reached CodeTerms through real FSEvents within the time limit. On an \
+            idle Mac, look at FSEventsSource and the real paths.
             """)
     }
     await fixture.finish(terms)
