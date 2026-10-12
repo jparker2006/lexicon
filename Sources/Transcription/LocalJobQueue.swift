@@ -16,9 +16,21 @@ public actor LocalJobQueue {
     var waiting: Int { live.count + background.count }
 
     /// Returns once at least `count` jobs wait for their turn: a test's signal that
-    /// a job is queued, with no clock and no polling.
+    /// a job is queued, with no clock and no polling. Also returns when its task is
+    /// cancelled, so a test whose job never queues fails at its time limit, not hangs.
     func untilWaiting(atLeast count: Int) async {
-        while waiting < count { await withCheckedContinuation { watchers.append($0) } }
+        while waiting < count, !Task.isCancelled {
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { watchers.append($0) }
+            } onCancel: {
+                Task { await self.wakeWatchers() }
+            }
+        }
+    }
+
+    private func wakeWatchers() {
+        for watcher in watchers { watcher.resume() }
+        watchers = []
     }
 
     /// Runs `job` when it is this caller's turn.
@@ -30,8 +42,7 @@ public actor LocalJobQueue {
                 case .live: live.append(waiter)
                 case .background: background.append(waiter)
                 }
-                for watcher in watchers { watcher.resume() }
-                watchers = []
+                wakeWatchers()
             }
         }
         busy = true

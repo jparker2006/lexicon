@@ -151,6 +151,15 @@ import LexiconDomain
     #expect(await model.transcribed == 0)
 }
 
+@Test(.timeLimit(.minutes(1))) func aWaitForQueuedJobsEndsWhenItsTestIsCancelled() async {
+    // A test that waits for a job that never queues must fail at its time limit, which
+    // cancels the test's work, not hang the whole run.
+    let queue = LocalJobQueue()
+    let waiter = Task { await queue.untilWaiting(atLeast: 1) }
+    waiter.cancel()
+    await waiter.value
+}
+
 @Test(.timeLimit(.minutes(1))) func liveWorkGoesAheadOfQueuedBackgroundWork() async throws {
     let queue = LocalJobQueue()
     let order = Order()
