@@ -166,6 +166,18 @@ test('a lens that could not finish its commands is INCOMPLETE', async () => {
   assert(/INCOMPLETE: .*gh pr list was refused/.test(r.result.markdown), 'the markdown should say why')
 })
 
+test("a critic's brief and schema say a build, test or check not run is never incomplete", async () => {
+  const { dir, sha } = fixtureRepo('ci-gate', ['Sources/Foo/a.swift'])
+  const r = await run(dir, { issue: 1, sha })
+  const critics = r.calls.filter(c => c.agentType && c.agentType.startsWith('critic'))
+  assert(critics.length > 0, 'critics should run')
+  for (const c of critics) {
+    for (const [what, text] of [['prompt', c.prompt], ['incomplete schema', c.schema.properties.incomplete.description]]) {
+      for (const s of ['CI is the build gate', 'scripts/check.sh', 'never incomplete']) assert(text.includes(s), `${c.label} ${what} should say "${s}"`)
+    }
+  }
+})
+
 test('a newline in an INCOMPLETE reason stays on the INCOMPLETE line', async () => {
   const { dir, sha } = fixtureRepo('incomplete-newline', ['Sources/Foo/a.swift'])
   const r = await run(dir, { issue: 1, sha }, (p, o) =>
