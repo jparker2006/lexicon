@@ -23,6 +23,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        # Full history: scripts/check-docs.mjs reads which tickets have merged
+        # from main's squash subjects, and a depth-1 clone has none.
+        with:
+          fetch-depth: 0
       # The scorer's pinned Python and packages (scorer/uv.lock). The image has no uv.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
