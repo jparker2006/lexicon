@@ -120,12 +120,13 @@ private let question = JevQuestion.respeakTarget(spoken: "Supabase", spokenPhone
 /// The caller's own ranking by sound, used when Jev can't answer.
 private let soundRanking = [RespeakPick(candidate: 1, probability: 0.6), RespeakPick(candidate: 0, probability: 0.3)]
 /// A client whose budget runs out only when a test advances `clock`, and whose
-/// requests URLSession never times out, so no test races real time.
+/// requests URLSession never times out, so no test races real time. Each test's
+/// time limit stops a hang.
 private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevClient {
     JevClient(session: server.session, clock: clock, requestTimeout: 3_600)
 }
 
-@Test func jevAnswersWithEveryCandidateRankedAndItsProbability() async throws {
+@Test(.timeLimit(.minutes(1))) func jevAnswersWithEveryCandidateRankedAndItsProbability() async throws {
     let server = FakeJev { _ in (200, answer(["c1": 0.02, "c2": 0.97, "none": 0.01])) }
     let decision = await client(server).decide(question, access: server.access(), fallback: soundRanking)
 
@@ -146,9 +147,8 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
     #expect((body["questions"] as? [String: Any])?.keys.sorted() == ["target"])
 }
 
-@Test func aRequestThatTimesOutIsATimeoutNotAnError() async {
-    // URLSession's own request timeout can fire before the budget on a busy Mac:
-    // that is still a timeout (#149).
+@Test(.timeLimit(.minutes(1))) func aRequestThatTimesOutIsATimeoutNotAnError() async {
+    // URLSession's own request limit is a timeout too, not an error.
     let server = FakeJev(failing: URLError(.timedOut))
     let decision = await client(server).decide(question, access: server.access(), fallback: soundRanking)
     #expect(decision.source == .fallback(.timeout))
@@ -168,7 +168,7 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
     #expect(decision.answer == soundRanking)
 }
 
-@Test func privateModeDecidesLocallyWithNoRequest() async {
+@Test(.timeLimit(.minutes(1))) func privateModeDecidesLocallyWithNoRequest() async {
     let server = FakeJev { _ in (200, answer(["c1": 1])) }
     var privateMode = Preferences.defaults
     privateMode.privacy = .private
@@ -192,7 +192,7 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
     #expect(await deciding.value.source == .fallback(.privateMode))
 }
 
-@Test func aCallerThatGaveUpStillGetsTheFallbackWithoutWaiting() async {
+@Test(.timeLimit(.minutes(1))) func aCallerThatGaveUpStillGetsTheFallbackWithoutWaiting() async {
     let server = FakeJev()
     let deciding = Task {
         withUnsafeCurrentTask { $0?.cancel() }
@@ -203,7 +203,7 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
     guard case .fallback = decision.source else { Issue.record("answered after the caller gave up"); return }
 }
 
-@Test func aSecretInTheWordsSendsNothing() async throws {
+@Test(.timeLimit(.minutes(1))) func aSecretInTheWordsSendsNothing() async throws {
     let server = FakeJev { _ in (200, answer(["c1": 1])) }
     let access = server.access()
     let secret = "ghp_" + "aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY2zA4"
@@ -216,7 +216,7 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
     #expect(server.requests.isEmpty)
 }
 
-@Test func noKeyOrABadReplyFallsBack() async {
+@Test(.timeLimit(.minutes(1))) func noKeyOrABadReplyFallsBack() async {
     let noKey = await JevClient(clock: TestClock())
         .decide(question, access: CloudAccess.granted(by: .defaults, for: .app(.unknown)) { _ in nil }, fallback: soundRanking)
     #expect(noKey.source == .fallback(.noKey))
@@ -247,13 +247,13 @@ private func client(_ server: FakeJev, clock: TestClock = TestClock()) -> JevCli
                                       candidates: [superBase]) == nil)
 }
 
-@Test func tiedAnswersKeepTheCandidateOrder() async {
+@Test(.timeLimit(.minutes(1))) func tiedAnswersKeepTheCandidateOrder() async {
     let server = FakeJev { _ in (200, answer(["none": 0.4, "c2": 0.3, "c1": 0.3])) }
     let decision = await client(server).decide(question, access: server.access(), fallback: soundRanking)
     #expect(decision.answer.map(\.candidate) == [nil, 0, 1])
 }
 
-@Test func requestBodiesHoldOnlyTheWordsAroundEachCandidate() async throws {
+@Test(.timeLimit(.minutes(1))) func requestBodiesHoldOnlyTheWordsAroundEachCandidate() async throws {
     // 40 distinct words, so any word in the body says where in the Dictation it came from.
     let words = (0..<40).map { String(format: "word%02d", $0) }
     let candidates = [

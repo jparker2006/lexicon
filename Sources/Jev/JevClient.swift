@@ -76,8 +76,8 @@ public struct JevClient: Sendable {
                 do {
                     (data, response) = try await session.data(for: request)
                 } catch let error as URLError where error.code == .timedOut {
-                    // URLSession's limit can beat the budget's timer on a busy Mac:
-                    // either way the answer came too late.
+                    // URLSession's own limit: the answer came too late, as past the
+                    // budget. A budget timer starved that long must not make it an error.
                     return fallingBack(.timeout)
                 } catch {
                     return fallingBack(.error)
