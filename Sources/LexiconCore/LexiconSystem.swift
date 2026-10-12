@@ -25,7 +25,8 @@ public final class LexiconSystem: Sendable {
     public let text: TargetApp
     /// Why fn is off (no Accessibility, or no listen access); nil while it works.
     public let fnOff: KeyboardError?
-    let keyboard: Keyboard?
+    /// The fn tap; nil while fn is off. The test hooks press keys through it.
+    public let keyboard: Keyboard?
     let speech: SpeechEngine
 
     /// Starts the fn tap first: fn must work within 150 ms of process start, and

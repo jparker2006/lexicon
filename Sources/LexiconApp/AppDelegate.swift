@@ -19,7 +19,8 @@ import TestHooks
 ///    login, the warning dot, and the setup window on first run.
 /// 3. NSWorkspace will-sleep -> `conductor.systemWillSleep()`; Quit waits for `conductor.idle()`.
 ///
-/// Test hooks (debug builds only) answer when the dev bundle id is launched with `--test-hooks`.
+/// Test hooks (debug builds only) answer when the dev bundle id is launched with `--test-hooks`;
+/// such a run keeps its data in a scratch folder unless `--dev-data` is passed too.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var system: LexiconSystem?
@@ -33,8 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var lexiconPage: LexiconWindowPresenter?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     var sleepObserver: (any NSObjectProtocol)?
+    /// The data root, chosen once in `startSystem`.
+    var paths: AppPaths?
     #if DEBUG
     var testHooks: TestHookServer?
+    /// The local model, slowed when a test hook asks.
+    var slowModel: SlowedTranscriber?
     #endif
 
     /// Before AppKit starts: the tap runs on its own thread and the key loop off
@@ -43,10 +48,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bundle = Bundle.main
         guard let bundleID = bundle.bundleIdentifier else { fatalError("Lexicon runs only as an app bundle") }
         let log = Logger(subsystem: bundleID, category: "launch")
+        #if DEBUG
+        let paths = AppTestHooks.isOn(bundleID: bundleID)
+            ? AppTestHooks.dataPaths(bundleID: bundleID) : AppPaths.forBundle(id: bundleID)
+        // Inert until a test hook asks it to slow an answer.
+        let local = SlowedTranscriber(ParakeetTranscriber(paths: paths))
+        slowModel = local
+        #else
         let paths = AppPaths.forBundle(id: bundleID)
+        let local = ParakeetTranscriber(paths: paths)
+        #endif
+        self.paths = paths
         do {
             try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
-            let system = try LexiconSystem.live(paths: paths, bundleID: bundleID, local: ParakeetTranscriber(paths: paths))
+            let system = try LexiconSystem.live(paths: paths, bundleID: bundleID, local: local)
             self.system = system
             Task.detached { await system.run() }
             let ms = LaunchClock.sinceProcessStart().map { Int(($0 * 1000).rounded()) } ?? -1
@@ -68,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bundle = Bundle.main
         let bundleID = bundle.bundleIdentifier ?? "Lexicon"
         let log = Logger(subsystem: bundleID, category: "launch")
-        let paths = AppPaths.forBundle(id: bundleID)
+        let paths = paths ?? AppPaths.forBundle(id: bundleID)
 
         let appName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lexicon"
         let history = HistoryWindowPresenter(paths: paths, system: system)
@@ -97,8 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
         #if DEBUG
-        testHooks = AppTestHooks.start(bundleID: bundleID, paths: paths, indicator: indicator, system: system,
-                                       preferences: preferences)
+        testHooks = AppTestHooks.start(bundleID: bundleID, dataRoot: paths, indicator: indicator, system: system,
+                                       preferences: preferences, slowModel: slowModel)
         #endif
 
         DispatchQueue.main.async { [weak self, system] in

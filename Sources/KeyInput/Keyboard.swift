@@ -77,6 +77,8 @@ public final class Keyboard: Sendable {
     public let commands: AsyncStream<KeyCommand>
     /// Hands an input to the recognizer on its own thread (the tap thread).
     let feed: @Sendable (KeyInput) -> Void
+    /// The tap behind `feed`; nil for a test's scripted keyboard.
+    let tap: EventTapThread?
 
     /// Creates the tap thread and starts listening. Throws if Accessibility is missing.
     public static func start(_ config: KeyboardConfig, input: InputClock) throws(KeyboardError) -> Keyboard {
@@ -88,12 +90,19 @@ public final class Keyboard: Sendable {
         let tap = EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
                                  continuation: continuation)
         try tap.start(listenAccess: listenAccess)
-        return Keyboard(commands: commands, feed: { tap.perform($0) })
+        return Keyboard(tap: tap, commands: commands)
+    }
+
+    init(tap: EventTapThread, commands: AsyncStream<KeyCommand>) {
+        self.commands = commands
+        feed = { tap.perform($0) }
+        self.tap = tap
     }
 
     init(commands: AsyncStream<KeyCommand>, feed: @escaping @Sendable (KeyInput) -> Void) {
         self.commands = commands
         self.feed = feed
+        tap = nil
     }
 
     /// Lid close or sleep is a normal stop (#4). It goes through the recognizer,

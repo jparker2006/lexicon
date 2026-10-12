@@ -50,9 +50,9 @@ final class TargetField {
     }
 
     /// Quits the child this harness started (by its own pid, never by name).
+    /// It exits on its own once told; nothing waits for that.
     func close() {
         process.terminate()
-        process.waitUntilExit()
     }
 
     /// The child: show the window and run until terminated, or until the
