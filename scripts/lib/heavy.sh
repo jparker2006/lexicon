@@ -63,36 +63,42 @@ heavy_holder() {
     cat "$HEAVY_DIR/slot$1.holder" 2>/dev/null || echo "an unknown job"
 }
 
-# When process $1 started, in seconds since 1970, or nothing if ps can't say.
-heavy_started() {
-    ps -o etime= -p "$1" 2> /dev/null | awk -v now="$(date +%s)" '{
-        d = 0; t = $1
-        if (t ~ /-/) { split(t, a, "-"); d = a[1]; t = a[2] }
-        n = split(t, p, ":"); s = p[n] + 60 * p[n - 1] + (n > 2 ? 3600 * p[n - 2] : 0)
-        print now - s - 86400 * d }' || true
+# Succeeds while process $1 runs and, when $2 (seconds since 1970) is given,
+# started no later than that: a pid is reused once its process is gone. Both
+# times are the kernel's own, read from the process and the file, never from
+# the clock, so a stall between readings changes nothing. A dead process that
+# its parent has not yet reaped (a zombie, which kill -0 still finds) is gone. A
+# ps that fails for a moment counts as running: a blip must not cost a job its
+# place.
+heavy_alive() {
+    heavy_by=${2:-}
+    kill -0 "$1" 2> /dev/null || return 1
+    heavy_ps=$(LC_ALL=C ps -o stat=,lstart= -p "$1" 2> /dev/null) || return 0
+    [ -n "$heavy_ps" ] || return 0
+    set -- $heavy_ps
+    case "$1" in Z*) return 1 ;; esac
+    [ -n "$heavy_by" ] || return 0
+    shift
+    heavy_since=$(LC_ALL=C date -j -f '%a %b %e %T %Y' "$*" +%s 2> /dev/null) || return 0
+    [ "$heavy_since" -le "$heavy_by" ]
 }
 
 # The line's live entries, first come first. With "prune", deletes the rest.
-# An entry is its waiter's while the pid is alive and started before the entry
-# was written (a pid is reused once its process is gone). A reading that fails
-# for a moment, of ps or of an entry the job ahead is deleting, keeps the entry:
-# a blip must not cost a job its place.
+# An entry is its waiter's while that pid's process runs and started before the
+# entry was written. An entry the job ahead deletes as it takes a slot just
+# drops from the list.
 heavy_queue() {
     for heavy_q in "$HEAVY_DIR"/queue/*; do
         [ -f "$heavy_q" ] || continue
-        heavy_q_pid=${heavy_q##*.}
-        if kill -0 "$heavy_q_pid" 2> /dev/null; then
-            heavy_q_written=$(stat -f %m "$heavy_q" 2> /dev/null) || {
-                [ -e "$heavy_q" ] || continue
-                heavy_q_written=
-            }
-            heavy_q_started=$(heavy_started "$heavy_q_pid")
-            if [ -z "$heavy_q_written" ] || [ -z "$heavy_q_started" ] || [ "$heavy_q_started" -le $((heavy_q_written + 1)) ]; then
-                echo "$heavy_q"
-                continue
-            fi
+        heavy_q_written=$(stat -f %m "$heavy_q" 2> /dev/null) || {
+            [ -e "$heavy_q" ] || continue
+            heavy_q_written=
+        }
+        if heavy_alive "${heavy_q##*.}" "$heavy_q_written"; then
+            echo "$heavy_q"
+        elif [ "${1:-}" = prune ]; then
+            rm -f "$heavy_q"
         fi
-        if [ "${1:-}" = prune ]; then rm -f "$heavy_q"; fi
     done
 }
 
@@ -206,7 +212,7 @@ heavy() {
 heavy_holding() {
     slot=$1 entry=$2
     shift 2
-    kill -0 "${entry##*.}" 2> /dev/null || exit 0
+    heavy_alive "${entry##*.}" || exit 0
     rm -f "$entry"
     line="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)") (pid $$) running $* since $(date '+%H:%M:%S')"
     held=1

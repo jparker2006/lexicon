@@ -32,7 +32,7 @@ test_build_slots_and_their_line() {
     use_fixture status-0730
     use_fakes
     mkdir -p "$HOME/Library/Application Support/Lexicon Dev/heavy/queue"
-    echo "05:00" > "$GH_FIXTURES/cmd/ps"
+    echo "S    Thu Jan  1 00:00:00 2026" > "$GH_FIXTURES/cmd/ps"
     : > "$HOME/Library/Application Support/Lexicon Dev/heavy/queue/0000000001.$$"
     : > "$GH_FIXTURES/cmd/lockf"
     export LEXICON_NOW=2026-10-11T07:30:00Z

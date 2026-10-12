@@ -109,9 +109,9 @@ test_waiters_in_line_are_counted() {
     queue="$HOME/Library/Application Support/Lexicon Dev/heavy/queue"
     mkdir -p "$queue"
     # A live waiter, one whose process is gone, and one whose pid now names a
-    # process that started after it queued. The fake ps says every process
-    # started 5 minutes ago.
-    echo "05:00" > "$GH_FIXTURES/cmd/ps"
+    # process that started after it queued. The fake ps says every process is
+    # running and started on 1 January 2026.
+    echo "S    Thu Jan  1 00:00:00 2026" > "$GH_FIXTURES/cmd/ps"
     : > "$queue/0000000001.$$"
     sh -c 'exit 0' & dead=$!
     wait "$dead"

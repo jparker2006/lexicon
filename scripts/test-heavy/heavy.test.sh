@@ -4,7 +4,10 @@
 # lockf. No test waits on time: each job says it holds a slot on a FIFO, a
 # holder lets go only when the test writes to its release FIFO, and a waiter's
 # line is read from another FIFO. Only heavy.sh's own tries are spaced in time
-# (HEAVY_POLL), which changes how soon a job moves, never the order. The verdict is forced with LEXICON_MACHINE_VERDICT.
+# (HEAVY_POLL), which changes how soon a job moves, never the order. No wait
+# here has a time limit of its own: a test that hangs is stopped and named by
+# its check step's limit (scripts/checks/33-heavy-tests.sh). The verdict is
+# forced with LEXICON_MACHINE_VERDICT.
 #
 #   sh scripts/test-heavy/heavy.test.sh [name-filter]
 set -eu
@@ -90,16 +93,14 @@ job_unreaped() {
 zombie() { [ "$(ps -o stat= -p "$1" 2> /dev/null | cut -c1)" = Z ]; }
 
 # expect_event "NAME SLOT JOBS": the next job to take a slot is that one.
-# timing-ok: the 30 s read limit here and in expect_wait only bounds a hang;
-# every wait ends on the job's own line, never on time.
 expect_event() {
-    read -r -t 30 got <&3 || fail "no job took a slot; expected '$1'"
+    read -r got <&3 || fail "no job took a slot; expected '$1'"
     [ "$got" = "$1" ] || fail "expected '$1' to take a slot, got '$got'"
 }
 
 # expect_wait TEXT: the next waiter's line says TEXT.
 expect_wait() {
-    read -r -t 30 got <&4 || fail "no wait line; expected one with '$1'"
+    read -r got <&4 || fail "no wait line; expected one with '$1'"
     case "$got" in *"$1"*) ;; *) fail "wait line lacks '$1': $got" ;; esac
 }
 
@@ -207,9 +208,8 @@ test_the_third_slot_stays_shut_on_a_no() {
     job J
     expect_wait "number 1 in line"
     # J asks the verdict on every try; after three more, slot 3 is still free.
-    # timing-ok: the read limit only bounds a hang.
     for n in 1 2 3 4; do
-        read -r -t 30 got <&5 || fail "J stopped trying for slot 3"
+        read -r got <&5 || fail "J stopped trying for slot 3"
     done
     held 3 && fail "slot 3 was taken on a no"
     kill -0 "$J" || fail "J stopped waiting"
@@ -332,12 +332,7 @@ test_a_waiter_killed_mid_try_runs_nothing() {
     job A
     # A's lockf took slot 1 for nobody and must let it go unrun: everything
     # left in A's process group ends, and only then does B try.
-    # timing-ok: the count only bounds a hang; the spin ends on A's group.
-    n=0
-    while pgrep -g "$A" | grep -v -x "$A" > /dev/null; do
-        n=$((n + 1))
-        [ "$n" -lt 5000 ] || fail "A's command ran for nobody"
-    done
+    while pgrep -g "$A" | grep -v -x "$A" > /dev/null; do :; done
     wait "$A" 2> /dev/null || true
     job B
     expect_event "B 1 $CORES"
@@ -352,12 +347,7 @@ test_a_waiting_quiet_run_holds_no_slot() {
     # Only the waiter dies, as when a session's own process is killed: nothing
     # it started may keep a slot or run its command later. Killed once it has a
     # child: a lockf trying the slots, or the wait between tries.
-    # timing-ok: the kill moment is the test's own input, bounded by a count.
-    n=0
-    until pgrep -P "$Q" > /dev/null; do
-        n=$((n + 1))
-        [ "$n" -lt 5000 ] || fail "Q never tried the slots"
-    done
+    until pgrep -P "$Q" > /dev/null; do :; done
     kill -KILL "$Q"
     wait "$Q" 2> /dev/null || true
     release H1
