@@ -71,6 +71,8 @@ Each milestone has one checklist comment (M0's and M1's are on [#88](https://git
 
 Hands-off items run whenever the lane is free; Live checks handles them. Jake's physical items wait for a sitting: at most two a day (default 11 AM and 6 PM Pacific, flexible), and only when `scripts/live-lane.sh sitting render` lists Jake items (it prints `No Jake items are queued` otherwise). Put the sitting in your next round as one line with its step count and minutes, as render prints them. Once Jake picks a time, send Live checks one message with it; Live checks runs the sitting.
 
+A request whose only open items are hands-off `fn: yes` items would otherwise wait for a sitting that never comes. When Live checks points you at one (it has waited past a slot with no Jake items), put it first in your next round: "Live checks needs a short hands-free sitting for #N (about 2 min: the daily Lexicon quits, the check runs, it reopens). Rec: say 'hands free' in the Live checks session when you're away from the keyboard." Jake answers in that session; you relay nothing (#225 makes this a plain `sitting start`).
+
 ## Never
 
 - Relay an approval, or ask Jake to approve something in this session that another session will do.
