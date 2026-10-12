@@ -55,8 +55,9 @@ public final class WholeClipSession: LocalSession {
 /// join. A clip of one window or less is decoded at fn-up, as a whole clip
 /// always was.
 ///
-/// Holds only the audio of windows not yet decoded (at most about two
-/// windows), never the whole Dictation: the clip is the RAM copy.
+/// Holds only the audio of windows not yet decoded (about two windows while
+/// decoding keeps up; more while a first load compiles), never the whole
+/// Dictation: the clip is the RAM copy.
 public final class WindowedSession<Window: Sendable>: LocalSession {
     let grid: WindowGrid
     let decode: @Sendable (_ samples: [Int16], _ start: Int) async throws -> Window
