@@ -256,13 +256,15 @@ let package = Package(
             ]
         ),
 
-        // lexicon-eval's own tests.
+        // lexicon-eval's own tests, and the local model's pure parts (LocalParakeet's window
+        // merge): lexicon-eval links FluidAudio already, so LexiconTests stays without it.
         .testTarget(
             name: "LexiconEvalTests",
             dependencies: [
                 "LexiconCore",
                 "LexiconDomain",
                 "LexiconEval",
+                "LocalParakeet",
                 "TestSupport",
                 "WordStore",
             ]
