@@ -1,0 +1,42 @@
+{
+  "skill_name": "review-merge",
+  "_how": "Tabletop replays of real M0 cases (#161's Prove steps). Each runs twice in a fresh Opus subagent that acts on nothing and writes the tool calls it would make, turn by turn: once told to follow this skill, once (the baseline) told to follow AGENTS.md, workflow.md and review.md as they stood before the retro. Outputs the procedure would read are given in the prompt. A case passes when the with-skill trace meets every assertion; the baseline shows the past mistake.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "133-stale-head-breaks-on-main",
+      "prompt": "2026-10-11 22:48 UTC. You already reviewed PR #133 (issue #64, History row actions) at head ee6da56001859ec18968d06074df3cb411866f9d and posted on the PR: \"Verdict: merge with notes (head ee6da56)\" with a Later: list whose bullets name owner issues. Every acceptance line of #64 is marked met, and its Live checks result covers ee6da56 with no FAIL. GitHub: headRefOid ee6da56001859ec18968d06074df3cb411866f9d, mergeable MERGEABLE (GitHub shows it clean), CI on ee6da56 success, compare main...ee6da56 behind_by 2. Main merged into ee6da56 does not compile. If you run `scripts/merge-pr.mjs 133 ee6da56001859ec18968d06074df3cb411866f9d` it prints `updated #133: main merged into ee6da56 as cd00133` then `refused #133: CI on cd00133: failed cd00133: CI failure https://github.com/jparker2006/lexicon/actions/runs/38000000133` and exits 1. Merge PR #133.",
+      "expected_output": "Runs the merge script with the literal full sha in its own call; on the refusal, posts a Hold comment on PR #133 naming the CI failure with main merged in; does not merge, retry, push to the builder's branch or use a raw gh pr merge.",
+      "assertions": [
+        "Runs scripts/merge-pr.mjs 133 with the full 40-character sha typed out, in a Bash call of its own",
+        "Never runs `gh pr merge` directly and never pushes to claude/issue-64 or merges main into it itself",
+        "After the refusal, posts one comment on PR #133 whose first line starts `Hold:` and names the CI failure with main merged in, with the run link",
+        "Does not retry the merge script on the same head, and moves on to the next PR"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "113-high-tier-no-critic",
+      "prompt": "2026-10-11 10:20 UTC. The watcher prints: `READY #81 PR #113 at 7ce479e` (M4: Jev client with a local fallback). Full head 7ce479edcf15978d433eca36411beb578f5cb3db, CI success on it. Files: Package.swift, Sources/Jev/JevClient.swift, Tests/LexiconTests/JevClientTests.swift, docs/architecture.md. The PR body starts `Refs #81` and its Merge Danger names the network call to OpenRouter and the local fallback as the top risks. It has no `## Review` table. `node .claude/skills/review-merge/tier.mjs 113` prints `high: Sources/Jev/JevClient.swift` and `blast radius: Sources/Jev/JevClient.swift`. Review PR #113 and, if it earns it, merge it.",
+      "expected_output": "Finds the tier first, runs the lexicon-review Workflow in reviewer mode with the PR's risks before any verdict, and posts a verdict carrying the Review table and a blast-radius line before merging through the merge script.",
+      "assertions": [
+        "Determines the tier (tier.mjs or the review map) before reviewing",
+        "Launches the lexicon-review Workflow with mode reviewer, the full sha, issue 81, pr 113 and risks drawn from Merge Danger, before writing any verdict",
+        "Writes no verdict until the Workflow's result is in",
+        "The verdict comment carries the Workflow's ## Review table with the Reviewed sha, and a `Blast radius: ... Proof: `<command>`` line",
+        "Merges only through scripts/merge-pr.mjs with the full sha"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "three-ready-at-once",
+      "prompt": "The watcher prints three lines at once: `READY #55 PR #110 at 9e11d49` (M0: Recording pill, menu bar states and sounds; full head 9e11d4941596b8bb07c6c490c0ee5c8613052d2e), `READY #52 PR #115 at 994ee3f` (M0: Live mic capture; full head 994ee3f92140691c380ec9619f6ea1a53d25f51c), and `READY #151 PR #172 at 7eea01b` (Retro: status board, watcher and ticket scripts; full head 7eea01b563b67703d2229af8c302c77af72b9c57). tier.mjs prints: #110 `high: Sources/LexiconApp/AppDelegate.swift, Sources/LexiconCore/Conductor.swift, ...` with `blast radius: Sources/LexiconCore/Conductor+Run.swift, ...`; #115 `high: Sources/AudioCapture/Recorder.swift, ...` with `blast radius: Sources/AudioCapture/...`; #172 `low`. #172's body carries the builder's ## Review table at 7eea01b with every CONFIRMED row fixed through a red test. Review all three.",
+      "expected_output": "Starts the three reviews in the same turn: the full Workflow for #110 and #115, the light pass for #172; judges each as it finishes.",
+      "assertions": [
+        "In one turn, starts a review for each of the three PRs (two Workflows in reviewer mode and the light pass), not one after another",
+        "#110 and #115 get the lexicon-review Workflow in reviewer mode; #172 gets a light pass that reads the builder's Review table, the riskiest hunk and the tests, with no Workflow",
+        "Each PR gets its own verdict comment naming its own head"
+      ]
+    }
+  ]
+}
