@@ -96,7 +96,8 @@ struct FnGesture: Sendable {
     /// double-tap window and the cap. Keys reached the focused app 2 to 12 ms after they
     /// were pressed through this listen-only tap (ADR 0004); one handled later than this,
     /// behind a stalled tap thread, comes after the mark. Nobody hears a drop or a stop
-    /// 50 ms late, and Quit waits at most this long past the cap for a lost fn-up.
+    /// 50 ms late, and Quit waits at most this long past the cap for a lost fn-up
+    /// (Jake took that trade, DECISIONS.md item 76).
     static let lateKeyGrace: Duration = .milliseconds(50)
 
     init(_ config: KeyboardConfig) {
