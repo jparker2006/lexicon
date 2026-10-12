@@ -123,7 +123,8 @@
     "scripts/bench.sh",
     "scripts/live-request.sh",
     "scripts/lib/fn-listeners.sh",
-    "scripts/lib/flavor.sh"
+    "scripts/lib/flavor.sh",
+    "scripts/checklists/**"
   ],
   "blastRadius": [
     "Sources/AudioCapture/**",

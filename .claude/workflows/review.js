@@ -343,7 +343,7 @@ function blastPrompt(pass) {
 
 ${where(pass)}
 
-Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a Swift test filter, or the headless pipeline on a WAV you synthesize. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/ or any key, and no network calls. Run no repo script that touches Jake's data (scripts/test-set.sh, scripts/eval-quick.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set), installs (scripts/install.sh, scripts/install-model.sh, scripts/install-pstack-sheet.sh) or reaches the live app (scripts/dev-run.sh, scripts/harness.sh, scripts/live-lane.sh, scripts/bench.sh), and never open, launch or quit an app. Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
+Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a Swift test filter, or the headless pipeline on a WAV you synthesize. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/ or any key, and no network calls. Run no repo script that touches Jake's data (scripts/test-set.sh, scripts/eval-quick.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set), installs (scripts/install.sh, scripts/lib/install-app.sh, scripts/install-model.sh, scripts/install-pstack-sheet.sh), reaches the live app (scripts/dev-run.sh, scripts/harness.sh, scripts/live-lane.sh, scripts/bench.sh) or posts to GitHub (scripts/live-request.sh), and never open, launch or quit an app. Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
 }
 
 const rows = []
@@ -373,7 +373,8 @@ async function review(pass, isDelta) {
       // A session started before critic-deep.md existed can't find it; same rules, critic's file.
       if (r || job.critic[0] !== 'critic-deep') return r
       log(`critic-deep not available for ${job.lens.name}; running critic on ${job.critic[1]} instead`)
-      return hire('critic', job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts)
+      // A throw here would drop the lens before the next stage records it as INCOMPLETE.
+      return hire('critic', job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts).catch(() => null)
     },
     (r, job) => {
       const label = `${job.lens.name} (${job.critic[0]})`
@@ -455,7 +456,7 @@ if (counted.some(r => r.v && r.v.test)) lines.push('', 'Each CONFIRMED test is w
 lines.push('', 'A REFUTED or UNSURE finding comes back only with a test that fails first.')
 if (unrun.length) lines.push('', `INCOMPLETE: named risks not run (reviewer mode runs at most four lenses; name these as the risks of a second run): ${unrun.join('; ')}.`)
 if (unfilled.length) lines.push('', `High-tier sections reached but not run (no risks named; name them as risks to run them): ${unfilled.join('; ')}.`)
-if (incomplete.length) lines.push('', `INCOMPLETE: ${incomplete.join('; ')}.`)
+if (incomplete.length) lines.push('', `INCOMPLETE: ${cell(incomplete.join('; '))}.`)
 if (!covered) lines.push('', reviewedSha ? `Re-run this review with the same args: the stamp stays \`${short(reviewedSha)}\`.` : 'Re-run the review in full, without `reviewed`: nothing is stamped.')
 if (info.note) lines.push('', `Not reviewed: ${info.note}.`)
 if (stale.length) lines.push('', `review-map.json names sections review.md no longer has: ${stale.join(', ')}. Any review.md section the map doesn't name runs on every file.`)

@@ -29,6 +29,7 @@ function fixtureRepo(name, files) {
   git(dir, 'init', '-q', '-b', 'main')
   git(dir, 'config', 'user.email', 'fixture@example.com')
   git(dir, 'config', 'user.name', 'fixture')
+  git(dir, 'config', 'commit.gpgsign', 'false')
   for (const rel of ['docs/agents/review.md', '.claude/workflows/review-map.json']) {
     fs.mkdirSync(path.join(dir, path.dirname(rel)), { recursive: true })
     fs.copyFileSync(path.join(repoRoot, rel), path.join(dir, rel))
@@ -225,7 +226,23 @@ test('the blast-radius brief bans installs and the live-app scripts', async () =
   const { dir, sha } = fixtureRepo('blast-brief', ['Sources/History/a.swift'])
   const r = await run(dir, { issue: 1, sha, mode: 'reviewer' })
   const p = r.calls.find(c => c.label === 'blast radius').prompt
-  for (const s of ['scripts/install.sh', 'scripts/dev-run.sh', 'scripts/harness.sh']) assert(p.includes(s), `the brief should ban ${s}`)
+  const banned = [
+    '~/Library/Application Support/Lexicon/', 'scripts/test-set.sh', 'scripts/eval-quick.sh', 'scripts/import-lexicon.sh',
+    'scripts/install.sh', 'scripts/lib/install-app.sh', 'scripts/install-model.sh', 'scripts/install-pstack-sheet.sh',
+    'scripts/dev-run.sh', 'scripts/harness.sh', 'scripts/live-lane.sh', 'scripts/bench.sh', 'scripts/live-request.sh',
+  ]
+  for (const s of banned) assert(p.includes(s), `the brief should ban ${s}`)
+})
+
+test('a critic-deep lens whose fallback also dies is INCOMPLETE', async () => {
+  const { dir, sha } = fixtureRepo('fallback', ['Sources/History/a.swift'])
+  const r = await run(dir, { issue: 1, sha, mode: 'reviewer', risks: ['Shape and budgets'] }, (p, o) => {
+    if (o.label.endsWith('Shape and budgets')) throw new Error('helper died')
+    return o.label.startsWith('blast radius') ? { safetyFact: 'f', proofCommand: 'true', proofResult: 'ok', findings: [] } : CLEAN
+  })
+  assert(r.calls.some(c => c.agentType === 'critic' && c.label.endsWith('Shape and budgets')), 'the critic fallback should run')
+  assert(r.result.complete === false, 'complete should be false')
+  assert(/INCOMPLETE: .*Shape and budgets/.test(r.result.markdown), 'the markdown should name the lens')
 })
 
 test("the verifier's test brief carries the Tests rules", async () => {
@@ -274,7 +291,7 @@ const mapCases = [
   ['Sources/TestHooks/a.swift', { high: true }],
   ['Sources/LexiconHarness/a.swift', { high: true }],
   ['Sources/AudioCapture/a.swift', { lens: 'Live app and permissions' }],
-  ['scripts/checklists/54-paste.checklist', { lens: 'Live app and permissions' }],
+  ['scripts/checklists/54-paste.checklist', { high: true, lens: 'Live app and permissions' }],
   ['docs/agents/workflow.md', { lens: 'Network, keys and private data' }],
   ['CLAUDE.md', { lens: 'Network, keys and private data' }],
   ['AGENTS.md', { lens: 'Network, keys and private data' }],
