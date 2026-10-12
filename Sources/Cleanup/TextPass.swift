@@ -316,14 +316,14 @@ enum Fillers {
         -> Int {
         let word = token.word
         if protected.contains(word) || token.isQuoted { return 0 }
-        // "five uh oh seven": the "oh" is a zero inside a number, so "uh" is a filler.
-        if let next, token.trailing.isEmpty, !token.isInNumber, interjections.contains(word + " " + next.word) {
-            return 0
+        if token.isHardFiller {
+            // A sound of "uh huh" or "mm hmm" is a word, unless it sits inside a number ("five uh oh seven").
+            if let next, token.trailing.isEmpty, !token.isInNumber, interjections.contains(word + " " + next.word) {
+                return 0
+            }
+            if let prior, prior.trailing.isEmpty, interjections.contains(prior.word + " " + word) { return 0 }
+            return 1
         }
-        if let prior, prior.trailing.isEmpty, !token.isZero, interjections.contains(prior.word + " " + word) {
-            return 0
-        }
-        if token.isHardFiller { return 1 }
 
         if dictationStart, let next, !token.endsSentence {
             let comma = token.trailing.hasPrefix(",")
