@@ -28,13 +28,41 @@ import shutil
 import subprocess
 import sys
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 from .testset import TestSetError, _private_dir, _read_jsonl, _write_jsonl, lock_down, locked
 
 SPLITS = ("everyday", "held-back")
+REVIEW = "scripts/test-set.sh review"
 SCORER = Path(__file__).resolve().parent.parent
 PROGRESS = re.compile(r"lexicon-eval: \d+/\d+")
+
+
+@dataclass(frozen=True)
+class GoldState:
+    scored: list[dict]
+    in_review: int
+    left_out: int  # the clips in review and every other clip in their sessions
+
+
+def gold_state(entries: list[dict]) -> GoldState:
+    """The entries that score now, while Jake's review is part done (#155). A
+    clip marked `review` holds only a draft. A session counts once every clip
+    in it is gold: the bootstrap resamples whole sessions, and half a session
+    would weigh it by how far the review got. Held-back is scored only whole,
+    since it checks milestones. A clip with no session is a session of its own."""
+    def session(entry: dict):
+        return entry.get("session") or ("id", entry["id"])
+
+    pending = [e for e in entries if e.get("gold") == "review"]
+    held_back = sum(e.get("split") == "held-back" for e in pending)
+    if held_back:
+        raise TestSetError(f"{held_back} held-back clips still await review, and held-back is scored only "
+                           f"whole; answer them with {REVIEW}")
+    open_sessions = {session(e) for e in pending}
+    scored = [e for e in entries if session(e) not in open_sessions]
+    return GoldState(scored, len(pending), len(entries) - len(scored))
 
 
 def _keyless() -> dict:
@@ -116,9 +144,12 @@ def baselines(root: Path, lexicon_eval: Path, today: datetime.date, out=sys.stdo
         manifest = _read_jsonl(manifest_path)
         if not manifest:
             raise TestSetError(f"no Test set at {manifest_path}; run scripts/test-set.sh first")
-        pending = sum(e["gold"] == "review" for e in manifest)
-        if pending:
-            raise TestSetError(f"{pending} clips still to review; run scripts/test-set.sh review first")
+        # A baseline is the reference every later run compares with, so it is
+        # saved only on the whole Test set.
+        for split in SPLITS:
+            left_out = gold_state([e for e in manifest if e["split"] == split]).left_out
+            if left_out:
+                raise TestSetError(f"{left_out} {split} clips left out in review; run {REVIEW} first")
         wispr = {line["id"]: line for line in _read_jsonl(root / "wispr-run.jsonl")}
         minutes = sum(e["duration"] for e in manifest) / 60
         say(f"baselines: {len(manifest)} clips, about {minutes:.0f} minutes of audio played at the speed of speech")
