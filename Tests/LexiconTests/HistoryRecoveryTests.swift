@@ -134,10 +134,11 @@ private func makeStore() throws -> (HistoryStore, AppPaths) {
 private func earlier() -> Date { Date().addingTimeInterval(-60) }
 
 /// Opens the store again on the same folders, as a relaunch does. Recovery acts only on what is
-/// older than the store's open, and both times are whole milliseconds, so the pause keeps every
-/// file the test wrote strictly before it.
+/// older than the store's open, and both times are rounded to whole milliseconds, so waiting for
+/// the next one keeps every file the test wrote strictly before it.
 private func relaunch(_ paths: AppPaths) async throws -> HistoryStore {
-    try await Task.sleep(for: .milliseconds(10))
+    let written = (Date().timeIntervalSince1970 * 1_000).rounded()
+    await until { (Date().timeIntervalSince1970 * 1_000).rounded() > written }
     return try HistoryStore(paths: paths)
 }
 

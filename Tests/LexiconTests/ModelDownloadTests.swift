@@ -19,7 +19,7 @@ private struct HangingDownload: Sendable {
     /// Throws `CancellationError` once cancelled; never returns otherwise.
     func run() async throws -> Int {
         signal.yield()
-        try await Task.sleep(for: .seconds(86_400))
+        try await Task.sleep(for: .seconds(86_400))  // timing-ok: never wakes; only cancellation ends it
         return 0
     }
 }

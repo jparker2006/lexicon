@@ -45,17 +45,23 @@ func fail(_ message: String) -> Never {
     exit(2)
 }
 
-func describePackage() -> Package {
+/// Never `waitUntilExit`: it waits in the run loop for a wakeup that is sometimes
+/// lost when the child exits quickly, which once hung a check for 14 minutes. The
+/// exit arrives by callback instead, as in runChild (Tests/TestSupport/ChildProcess.swift).
+func describePackage() async -> Package {
     let process = Process()
     process.executableURL = URL(filePath: "/usr/bin/env")
     process.arguments = ["swift", "package", "describe", "--type", "json"]
     let out = Pipe()
     process.standardOutput = out
     process.standardError = FileHandle.standardError
+    let exited = AsyncStream<Int32> { exit in
+        process.terminationHandler = { exit.yield($0.terminationStatus); exit.finish() }
+    }
     do { try process.run() } catch { fail("cannot run swift package describe: \(error)") }
     let data = out.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    guard process.terminationStatus == 0 else { fail("swift package describe exited \(process.terminationStatus)") }
+    guard let status = await exited.first(where: { _ in true }) else { fail("swift package describe did not exit") }
+    guard status == 0 else { fail("swift package describe exited \(status)") }
     do { return try JSONDecoder().decode(Package.self, from: data) } catch { fail("unexpected describe JSON: \(error)") }
 }
 
@@ -64,7 +70,7 @@ func describePackage() -> Package {
 // and any access level (`public import`, `internal import`, ...).
 let importLine = #/^\s*(?:@[A-Za-z_]+(?:\([^)]*\))?\s+)*(?:(?:public|package|internal|fileprivate|private|open)\s+)?import\s+(?:(?:typealias|struct|class|enum|protocol|let|var|func|actor)\s+)?([A-Za-z_][A-Za-z0-9_]*)/#
 
-let package = describePackage()
+let package = await describePackage()
 let moduleOfTarget = Dictionary(uniqueKeysWithValues: package.targets.map { ($0.name, $0.c99name) })
 let packageModules = Set(moduleOfTarget.values)
 let allProducts = Set(package.targets.flatMap { $0.product_dependencies ?? [] })

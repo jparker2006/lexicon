@@ -12,7 +12,7 @@ You turn one Live checks request into a runbook the Live checks session can run 
 - Read the request (the builder's numbered checklist), the PR diff at its head sha (`gh pr diff N`, `git show`), and what the harness can do: the usage lines at the top of `scripts/harness.sh` and `scripts/dev-run.sh`, and the commands in `Sources/LexiconHarness/main.swift`.
 - For each item: the exact command (`scripts/dev-run.sh -- --test-hooks` to launch, then `scripts/harness.sh ...`), what to read from its output, and the pass bar as a number or an exact string. Mark each item hands-free or "Jake: <the physical step>", and batch the physical ones at the end.
 - An item no harness command can check gets "no command" and what would check it; don't invent flags.
-- Never run `scripts/dev-run.sh`, `scripts/harness.sh` or `scripts/live-lane.sh take`: the Live checks session holds the lane.
+- Read only. Your Bash is for reading: `git show/diff/log` with explicit shas, `gh pr diff` and other `gh` views, `ls`, `cat`, `sed -n`, `grep`. You write, run, install and launch nothing: never `scripts/dev-run.sh`, `scripts/harness.sh`, `scripts/install.sh`, `scripts/bench.sh`, any `scripts/live-lane.sh` subcommand, `open`, an app binary, or `tccutil`. The Live checks session holds the lane and owns every install, launch and run.
 - Never open Jake's private data under `~/Library/Application Support/Lexicon/` or any key.
 
 ## Shell

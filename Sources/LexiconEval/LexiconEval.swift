@@ -6,8 +6,10 @@ import LocalParakeet
 import Transcription
 import WordStore
 
-// `lexicon-eval`: dev tool, never shipped. Runs the real Conductor headless, at
-// the speed of speech, on one WAV or on every entry of a manifest.
+// `lexicon-eval`: dev tool, never shipped. Its main is Sources/LexiconEvalCLI, one
+// line, so the tests can import everything here: a test target never links an
+// executable (scripts/checks/21-source-lints.sh). Runs the real Conductor
+// headless, at the speed of speech, on one WAV or on every entry of a manifest.
 //
 //   swift run lexicon-eval <wav> [--scripted <text>] [--lexicon <file>]
 //       {"status": "inserted", "text": "...", "lag_ms": 42}
@@ -66,7 +68,9 @@ struct Line: Encodable {
     let lag_ms: Int?
 }
 
-func runEval(arguments: [String]) async -> Int32 {
+/// Runs `lexicon-eval` with these arguments (the first is the tool's own path)
+/// and returns its exit code.
+public func runEval(arguments: [String]) async -> Int32 {
     var options: [String: String] = [:]
     var scriptedGold = false
     var files: [String] = []
@@ -268,5 +272,3 @@ func usage() -> Int32 {
         """.utf8))
     return 2
 }
-
-exit(await runEval(arguments: CommandLine.arguments))
