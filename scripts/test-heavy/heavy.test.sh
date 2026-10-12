@@ -283,8 +283,15 @@ test_a_waiter_killed_mid_try_runs_nothing() {
     export LEXICON_MACHINE_VERDICT=no
     : > "$T/kill-try"
     job A
+    # A's lockf took slot 1 for nobody and must let it go unrun: everything
+    # left in A's process group ends, and only then does B try.
+    # timing-ok: a bounded spin on the test's own processes.
+    n=0
+    while pgrep -g "$A" | grep -v -x "$A" > /dev/null; do
+        n=$((n + 1))
+        [ "$n" -lt 5000 ] || fail "A's command ran for nobody"
+    done
     wait "$A" 2> /dev/null || true
-    # A's lockf took slot 1 for nobody; it must let it go unrun, so B gets it.
     job B
     expect_event "B 1 $CORES"
     release B

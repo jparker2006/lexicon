@@ -46,6 +46,14 @@ test_an_unreadable_reading_says_no() {
     expect_out "room for more builders: no (load reading unknown; memory reading unknown)"
 }
 
+test_a_load_just_under_1_per_core_says_yes() {
+    use_fixture machine-0636
+    use_fakes
+    printf '10\n{ 9.96 9.96 9.96 }\n' > "$GH_FIXTURES/cmd/sysctl"
+    run machine.sh
+    expect_out "room for more builders: yes"
+}
+
 test_an_unreadable_page_out_count_says_no() {
     use_fixture machine-0636
     use_fakes
