@@ -35,7 +35,8 @@ enum PostedInput {
     }
 
     /// Appends one window as a single write, so two checks at once can't lose
-    /// each other's line. `live-lane.sh take` trims the file; `idle` reads the end.
+    /// each other's line. The harness is the file's only writer and never
+    /// trims it (about 40 bytes a window); `idle` reads only the newest 50.
     static func note(from: Double, idle: Double) {
         let line = String(format: "%.3f\t%.3f\t%.3f\n", from, Date().timeIntervalSince1970, idle)
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
