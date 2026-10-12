@@ -11,8 +11,9 @@
 //     "once #N lands") whose
 //     sentence names no ticket number, or names one that has merged. A ticket
 //     has merged when a commit subject on HEAD ends in "(#N)" or "(#N) (#M)";
-//     --merged replaces that list (tests). In a shallow clone, such as CI's,
-//     there is no history to read, so only the paths are checked.
+//     --merged replaces that list (tests). A shallow clone, such as CI's
+//     checkout, is deepened first (git fetch --unshallow); if that fails,
+//     only the paths are checked, and it says so.
 //   - a scripts/ path that does not exist. Globs and <placeholders> are skipped.
 //
 // Reads AGENTS.md, CLAUDE.md, GLOSSARY.md, README.md, docs/**/*.md except
@@ -34,7 +35,13 @@ function mergedTickets() {
   const given = option('--merged')
   if (given !== undefined) return { merged: new Set(given.split(',').filter(Boolean).map(Number)), shallow: false }
   const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' })
-  if (git('rev-parse', '--is-shallow-repository').trim() === 'true') return { merged: null, shallow: true }
+  if (git('rev-parse', '--is-shallow-repository').trim() === 'true') {
+    try {
+      execFileSync('git', ['-C', root, 'fetch', '--quiet', '--unshallow'], { stdio: 'ignore', timeout: 120_000 })
+    } catch {
+      return { merged: null, shallow: true }
+    }
+  }
   const merged = new Set()
   for (const subject of git('log', '--format=%s', 'HEAD').split('\n')) {
     for (const m of subject.matchAll(/\(#(\d+)\)/g)) merged.add(Number(m[1]))
@@ -59,9 +66,10 @@ function docs() {
 }
 
 // A pointer at a ticket: "lands with #38", "will land in the bundle scripts ticket",
-// "once #159 merges". Not "the result lands with every item PASS".
+// "once #159 (PR #215) merges", "until #58 and #62 land". Not "the result lands
+// with every item PASS".
 const TICKET = String.raw`(?:\[?#\d+\]?|the [^.]*?\bticket\b)`
-const FUTURE = new RegExp(String.raw`\b(?:lands with|will land (?:with|in)) ${TICKET}|\b(?:once|until|when|after) \[?#\d+\]?(?:\([^)]*\))? (?:lands|merges|ships)\b`, 'i')
+const FUTURE = new RegExp(String.raw`\b(?:lands with|will land (?:with|in)) ${TICKET}|\b(?:once|until|when|after) \[?#\d+\]?[^.]{0,60}?\b(?:lands?|merges?|ships?)\b`, 'i')
 // A path character may not come before it, so ~/x/scripts/y and .claude/scripts are left alone.
 const SCRIPT = /(?<![\w./~-])scripts\/[\w./-]*\w/g
 
@@ -89,7 +97,7 @@ for (const rel of docs()) {
   })
 }
 
-if (shallow) console.error('check-docs: a shallow clone has no history, so merged tickets were not checked')
+if (shallow) console.error('check-docs: a shallow clone that could not be deepened has no history, so merged tickets were not checked')
 for (const f of failures) console.log(f)
 if (failures.length) process.exit(1)
 console.log('check-docs: OK')

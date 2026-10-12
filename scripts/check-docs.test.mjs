@@ -60,8 +60,38 @@ test('passes the rewritten lines', () => {
 
 test('"lands with" that points at no ticket is not a future pointer', () => {
   // implement-ticket step 7 on #158's branch.
-  const root = tree({ 'a.md': 'When the Live checks result lands with every item PASS, mark the acceptance lines. The text will land at the cursor.\n' })
+  const root = tree({ 'docs/a.md': 'When the Live checks result lands with every item PASS, mark the acceptance lines. The text will land at the cursor.\n' })
   assert.equal(run(root, '').status, 0)
+})
+
+test('a pointer with words between the ticket and "lands" or "merges" is still future', () => {
+  const root = tree({ 'docs/adr/x.md': 'Esc also reaches the app until #58 and #62 land a way to take it.\n', 'AGENTS.md': 'The merge path is manual once #159 (PR #215) merges.\n' })
+  const r = run(root, '62,159')
+  assert.equal(r.status, 1)
+  assert.match(r.out, /^docs\/adr\/x\.md:1: #62 has merged/m)
+  assert.match(r.out, /^AGENTS\.md:1: #159 has merged/m)
+  assert.doesNotMatch(r.out, /#58 has merged/)
+})
+
+test('a shallow clone, as CI checks out, reads the merged tickets too', () => {
+  const origin = tree({ 'AGENTS.md': 'The skeleton lands with #38.\n' })
+  const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  git(origin, 'init', '-q')
+  git(origin, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'M0: architecture skeleton (#38) (#92)')
+  git(origin, 'add', '-A')
+  git(origin, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'docs')
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'check-docs-clone-'))
+  execFileSync('git', ['clone', '-q', '--depth', '1', `file://${origin}`, clone], { stdio: 'ignore' })
+  let status = 0
+  let out = ''
+  try {
+    out = execFileSync('node', [script, '--root', clone], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (e) {
+    status = e.status
+    out = `${e.stdout}${e.stderr}`
+  }
+  assert.equal(status, 1, out)
+  assert.match(out, /^AGENTS\.md:1: #38 has merged/m)
 })
 
 test('a future pointer at an open ticket passes', () => {
