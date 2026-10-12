@@ -66,7 +66,7 @@ final class EventTapThread: @unchecked Sendable {
         else { throw .notTrusted }
         self.tap = tap
         // The hotkey's press is the same Esc the tap may also see: the recognizer acts on the first.
-        let escape = RegisteredHotkey(.escape) { [self] in perform(.escape(.now())) }
+        let escape = RegisteredHotkey(.escape) { [self] at in perform(.escape(at)) }
         takeEscape = { escape.setRegistered($0) }
         let ready = DispatchSemaphore(value: 0)
         let thread = Thread { [self] in
@@ -127,14 +127,10 @@ final class EventTapThread: @unchecked Sendable {
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
         if Self.isTypingOrClicking(type) { input.tick() }
         guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
-        let escTaken = tookEscape
         feed(key)
         switch key {
         case .fnDown(let at, _, _): logDelivery("down", at: at)
         case .fnUp(let at): logDelivery("up", at: at)
-        // Only an Esc the hotkey was holding: it shows the tap still sees one, and Esc
-        // presses outside a Dictation are never written down.
-        case .escape(let at) where escTaken: logDelivery("esc", at: at)
         default: break
         }
         return pass

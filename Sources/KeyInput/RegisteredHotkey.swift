@@ -1,4 +1,5 @@
 import Carbon.HIToolbox
+import CoreGraphics
 import Foundation
 import os
 import LexiconDomain
@@ -20,13 +21,13 @@ import LexiconDomain
 /// `@unchecked Sendable`: `refs` and `handler` are touched on the main queue only.
 final class RegisteredHotkey: @unchecked Sendable {
     private let hotkey: Hotkey
-    private let onPress: @Sendable () -> Void
+    private let onPress: @Sendable (HostTime) -> Void
     private var refs: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
     private let log = Logger(subsystem: "Lexicon", category: "fn")
 
-    /// `onPress` runs on the main thread, once per press (no auto-repeat).
-    init(_ hotkey: Hotkey, onPress: @escaping @Sendable () -> Void) {
+    /// `onPress` runs on the main thread, once per press (no auto-repeat), with the press's own time.
+    init(_ hotkey: Hotkey, onPress: @escaping @Sendable (HostTime) -> Void) {
         self.hotkey = hotkey
         self.onPress = onPress
     }
@@ -78,7 +79,7 @@ final class RegisteredHotkey: @unchecked Sendable {
             return OSStatus(eventNotHandledErr)
         }
         log.notice("hotkey \(self.hotkey.keyCode, privacy: .public) pressed")
-        onPress()
+        onPress(HostTime(carbonEventTime: GetEventTime(event), now: .now()))
         return noErr
     }
 }
@@ -103,5 +104,10 @@ extension Hotkey {
 }
 
 extension HostTime {
-    init(carbonEventTime seconds: Double, now: HostTime) { self = now }
+    /// A Carbon event's time: seconds on the same uptime clock as `HostTime`, so a press
+    /// keeps the time it happened, not when the recognizer got it. Judged as a CGEvent's
+    /// stamp is: unset, in the future or over a second old reads as `now`.
+    init(carbonEventTime seconds: Double, now: HostTime) {
+        self.init(eventTimestamp: seconds > 0 ? CGEventTimestamp((seconds * 1e9).rounded()) : 0, now: now)
+    }
 }
