@@ -70,7 +70,7 @@
 // deep allow the command. A non-string cwd allows any command that needs a path.
 // This is a backstop, not the permission system.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -94,7 +94,7 @@ const REASONS = {
   env: "Refused: .env files hold Jake's keys; agents never read them (AGENTS.md).",
   keychain: 'Refused: agents never read Keychain items (AGENTS.md); put the step that needs a key on the Live checks checklist.',
   daily: "Refused: Jake's daily Lexicon is his; only scripts/install.sh and scripts/live-lane.sh daily quit, open or kill it.",
-  mergeScript: 'Refused: merge only with scripts/merge-pr.mjs, the one merge path.',
+  mergeScript: 'Refused: only the Reviewer merges, and only with scripts/merge-pr.mjs from the main checkout.',
   destructive: 'Refused: git reset --hard, git clean -f and force pushes discard work; ask Jake (AGENTS.md).',
   bareBuild: 'Refused: build and test through scripts/test.sh or scripts/check.sh (or scripts/lib/heavy.sh <command>), which take a build slot.',
   closing: 'Refused: a closing keyword before an issue number closes it on merge; write Refs #N (AGENTS.md), and Jake closes the issue.',
@@ -142,13 +142,14 @@ const DAILY_APP = /\bdev\.jparker\.lexicon\b(?![.\w-])|\b(?:application|app|proc
 const PRIVATE_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon(?:\/|$)/i;
 // A .env file, but not the templates that hold no keys.
 const ENV_FILE = /^\.env(?:\.(?!(?:example|sample|template)$)[^/]+)?$/i;
-// Commands that read every file under the folders they are given, and those that do with a flag: its letters.
-const RECURSIVE_READERS = new Set(['find', 'rg', 'fd', 'ag', 'tar', 'rsync', 'zip', 'ditto']);
+// Commands that reach every file under the folders they are given (ln through the link it makes), and those that do with a flag: its letters.
+const RECURSIVE_READERS = new Set(['find', 'rg', 'fd', 'ag', 'tar', 'rsync', 'zip', 'ditto', 'ln']);
 const RECURSIVE_FLAGS = new Map([['grep', 'rR'], ['egrep', 'rR'], ['fgrep', 'rR'], ['cp', 'rR'], ['rm', 'rR'], ['ls', 'R'], ['scp', 'r']]);
 // Commands that only name paths: their words are text, not files they open.
 const NAMES_ONLY = new Set(['echo', 'printf']);
 const GREPS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag']);
 const KEYCHAIN_READS = new Set(['find-generic-password', 'find-internet-password', 'dump-keychain']);
+const KEYCHAIN_SHELL_OUT = /\b(?:find-generic-password|find-internet-password|dump-keychain)\b/;
 // Runners a scratch Keychain reader would be written for.
 const SCRIPT_RUNNERS = new Set(['swift', 'swiftc', 'python', 'python3', 'osascript']);
 // .claude's tracked entries; deleting one of these, .claude or .claude/worktrees is refused.
@@ -824,12 +825,12 @@ function inRepo(relative) {
 /** Why a gh command is refused for merging or moving main, or null. `raw` is gh's arguments as written. */
 function ghMergeRefusal(gh, raw, command) {
   if (ghPrMerges(raw)) {
-    if (!reviewerSession()) return REASONS.merge;
     if (inRepo('scripts/merge-pr.mjs')) return REASONS.mergeScript;
+    if (!reviewerSession()) return REASONS.merge;
     const args = gh.slice(2);
     const squash = args.includes('--squash') || args.includes('-s');
     const pinned = /^[0-9a-f]{40}$/.test(flagValue(args, '--match-head-commit') ?? '');
-    if (!squash || !pinned || args.some((arg) => MERGE_OTHER_WAYS.has(arg))) return REASONS.mergeForm;
+    if (!squash || !pinned || args.some((arg) => MERGE_OTHER_WAYS.has(arg.split('=')[0]))) return REASONS.mergeForm;
     return null;
   }
   if (gh[0] !== 'api' || !isGitHubWrite(gh)) return null;
@@ -837,7 +838,7 @@ function ghMergeRefusal(gh, raw, command) {
   const branchField = gh.map((arg) => /^branch=(.+)$/.exec(arg)?.[1]).find(Boolean);
   if (gh.some((arg) => CONTENTS_ENDPOINT.test(arg)) && (branchField ?? MAIN) === MAIN) return REASONS.main;
   const merges = gh.some((arg) => MERGE_ENDPOINT.test(arg)) || (gh[1] === 'graphql' && GRAPHQL_MERGE.test(text(command)));
-  if (merges) return !reviewerSession() ? REASONS.merge : inRepo('scripts/merge-pr.mjs') ? REASONS.mergeScript : REASONS.mergeForm;
+  if (merges) return inRepo('scripts/merge-pr.mjs') ? REASONS.mergeScript : reviewerSession() ? REASONS.mergeForm : REASONS.merge;
   return null;
 }
 
@@ -850,9 +851,29 @@ function tccRefusal(args) {
   return existsSync(path.join(homedir(), 'Library/Application Support/Lexicon Dev/live-sitting.open')) ? null : REASONS.sitting;
 }
 
-/** Jake's private folder in this home. */
-function privateDir() {
-  return path.join(homedir(), 'Library/Application Support/Lexicon');
+/** `file` with the links in its deepest existing folder followed, so a link to a folder above the private one is seen. */
+function realOrSelf(file) {
+  const rest = [];
+  for (let head = file; ; head = path.dirname(head)) {
+    try {
+      return path.join(realpathSync(head), ...rest.reverse());
+    } catch {
+      if (path.dirname(head) === head) return file;
+      rest.push(path.basename(head));
+    }
+  }
+}
+
+/** Jake's private folder in this home, as written and with its links followed. */
+function privateDirs() {
+  const dir = path.join(homedir(), 'Library/Application Support/Lexicon');
+  return unique([dir, realOrSelf(dir)]);
+}
+
+/** The patterns a brace list stands for: `{a,b}.md` is `a.md` and `b.md`. */
+function braces(pattern) {
+  const match = /^(.*?)\{([^{}]*)\}(.*)$/.exec(pattern);
+  return match ? match[2].split(',').flatMap((alt) => braces(`${match[1]}${alt}${match[3]}`)) : [pattern];
 }
 
 /** How the absolute path `resolved`, which may hold glob patterns, reaches `dir`: 'inside' it or at it, 'above' it, or null. */
@@ -861,34 +882,54 @@ function reach(resolved, dir) {
   const want = dir.split('/').filter(Boolean);
   for (let i = 0; i < Math.min(have.length, want.length); i += 1) {
     if (have[i] === '**') return 'inside';
-    if (!globMatches(have[i], want[i])) return null;
+    if (!braces(have[i]).some((pattern) => globMatches(pattern, want[i]))) return null;
   }
   return have.length >= want.length ? 'inside' : 'above';
 }
 
-/** Why the absolute path `resolved` is refused, or null: in the private folder, above it for a recursive read, or a .env file. */
-function pathRefusal(resolved, recursiveRead) {
-  if (resolved === null) return null;
-  const reached = reach(resolved, privateDir());
-  if (PRIVATE_TEXT.test(resolved) || reached === 'inside' || (recursiveRead && reached === 'above')) return REASONS.private;
-  return ENV_FILE.test(path.basename(resolved)) ? REASONS.env : null;
+/** Whether a file name, which may be a glob, names a .env file. A glob counts when it is written for one, not when it is `*` or `.*`. */
+function envName(name) {
+  if (ENV_FILE.test(name)) return true;
+  return /[*?[{]/.test(name) && /^\.e|env/i.test(name) && braces(name).some((pattern) => globMatches(pattern, '.env'));
 }
 
-/** The words of a command that may be paths it opens, each as written after a flag's = or a redirection. */
-function pathWords(name, args) {
-  // A grep's first plain word is its pattern, unless -e or -f gives it.
-  const patternGiven = args.some((arg) => /^(?:-[a-zA-Z]*[ef]|--regexp|--file)(?:=|$)/.test(arg));
-  let patternSkipped = !GREPS.has(name) || patternGiven;
-  const words = [];
-  for (const arg of args) {
-    if (!patternSkipped && !arg.startsWith('-')) {
-      patternSkipped = true;
-      continue;
+/** Why the absolute path `resolved` is refused, or null: in the private folder, above it for a recursive read, or a .env file. A link is followed. */
+function pathRefusal(resolved, recursiveRead) {
+  if (resolved === null) return null;
+  for (const file of unique([resolved, realOrSelf(resolved)])) {
+    if (PRIVATE_TEXT.test(file)) return REASONS.private;
+    for (const dir of privateDirs()) {
+      const reached = reach(file, dir);
+      if (reached === 'inside' || (recursiveRead && reached === 'above')) return REASONS.private;
     }
-    const redirected = REDIRECTION.exec(arg);
-    if (redirected) words.push(redirected[1]);
-    else if (arg.startsWith('-')) words.push(arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : '');
-    else words.push(arg);
+  }
+  return envName(path.basename(resolved)) ? REASONS.env : null;
+}
+
+/** The words of a command that may be paths it opens, each as written after a flag's = or a redirection. A grep's pattern is text, not a path. */
+function pathWords(name, args) {
+  const greps = GREPS.has(name);
+  const patternFlag = /^(?:-[a-zA-Z]*e|--regexp)$/;
+  // The first plain word is the pattern, unless -e or --regexp gives it.
+  let patternSkipped = !greps || args.some((arg) => patternFlag.test(arg) || arg.startsWith('--regexp='));
+  const words = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (greps && patternFlag.test(arg)) {
+      i += 1;
+    } else if (greps && arg.startsWith('--regexp=')) {
+      continue;
+    } else if (!patternSkipped && !arg.startsWith('-')) {
+      patternSkipped = true;
+    } else if (REDIRECTION.test(arg)) {
+      words.push(REDIRECTION.exec(arg)[1]);
+    } else if (arg.startsWith('-')) {
+      // A flag's glob value is a filter, such as --exclude='.env*', not a file it opens.
+      const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : '';
+      if (!/[*?[{]/.test(value)) words.push(value);
+    } else {
+      words.push(arg);
+    }
   }
   return words.filter(Boolean);
 }
@@ -897,9 +938,15 @@ function pathWords(name, args) {
 function dataRefusal(name, args, gh, cwd) {
   if (NAMES_ONLY.has(name)) return null;
   let words;
-  if (name === 'gh') words = gh[0] === 'gist' ? gh.slice(2) : bodyFiles(gh);
-  else if (name === 'git') words = ['commit', 'tag', 'notes'].includes(gitSubcommand(args, cwd).rest[0]) ? [] : pathWords(name, args);
-  else words = pathWords(name, args);
+  if (name === 'gh') {
+    words = gh[0] === 'gist' ? gh.slice(2) : bodyFiles(gh);
+  } else if (name === 'git') {
+    // Only these git commands open the paths they are given; the rest take messages, refs and patterns.
+    const [sub, ...rest] = gitSubcommand(args, cwd).rest;
+    words = sub === 'add' || (sub === 'diff' && rest.includes('--no-index')) ? pathWords(name, rest) : [];
+  } else {
+    words = pathWords(name, args);
+  }
   const letters = RECURSIVE_FLAGS.get(name);
   const recursiveRead =
     RECURSIVE_READERS.has(name) || (letters && args.some((arg) => arg === '--recursive' || new RegExp(`^-[a-zA-Z]*[${letters}]`).test(arg)));
@@ -913,12 +960,19 @@ function dataRefusal(name, args, gh, cwd) {
   return null;
 }
 
-/** Why a command is refused for reading a Keychain secret, or null: security's secret reads, or a script that calls SecItem's reader. */
-function keychainRefusal(name, args, command, cwd) {
+/**
+ * Why a command is refused for reading a Keychain secret, or null: security's secret reads, gh's token, git's credential
+ * helpers, or a script that calls SecItem's reader or shells out to security.
+ */
+function keychainRefusal(name, args, gh, command, cwd) {
   if (name === 'security') return KEYCHAIN_READS.has(args.find((arg) => !arg.startsWith('-'))) ? REASONS.keychain : null;
+  if (name === 'gh') return gh[0] === 'auth' && gh[1] === 'token' ? REASONS.keychain : null;
+  if (name === 'git' || name === 'git-credential-osxkeychain') {
+    return name !== 'git' || gitSubcommand(args, cwd).rest[0]?.startsWith('credential') ? REASONS.keychain : null;
+  }
   if (!SCRIPT_RUNNERS.has(name)) return null;
   const sources = [text(command), ...args.filter((arg) => !arg.startsWith('-')).map((file) => readable(file, cwd))];
-  return sources.some((source) => SECITEM_READ.test(source)) ? REASONS.keychain : null;
+  return sources.some((source) => SECITEM_READ.test(source) || KEYCHAIN_SHELL_OUT.test(source)) ? REASONS.keychain : null;
 }
 
 /** Why a command is refused for quitting, opening or killing Jake's daily Lexicon, or null. */
@@ -969,7 +1023,7 @@ function check(command, cwd) {
   const gh = name === 'gh' ? ghSubcommand(args) : [];
   const ruled =
     dataRefusal(name, args, gh, cwd) ??
-    keychainRefusal(name, args, command, cwd) ??
+    keychainRefusal(name, args, gh, command, cwd) ??
     dailyRefusal(name, args, command, cwd) ??
     buildRefusal(name, args);
   if (ruled) return ruled;
@@ -1034,12 +1088,13 @@ function toolRefusal(tool, toolInput, cwd) {
     const reason = pathRefusal(at(toolInput.path) ?? cwd, true);
     if (reason) return reason;
     const glob = typeof toolInput.glob === 'string' ? toolInput.glob : '';
-    return glob.toLowerCase().startsWith('.env') && globMatches(glob, '.env') ? REASONS.env : null;
+    return envName(path.basename(glob)) ? REASONS.env : null;
   }
   // Glob lists names only, so .env and the folders above the private one are fine.
   if (typeof toolInput.pattern !== 'string' || !toolInput.pattern) return null;
-  const full = path.resolve(at(toolInput.path) ?? cwd, expandHome(toolInput.pattern));
-  return PRIVATE_TEXT.test(full) || reach(full, privateDir()) === 'inside' ? REASONS.private : null;
+  const base = realOrSelf(at(toolInput.path) ?? cwd);
+  const full = path.resolve(base, expandHome(toolInput.pattern));
+  return PRIVATE_TEXT.test(full) || privateDirs().some((dir) => reach(full, dir) === 'inside') ? REASONS.private : null;
 }
 
 const tool = input?.tool_name;

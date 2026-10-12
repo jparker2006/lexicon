@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -849,4 +849,60 @@ test('refuses a PR body with a closing keyword before an issue number, or an em 
     'gh issue comment 12 --body "Ready for review: PR #13 - fixes in"',
     'gh pr view 12 --json body --jq ".body | test(\\"Fixes #\\")"',
   ]) assertAllowed(command);
+});
+
+test('review findings: links, globs, braces and patterns reach the private folder and .env only when they open them', (t) => {
+  const home = fakeHome(t);
+  const options = { home };
+  const support = path.join(home, 'Library/Application Support');
+  const repo = mkdtempSync(path.join(tmpdir(), 'guard-link-'));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  symlinkSync(support, path.join(repo, 'as'));
+  for (const command of [`ln -s "$HOME/Library/Application Support" ./as`, `rg -n x ${repo}/as`]) {
+    assertRefused(command, /private data/, options);
+  }
+  for (const [tool, input] of [
+    ['Read', { file_path: path.join(repo, 'as/Lexicon/lexicon.db') }],
+    ['Grep', { pattern: 'x', path: path.join(repo, 'as') }],
+    ['Glob', { pattern: '{Lexicon,Other}/**', path: support }],
+  ]) assert.match(runTool(tool, input, options).reason ?? '', /private data/, `${tool} ${JSON.stringify(input)}`);
+  for (const command of ['cat .en?', 'grep KEY .env*']) assertRefused(command, /\.env/, options);
+  for (const glob of ['*.env', '**/.env', '{.env,.env.local}']) {
+    assert.match(runTool('Grep', { pattern: 'KEY', path: REPO, glob }, options).reason ?? '', /\.env/, glob);
+  }
+  for (const command of [
+    'git grep -n "Library/Application Support/Lexicon/" -- docs',
+    'grep -rn -e "Library/Application Support/Lexicon/" docs',
+    'git log --oneline -S ".env" -- docs',
+    'grep -rn -e ".env" docs',
+    'ls -d .*',
+    'cat *.md',
+  ]) assertAllowed(command, options);
+});
+
+test('review findings: Keychain reads through gh, git credential helpers and scripts that shell out to security', () => {
+  for (const command of [
+    'gh auth token',
+    "printf 'protocol=https\\nhost=github.com\\n\\n' | git credential-osxkeychain get",
+    "printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill",
+    `python3 -c "import subprocess; subprocess.run(['security', 'find-generic-password', '-w'])"`,
+    `osascript -e 'do shell script "security find-generic-password -s x -w"'`,
+  ]) assertRefused(command, /Live checks checklist/);
+  assertAllowed('gh auth status');
+});
+
+test('review findings: the merge script names itself to builders, and --flag=value merges are not a squash', () => {
+  const builder = builderWorktree();
+  const reviewer = mainCheckout();
+  try {
+    mkdirSync(path.join(builder.dir, 'scripts'));
+    writeFileSync(path.join(builder.dir, 'scripts/merge-pr.mjs'), '');
+    assertRefused(`gh pr merge 5 --squash --match-head-commit ${SHA}`, /scripts\/merge-pr\.mjs/, { projectDir: builder.dir, cwd: builder.dir });
+    for (const flag of ['--admin=true', '--auto=true', '--merge=true']) {
+      assertRefused(`gh pr merge 41 --squash ${flag} --match-head-commit ${SHA}`, /squash --match-head-commit/, { projectDir: reviewer, cwd: reviewer });
+    }
+  } finally {
+    builder.cleanup();
+    rmSync(reviewer, { recursive: true, force: true });
+  }
 });
