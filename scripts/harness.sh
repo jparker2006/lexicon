@@ -24,11 +24,11 @@ if [ "${1:-}" = check ]; then
 fi
 
 # The same debug flags as scripts/check.sh and scripts/bundle.sh, so this reuses
-# their build products. Sourced inside a function: it replaces "$@".
+# their build products.
 bin_path() {
     . scripts/lib/swift-flags.sh
-    swift build --product lexicon-harness "$@" >&2
-    swift build --show-bin-path "$@"
+    swift build --product lexicon-harness $SWIFT_FLAGS >&2
+    swift build --show-bin-path $SWIFT_FLAGS
 }
 BIN="$(bin_path)/lexicon-harness"
 exec "$BIN" "$@"
