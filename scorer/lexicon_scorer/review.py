@@ -2,31 +2,41 @@
 Parakeet and Wispr's raw text disagree (`disagreements.jsonl`, from
 scorer/testset update).
 
-    scripts/test-set.sh review     (scorer/testset review [--no-open])
+    scripts/test-set.sh review     (scorer/testset review)
+    scripts/test-set.sh status     (scorer/testset status: counts only)
 
 Serves one page from 127.0.0.1 until Ctrl-C and opens it in the default
-browser. For each clip the audio plays, the page shows both speech texts with
+browser. The link holds the page's key, so it goes only to the browser, never
+to the terminal. The queue holds the held-back sessions first, then the everyday
+sessions in a fixed shuffled order, each session's clips together, so Jake can
+stop after any session and the scorer counts every session he finished (#155).
+After them come the agreed-gold audit's clips (`audit.jsonl`, drawn once). For
+each clip the audio plays, the page shows both speech texts with
 the words that differ highlighted, and Jake picks the one with the words he
 said or fixes one; what he typed or fixed into Wispr sits behind a toggle, since
 it is what he wanted typed, not what he said. He can also mark wrong words in
 either speech text. Every change is saved as it is made, and the page reopens
 where he left off. A three-step tour shows on the first visit.
 
-What it writes, all owner-only, under the Test set folder and nowhere else:
+What it writes, all owner-only, under the Test set folder and nowhere else
+(`audit.jsonl` too, the first time):
 
 - `review.jsonl`: Jake's answer for each clip he touched, the source of truth:
   `choice` ("parakeet", "wispr", "typed" or null), `text` (his gold or null)
   and `marks` (indexes of the words he marked, per speech text).
 - `manifest.jsonl`: each answered entry gets his `text`, `terms` recomputed from
   it, and `gold` "reviewed", so the scorer will score it. An entry he cleared
-  goes back to `review` with Parakeet's text as the placeholder.
+  goes back to `review` with Parakeet's text as the placeholder, or for an
+  audit clip back to `agreed` with the agreed text.
 - `marks.jsonl`: one Test set entry per run of marked words: the clip, its
   audio, session and split, which speech text, the words heard and the words
   said (from his gold, once he has given it).
 - `review-state.json`: the clip he was on, and whether he has seen the tour.
 
 `manifest.jsonl` and `marks.jsonl` are rebuilt from `review.jsonl` at every save
-and at start, so a crash between writes is repaired on the next open.
+and at start, so a crash between writes is repaired on the next open. Every
+answer loaded is saved back, its clip in the queue or not, and a save that
+would write fewer answer lines than were loaded is refused.
 
 The page makes no network requests: it is served with a Content-Security-Policy
 that lets it load only its own files and talk only to this server, its audio is
@@ -39,6 +49,7 @@ name clips.
 
 import difflib
 import hmac
+import math
 import http.server
 import json
 import os
@@ -52,8 +63,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .score import term_counts
-from .testset import (Lexicon, TestSetError, _read_jsonl, _spelling_variant, _words, _write_jsonl,
-                      locked, lock_down, parse_lexicon)
+from .testset import (AUDIT, Lexicon, TestSetError, _read_jsonl, _spelling_variant, _words, _write_jsonl,
+                      ensure_audit, locked, lock_down, parse_lexicon, rank)
 
 PAGE = Path(__file__).parent / "review_page"
 MODELS = ("parakeet", "wispr")
@@ -148,13 +159,20 @@ class Review:
     def __init__(self, root: Path, lexicon: Lexicon):
         self.root = root
         self.lexicon = lexicon
-        self.clips = _read_jsonl(root / "disagreements.jsonl")
+        # In file order (recording order) within a session; sorted is stable.
+        disagreements = sorted(_read_jsonl(root / "disagreements.jsonl"),
+                               key=lambda c: (c["split"] != "held-back", rank(c["session"])))
+        audit = [c for c in sorted(_read_jsonl(root / "audit.jsonl"), key=lambda c: rank(c["id"]))]
+        self.audit = {c["id"] for c in audit}
+        self.clips = disagreements + [c for c in audit if c["id"] not in {d["id"] for d in disagreements}]
         self.by_id = {c["id"]: c for c in self.clips}
         manifest = {e["id"] for e in _read_jsonl(root / "manifest.jsonl")}
         missing = sum(c["id"] not in manifest for c in self.clips)
         if missing:
-            raise TestSetError(f"{missing} disagreements have no manifest entry; run scripts/test-set.sh first")
-        self.answers = {a["id"]: a for a in _read_jsonl(root / "review.jsonl") if a["id"] in self.by_id}
+            raise TestSetError(f"{missing} review clips have no manifest entry; run scripts/test-set.sh first")
+        # Every answer, its clip in the queue or not: one save must never drop one.
+        self.answers = {a["id"]: a for a in _read_jsonl(root / "review.jsonl")}
+        self.loaded = len(self.answers)
         state = root / "review-state.json"
         saved = json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
         self.position = saved.get("position")
@@ -174,7 +192,7 @@ class Review:
                 "suggestions": {m: suggestions(c[f], self.lexicon) for m, f in (("parakeet", "parakeet"),
                                                                                 ("wispr", "wispr_raw"))},
             } for c in self.clips],
-            "answers": {i: self._answer_view(a) for i, a in self.answers.items()},
+            "answers": {i: self._answer_view(a) for i, a in self.answers.items() if i in self.by_id},
             "position": self.position if self.position in self.by_id else None,
             "toured": self.toured,
         }
@@ -256,9 +274,13 @@ class Review:
         os.replace(temp, self.root / "review-state.json")
 
     def _save(self) -> None:
+        rows = [self.answers[c["id"]] for c in self.clips if c["id"] in self.answers]
+        rows += [a for i, a in self.answers.items() if i not in self.by_id]
+        if len(rows) < self.loaded:
+            raise TestSetError(f"refusing to save {len(rows)} answers over the {self.loaded} loaded")
         # Answers first: the manifest and marks are rebuilt from them, so a
         # crash after this line loses nothing.
-        _write_jsonl(self.root / "review.jsonl", [self.answers[c["id"]] for c in self.clips if c["id"] in self.answers])
+        _write_jsonl(self.root / "review.jsonl", rows)
         self._apply()
 
     def _apply(self) -> None:
@@ -270,11 +292,14 @@ class Review:
         for entry in manifest:
             clip = self.by_id.get(entry["id"])
             if clip is not None:
-                answer = self.answers.get(entry["id"], {})
-                text = answer.get("text")
-                gold = clip["parakeet"] if text is None else text
-                entry = entry | {"text": gold, "gold": "review" if text is None else "reviewed",
-                                 "terms": sorted(term_counts(gold, self.lexicon.written))}
+                text = self.answers.get(entry["id"], {}).get("text")
+                if text is not None:
+                    entry = self._gold(entry, text, "reviewed")
+                elif clip["id"] not in self.audit:
+                    entry = self._gold(entry, clip["parakeet"], "review")
+                elif entry["gold"] != "agreed":
+                    # An audit answer cleared: an untouched one keeps its bytes.
+                    entry = self._gold(entry, clip["parakeet"], "agreed")
             rebuilt.append(entry)
         if rebuilt != manifest:
             _write_jsonl(manifest_path, rebuilt)
@@ -298,11 +323,24 @@ class Review:
         if marks or marks_path.exists():
             _write_jsonl(marks_path, marks)
 
+    def _gold(self, entry: dict, text: str, gold: str) -> dict:
+        return entry | {"text": text, "gold": gold, "terms": sorted(term_counts(text, self.lexicon.written))}
+
+    def answered(self, clip_id: str) -> bool:
+        return self.answers.get(clip_id, {}).get("text") is not None
+
     def counts(self) -> tuple[int, int, int]:
-        """(clips, answered, marks), for the terminal."""
-        answered = sum(a["text"] is not None for a in self.answers.values())
-        marked = sum(len(runs(a["marks"].get(m, []))) for a in self.answers.values() for m in MODELS)
-        return len(self.clips), answered, marked
+        """(clips, answered, marks) in the queue, for the terminal."""
+        mine = [a for i, a in self.answers.items() if i in self.by_id]
+        marked = sum(len(runs(a["marks"].get(m, []))) for a in mine for m in MODELS)
+        return len(self.clips), sum(self.answered(c["id"]) for c in self.clips), marked
+
+    def audit_counts(self) -> tuple[int, int, int]:
+        """(audit clips, answered, corrected): an answer that differs from the
+        agreed draft is a correction."""
+        answered = [c for c in self.clips if c["id"] in self.audit and self.answered(c["id"])]
+        corrected = sum(_clean(self.answers[c["id"]]["text"]) != _clean(c["parakeet"]) for c in answered)
+        return len(self.audit), len(answered), corrected
 
 
 # The server
@@ -438,25 +476,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(404)
 
 
-def serve(root: Path, lexicon_file: Path, *, open_page: bool = True, out=sys.stdout) -> None:
+def serve(root: Path, lexicon_file: Path, *, out=None) -> None:
     def say(line: str) -> None:
-        print(line, file=out, flush=True)
+        print(line, file=out or sys.stdout, flush=True)
 
     with locked(root):
         if not (root / "disagreements.jsonl").exists():
             raise TestSetError(f"no disagreements.jsonl in {root}; run scripts/test-set.sh first")
         if not lexicon_file.exists():
             raise TestSetError(f"no starter Lexicon at {lexicon_file}")
+        audited = ensure_audit(root)
         review = Review(root, parse_lexicon(lexicon_file.read_text(encoding="utf-8")))
         clips, answered, marked = review.counts()
-        say(f"review: {answered} of {clips} clips answered, {marked} marks")
+        say(f"review: {answered} of {clips} clips answered ({clips - len(review.audit)} disagreements, "
+            f"then {audited} audit clips), {marked} marks")
         server = Server(review)
-        if open_page:
-            # The link holds the key, so it goes to the browser, not the terminal.
-            subprocess.run(["open", server.page_url], check=False)
-            say(f"opened {server.origin}/ in your browser")
-        else:
-            say(f"open: {server.page_url}")
+        # The link holds the key, so it goes to the browser, never to the terminal.
+        subprocess.run(["open", server.page_url], check=False)
+        say(f"opened {server.origin}/ in your browser")
         say("Ctrl-C stops it; every answer is already saved.")
         try:
             server.serve_forever()
@@ -468,3 +505,84 @@ def serve(root: Path, lexicon_file: Path, *, open_page: bool = True, out=sys.std
                 clips, answered, marked = review.counts()
             lock_down(root)
             say(f"\nreview: {answered} of {clips} clips answered, {marked} marks")
+
+
+# The counts
+
+
+# What the page guesses a clip takes before it has timed any of Jake's answers
+# (review_logic.js timeLeft).
+PAGE_PACE = 20
+
+
+def time_left(remaining: int, pace: float = PAGE_PACE) -> str:
+    """The page's estimate, worded as the page words it."""
+    if remaining <= 0:
+        return "all done"
+    minutes = round(remaining * pace / 60)
+    if minutes < 1:
+        return "under a minute left"
+    if minutes < 60:
+        return f"about {minutes} min left"
+    minutes = round(minutes / 5) * 5
+    h, m = divmod(minutes, 60)
+    return f"about {h} h {m} min left" if m else f"about {h} h left"
+
+
+def upper_bound(wrong: int, n: int, confidence: float = 0.95) -> float:
+    """The most of the agreed gold that can be wrong, given `wrong` of `n`
+    audited clips were: the one-sided Clopper-Pearson bound, by bisection."""
+    if wrong >= n:
+        return 1.0
+
+    def at_most_wrong(p: float) -> float:
+        return sum(math.comb(n, k) * p ** k * (1 - p) ** (n - k) for k in range(wrong + 1))
+
+    low, high = wrong / n, 1.0
+    for _ in range(60):
+        mid = (low + high) / 2
+        low, high = (mid, high) if at_most_wrong(mid) > 1 - confidence else (low, mid)
+    return high
+
+
+def status(root: Path, out=None) -> None:
+    """`scripts/test-set.sh status`: the review's counts, never a clip. Reads
+    without the lock, so it works while the page is open."""
+    from .baselines import SPLITS, gold_state
+
+    def say(line: str) -> None:
+        print(line, file=out or sys.stdout, flush=True)
+
+    manifest = _read_jsonl(root / "manifest.jsonl")
+    if not manifest:
+        raise TestSetError(f"no Test set at {root}; run scripts/test-set.sh first")
+    review = Review(root, Lexicon((), ()))
+    duration = {e["id"]: e["duration"] for e in manifest}
+    queue = [c for c in review.clips if c["id"] not in review.audit]
+    left = [c for c in queue if not review.answered(c["id"])]
+    say(f"review: {len(queue) - len(left)} of {len(queue)} clips answered, {len(left)} left")
+    for split in ("held-back", "everyday"):
+        mine = [c for c in queue if c["split"] == split]
+        done = sum(review.answered(c["id"]) for c in mine)
+        say(f"  {split}: {done} of {len(mine)} answered, {len(mine) - done} left")
+    say(f"audio left to hear: {round(sum(duration[c['id']] for c in left) / 60)} min")
+    say(f"at the page's first guess of {PAGE_PACE} s a clip: {time_left(len(left))}")
+
+    clips, answered, corrected = review.audit_counts()
+    if not clips:
+        say(f"audit: about {AUDIT} agreed clips with a Term join the queue when the review page next opens")
+    elif answered:
+        say(f"audit: audited {answered} of {clips}, corrected {corrected}; at most "
+            f"{upper_bound(corrected, answered):.0%} of agreed Term clips are wrong (95% bound)")
+    else:
+        say(f"audit: audited 0 of {clips}, after the disagreements")
+
+    for split in SPLITS:
+        entries = [e for e in manifest if e["split"] == split]
+        try:
+            state = gold_state(entries)
+        except TestSetError:
+            say(f"scores now: {split} waits for its whole review")
+            continue
+        partial = f", {state.left_out} left out in review (partial)" if state.left_out else ""
+        say(f"scores now: {split} {len(state.scored)} of {len(entries)} clips{partial}")
