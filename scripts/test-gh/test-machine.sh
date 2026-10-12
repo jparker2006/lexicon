@@ -44,6 +44,9 @@ test_slots_in_use_are_counted() {
     : > "$GH_FIXTURES/cmd/lockf.1"
     : > "$GH_FIXTURES/cmd/lockf.2"
     : > "$GH_FIXTURES/cmd/lockf.3"
+    # The fourth call checks slot 1 again before naming its holder.
+    echo 75 > "$GH_FIXTURES/cmd/lockf.4.exit"
+    : > "$GH_FIXTURES/cmd/lockf.4"
     run machine.sh
     expect_out "build slots 1 of 3 in use | queue: 0 waiting"
     expect_out "slot 1: #153 builder (pid 4100)"

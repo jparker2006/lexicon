@@ -88,8 +88,11 @@ hold_two() {
 test_waiters_take_slots_in_the_order_they_came() {
     export LEXICON_MACHINE_VERDICT=no
     hold_two
+    # A tries least often, so a B or C allowed to jump the line would win.
+    export HEAVY_POLL=1
     job A
     expect_wait "number 1 in line"
+    export HEAVY_POLL=0.05
     job B
     expect_wait "number 2 in line"
     job C
