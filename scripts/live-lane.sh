@@ -517,10 +517,14 @@ daily() {
             [ -n "$pid" ] || { echo "live-lane: the daily Lexicon is not running"; return 0; }
             [ "$(ps -o comm= -p "$pid")" = "$app/Contents/MacOS/Lexicon" ] || die "the running daily Lexicon (pid $pid) is not $app; not quitting it"
             ! dictating || die "the daily Lexicon has a Dictation in progress; wait for it to land"
-            # From its own menu, the same Quit Jake clicks: never a kill.
-            osascript -e "tell application \"System Events\" to tell (first application process whose bundle identifier is \"$DAILY_ID\")" \
-                -e 'click menu bar item 1 of menu bar 2' \
-                -e 'click menu item "Quit Lexicon" of menu 1 of menu bar item 1 of menu bar 2' \
+            # From its own menu, the same Quit Jake clicks: never a kill. By pid,
+            # since Lexicon Dev's process is named Lexicon too. The status menu is
+            # the last menu bar: an app not activated since launch (as after
+            # daily reopen) has no main menu bar, so it is menu bar 1, not 2.
+            osascript -e "tell application \"System Events\" to tell (first application process whose unix id is $pid)" \
+                -e 'set extras to last menu bar' \
+                -e 'click menu bar item 1 of extras' \
+                -e 'click menu item "Quit Lexicon" of menu 1 of menu bar item 1 of extras' \
                 -e 'end tell' > /dev/null
             ticks=0
             while kill -0 "$pid" 2>/dev/null; do
