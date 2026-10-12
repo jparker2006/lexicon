@@ -54,6 +54,24 @@ test_a_load_just_under_1_per_core_says_yes() {
     expect_out "room for more builders: yes"
 }
 
+test_paging_out_50_a_second_says_no() {
+    use_fixture machine-0636
+    use_fakes
+    printf '10\n{ 1.00 1.00 1.00 }\n' > "$GH_FIXTURES/cmd/sysctl"
+    echo "Pageouts:                                   16559845." > "$GH_FIXTURES/cmd/vm_stat.2"
+    run machine.sh --interval 3
+    expect_out "room for more builders: no (paging out 50 pages/s)"
+}
+
+test_under_15_percent_memory_free_says_no() {
+    use_fixture machine-0636
+    use_fakes
+    printf '10\n{ 1.00 1.00 1.00 }\n' > "$GH_FIXTURES/cmd/sysctl"
+    echo "System-wide memory free percentage: 14%" > "$GH_FIXTURES/cmd/memory_pressure"
+    run machine.sh
+    expect_out "room for more builders: no (memory 14% free)"
+}
+
 test_an_unreadable_page_out_count_says_no() {
     use_fixture machine-0636
     use_fakes

@@ -127,7 +127,7 @@ Jake, 04:31:43Z: "publish, yes to all three". The second question was about the 
 
 Jake, 2026-10-12 10:36Z: "yes to the chips rule" ([record](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6122562855)). He had raised the problem at 09:49:04Z ("sometimes builders give me chips to spin up..."). Decided: only the orchestrator posts chips; a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, verdict or `Live checks:` result, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, workflow.md, Roles, the orchestrate, review-merge and live-checks skills, and the orchestrator's start prompt.
 
-**76. Build slots wait in line, with a third slot while the Mac has room.**
+**77. Build slots wait in line, with a third slot while the Mac has room.**
 > **Decision:** should I file an M1 ticket to fix the slots? It would do two things: 1. Make the wait first-come-first-served. 2. Allow a third slot only while `machine.sh` shows headroom. Builders would wait far less, and M1 finishes sooner. M1's gate isn't frozen yet, since its last planned ticket hasn't started, so it can join M1. A builder takes it when a lane frees. My recommendation is yes. Reply yes to take that, or "just FIFO" if you'd rather keep two slots and only fix the order.
 
 Asked by the orchestrator in its session, with the evidence: 8 builders on 2 slots, #60's test waited 45 min while newer jobs got in, at a load of 0.8 per core. Jake, 2026-10-12, about 13:19Z: "yes" ([record](https://github.com/jparker2006/lexicon/issues/238#issuecomment-6125100225)). It joins M1 because M1's gate list had not frozen yet (Q14), as the question said. Decided: a job that can't take a slot waits in one line shared by every worktree, and only the job at its head takes a free slot; a waiter whose process is gone drops out at once. Slot 3 is taken only when slots 1 and 2 are held and the machine verdict (`scripts/lib/verdict.sh`, the rule `scripts/machine.sh` prints) says yes at that moment; a reading it can't take counts as a no. A quiet timing run waits in the same line, then takes all three slots, slot 1 first: it is one job keeping the Mac quiet, not a third build. A build splits the cores by the slots held. Built in [#238](https://github.com/jparker2006/lexicon/issues/238). Lives in `scripts/lib/heavy.sh`, AGENTS.md, Commands, and workflow.md, Concurrency.
@@ -147,7 +147,7 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 **65. The merge rule.** The Reviewer runs `gh pr update-branch` only on the PR it is about to merge, then waits for CI on that exact head; builders bring `main` in only to resolve a conflict. The orchestrator's call, shown to Jake at 2026-10-12 04:21:18Z under "Calls I made for you (say if you disagree)"; he raised none, which is not a yes. Built in `scripts/merge-pr.mjs` (#159).
 
-**66. Builders added while the Mac has room.** Builder sessions start at about 4 to 6 and step up while `scripts/machine.sh` says there is room. The orchestrator's call, shown to Jake in the same message as 65. Its first half, two build slots, is replaced by item 76.
+**66. Builders added while the Mac has room.** Builder sessions start at about 4 to 6 and step up while `scripts/machine.sh` says there is room. The orchestrator's call, shown to Jake in the same message as 65. Its first half, two build slots, is replaced by item 77.
 
 **67. What a `// timing-ok:` line covers.** Besides a real-time deadline that only bounds a hang, the timing lint (`scripts/checks/20-test-timing.sh`) accepts a `// timing-ok:` disclosure on the line for: a poll interval, a kill moment that is the test's own input, a semaphore the test itself releases, and a cancellation-only stand-in. The Reviewer's ruling in its verdict on PR #211 (#160).
 
@@ -305,7 +305,7 @@ The spec's own supersessions, written when it was published; each names the plan
 - **60 ms to first audio, cold or prepared** (the spec), by item 30: the budget is the prepared path.
 - **Tickets Jake can feel stay open until he closes them** (workflow.md, M0), by Q11.
 - **Jake promotes Later items himself** (review.md, M0), by Q13.
-- **Two build slots** (item 66's first half), by item 76: first come, first served, with a third slot while the Mac has room.
+- **Two build slots** (item 66's first half), by item 77: first come, first served, with a third slot while the Mac has room.
 - **Every live item gates the merge** (workflow.md, M0), by Q6.
 - **Only Jake quits his daily copy** (workflow.md, M0), by Q8.
 - **A builder grills its own issue and waits for Jake's OK** (workflow.md, M0), by Q5.

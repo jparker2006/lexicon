@@ -285,7 +285,7 @@ test_a_waiter_killed_mid_try_runs_nothing() {
     job A
     # A's lockf took slot 1 for nobody and must let it go unrun: everything
     # left in A's process group ends, and only then does B try.
-    # timing-ok: a bounded spin on the test's own processes.
+    # timing-ok: the count only bounds a hang; the spin ends on A's group.
     n=0
     while pgrep -g "$A" | grep -v -x "$A" > /dev/null; do
         n=$((n + 1))
