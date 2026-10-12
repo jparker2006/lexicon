@@ -75,27 +75,42 @@ struct Focus {
     static func now() -> Focus? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, AX.timeout)
-        if let app = AX.element(system, kAXFocusedApplicationAttribute), let pid = AX.pid(app) {
-            return Focus(pid: pid, app: app, field: AX.element(app, kAXFocusedUIElementAttribute))
-        }
-        // The system-wide query named no app, but one is in front and gets Cmd-V.
-        guard let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
-        let app = AX.app(frontmost)
+        // Only Accessibility names the app keys go to. The frontmost app is no stand-in:
+        // a non-activating panel (Spotlight, a password manager) takes the keys while
+        // the app behind it stays frontmost and truly has no focused element.
+        guard let pid = AX.element(system, kAXFocusedApplicationAttribute).flatMap(AX.pid) else { return nil }
+        let app = AX.app(pid)
         var value: CFTypeRef?
-        let answer = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value)
-        guard let pid = standIn(frontmost: frontmost, focusedElementError: answer.rawValue) else { return nil }
-        let field = value.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }  // type id checked
-        if let field { AXUIElementSetMessagingTimeout(field, AX.timeout) }
-        return Focus(pid: pid, app: app, field: field)
+        switch Answer(AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue) {
+        case .unreadable:
+            return nil
+        case .none:
+            return Focus(pid: pid, app: app, field: nil)
+        case .element:
+            guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+            let field = value as! AXUIElement  // the type id was checked above
+            AXUIElementSetMessagingTimeout(field, AX.timeout)
+            return Focus(pid: pid, app: app, field: field)
+        }
     }
 
-    /// Only a definite answer from the frontmost app makes it the target: its
-    /// focused element, or "none" (a key window with no focused element answers
-    /// that). A timeout or any other error leaves nowhere to type, so the same
-    /// Dictation never holds or pastes on how fast Accessibility answered.
-    static func standIn(frontmost: pid_t?, focusedElementError: Int32) -> pid_t? {
-        guard let frontmost, [AXError.success, .noValue].contains(AXError(rawValue: focusedElementError)) else { return nil }
-        return frontmost
+    /// An app's answer for its focused element, one meaning on every path. A
+    /// timeout or any other error is `unreadable`: the text is held, so a slow
+    /// answer can only ever hold text, never paste it into an app read as fieldless.
+    enum Answer: Equatable {
+        case element
+        /// The app says it has no focused element: the same-app 5 s rule covers it.
+        case none
+        case unreadable
+
+        /// From an `AXError` raw value, so tests need no ApplicationServices.
+        init(_ code: Int32) {
+            switch AXError(rawValue: code) {
+            case .success: self = .element
+            case .noValue, .attributeUnsupported, .notImplemented: self = .none
+            default: self = .unreadable
+            }
+        }
     }
 
     var isSecure: Bool { traits.map { FieldTraits.accepts($0) == .secure } ?? false }
