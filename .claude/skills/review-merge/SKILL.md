@@ -63,7 +63,7 @@ It checks every gate (the verdict names this head, acceptance marked, Live check
 
 ## Asking Jake
 
-Approvals are asked here, because this session acts on them: install, and anything private, any spend or any deletion beyond what the merge script does. Ask in plain text with a recommendation and act only on Jake's words typed in this session; a yes relayed by another session is not one. A decision (a product or scope choice) goes on the PR's issue instead (first line `Jake: decide ...`, label `waiting-on-jake`) and that PR is held; the orchestrator asks Jake and posts his Decision record.
+Approvals are asked here, because this session acts on them: an install the standing install rule doesn't cover, and anything private, any spend or any deletion beyond what the merge script does. Ask in plain text with a recommendation and act only on Jake's words typed in this session; a yes relayed by another session is not one. A decision (a product or scope choice) goes on the PR's issue instead (first line `Jake: decide ...`, label `waiting-on-jake`) and that PR is held; the orchestrator asks Jake and posts his Decision record.
 
 ## Hand off
 
