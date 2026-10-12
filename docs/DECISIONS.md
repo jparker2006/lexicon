@@ -62,8 +62,6 @@ Decided: yes, at most two a day, by default 11 AM and 6 PM Pacific and not fixed
 
 Decided: yes. Lives in AGENTS.md, Dev builds and the live app, and workflow.md, Live checks.
 
-A hands-free sitting (#225) is a sitting with no steps for Jake, opened only after he types "hands free" in the Live checks session, so hands-off fn items can run with his daily app quit the same way. It is in the M1 plan Jake approved on 2026-10-12, whose fillers line (marked "Jake: yes") reads "a hands-free sitting must quit the daily app" ([plan](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6120839008)). Proposed (#225's builder): it uses neither of Q7's two daily slots, since it asks nothing of his hands.
-
 **Q9. Mac habits and the lag bar's power state.**
 > Q9, Mac habits: (a) Keep the Mac awake while sessions run? I'd ask the app for it and release it when things go idle. A closed lid still sleeps. (b) Keep Low Power Mode off during builds? You just did. A script will warn if it's on. (c) Which power state counts for the lag bar? ➡️ (a) yes; (b) yes; (c) whatever state you normally dictate in, with the other one reported alongside.
 
@@ -147,6 +145,8 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 **66. Two build slots, and builders added while the Mac has room.** Heavy jobs take turns in two slots, and builder sessions start at about 4 to 6 and step up while `scripts/machine.sh` says there is room. The orchestrator's call, shown to Jake in the same message as 65.
 
 **67. What a `// timing-ok:` line covers.** Besides a real-time deadline that only bounds a hang, the timing lint (`scripts/checks/20-test-timing.sh`) accepts a `// timing-ok:` disclosure on the line for: a poll interval, a kill moment that is the test's own input, a semaphore the test itself releases, and a cancellation-only stand-in. The Reviewer's ruling in its verdict on PR #211 (#160).
+
+**70. A hands-free sitting.** Proposed. A sitting with no steps for Jake, opened only after he types "hands free" in the Live checks session (`scripts/live-lane.sh sitting start --hands-free`), so hands-off fn items run while his daily app is quit and reopened as Q8 says. It uses neither of Q7's two daily slots, since it asks nothing of his hands. Jake's yes on the M1 plan covers building #225 (its fillers line: "a hands-free sitting must quit the daily app", [plan](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6120839008)), but his own words on the sitting itself are not recorded. #225's builder. Lives in AGENTS.md, Dev builds and the live app, and workflow.md, Live checks.
 
 ## Current: the product (spec part 3)
 

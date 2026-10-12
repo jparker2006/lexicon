@@ -12,7 +12,7 @@
 #
 #   scripts/live-lane.sh queue              open requests in arrival order, and due timers
 #   scripts/live-lane.sh idle [seconds]     succeed once Jake hasn't typed or moved the mouse for that long (default 30);
-#                                           keys the harness or Dev posts don't count
+#                                           keys the harness posts, or Dev posts for it, don't count
 #   scripts/live-lane.sh timer <seconds> <label>   note a long wait instead of sitting on the lane
 #   scripts/live-lane.sh timers             each timer, due or not
 #   scripts/live-lane.sh preflight <issue>  refuse what that issue's request can't pass; print the open command
@@ -52,6 +52,8 @@ DAILY_ID=dev.jparker.lexicon
 # Jake's items, kept from every open request seen (#233): a hands-off result
 # answers the request, and the merge closes the issue, before his sitting comes.
 JAKE="$STATE/jake-items.tsv"
+# The windows the harness posted keys in, which idle skips (idle_seconds).
+POSTED="$STATE/posted-input.tsv"
 # The unified log reader; a test sets its own, so it never reads the real Mac's.
 LOG=${LIVE_LANE_LOG:-/usr/bin/log}
 
@@ -269,6 +271,20 @@ next_slot() {
     fi
 }
 
+# The holder's queue look and its sitting end can run at once (a watcher's
+# status beside a sitting), so each read and rewrite of $JAKE holds this lock.
+# shlock clears a lock whose pid has died; a live one is waited out, 10 s at most.
+jake_lock() {
+    mkdir -p "$STATE"
+    tries=0
+    until shlock -f "$JAKE.lock" -p $$; do
+        tries=$((tries + 1))
+        [ "$tries" -lt 50 ] || die "the Jake queue is locked by pid $(cat "$JAKE.lock" 2> /dev/null); try again"
+        sleep 0.2
+    done
+}
+jake_unlock() { rm -f "$JAKE.lock"; }
+
 # Writes $ISSUES.jake: the kept Jake items (issue, head, then the item's
 # fields), first seen first, with each open request's added. An issue's newer
 # request replaces what its older head left. Only the lane's holder saves it
@@ -276,16 +292,18 @@ next_slot() {
 # hands-off result that answers its request; a builder's look changes nothing.
 remember_jake_items() {
     requests > "$ISSUES.remember"
+    mine=
+    if read_lock 2> /dev/null && holds; then mine=1; jake_lock; fi
     { [ ! -f "$JAKE" ] || cat "$JAKE"; } > "$ISSUES.kept"
     awk -F'\t' 'FILENAME == ARGV[1] { head[$2] = $3; next } !($1 in head) || head[$1] == $2' "$ISSUES.remember" "$ISSUES.kept" > "$ISSUES.jake"
     while IFS='	' read -r created issue head index; do
         items=$(request_body "$issue" "$index" | scripts/live-request.sh items - 2> /dev/null) || continue
         printf '%s\n' "$items" | awk -F'\t' -v i="$issue" -v h="$head" '$3 == "jake" { print i "\t" h "\t" $0 }'
     done < "$ISSUES.remember" | awk -F'\t' 'FILENAME == ARGV[1] { seen[$1 FS $2 FS $3] = 1; next } !seen[$1 FS $2 FS $3]++' "$ISSUES.jake" - >> "$ISSUES.jake"
-    if read_lock 2> /dev/null && holds; then
-        mkdir -p "$STATE"
+    if [ -n "$mine" ]; then
         cp "$ISSUES.jake" "$JAKE.$$"
         mv "$JAKE.$$" "$JAKE"
+        jake_unlock
     fi
 }
 
@@ -406,7 +424,8 @@ sitting() {
 }" > "$MARKER"
             if [ -n "$quit" ]; then
                 ( daily quit ) || { rm -f "$MARKER"; die "the sitting didn't open: the daily Lexicon wasn't quit"; }
-                require_no_fn_listeners || { rm -f "$MARKER"; die "the sitting didn't open: another app still answers fn"; }
+                # The quit happened: put the daily Lexicon back before refusing.
+                require_no_fn_listeners || { rm -f "$MARKER"; ( daily reopen ) || true; die "the sitting didn't open: another app still answers fn"; }
             fi
             : > "$STATE/sitting.acks"
             echo "live-lane: ${handsfree:+hands-free }sitting open ($(wc -l < "$STATE/sitting.tsv" | tr -d ' ') steps). $(fn_listeners_line)"
@@ -435,11 +454,13 @@ sitting() {
                 printf '%s\n' "$step. $title$where: ${ack:-no ack}"
             done < "$STATE/sitting.tsv"
             # A step acked pass or fail leaves Jake's queue; a skip, or no ack, keeps it for the next sitting.
+            jake_lock
             touch "$JAKE"
             awk -F'\t' 'FILENAME == ARGV[1] { done[$1] = ($2 == "pass" || $2 == "fail"); next }
                 FILENAME == ARGV[2] { if (done[$1]) gone[$2 FS $3 FS $4] = 1; next }
                 !(($1 FS $2 FS $3) in gone)' "$STATE/sitting.acks" "$STATE/sitting.tsv" "$JAKE" > "$JAKE.$$"
             mv "$JAKE.$$" "$JAKE"
+            jake_unlock
             rm -f "$MARKER" "$STATE/sitting.tsv" "$STATE/sitting.txt" "$STATE/sitting.acks"
             echo "live-lane: sitting closed"
             if [ -e "$STATE/daily-quit" ]; then
@@ -457,10 +478,12 @@ daily_pid() { lsappinfo info -only pid "$DAILY_ID" | sed -n 's/^"pid"=\([0-9][0-
 # A Dictation is in progress when the daily app's newest Dictation gesture in
 # the last 21 minutes (the 20-minute cap plus landing) began or confirmed one.
 # KeyInput logs them as "fn gesture: dictationBegan(...)" (subsystem Lexicon, category fn).
+# A log that can't be read could hide one, so it refuses rather than answer no.
 dictating() {
-    last=$("$LOG" show --last 21m --style compact --predicate \
-        "subsystem == \"Lexicon\" && category == \"fn\" && processImagePath CONTAINS \"/Lexicon.app/\" && eventMessage BEGINSWITH \"fn gesture: dictation\"" \
-        | sed -n 's/.*fn gesture: //p' | tail -1)
+    gestures=$("$LOG" show --last 21m --style compact --predicate \
+        "subsystem == \"Lexicon\" && category == \"fn\" && processImagePath CONTAINS \"/Lexicon.app/\" && eventMessage BEGINSWITH \"fn gesture: dictation\"") \
+        || die "can't read the daily Lexicon's log, so a Dictation may be in progress; not quitting it"
+    last=$(printf '%s\n' "$gestures" | sed -n 's/.*fn gesture: //p' | tail -1)
     case "$last" in dictationBegan* | dictationConfirmed*) return 0 ;; *) return 1 ;; esac
 }
 
@@ -593,11 +616,21 @@ timers() {
     done
 }
 
-# Seconds since the last key press or mouse move from the hardware: CoreGraphics'
-# HID system state, not IOHIDSystem's HIDIdleTime, which every posted key resets
-# (the harness's own, and Dev's Cmd-V), so a second focus run waited out the first.
+# Seconds since Jake's last key press or mouse move. IOHIDSystem's HIDIdleTime
+# (ns) counts posted keys too: the harness's own and Dev's Cmd-V. So the harness
+# notes each window it posts in (lexicon-harness's PostedInput: from, to, and
+# the idle time when it began), and input inside one steps back to the last
+# input before it, window by window. Integer seconds, so each edge has slack.
 idle_seconds() {
-    osascript -l JavaScript -e "ObjC.import('CoreGraphics'); Math.floor(\$.CGEventSourceSecondsSinceLastEventType(\$.kCGEventSourceStateHIDSystemState, 0xFFFFFFFF))" 2> /dev/null
+    hid=$(ioreg -c IOHIDSystem -d 4 | awk '/"HIDIdleTime"/ { printf "%.3f", $NF / 1000000000; exit }')
+    [ -n "$hid" ] || return 0
+    { [ ! -f "$POSTED" ] || cat "$POSTED"; } | awk -F'\t' -v now="$(date +%s)" -v hid="$hid" '
+        { from[NR] = $1; to[NR] = $2; idle[NR] = $3 }
+        END {
+            last = now - hid
+            for (i = NR; i >= 1; i--) if (last >= from[i] - 1 && last <= to[i] + 2) last = from[i] - idle[i]
+            print int(now - last)
+        }'
 }
 
 case "${1:-}" in
@@ -643,7 +676,7 @@ case "${1:-}" in
     idle)
         want=${2:-30}
         have=$(idle_seconds)
-        [ -n "$have" ] || die "CoreGraphics gave no idle time"
+        [ -n "$have" ] || die "ioreg gave no HIDIdleTime"
         [ "$have" -ge "$want" ] || { echo "live-lane: Jake is at the keyboard (idle $have s, want $want s)" >&2; exit 1; }
         echo "live-lane: idle $have s"
         ;;
