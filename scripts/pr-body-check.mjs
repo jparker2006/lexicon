@@ -16,15 +16,18 @@
 //   headings   Summary, Evidence, Merge Danger, Install, in that order
 //   door       **Door:** one-way or two-way
 //   blast      **Blast Radius:** one word from BLAST_RADIUS
-//   check      a "Check:" line after Install; what follows it is a footer
+//   check      a "Check:" line after Install, then at most one line: the footer
+//              a tool adds (the "Generated with" line)
 //   words      at most WORD_CAP words up to the Check: line. A word is a token
 //              between spaces with a letter or digit, so table rules and tree
-//              branches don't count; nor does a collapsed <details> block, or the
-//              footer a tool adds after Check:
+//              branches don't count; nor does a closed <details> block, or the
+//              footer
 //   scores     a **Scores:** line with numbers when speech, Cleanup or the Lexicon
 //              changed (review-map.json's "Scores" paths less the eval tooling)
 //   emdash, home, handle   no em dash, no /Users/ path, no handle mention
 //   deviation  wording that departs from the spec links docs/DECISIONS.md
+//   sketch     a "Sketch:" link when the ticket's Modules line names 3 or more
+//              modules under Sources/ (implement-ticket step 2)
 //   numbers    the check summary's **Check script:** line, word for word
 import fs from 'node:fs'
 import path from 'node:path'
@@ -44,6 +47,8 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[\w.-]+\/[\w.-]+#\d+|#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)/i
 // Built from parts so this file never carries a mention itself.
 const HANDLE = new RegExp('(^|[^\\w`])@' + '(?:codex|claude)\\b', 'i')
+const DECISIONS_LINK = /\]\([^)\s]*DECISIONS\.md[^)\s]*\)|https?:\/\/\S*DECISIONS\.md/
+const LINK = /https?:\/\/\S|\]\(/
 const DEVIATION = /\b(?:deviat\w*|diverg\w*|depart(?:s|ed|ing|ure)?\s+from)\b|\b(?:instead of|unlike|contrary to|differs? from)\s+(?:the\s+)?(?:spec\b|#36\b)/i
 
 // review-map.json's patterns: ** crosses folders, * stays in one.
@@ -73,8 +78,15 @@ export function numbersLine(summary) {
     : `**Check script:** red at ${at}: ${summary.failed || 'a step'} failed; ${counts}`
 }
 
+/** The modules under Sources/ a ticket's Modules line names. Only that line
+ * counts: History and Cleanup are ordinary words in the rest of a body. */
+export function ticketModules(ticketBody, sources) {
+  const line = ticketBody.replace(/\r/g, '').split('\n').find(l => /^(\*\*)?Modules:/.test(l)) || ''
+  return sources.filter(m => new RegExp(`(^|[^A-Za-z])${m}([^A-Za-z]|$)`).test(line)).sort()
+}
+
 /** Every rule the body breaks, as {rule, message}; [] when it passes. */
-export function checkBody({ body, files = [], commits = [], summary = null }) {
+export function checkBody({ body, files = [], commits = [], summary = null, modules = [] }) {
   const problems = []
   const fail = (rule, message) => problems.push({ rule, message })
   const text = body.replace(/\r/g, '')
@@ -104,16 +116,22 @@ export function checkBody({ body, files = [], commits = [], summary = null }) {
   // A missing Install is the headings rule's; then any Check: line will do.
   const check = lines.findIndex((l, i) => i > install && /^Check:\s*\S/.test(l))
   if (check < 0) fail('check', 'a "Check:" line must follow ## Install, with the one thing Jake should try')
+  else if (lines.slice(check + 1).filter(l => l.trim()).length > 1) {
+    fail('check', 'only a footer may follow the Check: line, and only one line of it')
+  }
 
   // A collapsed block (the Review table's rows) opens only on a click, so only
-  // what shows counts.
-  let open = false
-  const counted = (check < 0 ? lines : lines.slice(0, check + 1)).filter(l => {
-    if (/^\s*<details>/.test(l)) open = true
-    const show = !open
-    if (/<\/details>\s*$/.test(l)) open = false
-    return show
-  })
+  // what shows counts. One never closed hides nothing.
+  const upTo = check < 0 ? lines : lines.slice(0, check + 1)
+  const hidden = new Set()
+  for (let i = 0; i < upTo.length; i++) {
+    if (!/^\s*<details>/.test(upTo[i])) continue
+    const end = upTo.findIndex((l, j) => j >= i && /<\/details>\s*$/.test(l))
+    if (end < 0) break
+    for (let j = i; j <= end; j++) hidden.add(j)
+    i = end
+  }
+  const counted = upTo.filter((l, i) => !hidden.has(i))
   const words = counted.join(' ').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
   if (words > WORD_CAP) fail('words', `${words} words, over the ${WORD_CAP}-word cap (counted up to the Check: line); cut ${words - WORD_CAP}`)
 
@@ -129,8 +147,12 @@ export function checkBody({ body, files = [], commits = [], summary = null }) {
   if (text.includes('—')) fail('emdash', 'an em dash; use a comma, a colon or a new sentence')
   if (/\/Users\//.test(text)) fail('home', 'a /Users/ path; use a repo-relative or ~ path, and never one into private data')
   if (HANDLE.test(text)) fail('handle', 'an at-sign handle mention, which can start a cloud task; write "Codex\'s handle"')
-  if (DEVIATION.test(text) && !text.includes('DECISIONS.md')) {
+  if (DEVIATION.test(text) && !DECISIONS_LINK.test(text)) {
     fail('deviation', 'wording that departs from the spec, with no docs/DECISIONS.md link to the decision that allows it')
+  }
+
+  if (modules.length >= 3 && !lines.some(l => /^\s*(?:[-*]\s+)?(?:\*\*)?Sketch:/.test(l) && LINK.test(l))) {
+    fail('sketch', `the ticket names ${modules.length} modules (${modules.join(', ')}), so the body links the /pstack:architect sketch on a "Sketch:" line`)
   }
 
   if (summary) {
@@ -159,6 +181,19 @@ function currentSummary() {
   }
 }
 
+// The modules the Refs issue's Modules line names, read from GitHub.
+function refsModules(body) {
+  const n = /^Refs #(\d+)/.exec(body)?.[1]
+  if (!n) return { modules: [] }
+  try {
+    const ticket = execFileSync('gh', ['issue', 'view', n, '--json', 'body', '-q', '.body'], { cwd: root, encoding: 'utf8' })
+    const sources = fs.readdirSync(path.join(root, 'Sources'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+    return { modules: ticketModules(ticket, sources) }
+  } catch {
+    return { modules: [], error: `couldn't read #${n}'s Modules line with gh, so the Sketch rule wasn't checked; rerun when gh works` }
+  }
+}
+
 function main(argv) {
   if (argv[0] === '--numbers') {
     const { summary, error } = currentSummary()
@@ -173,8 +208,11 @@ function main(argv) {
   const commits = git('log', '--format=%B%x00', `${base}..HEAD`).split('\0').map(s => s.trim()).filter(Boolean)
   const files = git('diff', '--name-only', base, 'HEAD').split('\n').filter(Boolean)
   const { summary, error } = currentSummary()
-  const problems = checkBody({ body: fs.readFileSync(file, 'utf8'), files, commits, summary })
+  const body = fs.readFileSync(file, 'utf8')
+  const { modules, error: ticketError } = refsModules(body)
+  const problems = checkBody({ body, files, commits, summary, modules })
   if (error) problems.push({ rule: 'numbers', message: error })
+  if (ticketError) problems.push({ rule: 'sketch', message: ticketError })
   for (const p of problems) console.error(`pr-body-check: ${p.rule}: ${p.message}`)
   if (problems.length) return 1
   console.log('pr-body-check: the body passes')

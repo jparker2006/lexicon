@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkBody, numbersLine, WORD_CAP } from './pr-body-check.mjs'
+import { checkBody, numbersLine, ticketModules, WORD_CAP } from './pr-body-check.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const fixture = name => fs.readFileSync(path.join(here, 'test-pr-body', name), 'utf8')
@@ -94,9 +94,10 @@ test('the Check: line comes last, and only a footer follows it', () => {
   assert.deepEqual(rules(checkBody({ body: body('Check: open a PR and see the check run.\n', '') })), ['check'])
 })
 
-test('words after the Check: line are a footer and not counted', () => {
+test('one footer line after Check: is not counted; more is refused', () => {
   const filler = Array.from({ length: WORD_CAP }, () => 'word').join(' ')
-  assert.deepEqual(checkBody({ body: `${good}\n${filler}\n` }), [])
+  assert.deepEqual(checkBody({ body: good.replace('Generated with', `Generated with ${filler}`) }), [])
+  assert.deepEqual(rules(checkBody({ body: `${good}\nMore notes after the footer.\n` })), ['check'])
   assert.deepEqual(rules(checkBody({ body: body('Code only.', `Code only. ${filler}`) })), ['words'])
 })
 
@@ -104,6 +105,11 @@ test('a collapsed <details> block is not counted', () => {
   const rows = Array.from({ length: WORD_CAP }, () => '| CONFIRMED | x.swift:1 | a finding |').join('\n')
   assert.deepEqual(checkBody({ body: body('## Merge Danger', `<details><summary>Findings</summary>\n\n${rows}\n\n</details>\n\n## Merge Danger`) }), [])
   assert.deepEqual(rules(checkBody({ body: body('## Merge Danger', `${rows}\n\n## Merge Danger`) })), ['words'])
+})
+
+test('an unclosed <details> hides nothing from the count', () => {
+  const filler = Array.from({ length: WORD_CAP }, () => 'word').join(' ')
+  assert.deepEqual(rules(checkBody({ body: body('## Merge Danger', `<details><summary>Findings</summary>\n\n${filler}\n\n## Merge Danger`) })), ['words'])
 })
 
 test('a table rule or a tree branch is not a word', () => {
@@ -130,8 +136,10 @@ test('no em dash, home path or handle mention', () => {
 test('spec deviation wording needs a DECISIONS.md link', () => {
   const deviates = body('Code only.', 'Code only. This deviates from the spec: the tap is active.')
   assert.deepEqual(rules(checkBody({ body: deviates })), ['deviation'])
-  const linked = body('Code only.', 'Code only. This deviates from the spec as [DECISIONS.md](docs/DECISIONS.md) records.')
+  const linked = body('Code only.', 'Code only. This deviates from the spec as [DECISIONS.md](docs/DECISIONS.md#listen-only-fn-tap) records.')
   assert.deepEqual(checkBody({ body: linked }), [])
+  const named = body('Code only.', 'Code only. This deviates from the spec; see DECISIONS.md.')
+  assert.deepEqual(rules(checkBody({ body: named })), ['deviation'])
   assert.deepEqual(rules(checkBody({ body: body('Code only.', 'Code only. Unlike the spec, the cap is 10 s.') })), ['deviation'])
 })
 
@@ -148,4 +156,16 @@ test('with a check summary, the body carries its numbers line', () => {
 test('a red check summary says which step failed', () => {
   const summary = { sha: 'abc1234def', exit: 1, failed: 'tests', steps: { build: 'pass', tests: 'fail' }, tests: { run: 312, failed: 2 } }
   assert.equal(numbersLine(summary), '**Check script:** red at abc1234: tests failed; 2 steps, 312 tests, 2 failed.')
+})
+
+test("a ticket whose Modules line names 3 or more modules needs a Sketch: link", () => {
+  const sources = ['AppText', 'Cleanup', 'History', 'LexiconCore', 'LexiconUI']
+  const ticket = '## Parent\n\n#36\n\n**Modules:** History, LexiconUI, LexiconCore\n\nCleanup runs after the History row is made.'
+  const modules = ticketModules(ticket, sources)
+  assert.deepEqual(modules, ['History', 'LexiconCore', 'LexiconUI'])
+  assert.deepEqual(rules(checkBody({ body: good, modules })), ['sketch'])
+  const sketched = body('## Evidence', 'Sketch: https://github.com/jparker2006/lexicon/issues/64#issuecomment-1\n\n## Evidence')
+  assert.deepEqual(checkBody({ body: sketched, modules }), [])
+  assert.deepEqual(rules(checkBody({ body: body('## Evidence', 'Sketch: to come\n\n## Evidence'), modules })), ['sketch'])
+  assert.deepEqual(checkBody({ body: good, modules: ticketModules('**Modules:** History\n\nCleanup and LexiconUI in prose.', sources) }), [])
 })

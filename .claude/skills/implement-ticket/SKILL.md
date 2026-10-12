@@ -1,6 +1,6 @@
 ---
 name: implement-ticket
-description: Build one Lexicon issue end to end as a builder, from claim to a PR ready for review, and answer its review. Use when you are told to build, continue or fix issue #N or its PR in this repo.
+description: "Build one Lexicon issue end to end as a builder, from claim to a PR ready for review, and answer its review. Use when you are told to build, continue or fix issue #N or its PR in this repo."
 ---
 
 # Implement one ticket
@@ -9,7 +9,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 
 ## 1. Read
 
-- `scripts/ticket-context.sh N` writes the issue with every comment, the spec, the decisions (the spec's first comment, its supersessions, and every "Decision" comment), the Later list and the blockers' state to the scratchpad, and prints the paths. Read `issue.md`, `decisions.md` and `blockers.md` whole. The spec is over 60 KB: search `spec.md` for your modules and terms instead of reading it all.
+- `scripts/ticket-context.sh N --out <scratchpad>/ctx` writes the issue with every comment, the spec, the decisions (the spec's first comment, its supersessions, and every "Decision" comment), the Later list and the blockers' state to that folder and prints the paths. Read `issue.md`, `decisions.md` and `blockers.md` whole. The spec is over 60 KB: search `spec.md` for your modules and terms instead of reading it all.
 - Then `GLOSSARY.md`, the ADRs that touch your modules, `docs/DECISIONS.md` when it exists, and the Roles section of `docs/agents/workflow.md`.
 - A blocker is done when its PR has merged, whether or not its issue is closed. `blockers.md` says which are done. If one isn't, stop and say which.
 - Give `spec-checker` the ticket. A ticket that departs from the spec or a recorded decision, or rests on a choice Jake never confirmed, goes to Jake before you build: see Need Jake. (#53's fn tap went from the spec's active tap to listen-only with only the orchestrator's agreement.)
@@ -20,7 +20,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 ## 2. Claim
 
 - `scripts/ticket.sh claim N` comments the claim and swaps the labels. It refuses another builder's claim (stop and say so), a blocker not merged, and a ticket that changes `.claude/settings.json` with no recorded Jake yes (ask him: Need Jake). Your own earlier claim, on a continuation, means go on.
-- When the ticket touches 3 or more modules (`Sources/` targets), run `/pstack:architect` (call the Skill tool with "pstack:architect") with Opus or Sonnet runners before any code. Post the sketch on the issue as one comment headed `Sketch:`; the PR's Summary links it.
+- When the ticket's Modules line names 3 or more modules under `Sources/`, run `/pstack:architect` (call the Skill tool with "pstack:architect") with Opus or Sonnet runners before any code. Post the sketch on the issue as one comment headed `Sketch:`; a `Sketch:` line in the PR's Summary links it, and `pr-body-check` refuses the body without one.
 
 **Done:** the issue shows your claim and `building`, and a sketch when the ticket needed one.
 
@@ -33,7 +33,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
   - Editors (`editor`) take any part with a precise brief, tests or production, each in its own files. You review every editor's diff.
   - An untyped helper always gets a model and an effort, as CLAUDE.md says. At most 20 run at once.
   - Keep each helper's one-line disposition for the PR's Helpers line.
-- **Numbers.** A lag, memory or speed number comes from `bench-runner`'s table over samples the Live checks session saved, never from a run you timed by hand.
+- **Numbers.** A lag, memory or speed number comes from `bench-runner`'s table over samples the Live checks session saved, never from a run you timed by hand, and goes through `/pstack:benchmark-checklist` before it is reported.
 - **The live app is not yours.** You never drive it (fn, the mic, paste, Accessibility, the indicator); `scripts/dev-run.sh` and `scripts/harness.sh` refuse you. Write down the criteria that need it; you ask for them in step 6, once the head is reviewed and checked.
 - Run every commit, push, GitHub write and heavy command (the check script, `lexicon-eval`, the bundle script) yourself, once. Commit small, only your own files, with explicit paths: `type(scope): what changed (#N)`, with `Refs #N` in the body.
 
@@ -43,14 +43,14 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 
 The checked-in review Workflow is the whole review: CLAUDE.md's Review section and this step say the same thing.
 
-- Commit everything, then save the diff: `git diff $(git merge-base HEAD origin/main) > <scratchpad>/review.diff`. The merge-base keeps the diff yours when another session's fetch moves `origin/main`.
-- Give `spec-checker` that diff. Fix each departure, or write it into `docs/DECISIONS.md` with a link to Jake's recorded decision. A default nobody asked Jake about never ships silently: ask him (Need Jake).
+- Commit all your work (your own files, explicit paths), then save the diff: `git diff $(git merge-base HEAD origin/main) > <scratchpad>/review.diff`. The merge-base keeps the diff yours when another session's fetch moves `origin/main`.
+- Give `spec-checker` that diff, and the final diff again before Ready when commits came after. Fix each departure, or write it into `docs/DECISIONS.md` with a link to Jake's recorded decision. A default nobody asked Jake about never ships silently: ask him (Need Jake).
 - Run the `lexicon-review` Workflow with `{issue: N, sha: <HEAD>}`. It reviews a snapshot at that sha: a `critic` per review.md section the diff reaches, the acceptance criteria as a lens, and a `verifier` per finding. Write no critic briefs of your own; nothing stands in for a verifier's verdict.
 - A CONFIRMED finding is fixed only through a test that fails first: the test in its verifier's reply or one a `test-writer` writes. Run it red, fix, run it green. REFUTED and UNSURE findings are dropped unless a test that fails first proves them. An INCOMPLETE run is run again.
 - **Every commit after the reviewed sha gets a delta pass before Ready**: run the Workflow again with `{issue: N, sha: <new HEAD>, reviewed: <the sha it last reviewed>}`. That covers your fixes, a late test and a merge of `main`. The table in the PR names the head you push.
 - Run `scripts/ticket-context.sh N` again and read the new comments. Review items added while you worked are part of the job.
 
-**Done:** the Workflow's last run reviewed HEAD, is complete, and each CONFIRMED finding is fixed through a red test or named in the PR's Merge Danger for the Reviewer's Later list.
+**Done:** the Workflow's last run reviewed HEAD and is complete, each CONFIRMED finding is fixed through a red test, and spec-checker found no departure in the final diff that lacks Jake's recorded decision.
 
 ## 5. Run the checks once
 
@@ -71,7 +71,8 @@ The checked-in review Workflow is the whole review: CLAUDE.md's Review section a
 ## 7. Hand off
 
 - `scripts/ticket.sh ac N <n>=met:<url> ...` marks each acceptance line met (an evidence link), waived (a Decision link) or moved (#N), and ticks its box. It refuses a partial set, so with a Live checks result still to come, mark them all once it lands.
-- `scripts/ticket.sh ready N` posts `Ready for review: PR #M at <sha7>, CI pending` once and removes `building`. It refuses a dirty tree, an unpushed head or a check stamp for other content. With a Live checks request open, the request comment just above the Ready line says so.
+- `scripts/ticket.sh ready N` posts `Ready for review: PR #M at <sha7>, CI pending` once and removes `building`; while a Live checks request for that head has no result, the line ends `, Live checks pending`. It refuses a dirty tree, an unpushed head or a check stamp for other content.
+- When the Live checks result lands with every item PASS, mark the acceptance lines (`ticket.sh ac`, the result comment as evidence) and you are done. A FAIL goes to step 8.
 - Never wait on CI in the foreground, and never end a turn "waiting on CI". The Reviewer owns the CI wait, and the orchestrator's watcher sends you a pointer when CI goes red, Live checks posts a FAIL or the Reviewer says don't merge. The only watch you may start is a background `gh pr checks <pr> --watch --fail-fast` on your own PR, to learn of a red check sooner.
 - After your claim, comment on the issue only with a Ready line, a `Sketch:`, a Live checks request, or to ask Jake. Finish in this run: schedule no check-ins, triggers or reminders.
 
@@ -88,7 +89,7 @@ A red CI run, a Live checks FAIL or a Reviewer verdict reaches you as a message 
 
 ## Need Jake
 
-When the next step is Jake's, ask in the same turn you hit it, before any other work. Swap `building` for `waiting-on-jake` and comment with the question as the first line, your recommendation, and a reply that takes it:
+When the next step is Jake's, ask in the same turn you hit it, before any other work, in plain text on the issue (never AskUserQuestion or another blocking tool). Swap `building` for `waiting-on-jake` and comment with the question as the first line, your recommendation, and a reply that takes it:
 
 > Jake: decide whether the fn tap may be listen-only instead of the spec's active tap. I recommend listen-only: Live checks measured keys reaching apps 26 to 74 ms late through the active tap, and 2 to 12 ms through listen-only. Reply "yes" to take that.
 
