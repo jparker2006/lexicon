@@ -78,9 +78,19 @@ announce() {
     echo "install: Installed: $new7 posted on${posted:- no new issues}; Try list #$try updated${untried:+ (no try step:$untried)}" >&2
 }
 
-# Under the install lock: build, read the copy being replaced, swap. Prints
+# The daily copy is main as merged: never a branch, and never files nobody committed.
+clean_main() {
+    branch=$(git symbolic-ref --short -q HEAD || true)
+    [ "$branch" = main ] || die "the daily copy installs only main; this checkout is on ${branch:-a detached HEAD}"
+    changed=$(git status --porcelain -- Sources Package.swift Package.resolved scripts) || die "can't read git status"
+    [ -z "$changed" ] || die "uncommitted changes in Sources, Package.swift, Package.resolved or scripts; the daily copy installs only committed main"
+}
+
+# Under the install lock: check again (the tree may have changed while it
+# waited), build, read the copy being replaced, swap. Prints
 # "<previous commit> <installed commit>" on stdout, everything else on stderr.
 swap() {
+    clean_main
     . scripts/lib/flavor.sh
     flavor daily
     previous=$(plutil -extract LexiconCommit raw "$APP_PATH/Contents/Info.plist" 2> /dev/null || true)
@@ -107,11 +117,7 @@ case "${1:-}" in
     *) echo "$USAGE" >&2; exit 64 ;;
 esac
 
-# The daily copy is main as merged: never a branch, and never files nobody committed.
-branch=$(git symbolic-ref --short -q HEAD || true)
-[ "$branch" = main ] || die "the daily copy installs only main; this checkout is on ${branch:-a detached HEAD}"
-changed=$(git status --porcelain -- Sources Package.swift Package.resolved scripts) || die "can't read git status"
-[ -z "$changed" ] || die "uncommitted changes in Sources, Package.swift, Package.resolved or scripts; the daily copy installs only committed main"
+clean_main
 
 # The build runs under the lock too: bundle.sh rewrites its bundle folder, and a
 # second install building beside this one would swap in half of it. The GitHub

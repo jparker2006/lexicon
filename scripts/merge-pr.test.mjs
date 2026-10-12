@@ -386,10 +386,12 @@ test('GitHub refusals without a status code are refusals', async () => {
   assert.equal(result.lines.at(-1), 'refused #95: GitHub refused the merge: GraphQL: Resource not accessible by integration (mergePullRequest)');
 });
 
-test('an lsof that times out keeps the worktree; one that lists nothing frees it', async () => {
+test('an lsof that fails, times out or misses this process keeps the worktree', async () => {
+  const me = `p${process.pid}\ncnode\nfcwd\nn/elsewhere\n`;
   await assert.rejects(inUse('/w', async () => { throw Object.assign(new Error('lsof failed'), { code: null, killed: true }); }), /kept the worktree: lsof could not say/);
-  assert.deepEqual(await inUse('/w', async () => { throw Object.assign(new Error('lsof failed'), { code: 1, killed: false, stdout: '' }); }), []);
-  assert.deepEqual(await inUse('/w', async () => 'p12\ncclaude\nfcwd\nn/w/sub\np13\nczsh\nfcwd\nn/other\n'), ['claude (pid 12)']);
+  await assert.rejects(inUse('/w', async () => { throw Object.assign(new Error('lsof: can\'t get user ID'), { code: 1, stdout: '' }); }), /kept the worktree/);
+  assert.deepEqual(await inUse('/w', async () => `${me}p12\ncclaude\nfcwd\nn/w/sub\np13\nczsh\nfcwd\nn/other\n`), ['claude (pid 12)']);
+  assert.deepEqual(await inUse('/w', async () => { throw Object.assign(new Error('lsof exited 1'), { code: 1, stdout: me }); }), []);
 });
 
 // ---- as programs: the checkout rule needs real git, and install.sh is shell
@@ -536,10 +538,18 @@ echo "$app"
     execFileSync('plutil', ['-create', 'xml1', path.join(old, 'Info.plist')]);
     execFileSync('plutil', ['-insert', 'LexiconCommit', '-string', previous, path.join(old, 'Info.plist')]);
     cpSync(path.join(FIXTURES, 'install'), gh, { recursive: true });
-    const env = { ...process.env, HOME: home, TMPDIR: gh, PATH: `${path.join(HERE, 'test-gh/bin')}:${process.env.PATH}`, GH_FIXTURES: gh, GH_LOG: path.join(gh, 'gh.log'), LEXICON_NOW: '2026-10-11T12:00:00Z' };
+    // A gh in front of the fake one records whether the lock is held at each GitHub call.
+    const bin = path.join(gh, 'bin');
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, 'gh'), `#!/bin/sh
+if lockf -s -t 0 "$TMPDIR/dev.jparker.lexicon.install.lock" true; then echo free; else echo held; fi >> "$TMPDIR/gh-lock"
+exec "${path.join(HERE, 'test-gh/bin/gh')}" "$@"
+`, { mode: 0o755 });
+    const env = { ...process.env, HOME: home, TMPDIR: gh, PATH: `${bin}:${process.env.PATH}`, GH_FIXTURES: gh, GH_LOG: path.join(gh, 'gh.log'), LEXICON_NOW: '2026-10-11T12:00:00Z' };
     const result = spawnSync('sh', [path.join(dir, 'scripts/install.sh')], { encoding: 'utf8', env });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(readFileSync(path.join(gh, 'bundle-lock'), 'utf8'), 'locked\n');
+    assert.deepEqual([...new Set(readFileSync(path.join(gh, 'gh-lock'), 'utf8').trim().split('\n'))], ['free'], 'every GitHub call comes after the lock is released');
     const issues = JSON.parse(readFileSync(path.join(gh, 'issues.json'), 'utf8'));
     const sha7 = g('rev-parse', '--short=7', 'HEAD').trim();
     for (const n of [45, 63]) assert.equal(issues.find((i) => i.number === n).comments.filter((c) => c.body.startsWith(`Installed: ${sha7}`)).length, 1, `#${n}`);
@@ -564,6 +574,13 @@ test('install.sh installs only a clean main checkout, and refuses before it buil
     g('checkout', '-q', 'main');
     writeFileSync(path.join(dir, 'scripts/install.sh'), `${readFileSync(path.join(dir, 'scripts/install.sh'), 'utf8')}\n# an edit\n`);
     assert.deepEqual([install().status, install().stderr], [1, 'install: uncommitted changes in Sources, Package.swift, Package.resolved or scripts; the daily copy installs only committed main\n']);
+    // The swap step checks again under the lock, so neither waiting nor its env var skips the check.
+    const swap = spawnSync('sh', [path.join(dir, 'scripts/install.sh'), 'swap'], { encoding: 'utf8', env: { ...process.env, LEXICON_INSTALL_LOCKED: '1' } });
+    assert.deepEqual([swap.status, swap.stderr], [1, 'install: uncommitted changes in Sources, Package.swift, Package.resolved or scripts; the daily copy installs only committed main\n']);
+    g('checkout', '-q', '--', 'scripts/install.sh');
+    // A status git can't read is not a clean tree.
+    writeFileSync(path.join(dir, '.git/index'), 'not an index');
+    assert.equal(install().stderr.split('\n').at(-2), "install: can't read git status");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

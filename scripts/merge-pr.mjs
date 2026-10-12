@@ -404,11 +404,9 @@ const run = (command, args, options = {}) => new Promise((resolve, reject) => {
 
 /** "<command> (pid N)" for each process whose working directory is in the folder. */
 export async function inUse(folder, lsof = (args) => run('lsof', args, { timeout: 60_000 })) {
-  // lsof exits 1 when it lists nothing; any other failure, a timeout included, keeps the worktree.
-  const out = await lsof(['-a', '-d', 'cwd', '-F', 'pcn']).catch((error) => {
-    if (error.code === 1 && !error.killed) return error.stdout;
-    throw new Error(`kept the worktree: lsof could not say what runs in it (${error.message})`);
-  });
+  // lsof always lists this process's own folder, so a list without it (exit 1, a timeout, an error) says nothing.
+  const out = await lsof(['-a', '-d', 'cwd', '-F', 'pcn']).catch((error) => error.stdout ?? '');
+  if (!out.split('\n').includes(`p${process.pid}`)) throw new Error('kept the worktree: lsof could not say what runs in it');
   const found = [];
   let pid, command;
   for (const line of out.split('\n')) {
