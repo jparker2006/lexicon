@@ -33,6 +33,7 @@ enum KeyInput: Sendable, Hashable {
 ///     recording(hold) --fnUp--> idle              emits .dictationStopped
 ///     recording(handsFree) --fnDown--> idle       emits .dictationStopped; its fn-up then lands in idle
 ///     recording --Esc--> idle                     emits .dictationCancelled (saved, never typed)
+///     any --Esc stamped before this press--> same  nothing: the second report of an Esc that ended the last one
 ///     recording --cap--> idle                     emits .oneMinuteLeft at the warning, .dictationStopped at the cap
 ///                                                 (a key stamped past a mark gets that mark first, in either order)
 ///     recording --sleep--> idle                   emits .dictationStopped
@@ -98,7 +99,7 @@ struct FnGesture: Sendable {
     /// handled later than this, behind a stalled tap thread, comes after the mark.
     /// The cost: a dropped tap, the warning sound and the cap's stop each come 50 ms
     /// after their mark, and Quit waits at most this long past the cap for a lost
-    /// fn-up (Jake took that trade, DECISIONS.md item 76).
+    /// fn-up (Jake took that trade, DECISIONS.md item 79).
     static let lateKeyGrace: Duration = .milliseconds(50)
 
     init(_ config: KeyboardConfig) {
@@ -156,6 +157,8 @@ struct FnGesture: Sendable {
             guard isHeld(since, at: at) else { return discard(id) }
             return confirm(id, .hold, began: since)
         case .escape(let at):
+            // Stamped before this press: the other report of an Esc that ended the last one.
+            guard at >= since else { return Output() }
             // Under the threshold Esc is a chord like any key, and it reached the app.
             guard isHeld(since, at: at) else { return discard(id) }
             phase = .idle
@@ -188,6 +191,8 @@ struct FnGesture: Sendable {
             return Output()
         case .ended(let ended):
             return forget(id, ifItIs: ended)
+        case .escape(let at) where at < began:
+            return Output()  // the other report of an Esc that ended the last Dictation
         case .otherKey, .escape, .sleep:
             // A key between the taps: not a double tap. Esc was never taken, it reached the app.
             return discard(id)
@@ -235,7 +240,8 @@ struct FnGesture: Sendable {
             return Output()  // passed through; recording continues
         case .ended(let ended):
             return forget(id, ifItIs: ended)
-        case .escape:
+        case .escape(let at):
+            guard at >= recording.began else { return Output() }  // the other report of an Esc that ended the last Dictation
             phase = .idle
             return Output(commands: [.dictationCancelled(id)])
         case .deadline(let now):
