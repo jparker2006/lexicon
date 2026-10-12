@@ -1,10 +1,11 @@
 # #54's hands-off paste items, as Live checks ran them on 2026-10-11.
 # Run: scripts/harness.sh run-checklist scripts/checklists/54-paste.checklist
 # Needs Lexicon Dev running with test hooks: scripts/dev-run.sh -- --test-hooks
-# Item 3's tap is in item 2's window on a rerun: leave 3 minutes between runs.
+# Item 2 reads the last 3 minutes of fn lines: leave 3 minutes after any fn
+# press or hook (item 3's tap included) before a run.
+# The result's sha is the build Lexicon Dev runs; name the branch, or pin a
+# sha, only in a request for one build.
 issue: 54
-branch: main
-sha: d347832
 
 item: paste-check lands the text in a native field and puts the clipboard back
 run: paste-check
