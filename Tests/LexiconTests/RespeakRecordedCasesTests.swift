@@ -13,14 +13,17 @@ private func resolver(_ server: FakeJev) -> RespeakResolver {
     RespeakResolver(jev: JevClient(session: server.session, clock: TestClock(), requestTimeout: 3_600))
 }
 
-/// The options Jev was shown, by option name ("c1"...), with their text.
+/// The options Jev was shown, by option name ("c1"...), with their text. Jev
+/// is shown whole words, so "tail wind," keeps its comma; the span Lexicon
+/// replaces doesn't.
 private func shown(_ body: Data) -> [String: String] {
     struct Request: Decodable {
         struct State: Decodable { let candidates: [String: [String: String]] }
         let state: State
     }
     let request = try? JSONDecoder().decode(Request.self, from: body)
-    return request?.state.candidates.compactMapValues { $0["text"] } ?? [:]
+    let edges = CharacterSet(charactersIn: ".,;:!?\"'()[]{}<>“”‘’…")
+    return request?.state.candidates.compactMapValues { $0["text"]?.trimmingCharacters(in: edges) } ?? [:]
 }
 
 @Test(.timeLimit(.minutes(1)), arguments: respeakCases)

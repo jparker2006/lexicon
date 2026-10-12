@@ -39,8 +39,9 @@ public struct JevClient: Sendable {
         self.requestTimeout = requestTimeout
     }
 
-    /// fn-down: open the TLS connection so a later decision skips the cold start
-    /// (measured 359 ms cold vs 150 ms warm). A HEAD with no text and no key: the
+    /// A Re-speak's fn-down (and, from M5, a Hand fix watch): open the TLS
+    /// connection so the decision skips the cold start (measured 359 ms cold vs
+    /// 150 ms warm). Never for plain dictation, which sends Jev nothing. A HEAD with no text and no key: the
     /// rejection still leaves URLSession a warm connection for the next request,
     /// and keys are never read at fn-down (a first Keychain read can wait on a prompt).
     public func prewarm(_ access: CloudAccess?) {
