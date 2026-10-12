@@ -17,8 +17,10 @@ You write tests that fail first. You get an acceptance criterion or a CONFIRMED 
 - Report: the file and test name, the failure line from the run, and why that failure is the finding. Never commit; the builder does.
 - Never drive the live app or open Jake's private data under `~/Library/Application Support/Lexicon/`.
 
-## Shell (zsh)
+## Shell
 
-- Quote every glob you pass to a command (`find . -name '*.swift'`); an unmatched bare glob is an error in zsh.
+The shell may be zsh or bash; write commands that work in both.
+
+- Quote every glob you pass to a command (`find . -name '*.swift'`): zsh stops on an unmatched glob, bash passes it on literally.
 - No bare `=====` separator lines: zsh expands a word that starts with `=`. Use `echo "--- name"`.
 - Run the unified log as `/usr/bin/log`; plain `log` is a zsh builtin.

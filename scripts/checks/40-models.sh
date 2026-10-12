@@ -50,7 +50,7 @@ installed=$HOME/.claude/pstack-models.md
 if [ "${CI:-}" = true ] && [ ! -e "$installed" ]; then
     :
 elif ! cmp -s docs/agents/pstack-models.md "$installed"; then
-    say "$installed differs from docs/agents/pstack-models.md; fix: scripts/install-pstack-sheet.sh"
+    say "$installed differs from docs/agents/pstack-models.md; fix: ask Jake to run scripts/install-pstack-sheet.sh (it changes his global pstack sheet and keeps the old one)"
 fi
 
 exit "$fail"

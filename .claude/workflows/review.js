@@ -16,9 +16,11 @@ export const meta = {
 //   pr, head   optional; commits after sha on the PR's or branch's head get a delta pass
 //   reviewed   optional; a sha an earlier run reviewed: review only reviewed..sha
 //   mode       'builder' (default): a Haiku critic per reached section plus the criteria
-//              'reviewer': 2 to 4 independent lenses, critic-deep on the high tier,
+//              'reviewer': Never lose and Combining with main (review-map.json's
+//              reviewerLenses) plus the PR's top risks, critic-deep on the high tier,
 //              and a blast-radius pass where review-map.json says so
-//   risks      reviewer mode: the PR's top risks, as review.md section names or free text
+//   risks      reviewer mode: the PR's top risks, as review.md section names or free text;
+//              every one runs. With none, the first high-tier section reached is used.
 //   findings   [{path, line, claim, scenario?, cite?}] from a bot or an earlier review,
 //              verified like a critic's
 //   sideBySide run critic and critic-deep on every lens and tag who found what
@@ -140,48 +142,76 @@ if (head && !have(head) && a.pr) git('fetch', '-q', 'origin', 'pull/' + a.pr + '
 const sha = git('rev-parse', a.sha)
 const root = path.join(os.tmpdir(), 'lexicon-review')
 fs.mkdirSync(root, { recursive: true })
+// Snapshots older than three days go; a review takes minutes.
+const now = Number(sh('date', ['+%s']))
+for (const e of fs.readdirSync(root)) {
+  const p = path.join(root, e)
+  try { if (now - fs.statSync(p).mtimeMs / 1000 > 3 * 86400) fs.rmSync(p, { recursive: true, force: true }) } catch {}
+}
+// Built aside and renamed into place, so a half-made snapshot is never used and two runs on
+// one sha don't collide. git archive writes a file, so its failure can't hide in a pipe.
 const snapshot = s => {
   const dir = path.join(root, s)
-  if (!fs.existsSync(path.join(dir, '.done'))) {
-    fs.rmSync(dir, { recursive: true, force: true })
-    fs.mkdirSync(dir, { recursive: true })
-    sh('sh', ['-c', 'git archive "$1" | tar -x -C "$2"', 'sh', s, dir])
-    fs.writeFileSync(path.join(dir, '.done'), '')
-  }
+  if (fs.existsSync(path.join(dir, '.done'))) return dir
+  fs.rmSync(dir, { recursive: true, force: true })
+  const tmp = fs.mkdtempSync(path.join(root, '.tmp-'))
+  const tree = path.join(tmp, 'tree')
+  git('archive', '-o', path.join(tmp, 'tree.tar'), s)
+  fs.mkdirSync(tree)
+  sh('tar', ['-x', '-f', path.join(tmp, 'tree.tar'), '-C', tree])
+  fs.writeFileSync(path.join(tree, '.done'), '')
+  try { fs.renameSync(tree, dir) } catch (e) { if (!fs.existsSync(path.join(dir, '.done'))) throw e }
+  fs.rmSync(tmp, { recursive: true, force: true })
   return dir
 }
+const lines = out => out.split('\\n').filter(Boolean)
+// --no-renames everywhere: a file moved out of a high-tier folder keeps its old path in the list.
+const changed = (from, to) => lines(git('diff', '--name-only', '--no-renames', from, to))
 const pass = (from, to, files, commits) => {
   if (!files.length) return null
   const diff = path.join(root, from.slice(0, 12) + '..' + to.slice(0, 12) + '.diff')
-  fs.writeFileSync(diff, git('diff', from, to, '--', ...files) + '\\n')
+  fs.writeFileSync(diff + '.tmp' + process.pid, git('diff', '--no-renames', from, to, '--', ...files) + '\\n')
+  fs.renameSync(diff + '.tmp' + process.pid, diff)
   return { from, to, files, commits, diff, snapshot: snapshot(to) }
 }
-// Only what the branch's own commits touched: first parents, so main merged in is not re-reviewed.
+// What the branch's own commits touched (first parents, so main merged in is not re-reviewed),
+// plus what its merges did to the files the branch touches: a conflict resolution, or one that
+// takes main's side and undoes a reviewed fix.
 const delta = (from, to) => {
-  const commits = git('rev-list', '--first-parent', '--no-merges', '--reverse', from + '..' + to).split('\\n').filter(Boolean)
-  const files = [...new Set(commits.flatMap(c => git('diff-tree', '--no-commit-id', '--name-only', '-r', c).split('\\n')).filter(Boolean))].sort()
-  const merges = git('rev-list', '--first-parent', '--merges', from + '..' + to).split('\\n').filter(Boolean)
-  // A merge's own changes are its conflict resolutions: files that differ from every parent.
-  for (const m of merges) for (const f of git('diff-tree', '--cc', '--no-commit-id', '--name-only', '-r', m).split('\\n')) if (f && !files.includes(f)) files.push(f)
-  files.sort()
-  return pass(from, to, files, commits.map(c => git('log', '-1', '--format=%h %s', c)).concat(merges.map(m => git('log', '-1', '--format=%h %s (merge)', m))))
+  const commits = lines(git('rev-list', '--first-parent', '--no-merges', '--reverse', from + '..' + to))
+  const files = new Set(commits.flatMap(c => lines(git('diff-tree', '--no-commit-id', '--name-only', '--no-renames', '-r', c))))
+  const merges = lines(git('rev-list', '--first-parent', '--merges', from + '..' + to))
+  const touched = new Set([...files, ...changed(git('merge-base', 'origin/main', from), from)])
+  for (const m of merges) {
+    for (const f of lines(git('diff-tree', '--cc', '--no-commit-id', '--name-only', '-r', m))) files.add(f)
+    for (const f of changed(m + '^1', m)) if (touched.has(f)) files.add(f)
+  }
+  return pass(from, to, [...files].sort(), commits.map(c => git('log', '-1', '--format=%h %s', c)).concat(merges.map(m => git('log', '-1', '--format=%h %s (merge)', m))))
 }
-let main = null, later = null
+let main = null, later = null, note = null
 if (a.reviewed) {
   later = delta(git('rev-parse', a.reviewed), sha)
 } else {
   let base = a.base ? git('rev-parse', a.base) : git('merge-base', 'origin/main', sha)
   if (base === sha) base = git('rev-parse', sha + '^')
-  main = pass(base, sha, git('diff', '--name-only', base, sha).split('\\n').filter(Boolean), [])
+  main = pass(base, sha, changed(base, sha), [])
   head = head ? git('rev-parse', head) : sha
-  const after = s => { try { git('merge-base', '--is-ancestor', sha, s); return true } catch { return false } }
-  if (head !== sha && after(head)) later = delta(sha, head)
+  const isAncestor = (x, y) => { try { git('merge-base', '--is-ancestor', x, y); return true } catch { return false } }
+  if (head !== sha && isAncestor(sha, head)) later = delta(sha, head)
+  // A head behind the sha (an older push) leaves nothing unreviewed.
+  else if (head !== sha && !isAncestor(head, sha)) note = 'head ' + head.slice(0, 7) + ' does not descend from ' + sha.slice(0, 7) + ', so its commits got no delta pass'
 }
-const rules = path.resolve('docs/agents/review.md')
+// The rules, map and decisions come from the reviewed sha; a sha older than them uses this
+// checkout's copy, and the output says so.
+const at = snapshot(sha)
+const from = rel => fs.existsSync(path.join(at, rel)) ? path.join(at, rel) : (fs.existsSync(rel) ? path.resolve(rel) : null)
+const rules = from('docs/agents/review.md')
+const mapFile = from('.claude/workflows/review-map.json')
 const headings = fs.readFileSync(rules, 'utf8').split('\\n').filter(l => l.startsWith('## ')).map(l => l.slice(3).trim())
-const map = JSON.parse(fs.readFileSync('.claude/workflows/review-map.json', 'utf8'))
-const decisions = fs.existsSync('docs/DECISIONS.md') ? path.resolve('docs/DECISIONS.md') : null
-console.log(JSON.stringify({ sha, main, later, rules, headings, map, decisions }))
+const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'))
+const decisions = from('docs/DECISIONS.md')
+const fromCheckout = [rules, mapFile].filter(f => !f.startsWith(at)).map(f => path.relative(process.cwd(), f))
+console.log(JSON.stringify({ sha, main, later, note, rules, headings, map, decisions, fromCheckout }))
 PREP`
 }
 
@@ -189,7 +219,7 @@ phase('Snapshot')
 const prepPrompt = `Run this one Bash command exactly as written, from the repository root, and put its complete stdout, unchanged, in \`out\`. Run nothing else and edit nothing. If it fails, put "ERROR: " and the error text in \`out\`.
 
 ${prepCommand({ issue: a.issue, sha: a.sha, base: a.base, pr: a.pr, head: a.head, reviewed: a.reviewed })}`
-const prep = await hire('prep', 'haiku', 'low', prepPrompt, { label: 'snapshot', phase: 'Snapshot', schema: OUT })
+const prep = await hire('prep', 'haiku', 'xhigh', prepPrompt, { label: 'snapshot', phase: 'Snapshot', schema: OUT })
 let info
 try {
   info = JSON.parse(prep.out)
@@ -197,9 +227,9 @@ try {
   throw new Error('snapshot failed: ' + (prep ? prep.out : 'no reply'))
 }
 if (!info.main && !info.later) {
-  const what = a.reviewed ? `no change of the branch's own since \`${a.reviewed.slice(0, 7)}\`` : 'the diff is empty'
+  const what = (a.reviewed ? `no change of the branch's own since \`${a.reviewed.slice(0, 7)}\`` : 'the diff is empty') + (info.note ? `; ${info.note}` : '')
   return {
-    markdown: `## Review\n\nReviewed sha: \`${info.sha.slice(0, 7)}\`. Nothing to review: ${what}.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED.\n\nHelpers: 1 prep (haiku low).`,
+    markdown: `## Review\n\nReviewed sha: \`${info.sha.slice(0, 7)}\`. Nothing to review: ${what}.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED.\n\nHelpers: 1 prep (haiku xhigh).`,
     reviewedSha: info.sha, complete: true, confirmed: [], rows: [], snapshots: [],
   }
 }
@@ -221,6 +251,7 @@ const map = info.map
 const known = new Set(info.headings)
 const stale = Object.keys(map.sections).filter(s => !known.has(s))
 if (stale.length) log(`review-map.json names sections review.md no longer has: ${stale.join(', ')}`)
+// Shown in the output too, so a renamed section is never skipped without a word.
 const allFiles = [...(info.main ? info.main.files : []), ...(info.later ? info.later.files : [])]
 const high = reach(map.highTier, allFiles).length > 0
 const blast = reach(map.blastRadius, allFiles)
@@ -242,11 +273,12 @@ function lensesFor(files) {
   }
   const names = [...map.reviewerLenses]
   for (const r of a.risks || []) if (!names.includes(r)) names.push(r)
-  if (names.length < 3) {
+  // Every risk the Reviewer names runs; with none named, the first high-tier section is the top risk.
+  if (!(a.risks || []).length) {
     const top = sectionLenses(files).find(l => !names.includes(l.name) && reach(map.highTier, l.files).length)
     if (top) names.push(top.name)
   }
-  return names.slice(0, 4).map(name => ({ name, files, rule: known.has(name) }))
+  return names.map(name => ({ name, files, rule: known.has(name) }))
 }
 
 function critics() {
@@ -303,8 +335,10 @@ const incomplete = []
 
 async function verify(f, pass, lensLabel) {
   f = { ...f, path: f.path.split(pass.snapshot + '/').pop() }
-  let v = await hire('verifier', 'haiku', 'xhigh', verifyPrompt(f, pass), { label: `verify ${f.path}:${f.line}`, phase: pass.phase, schema: VERDICT })
-  if (!v) v = await hire('verifier', 'haiku', 'xhigh', verifyPrompt(f, pass), { label: `verify again ${f.path}:${f.line}`, phase: pass.phase, schema: VERDICT })
+  // A verifier that errors gets one more try; a second failure is a NO VERDICT row, not a crash.
+  const ask = label => hire('verifier', 'haiku', 'xhigh', verifyPrompt(f, pass), { label, phase: pass.phase, schema: VERDICT }).catch(() => null)
+  let v = await ask(`verify ${f.path}:${f.line}`)
+  if (!v) v = await ask(`verify again ${f.path}:${f.line}`)
   if (!v) incomplete.push(`no verdict for ${f.path}:${f.line}`)
   rows.push({ ...f, lens: lensLabel, pass: pass.label, verdict: v ? v.verdict : 'NO VERDICT', v })
 }
@@ -328,7 +362,7 @@ async function review(pass, isDelta) {
       if (!r) { incomplete.push(`no reply from ${label}`); return null }
       for (const n of r.notes) notes.push(`${label}: ${n}`)
       const findings = r.findings.slice(0, MAX_FINDINGS)
-      if (r.findings.length > MAX_FINDINGS) log(`${label}: dropped ${r.findings.length - MAX_FINDINGS} findings past the cap`)
+      if (r.findings.length > MAX_FINDINGS) incomplete.push(`${label} returned ${r.findings.length} findings; the ${r.findings.length - MAX_FINDINGS} past the cap of ${MAX_FINDINGS} were not verified`)
       return parallel(findings.map(f => () => verify(f, pass, label)))
     },
   )
@@ -366,7 +400,9 @@ for (const r of rows) {
   if (!same) merged.push({ ...r })
   else {
     same.lens += `; ${r.lens}`
+    const claims = same.claim === r.claim ? same.claim : `${same.claim} Also: ${r.claim}`
     if (!holds(same) && holds(r)) Object.assign(same, { ...r, lens: same.lens })
+    same.claim = claims
   }
 }
 rows.splice(0, rows.length, ...merged)
@@ -385,9 +421,13 @@ const lines = [
   '|---|---|---|---|---|',
   ...rows.map(r => `| ${r.verdict}${r.verdict === 'CONFIRMED' && !counted.includes(r) ? ' (citation fails: a note)' : ''} | \`${cell(r.path)}:${r.line}\` | ${cell(r.claim)} | ${r.cite ? cell(`${r.cite.source}: "${r.cite.quote}"`) : 'given'} | ${cell(r.lens)}, ${r.pass} |`),
   '',
-  `Counted: ${counted.length} CONFIRMED. Dropped: ${rows.filter(r => r.verdict === 'REFUTED').length} REFUTED, ${rows.filter(r => r.verdict === 'UNSURE').length} UNSURE (each counts only once a test that fails first proves it), ${uncited.length} with a citation that does not hold.`,
+  `Counted: ${counted.length} CONFIRMED. Dropped: ${rows.filter(r => r.verdict === 'REFUTED').length} REFUTED, ${rows.filter(r => r.verdict === 'UNSURE').length} UNSURE, ${uncited.length} with a citation that does not hold.`,
 ]
+lines.push('', 'Each CONFIRMED test is written, not run: the builder runs it red before fixing. A dropped finding comes back only with a test that fails first.')
 if (incomplete.length) lines.push('', `INCOMPLETE: ${incomplete.join('; ')}.`)
+if (info.note) lines.push('', `Not reviewed: ${info.note}.`)
+if (stale.length) lines.push('', `review-map.json names sections review.md no longer has: ${stale.join(', ')}. Any review.md section the map doesn't name runs on every file.`)
+if (info.fromCheckout.length) lines.push('', `Read from this checkout, not the sha (the sha predates them): ${info.fromCheckout.join(', ')}.`)
 for (const p of passes) if (p.blast) lines.push('', `Blast radius (${p.label}): ${cell(p.blast.safetyFact)} Proof: \`${cell(p.blast.proofCommand)}\`: ${cell(p.blast.proofResult)}`)
 if (notes.length) lines.push('', '<details><summary>Notes (no citation, not counted)</summary>', '', ...notes.map(n => `- ${cell(n)}`), '', '</details>')
 lines.push('', `Helpers: ${Object.entries(helpers).map(([k, n]) => `${n} ${k}`).join(', ')}.`)

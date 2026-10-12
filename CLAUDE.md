@@ -35,14 +35,14 @@ The only sizing table: other docs point here instead of restating it. The counts
 | Docs or small fix | about 6 to 12 |
 | Normal code ticket | about 20 to 40 |
 | Hard ticket (fn, mic, paste, never-lose, privacy, network) | about 30 to 50, with an Opus design critic before a system-hook or latency design is locked |
-| Flake or hang fix | the above plus a pattern swarm, one worker per test file |
+| Flake or hang fix | the above plus a pattern swarm over the test files, one worker per file or small group, at most 50 |
 
 ### Swarms, by job type
 
 Run `/pstack:swarm` (Haiku workers at xhigh, at least 10, normally 20 to 40) for these, however small the job feels:
 
 - 10 or more same-shape pieces: pattern sweeps over tests or modules, Term and Rule lists, eval cases, doc sweeps.
-- Every flake or hang fix: one worker per test file, hunting the same pattern.
+- Every flake or hang fix: the test files split among at most 50 workers, each hunting the same pattern.
 - A change to Cleanup, StructuralCheck, Terms or folding, Code Terms or the scorer: one worker per input category, each returning failing inputs with their expected outputs.
 
 Each brief carries the helper rules below.
@@ -63,11 +63,14 @@ Each brief carries the helper rules below.
 
 ## Standing approvals (Jake, 2026-10-12)
 
-Jake gave these once, in the #88 grill (Q3 and Q4). Don't ask again; say what you did.
+The orchestrator's, from #88 Q3: it does these without asking, and says what it did.
 
-- Start builders on `ready-for-agent` tickets of the open milestone, up to the cap in workflow.md Concurrency.
-- Close tickets as workflow.md's closing rule says, and archive finished sessions as the app's auto-archive setting does.
-- Remove the worktree and `.build/` of a merged ticket.
-- Run the `lexicon-review` Workflow and `/pstack:swarm` wherever this file calls for them, on the plan, within the 20-at-once cap (Q4, the standing Workflow opt-in).
+- Post chips for unblocked tickets, up to the builder cap in workflow.md Concurrency, while the plan is under 90% of the 5-hour window and 95% of the week.
+- Remove the worktrees of merged PRs.
+- Archive finished sessions.
 
-Still Jake's: a ticket of the next milestone before its gate opens; `ready-for-human` or hands-on tickets; private data or any copy of it; any deletion beyond a merged ticket's worktree; a change to another role's standing duty; any spend (paid APIs, usage credits, fast mode). Trash moves, if any, go to him in one message at the end of a cleanup.
+It still asks Jake for anything private, any spend, any other deletion, and next-milestone work. Each role's other standing rules (the Reviewer's installs, say) live in its start prompt.
+
+## Standing Workflow opt-in (Jake, 2026-10-12)
+
+From #88 Q4: any session runs the `lexicon-review` Workflow and `/pstack:swarm` wherever this file calls for them, without asking. On the plan only (no paid API calls, usage credits or fast mode); no helper drives the live app or reads private data.

@@ -14,8 +14,10 @@ You are a scout for an Opus session in the Lexicon repo. Answer the one question
 - Never open Jake's private data under `~/Library/Application Support/Lexicon/` (Wispr export, Test set, starter Lexicon, History) or any key; name the path instead.
 - Keep the report under 300 words unless the question asks for a list.
 
-## Shell (zsh)
+## Shell
 
-- Quote every glob you pass to a command (`find . -name '*.swift'`); an unmatched bare glob is an error in zsh.
+The shell may be zsh or bash; write commands that work in both.
+
+- Quote every glob you pass to a command (`find . -name '*.swift'`): zsh stops on an unmatched glob, bash passes it on literally.
 - No bare `=====` separator lines: zsh expands a word that starts with `=`. Use `echo "--- name"`.
 - Run the unified log as `/usr/bin/log`; plain `log` is a zsh builtin.
