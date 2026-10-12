@@ -14,7 +14,9 @@ scorer/score compare --gold gold.jsonl --run-a lexicon.jsonl --run-b wispr.jsonl
 scorer/test
 ```
 
-Input formats are in `lexicon_scorer/__main__.py`. Gold lines need `id`, `text` (word-for-word), `session` (for `compare`) and optional `terms` and `split`. Run lines need `id`, `speech_text` and `inserted_text`. A run must cover every gold entry scored (after `--split`); a missing Dictation is an error, not a better score.
+Input formats are in `lexicon_scorer/__main__.py`. Gold lines need `id`, `text` (word-for-word), `session` (for `compare`) and optional `terms`, `split` and `gold`. Run lines need `id`, `speech_text` and `inserted_text`. A run must cover every gold entry scored (after `--split`); a missing Dictation is an error, not a better score. `compare` scores the two runs on the entries both hold (`compared`).
+
+While Jake's gold review is part done, an entry whose `gold` is `review` is left out, and so is every other entry in its session: the bootstrap resamples whole sessions, so a session counts once all of it is gold (`baselines.gold_state`, the one rule). Every command prints `scored N of M, K left out in review` to stderr, and its JSON carries `gold` (those counts) and `partial` (K is not 0). A run's lines for left-out entries are ignored. The held-back split is all or nothing: one entry in review refuses the run, naming `scripts/test-set.sh review`.
 
 What a Term match is:
 
@@ -42,9 +44,17 @@ scorer/score report --gold gold.jsonl --run run.jsonl [--baseline wispr.jsonl] [
 
 Exit codes: 0 when `worse` is empty, 3 when it is not (the report prints first), 1 for a bad input.
 
-The baseline covers every split, so before scoring, its rows for ids outside the scored gold are dropped. A scored entry missing from the baseline is still an error. The optional run fields (`status`, `lag_ms`, `cleanup`, `engine`, `lost`) are checked only by `report`, and a bad type is an error.
+The baseline covers every split, so before scoring, its rows for ids outside the scored gold are dropped. The two runs are compared on the scored entries both hold (`compared`), and both summaries count those: a baseline from before the Test set grew still compares. `--sample N` scores the N lowest ids of the split's entries not in review, less any left out in review: the same draw as `lexicon-eval --manifest --sample N`. The optional run fields (`status`, `lag_ms`, `cleanup`, `engine`, `lost`) are checked only by `report`, and a bad type is an error.
 
 `report` never prints text: no ids, speech, inserted text or Terms, only numbers and labels.
+
+## The quick eval
+
+```sh
+scripts/eval-quick.sh [--baseline <run.jsonl>] [--keep <run.jsonl>]
+```
+
+What "a quick `lexicon-eval`" means for a speech or Cleanup change: the everyday split at fast pace for words and Terms, a realtime sample of 30 clips for lag, the check that both paces heard the same text on those 30, and the compare with the baseline, or "no baseline yet", in about 20 minutes and never past 30. Local Parakeet only: no key reaches it. `--keep` on main saves a run that `--baseline` on a branch compares with. `scorer/score quick` prints its lines from the two reports; the script's header has the details. Tests: `tests/test_partial.py`.
 
 Tests use public synthetic examples only. Never point them at the private Test set. `scorer/fixtures/` holds a public example for the tests, and for the CI smoke run that will use it.
 
@@ -63,7 +73,7 @@ Builds and grows Jake's private Test set from his Wispr history (#50): weekly un
 Everything lives under `~/Library/Application Support/Lexicon/test-set/`, owner-only, never in a git work tree:
 
 - `manifest.jsonl`: the Test set, NeMo-style: `id`, `audio_filepath` (relative to the folder), `duration`, `text` (gold), `gold`, `terms`, `speech_end` (Wispr's logged speech duration), `context` (the app's bundle ID), `session`, `split`.
-- `gold` is `agreed` where local Parakeet's text and Wispr's raw text agree: the same words after the normalizer, the same Lexicon words written the same way, no Rule's heard side and no Term in another case or spacing in either. Then `text` is Parakeet's text. Otherwise it is `review` and `text` is only a placeholder until Jake reviews it (#51, below): the scorer refuses to score a `review` entry, so the Test set scores only once review is done. Review sets the entry's `text`, `terms` (recomputed from the new text) and `gold` `reviewed`.
+- `gold` is `agreed` where local Parakeet's text and Wispr's raw text agree: the same words after the normalizer, the same Lexicon words written the same way, no Rule's heard side and no Term in another case or spacing in either. Then `text` is Parakeet's text. Otherwise it is `review` and `text` is only a placeholder until Jake reviews it (#51, below): the scorer leaves a `review` entry out with its session, so the Test set scores in part while review goes on, and held-back only once its review is done. Review sets the entry's `text`, `terms` (recomputed from the new text) and `gold` `reviewed`.
 - `terms`: the Lexicon's written forms (its Terms and the written side of its Rules, from `starter-lexicon.txt`) found in `text`.
 - `session`: a run of Dictations at most 30 minutes apart. `split`: `held-back` (100 clips in whole sessions, drawn once with a fixed seed, never the latest session; milestone checks only) or `everyday`. Later clips join their session's split, or `everyday`.
 - `wispr-run.jsonl`: Wispr's run from its own logs (raw speech text, the text it pasted, its logged lag), the input for its baseline.
@@ -78,16 +88,21 @@ One run at a time (`.lock`, shared with the review page and the baselines). It p
 scripts/test-set.sh review
 ```
 
-Jake's review of the `review` entries (#51): a page served from 127.0.0.1 until Ctrl-C, opened in the default browser. For each clip in `disagreements.jsonl` it plays the audio and shows local Parakeet's text (A) and Wispr's raw text (B) with only the differing words highlighted, under one rule: gold is the words Jake said, not what he wanted typed, and punctuation doesn't matter. He presses A or B, or N to fix B in a box that opens on the first differing word. What Wispr typed, Jake's own Hand fix of it and any Term written in another case or spacing or Rule's heard side sit behind a hints toggle, since they show what he wanted typed. M marks wrong words in either text. A three-step tour shows on the first visit. Every answer and mark is saved at once; reopening resumes on the clip he was on. The five main keys are on the page, the rest behind More keys.
+Jake's review of the `review` entries (#51): a page served from 127.0.0.1 until Ctrl-C, opened in the default browser. The queue: the held-back sessions first, then the everyday sessions in a fixed shuffled order (a session's place never moves as the Test set grows), each session's clips together, so Jake can stop after any session and the scorer counts every one he finished. After them come about 60 agreed clips that hold a Term (`audit.jsonl`, drawn once with a fixed seed the first time the page opens): where both models misheard a Term the same way the agreed gold is wrong, and an answer that differs from the agreed text counts as a correction. For each clip it plays the audio and shows local Parakeet's text (A) and Wispr's raw text (B) with only the differing words highlighted, under one rule: gold is the words Jake said, not what he wanted typed, and punctuation doesn't matter. He presses A or B, or N to fix B in a box that opens on the first differing word. What Wispr typed, Jake's own Hand fix of it and any Term written in another case or spacing or Rule's heard side sit behind a hints toggle, since they show what he wanted typed. M marks wrong words in either text. A three-step tour shows on the first visit. Every answer and mark is saved at once; reopening resumes on the clip he was on. The five main keys are on the page, the rest behind More keys.
 
 It writes only under the Test set folder, owner-only:
 
 - `review.jsonl`: his answers (`choice`, `text`, `marks`), the source of truth.
-- `manifest.jsonl`: an answered entry gets his `text`, `terms` recomputed from it and `gold` `reviewed`; a cleared one goes back to `review`. Other entries are untouched.
+- `manifest.jsonl`: an answered entry gets his `text`, `terms` recomputed from it and `gold` `reviewed`; a cleared one goes back to `review`, or an audit clip to `agreed` and its agreed text. Other entries, and audit clips he never answered, are untouched.
 - `marks.jsonl`: one Test set entry per run of marked words: `clip`, `audio_filepath`, `session`, `split`, `model` (`parakeet` or `wispr`), word `start` and `end`, the words `heard`, and the words `said` (lined up with his gold, null until he gives it).
 - `review-state.json`: the clip he was on, and whether he has seen the tour.
+- `audit.jsonl`: the audit's clips, in the shape of `disagreements.jsonl`.
 
-The page makes no network requests: its Content-Security-Policy lets it load only its own files and fetch only from its own server, and nothing is cached (no-store). The server answers only `Host: 127.0.0.1:<port>`, and serves Jake's data only with the key from the link it opens, which sits in the link's fragment (never sent by the browser) and comes back as a header no other web page can send, so no other page can read or write through it. It sets no cookie and logs no requests. `--no-open` prints the link instead of opening it. Tests: `tests/test_review.py`, on synthetic clips.
+Every answer loaded is saved back, its clip in the queue or not, and a save that would write fewer answer lines than were loaded is refused.
+
+`scripts/test-set.sh status` prints the review's counts, never a clip, and works while the page is open: answered and left per split, minutes of audio left, the page's first time guess, the audit (`audited N of 60, corrected M`, with a 95% bound on how much agreed Term gold is wrong), and what each split scores now.
+
+The page makes no network requests: its Content-Security-Policy lets it load only its own files and fetch only from its own server, and nothing is cached (no-store). The server answers only `Host: 127.0.0.1:<port>`, and serves Jake's data only with the key from the link it opens, which sits in the link's fragment (never sent by the browser) and comes back as a header no other web page can send, so no other page can read or write through it. It sets no cookie and logs no requests. The link goes only to the browser, never to the terminal. Tests: `tests/test_review.py` and `tests/test_review_queue.py`, on synthetic clips.
 
 ### Baselines
 
@@ -95,4 +110,4 @@ The page makes no network requests: its Content-Security-Policy lets it load onl
 scripts/test-set.sh baselines
 ```
 
-Once no entry is `review`, saves into a new `baselines/YYYY-MM-DD/`, for `everyday` then `held-back`: `wispr-<split>.jsonl` (Wispr's run on the split) and `wispr-<split>.json` (its report), and `parakeet-<split>.jsonl` (`lexicon-eval --manifest` on the split: local Parakeet through the real pipeline at the speed of speech, no key in its environment) and `parakeet-<split>.json` (its report against Wispr). It takes about as long as the audio. It prints the two scores and lag for each, numbers only. A later quick run compares against them with `lexicon-eval --manifest <test-set>/manifest.jsonl --split everyday --baseline <test-set>/baselines/<date>/parakeet-everyday.jsonl`. A clip added by a later update has no line in a saved Parakeet baseline, so a run that includes one needs the baselines saved again. The held-back split is for milestone checks only: Jake runs this, and agents never tune on its numbers. Tests: `tests/test_baselines.py`, with a fake `lexicon-eval`.
+Once no clip of either split is left out in review, saves into a new `baselines/YYYY-MM-DD/`, for `everyday` then `held-back`: `wispr-<split>.jsonl` (Wispr's run on the split) and `wispr-<split>.json` (its report), and `parakeet-<split>.jsonl` (`lexicon-eval --manifest` on the split: local Parakeet through the real pipeline at the speed of speech, no key in its environment) and `parakeet-<split>.json` (its report against Wispr). It takes about as long as the audio. It prints the two scores and lag for each, numbers only. `scripts/eval-quick.sh` compares against the latest `parakeet-everyday.jsonl` by default, on the clips both runs hold, so clips added by a later update are left out of the compare until the baselines are saved again. The held-back split is for milestone checks only: Jake runs this, and agents never tune on its numbers. Tests: `tests/test_baselines.py`, with a fake `lexicon-eval`.
