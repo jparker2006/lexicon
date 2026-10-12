@@ -281,7 +281,8 @@ final class AttemptCore: Sendable {
     /// nil with no cloud model, or with the network down at fn-down.
     let session: CloudSession?
     let segments: AsyncStream<SpeechSegment>
-    /// This attempt's hold on the model has begun. Quick: no load in it.
+    /// This attempt's hold on the model has begun. Apart from `warmUp`, so ending
+    /// the hold waits only for this, never for a load stuck behind a hung call.
     let began: Task<Void, Never>
     /// Loads the local model while Jake talks, so fn-up never waits on the load.
     /// Fails with the load's error, which fn-up then answers with.

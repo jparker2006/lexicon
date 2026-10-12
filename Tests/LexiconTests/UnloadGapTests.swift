@@ -107,8 +107,8 @@ import LexiconDomain
     for await _ in unloadStarts { break }
 
     await engine.begin(feed: finishedFeed(), plan: plan).cancel()
-    // The hold ended, so the idle unload arms again. Returns at the time limit otherwise.
-    await until { await engine.residency?.unloadScheduled == true }
+    // The hold ended, so the idle unload arms again: its linger ends 600 s from now.
+    await clock.waitForSleep(endingAt: .seconds(1_200))
     #expect(await engine.residency?.unloadScheduled == true, "the cancelled Dictation still holds the model")
     release.yield()
 }
