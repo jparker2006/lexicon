@@ -50,10 +50,12 @@ async function gated(fn) {
 }
 
 const helpers = {}
+// .claude/agents types; prep and blast-radius run as untyped helpers.
+const TYPED = new Set(['critic', 'critic-deep', 'verifier'])
 // Counts the helpers that answered, by type, model and effort, for the Helpers line.
 async function hire(type, model, effort, prompt, opts) {
   const call = { ...opts, model, effort }
-  if (type !== 'prep') call.agentType = type
+  if (TYPED.has(type)) call.agentType = type
   const result = await gated(() => agent(prompt, call))
   const key = `${type} (${model} ${effort})`
   if (result) helpers[key] = (helpers[key] || 0) + 1

@@ -13,6 +13,11 @@
 | `critic-deep` | `claude-sonnet-5-5` | high | 50 | the Reviewer's high-tier lenses; a spec departure |
 | `verifier` | `claude-haiku-5-5` | xhigh | 40 | tries to disprove one finding |
 | `editor` | `claude-haiku-5-5` | xhigh | 60 | makes one assigned change in its own files |
+| `test-writer` | `claude-haiku-5-5` | xhigh | 60 | turns a criterion or a CONFIRMED finding into a test that fails at the head; never edits Sources/ |
+| `spec-checker` | `claude-haiku-5-5` | xhigh | 40 | lists where a ticket or diff departs from the spec and DECISIONS.md, with the line |
+| `bench-runner` | `claude-haiku-5-5` | xhigh | 40 | runs one timing measurement by the bench protocol; PASS or PROVISIONAL, never a budget call |
+| `live-prep` | `claude-haiku-5-5` | xhigh | 30 | turns a Live checks request and the diff into harness commands with pass bars, before the lane opens |
+| `live-parse` | `claude-haiku-5-5` | xhigh | 30 | turns a Live checks run's logs into the result table; lengths and hashes, never dictated text |
 
 - **Untyped helpers** always get a model and an effort: `model: "haiku"`, `effort: "xhigh"` for reading and mechanical work; `"sonnet"` or `"opus"` at `"high"` for judgment calls (a design trade-off, a tricky finding, prose Jake reads).
 - **pstack roles**: `docs/agents/pstack-models.md`, imported above.
