@@ -1,9 +1,10 @@
 #!/bin/sh
 # scripts/lib/heavy.sh's own tests: the build slots' queue, the third slot, the
 # quiet run and the core split, on slot files in a fake HOME with the real
-# lockf. Nothing sleeps: each job says it holds a slot on a FIFO, a holder lets
-# go only when the test writes to its release FIFO, and a waiter's line is read
-# from another FIFO. The verdict is forced with LEXICON_MACHINE_VERDICT.
+# lockf. No test waits on time: each job says it holds a slot on a FIFO, a
+# holder lets go only when the test writes to its release FIFO, and a waiter's
+# line is read from another FIFO. Only heavy.sh's own tries are spaced in time
+# (HEAVY_POLL), which changes how soon a job moves, never the order. The verdict is forced with LEXICON_MACHINE_VERDICT.
 #
 #   sh scripts/test-heavy/heavy.test.sh [name-filter]
 set -eu
@@ -275,6 +276,7 @@ test_a_waiting_quiet_run_holds_no_slot() {
     # Only the waiter dies, as when a session's own process is killed: nothing
     # it started may keep a slot or run its command later. Killed once it has a
     # child: a lockf trying the slots, or the wait between tries.
+    # timing-ok: the kill moment is the test's own input, bounded by a count.
     n=0
     until pgrep -P "$Q" > /dev/null; do
         n=$((n + 1))

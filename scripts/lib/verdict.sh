@@ -35,12 +35,14 @@ verdict() {
         verdict_per_core=?
         verdict_add "load reading unknown"
     fi
-    if [ -n "$verdict_before" ]; then
+    verdict_rate=?
+    if [ -z "$verdict_before" ]; then
+        verdict_add "page-outs not measured yet"
+    elif awk -v a="$verdict_before" -v b="$verdict_after" 'BEGIN { exit !(a ~ /^[0-9]+$/ && b ~ /^[0-9]+$/) }'; then
         verdict_rate=$(awk -v a="$verdict_before" -v b="$verdict_after" -v s="$verdict_secs" 'BEGIN { printf "%d", (b - a) / (s > 0 ? s : 1) }')
         if [ "$verdict_rate" -ge 50 ]; then verdict_add "paging out $verdict_rate pages/s"; fi
     else
-        verdict_rate=?
-        verdict_add "page-outs not measured yet"
+        verdict_add "page-out reading unknown"
     fi
     if [ -z "$verdict_free" ]; then
         verdict_add "memory reading unknown"
