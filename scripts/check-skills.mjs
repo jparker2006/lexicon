@@ -48,8 +48,9 @@ function frontmatter(text) {
       while (i + 1 < end && /^\s+\S|^\s*$/.test(lines[i + 1])) block.push(lines[++i].trim())
       value = block.join(value.startsWith('>') ? ' ' : '\n').trim()
     } else if (value || !/^\s+[A-Za-z0-9_-]+:/.test(lines[i + 1] ?? '')) {
-      // A plain value may wrap onto indented lines, blank lines between them included; YAML
-      // folds them with spaces. An empty value followed by indented keys is a mapping instead.
+      // A plain value may wrap onto indented lines, blank lines between them included. Joined
+      // with spaces (YAML keeps a newline per blank line; only lengths matter here). An empty
+      // value followed by indented keys is a mapping instead.
       const wraps = j => j < end && (/^\s+\S/.test(lines[j]) || (/^\s*$/.test(lines[j]) && wraps(j + 1)))
       while (wraps(i + 1)) value = `${value} ${lines[++i].trim()}`.trim()
       if (/^(["']).*\1$/.test(value)) value = value.slice(1, -1)
