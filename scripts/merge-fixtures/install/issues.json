@@ -1,0 +1,84 @@
+[
+  {
+    "number": 45,
+    "title": "M0: Test hooks and the Accessibility harness",
+    "state": "CLOSED",
+    "body": "",
+    "labels": [],
+    "comments": [
+      {
+        "author": {
+          "login": "jparker2006"
+        },
+        "body": "Building: taking this (Claude)",
+        "createdAt": "2026-10-11T08:50:52Z"
+      },
+      {
+        "author": {
+          "login": "jparker2006"
+        },
+        "body": "Ready for review: PR #105, CI green",
+        "createdAt": "2026-10-11T09:17:28Z"
+      },
+      {
+        "author": {
+          "login": "jparker2006"
+        },
+        "body": "Closed as plumbing on merge (PR #105, 98b609a).",
+        "createdAt": "2026-10-11T09:22:34Z"
+      }
+    ]
+  },
+  {
+    "number": 46,
+    "title": "M0: Headless Dictation through the Conductor",
+    "state": "CLOSED",
+    "body": "",
+    "labels": [],
+    "comments": [
+      {
+        "author": {
+          "login": "jparker2006"
+        },
+        "body": "Building: taking this (Claude)",
+        "createdAt": "2026-10-11T08:38:31Z"
+      },
+      {
+        "author": {
+          "login": "jparker2006"
+        },
+        "body": "Ready for review: PR #102, CI pending",
+        "createdAt": "2026-10-11T09:01:29Z"
+      },
+      {
+        "author": {
+          "login": "jparker2006"
+        },
+        "body": "Ready for review: PR #102, CI pending",
+        "createdAt": "2026-10-11T09:19:23Z"
+      },
+      {
+        "author": {
+          "login": "jparker2006"
+        },
+        "body": "Ready for review: PR #102, CI pending",
+        "createdAt": "2026-10-11T09:23:11Z"
+      },
+      {
+        "author": {
+          "login": "jparker2006"
+        },
+        "body": "Closed as plumbing on merge (PR #102, e3aad6c).",
+        "createdAt": "2026-10-11T09:28:03Z"
+      }
+    ]
+  },
+  {
+    "number": 178,
+    "title": "Try list: things to try in the daily copy",
+    "state": "OPEN",
+    "body": "Things Jake can feel in his daily copy, one line each, with about how long a try takes. A ticket closes when its PR merges (#88 Q11); its \"try it\" step lands here instead of keeping the ticket open. `scripts/install.sh` appends a line for each carried issue at install (#159). Tick a line once tried; if it's wrong, say so on its issue.\n\n- [ ] #63 and #64 History (about 3 min): open History, click a row (it copies), play, pin, Retry.\n- [ ] #68 Private mode (about 1 min): turn Private mode on and off, see the outlined logo.\n\nRefs #88\n",
+    "labels": [],
+    "comments": []
+  }
+]

@@ -1,0 +1,16 @@
+[
+  {
+    "number": 105,
+    "state": "MERGED",
+    "headRefName": "claude/issue-45",
+    "title": "M0: Test hooks and the Accessibility harness (#45)",
+    "body": "Refs #45"
+  },
+  {
+    "number": 102,
+    "state": "MERGED",
+    "headRefName": "claude/issue-46",
+    "title": "M0: Headless Dictation through the Conductor (#46)",
+    "body": "Refs #46"
+  }
+]
