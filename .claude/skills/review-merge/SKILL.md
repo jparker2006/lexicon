@@ -38,7 +38,7 @@ One comment on the PR, with every blocking item in it, so a PR comes back as few
 - `Verdict: don't merge (head <sha7>)`
 - `Hold: <why> (head <sha7>)`, for anything Jake or another PR must settle first.
 
-On a high-tier PR the comment carries the Workflow's `## Review` markdown in full (its table, the `Reviewed sha:` line and the Helpers line), and, when `tier.mjs` printed a blast radius, one line `Blast radius: <the one safety fact> Proof: \`<command>\``. The merge script refuses a high-tier PR without them. The builder's watcher sees the verdict; send no message.
+On a high-tier PR the comment carries the Workflow's `## Review` markdown in full (its table, the `Reviewed sha:` line and the Helpers line), and, when `tier.mjs` printed a blast radius, one line `Blast radius: <the one safety fact> Proof: \`<command>\``. The merge script refuses a high-tier PR without them. Send no message: the orchestrator points the builder at a verdict that isn't a merge.
 
 ## Merge
 

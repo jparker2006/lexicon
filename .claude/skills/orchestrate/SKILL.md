@@ -26,9 +26,12 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 | `READY`, `MERGED`, `JAKE-ASK`, a new Needs-you line | Status to Jake. |
 | `MERGED` | `scripts/unblocked.sh`, then chips for the new frontier. Archive finished sessions: a builder whose last ticket merged, a role session that handed off. Remove a merged ticket's worktree if the merge script skipped it. Every ticket closes at merge (the merge script closes it); what Jake can feel reaches him on the Try list at install. |
 | `JAKE-ASK` | Ask Jake (below). |
-| `LIVE-REQUEST` with Jake items, `LIVE-RESULT` | Schedule a sitting (below). |
+| `LIVE-RESULT` | Send the builder a pointer to the result comment. With Jake items left, schedule a sitting (below). |
+| `LIVE-REQUEST` with Jake items | Schedule a sitting (below). |
+| `CI` failed on a PR | Send its builder a pointer to the run. |
+| `VERDICT` that isn't a merge (`don't merge`, `Hold`) | Send the builder a pointer to the verdict. |
 | `CI` failed on `main` | Status to Jake with the run link. |
-| `HEAD-MOVED`, `FIXED-REVIEW`, `VERDICT` | Nothing: the Reviewer and the builders own these. |
+| `HEAD-MOVED`, `FIXED-REVIEW`, a merge `VERDICT` | Nothing: the Reviewer and the builders own these. |
 
 **Status to Jake.** Run `scripts/status.sh` in that turn. Lead with its Needs-you lines (each says which session Jake answers in), then what moved since the last status, in under 10 lines. Add the Claude side from `list_sessions`: which sessions run and which chips wait to be clicked.
 
