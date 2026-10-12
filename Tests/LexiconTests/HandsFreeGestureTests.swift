@@ -386,3 +386,20 @@ func anEscStampedJustBeforeTheWarningMarkGetsNoWarningWhicheverIsHandledFirst(es
     let inputs: [KeyInput] = escFirst ? [.escape(at(7_990)), .deadline(at(8_000))] : [.deadline(at(8_000)), .escape(at(7_990))]
     #expect(run(inputs, gesture: &gesture) == [.dictationCancelled(a)])
 }
+
+@Test func aLateCopyOfAnEscLeavesTheNextPressAlone() {
+    // Esc at 1.0 s cancels a hold through one report; the other report of that same Esc (tap or
+    // hotkey), stamped 1.0 s, is handled only after a new press began. It belongs to the press it
+    // already ended, so it changes nothing, whatever phase the new press is in.
+    var gesture = FnGesture(shortCap)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300))], gesture: &gesture)
+    #expect(gesture.handle(.escape(at(1_000))).commands == [.dictationCancelled(a)])
+    #expect(gesture.handle(.fnDown(at(1_100), secureInput: false, id: b)).commands == [.dictationBegan(b, at: at(1_100))])
+    #expect(gesture.handle(.escape(at(1_000))).commands.isEmpty)  // pressed
+    #expect(gesture.handle(.fnUp(at(1_150))).commands.isEmpty)
+    #expect(gesture.handle(.escape(at(1_000))).commands.isEmpty)  // the double-tap gap
+    #expect(gesture.handle(.fnDown(at(1_250), secureInput: false, id: DictationID())).commands
+        == [.dictationConfirmed(b, .handsFree)])
+    #expect(gesture.handle(.escape(at(1_000))).commands.isEmpty)  // hands-free
+    #expect(gesture.takesEscape)
+}
