@@ -48,8 +48,8 @@ func aDelayedAnswerThatFailsSpendsTheDelay() async throws {
     let model = SlowedTranscriber(FailsOnce(), clock: TestClock())
     let clip = AudioClip(samples: tone(16_000))
     let second = await model.slowing(by: delay) { () async -> String? in
-        _ = try? await model.transcribe(clip, terms: [], priority: .live)  // not installed yet
-        return try? await model.transcribe(clip, terms: [], priority: .live)
+        _ = try? await model.session(terms: [], priority: .live).finish(clip)  // not installed yet
+        return try? await model.session(terms: [], priority: .live).finish(clip)
     }
     #expect(second == "Ship it.")
 }
@@ -61,6 +61,10 @@ private actor FailsOnce: LocalTranscriber {
     var isResident: Bool { true }
     func load() {}
     func unload() {}
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in try await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
         calls += 1
         if calls == 1 { throw LocalModelNotInstalled(model) }
