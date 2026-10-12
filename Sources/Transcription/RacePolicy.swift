@@ -110,9 +110,9 @@ actor LocalResidency {
         unloadTimer = nil
     }
 
-    /// fn-down's load, after `dictationBegan`. Waits for an idle unload under way
-    /// (fn-up bounds that wait, `AttemptCore.loadLimit`). Throws the load's error,
-    /// so fn-up answers with it instead of loading again.
+    /// fn-down's load, after `dictationBegan`. Waits for every idle unload under
+    /// way (fn-up bounds that wait, `AttemptCore.loadLimit`). Throws the load's
+    /// error, so fn-up answers with it instead of loading again.
     func loadForDictation() async throws {
         // Another unload can start while this waits on one stuck behind a hung call.
         var waited: Task<Void, Never>?
@@ -121,6 +121,10 @@ actor LocalResidency {
             waited = unload
         }
         if !(await transcriber.isResident) { try await transcriber.load() }
+        // Its Dictation ended while it waited, and none holds the model now: the
+        // linger that armed when it ended has already run, so start it again. One
+        // still armed (or firing) is left alone.
+        if dictating == 0, unloadTimer == nil { armUnload() }
     }
 
     /// Launch: load now if not resident, then follow `policy` (the idle unload),

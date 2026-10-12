@@ -149,6 +149,36 @@ import LexiconDomain
     #expect(await model.loadsDuringAnUnload == 0, "fn-down loaded the model while the second unload still ran")
 }
 
+@Test(.timeLimit(.minutes(1))) func aLoadForADictationAlreadyEndedStillUnloadsAfterTheLinger() async throws {
+    // A cancelled Dictation's fn-down load waits through two stuck unloads, then loads
+    // with no Dictation left to hold the model: the idle unload must start again.
+    let model = GatedUnloadModel()
+    let clock = TestClock()
+    let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)
+    let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
+    await engine.warmUp(tenMinuteLinger)
+    await clock.waitForSleep(endingAt: .seconds(600))
+    await clock.advance(by: .seconds(600))
+    await model.untilUnloadsStarted(1)
+
+    await engine.begin(feed: finishedFeed(), plan: plan).cancel()
+    await clock.waitForSleep(endingAt: .seconds(1_200))
+    await clock.advance(by: .seconds(600))
+    await model.untilUnloadsStarted(2)
+
+    await model.endOldestUnload()
+    await model.endOldestUnload()  // the cancelled Dictation's load now runs, for nobody
+    // Its linger, 600 s from now. Returns at the time limit if nothing arms it.
+    await clock.waitForSleep(endingAt: .seconds(1_800))
+    guard !Task.isCancelled else {
+        Issue.record("the model stayed loaded with no Dictation and no idle unload armed")
+        return
+    }
+    await clock.advance(by: .seconds(600))
+    await model.untilUnloadsStarted(3)
+    await model.endOldestUnload()
+}
+
 // MARK: Helpers
 
 /// Holds each unload until the test ends it, oldest first; `isResident` clears when
