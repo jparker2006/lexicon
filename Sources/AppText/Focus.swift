@@ -30,6 +30,11 @@ enum AX {
         return child
     }
 
+    static func pid(_ element: AXUIElement) -> pid_t? {
+        var pid: pid_t = 0
+        return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+    }
+
     static func int(_ element: AXUIElement, _ attribute: String) -> Int? {
         (value(element, attribute) as? NSNumber)?.intValue
     }
@@ -70,10 +75,17 @@ struct Focus {
     static func now() -> Focus? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, AX.timeout)
-        guard let app = AX.element(system, kAXFocusedApplicationAttribute) else { return nil }
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(app, &pid) == .success else { return nil }
+        guard let pid = focusedPID(accessibility: AX.element(system, kAXFocusedApplicationAttribute).flatMap(AX.pid),
+                                   frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier) else { return nil }
+        let app = AX.app(pid)
         return Focus(pid: pid, app: app, field: AX.element(app, kAXFocusedUIElementAttribute))
+    }
+
+    /// An app in front whose focus Accessibility can't name (a key window with no
+    /// focused element was seen to answer nothing) still gets Cmd-V, so it is
+    /// the target: one with no field, which the 5 s rule then covers.
+    static func focusedPID(accessibility: pid_t?, frontmost: pid_t?) -> pid_t? {
+        accessibility ?? frontmost
     }
 
     var isSecure: Bool { traits.map { FieldTraits.accepts($0) == .secure } ?? false }
