@@ -68,8 +68,7 @@ struct FieldRef: @unchecked Sendable {
 struct Focus {
     let pid: pid_t
     let app: AXUIElement
-    /// nil when the app exposes no focused element (an Electron app before
-    /// `AXManualAccessibility` takes, or no field at all).
+    /// nil when the app answers that it has no focused element (`Answer.none`).
     let field: AXUIElement?
 
     /// The app keys go to, by Accessibility, whatever its focused element says.
@@ -86,7 +85,7 @@ struct Focus {
     static func now() -> Focus? {
         guard let (pid, app) = focusedApp() else { return nil }
         var value: CFTypeRef?
-        switch Answer(AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue) {
+        switch Answer.read({ AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue }) {
         case .unreadable:
             return nil
         case .none:
@@ -108,6 +107,13 @@ struct Focus {
         /// The app says it has no focused element: the same-app 5 s rule covers it.
         case none
         case unreadable
+
+        /// Reads once more after an unreadable answer: one slow or failed read is
+        /// not the app's answer. At fn-up this overlaps the audio tail.
+        static func read(_ attempt: () -> Int32) -> Answer {
+            let first = Answer(attempt())
+            return first == .unreadable ? Answer(attempt()) : first
+        }
 
         /// From an `AXError` raw value, so tests need no ApplicationServices.
         init(_ code: Int32) {
