@@ -1,0 +1,3 @@
+#!/bin/sh
+# The stub gh as a command, for the tests that run merge-pr.mjs, wait-ci.mjs and install.sh as programs.
+exec node "$(dirname "$0")/../stub-gh.mjs" "$@"

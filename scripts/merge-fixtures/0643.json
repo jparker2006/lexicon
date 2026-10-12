@@ -1,0 +1,107 @@
+{
+ "about": "06:43:04, the Reviewer's verdict on #95 at d3c9530, one commit behind main 1cc9e6e (#94). It merged at 08:33 after a builder merge round.",
+ "owner": "jparker2006",
+ "main": "1cc9e6edf7955bfd0040004c1d92247a531ae18a",
+ "pulls": [
+  {
+   "number": 95,
+   "state": "OPEN",
+   "isDraft": false,
+   "baseRefName": "main",
+   "headRefName": "claude/issue-43",
+   "headRefOid": "d3c95304b6183512744040d2cb708561e8cb41ea",
+   "body": "Refs #43\n\n## Summary\n\nThe never-lose audio writer, driven by file input. A file runs the same path the mic will use in #52:\n\n```text\nRecorder.start(.file(url, pace:), writingTo: audio/<id>.caf)\n  FileSource thread        512-frame blocks, mono Float32 -> SPSCRing (lock-free, Synchronization.Atomic)\n  writer queue, every 100 ms\n    drain ring -> AVAudioConverter (MinimumPhase, .max) -> 16 kHz mono Int16\n      RAM copy (the Take's clip)\n      AudioFileWritePackets -> CAF, data size -1 while open\n      yield PCMChunk on feed  (only after write())\n    F_FULLFSYNC every 1 s (fsync fallback), via a second read-only descriptor\nLiveCapture.stop (consuming)   drain, flush converter, finish feed, return Take\n  then on the writer queue     AudioFileClose (real size), F_FULLFSYNC\nLiveCapture dropped            same stop, in the background: audio kept\nwrite or create error          file closed, capture continues in RAM, .diskTrouble\nCAFFile.state / finalize / read  for History's recovery (#59)\n```\n\nNew: `Recorder.settle()` waits until stopped captures' files are synced and closed (for quit and tests). `CaptureSignals.inputEnded()` returns nil when cancelled, so racing it in a task group never hangs.\n\nFinding: the research doc says reopening a crashed CAF read-write and closing it writes the real size. On macOS 26 it does not: the size stays -1. `CAFFile.finalize` writes the size itself from the file length and cuts off a torn last packet. The CAF spec allows this.\n\nNot here, for #52: microphone, adaptive tail, the 1 GB free-space check, `levels`.\n\n## Evidence\n\n`scripts/check.sh`: build with import check, check-imports OK, 18 of 18 tests pass (9 new).\n\n- **Bit-exact readback:** a synthetic 16 kHz WAV (tones, noise, both Int16 extremes) through the writer. The CAF, the RAM clip and the feed are each identical to the source. The file says closed, and chunks are at most 100 ms.\n- **Crash test:** a Swift Testing exit test. The child records at speech pace and is SIGKILLed from another thread while still recording. Parent checks: the header still says -1, the file reads back bit-exact for at least every sample the child reported written, and fewer than all. `finalize` then closes it with no sample changed, also with a torn stray byte added, and is idempotent. Passed 10 of 10 repeat runs.\n- **Stopping twice is a compile error:** the test compiles a snippet against the built module to SIL. One stop compiles; two fail with \"consumed more than once\".\n- 48 kHz in, 16 kHz out, tone level within 0.5 dB and pitch kept. Early stop and a dropped capture keep exactly what was read. An unwritable path keeps the audio in RAM.\n\nBefore: every one of these paths was `fatalError(\"not implemented\")`.\n\n## Merge Danger\n\n**Door:** two-way. Nothing calls the writer yet besides tests.\n\n**Blast Radius:** audio (HIGH risk tier: audio safety).\n\nThe writer is what every Dictation's audio will go through. A bug here loses audio. Review the full diff. Critics (crash safety, real-time rules) and one verifier per finding ran; fixed findings are in the second commit. For the Later list:\n\n- **Converter `.error` is not surfaced** (Resampler `run`): a block would drop without a CaptureProblem. No realistic trigger found.\n- **Sync and close failures are ignored** (CaptureCore `tick`, CAFWriter `close`): app-crash safety holds, power-cut durability could fail silently. Fix: keep writing, retry, notify. Not RAM-only, which is worse for app crashes.\n- **#59 must order recovery before the first capture.** `finalize` on a file a LiveCapture is still writing would race it. Recovery should finish before fn is accepted, or skip files being written.\n- **F_FULLFSYNC runs on the writer queue** as the architecture doc says. For the mic (#52), a very slow flush over 2 s would overflow the ring. Watch it in #52.\n\nMerge order: independent of #94.\n\n## Install\n\nCode only.\n\nCheck: nothing to try yet; the writer has no caller until #46 wires it into the Conductor.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+   "labels": [],
+   "files": [
+    {
+     "path": "Sources/AudioCapture/CAFFile.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/CAFWriter.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/CaptureCore.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/FileSource.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/Internals.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/Recorder.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/Resampler.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/AudioCaptureTests.swift"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T06:43:04Z",
+     "body": "Verdict: merge with notes.\n\nReviewed head `d3c95304b6183512744040d2cb708561e8cb41ea`, CI green on it. High risk tier (audio capture): I read the full diff, and two critics checked it, one on crash safety and races, one on the tests.\n\nWhat holds:\n- A chunk reaches the feed only after `AudioFileWritePackets`. The data size stays -1 while recording, and the SIGKILL exit test reads back a bit-exact prefix covering every sample the child reported.\n- `finalize` writes the size by hand, which the measured macOS 26 behavior requires. It cuts a torn odd byte and is idempotent.\n- The SPSC ring's acquire/release pairs and wrap math are right. `OneShot` cancellation cannot leak or double-resume.\n- A dropped LiveCapture stops itself and keeps the audio, and the deinit after a consuming `stop` is a no-op.\n- A write or create error carries on in RAM with `.diskTrouble`.\n- MinimumPhase at max quality. No async writes, FLAC or WAV.\n- Stopping twice fails to compile, checked against the built module.\n\nNo blockers.\n\n**Later:**\n- #46: settle before it wires the writer in: `.eraseFile` would erase an existing CAF if a start ever reuses an id.\n\nNotes are on the Later list: https://github.com/jparker2006/lexicon/issues/36#issuecomment-6106073553. The one to settle before #46 wires the writer in: `.eraseFile` would erase an existing CAF if a start ever reuses an id.\n\nMerge order: independent of #96. The branch is one commit behind main (#94, no overlap). It merges once main is merged in and CI is green on the new head.\n",
+     "added": "the Later note names its owner, #46 (Q13)"
+    },
+    {
+     "createdAt": "2026-10-11T06:43:04Z",
+     "body": "## Review\n\nReviewed sha: `d3c9530`. main pass `0000000..d3c9530`. reviewer mode, high tier.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED. Dropped: 0 REFUTED, 0 UNSURE, 0 with a citation that does not hold.\n\nBlast radius (main): a chunk reaches the feed only after AudioFileWritePackets, so a crash keeps every reported sample. Proof: `scripts/test.sh --filter AudioCaptureTests`: the SIGKILL exit test reads back a bit-exact prefix.",
+     "author": {
+      "login": "jparker2006"
+     },
+     "added": "the review Workflow's table, which M0 did not have yet"
+    }
+   ]
+  }
+ ],
+ "issues": [
+  {
+   "number": 43,
+   "title": "M0: Never-lose audio file writer",
+   "state": "OPEN",
+   "body": "## Parent\n\n#36 (Spec: Lexicon v0)\n\n**Milestone:** M0  \n**User stories:** 22  \n**Test seam:** headless (file input)  \n**Modules:** AudioCapture\n\n## What to build\n\nThe writer every Dictation's audio goes through, proven with file input before any mic exists. Audio is written to `audio/<id>.caf` as 16 kHz mono 16-bit PCM, packets about every 100 ms, `F_FULLFSYNC` every 1 s and at stop, off any real-time thread. Resampling uses the converter (minimum phase, max quality). Banned: async file writes, direct FLAC, WAV via AudioFile. A capture can be stopped at most once (non-copyable type with a consuming stop).\n\n## Acceptance criteria\n\n- [x] A synthetic 16 kHz WAV fed through the writer reads back bit-exact. (met: https://github.com/jparker2006/lexicon/pull/95)\n- [x] Killing the writer process mid-write leaves a CAF that reads back bit-exact up to the last flush (data size left unset). (met: https://github.com/jparker2006/lexicon/pull/95)\n- [x] Stopping twice is a compile error. (met: https://github.com/jparker2006/lexicon/pull/95)\n\n## Blocked by\n\n- #38",
+   "labels": [],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T06:10:01Z",
+     "body": "Building: taking this (Claude)"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T06:35:45Z",
+     "body": "Ready for review: PR #95, checks green"
+    }
+   ],
+   "added": "acceptance lines marked met, as scripts/ticket.sh ac leaves them (change 29)"
+  }
+ ],
+ "runs": [
+  {
+   "id": 38118453737,
+   "head_sha": "d3c95304b6183512744040d2cb708561e8cb41ea",
+   "path": ".github/workflows/ci.yml",
+   "name": "CI",
+   "event": "push",
+   "status": "completed",
+   "conclusion": "success",
+   "html_url": "https://github.com/jparker2006/lexicon/actions/runs/38118453737",
+   "pull_requests": [
+    {
+     "number": 95
+    }
+   ]
+  }
+ ],
+ "behind": {
+  "d3c95304b6183512744040d2cb708561e8cb41ea": 1
+ }
+}

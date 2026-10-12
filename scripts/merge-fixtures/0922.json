@@ -1,0 +1,266 @@
+{
+ "about": "09:22:09, the Reviewer's verdict on #105 (green at 74fa78c), two seconds before it merged ahead of #102 (#46), green at 899782b since 09:21:39 and Ready since 09:19:23. Both edit Package.swift.",
+ "owner": "jparker2006",
+ "main": "22fc9d7d46ca4e6324daa8a347dac65ca266e252",
+ "pulls": [
+  {
+   "number": 102,
+   "state": "OPEN",
+   "isDraft": false,
+   "baseRefName": "main",
+   "headRefName": "claude/issue-46",
+   "headRefOid": "899782bef7bc10a88ee3d0d8913d459a89681f2c",
+   "body": "Refs #46\n\n## Summary\n\nThe never-lose spine runs headless: `Conductor.dictate(file:)` through `HeadlessSystem`, with a scripted engine standing in for the local model and a destination that records text.\n\n```text\nHeadlessSystem.make(paths, context, preferences, local: ScriptedTranscriber)\n  conductor.dictate(file: wav)\n    recorder.start(file)              capture first, CAF on disk\n    history .began                    row exists from the start\n    speech.begin (local-only plan)    loads the local model while the file plays\n    nextEnd                           end of file = fn-up\n    attempt.finish(clip)              engine text, or .noModel / .silence\n    cleanup.finish                    rules only\n    history .textReady (ready)        queued BEFORE the insert\n    insertTurn -> destination.insert  InsertGuard, then \"typed\"\n    history .delivered (lag)\n```\n\n- `SpeechEngine`: local-only attempts (M0). No engine is `.noModel`; an empty transcript is `.silence`.\n- A Dictation no engine can answer is marked **waiting** with its audio kept and returns. The automatic retry is #59 (`TODO(#59)` in `land`).\n- Insert turns (Dictations insert in spoken order; a waiting one gives up its turn), `nextEnd`, `PreferencesStore(fixed:)`, `Secrets(.environment)` (`LEXICON_KEY_<ACCOUNT>`).\n- `lexicon-eval <wav> [--scripted <text>]` prints one JSON line: status, text, lag. History goes to a temp folder deleted on exit.\n- Outside my lane, because the path needs them: `WordStore.Lexicon` returns no words (architecture.md's M0 row), and `InsertGuard.decide` is implemented from its TODO (its disabled #60 test is now on).\n\n## Evidence\n\n**Before:** `aWavRunsTheWholeLifecycleHeadless` was disabled (\"lands with #46\"); every step it reached was `fatalError`.\n**After:** `Tests/LexiconTests/HeadlessDictationTests.swift`, all passing:\n\n```text\naShortWavIsTypedAndSavedInHistory          1.2 s synthetic WAV -> inserted;\n                                           row: model + cleaned text, local model, rulesOnly(off),\n                                           lag, origin file; CAF reads back bit-exact\ntextIsQueuedForHistoryBeforeItIsTyped      status seen by the destination at insert == ready\nwithNoSpeechModelTheDictationWaits...      no engine -> waiting, audio kept on disk\ninsertTargetsCannotBeMadeOutsideTheirModules  compiling TargetApp.Target(...) or\n                                           HeadlessDestination.Target(...) fails: \"inaccessible\"\nfinishingASpeechAttemptTwiceIsACompileError   \"consumed more than once\"\nheadlessKeysComeFromTheEnvironment, lateTextIsHeldWhenJakeTypedSinceFnUp\n```\n\n`lexicon-eval` on a synthesized 1.2 s WAV (realtime pace):\n\n```text\n$ lexicon-eval tone.wav --scripted \"Um, so ship the, uh, headless conductor today.\"\n{\"lag_ms\":1,\"status\":\"inserted\",\"text\":\"Ship the headless conductor today.\"}\n$ lexicon-eval tone.wav            {\"status\":\"waiting\"}      (no local model until #47)\n$ lexicon-eval missing.wav         {\"status\":\"nothing\"}      exit 1\n```\n\n`scripts/check.sh` after merging `main` (#44, #61): build with the import check, import-check script, `swift test`: 63 tests passed.\n\nAC 3: `lexicon-eval <wav>` prints text and lag today only with `--scripted`; plain `lexicon-eval <wav>` prints `waiting` until #47 supplies the local model.\n\nNo `lexicon-eval` scores: the scorer run needs the local model (#47) and the manifest runner (#49); this PR changes no speech or Cleanup output.\n\n## Merge Danger\n\n**Door:** two-way\n\nCode only, behind no live path yet: `LexiconSystem.live` is still a stub, so nothing here runs in the app.\n\n**Blast Radius:** contained\n\n- AC 2 is met by types: no public initializer for either insert target, checked by compiling snippets. A file run in the dev app with test hooks still types (the spec allows a test file run), which is #45's path.\n- `lexicon-eval <wav>` prints real text once #47 passes a `ParakeetTranscriber` instead of `nil` (one line in `main.swift`).\n- #45 (test hooks) may touch `Conductor.dictate(file:)`; merge this first. `main` (with #44 and #61) is merged in.\n- `nextEnd` now stops a file Dictation whose read fails mid-file (it used to wait forever). Found in self-review; a truncated WAV doesn't reproduce it (AVAudioFile reads it cleanly), so it has no failing-first test.\n- `PreferencesStore` gains a `Mutex<Preferences>`: one fixed value per headless run, no writer yet.\n- `Package.swift`: the test target now declares WordStore.\n- For the Later list:\n  - A local transcription has no deadline. If one hangs, later Dictations wait for their insert turn (the race and residency tickets, #66 and #47).\n  - A `ramOnly` Dictation that goes waiting drops its RAM clip, so #59's retry must keep it.\n  - `lexicon-eval`'s temporary audio survives a Ctrl-C (it lives in `$TMPDIR`).\n  - `.privateMode` with no local model still lands as failed, not waiting. #59 should decide.\n\n## Install\n\nCode only.\n\nCheck: `swift run lexicon-eval <any 16 kHz WAV> --scripted \"um, so test this\"` prints `\"status\":\"inserted\"` with text and a lag.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+   "labels": [],
+   "files": [
+    {
+     "path": "Package.swift"
+    },
+    {
+     "path": "Sources/AppText/InsertGuard.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Conductor+Run.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Conductor.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Headless.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Settings.swift"
+    },
+    {
+     "path": "Sources/LexiconEval/main.swift"
+    },
+    {
+     "path": "Sources/Transcription/SpeechEngine.swift"
+    },
+    {
+     "path": "Sources/WordStore/Lexicon.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/HeadlessDictationTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/UsageTests.swift"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T09:07:23Z",
+     "body": "Verdict: don't merge yet. CI is red on `a2ce7e12c573b42378de0031c09864341f97dc9c`, twice, and the cause is in this PR's tests.\n\n**Why it's red.** `stoppingBeforeTheEndKeepsEverythingRead` (both runs) and `aDroppedCaptureStillClosesItsFile` (the re-run) fail because the 3 s realtime file plays to its end before the test stops it. On main those tests take 1.7 to 1.9 s. Here they take about 6 s, while `insertTargetsCannotBeMadeOutsideTheirModules` (9.7 s), `finishingASpeechAttemptTwiceIsACompileError` (6.1 s) and `stoppingACaptureTwiceIsACompileError` (8.8 s) run alongside. `compile(_:importing:)` blocks a cooperative-pool thread on `process.waitUntilExit()` and `readDataToEndOfFile()`. Three of them at once fill a 3-core runner's pool, so the audio tests' awaits (`firstAudio`, `Task.sleep`) can't resume until the file has ended. #95's tests lean on wall-clock time, which AGENTS.md rules out; this PR's extra compile tests make that fail reliably.\n\n**Fix (this PR, since it turns CI red):**\n1. Keep the compile tests off the cooperative pool: run `Process` with a `terminationHandler` and await a continuation, or put every `compile` test in one `.serialized` suite.\n2. Make the two audio tests wait on a signal, not the clock: stop after N chunks from `feed` (as the SIGKILL test does), so a stalled runner can't let the file finish first. Details are on #43.\n\nThe rest of the review: I read the full diff and found no blockers. Every exit from `run` releases the insert turn. `.textReady` is queued before `insert`, and a test checks the status the destination sees. A no-model Dictation waits with its audio on disk. Insert targets can't be made outside their modules. Two critics are still out; their findings will come with the next look. Push the fix and I'll re-review the new head."
+    },
+    {
+     "createdAt": "2026-10-11T09:22:00Z",
+     "body": "Verdict: merge with notes.\n\nReviewed head `899782bef7bc10a88ee3d0d8913d459a89681f2c`, CI green, not behind main.\n\n**Later:**\n- #52: a failed `recorder.start` leaves `captureEnd` set, so every later fn press is dropped until relaunch.\n- #47: the transcriber must match `plan.local`, and a local failure must not read as \"waiting for network\".",
+     "author": {
+      "login": "jparker2006"
+     },
+     "added": "a verdict at the head that went green at 09:21:39; the real one came at 09:27, after a merge round"
+    },
+    {
+     "createdAt": "2026-10-11T09:22:00Z",
+     "body": "## Review\n\nReviewed sha: `899782b`. main pass `0000000..899782b`. reviewer mode, high tier.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED. Dropped: 0 REFUTED, 0 UNSURE, 0 with a citation that does not hold.\n\nBlast radius (main): every exit from `run` releases the insert turn, and insert targets cannot be made outside their modules. Proof: `scripts/test.sh --filter HeadlessDictationTests`",
+     "author": {
+      "login": "jparker2006"
+     },
+     "added": "the review Workflow's table"
+    }
+   ]
+  },
+  {
+   "number": 105,
+   "state": "OPEN",
+   "isDraft": false,
+   "baseRefName": "main",
+   "headRefName": "claude/issue-45",
+   "headRefOid": "74fa78c4801930bc5e4e0135f1392af988addc26",
+   "body": "Refs #45\n\n## Summary\n\nHow builders prove live-app behavior: debug-only test hooks in Lexicon Dev, and `lexicon-harness`, which drives the app through them and reads it through Accessibility.\n\n```text\nscripts/dev-run.sh -- --test-hooks      install Lexicon Dev, launch with open\nscripts/harness.sh check\n  DevApp.launch          open -g \"Lexicon Dev.app\" --args --test-hooks (only if not running)\n    hooks.send(.status)  requests/<id>.json -> app -> replies/<id>.json\n  statusItem()           AXExtrasMenuBar -> AXIdentifier \"lexicon.statusItem\"\n  windows()              AXWindows: title [identifier]\n  TargetField.open       child process: one text area, background only\n    text() / clear()     AXValue read, AXValue = \"\"\nscripts/harness.sh hook status | dictate <wav> | indicator <state>\n```\n\nNew: `Sources/TestHooks/` (`#if DEBUG` wire), `Sources/LexiconHarness/`, `LexiconApp/TestHooks.swift` (on only for the dev bundle id plus `--test-hooks`), `LexiconDomain/AccessibilityID.swift`, `scripts/harness.sh`. Removed: the inbox's `dictateFile` and LexiconSystem's `testHooks` flag.\n\nDecisions I made:\n\n- **Own request/reply folder, not the inbox.** The architecture had test hooks riding the inbox, which is one-way and at most once; a harness needs an answer (status now, dictate results later). `<dev data>/test-hooks/requests` and `replies`, same files-not-sockets reasoning. Requests older than 30 s are dropped so a stale `dictate` never types at the next launch. `docs/architecture.md` updated.\n- **Compiled out with `#if DEBUG`.** The daily app is always a release build. `bundle.sh dev --release` therefore has no hooks either (noted in its usage).\n- **`dictate` and `indicator` reply \"not built yet\"** naming #56 and #55: there is no Conductor or pill in the app on `main`. Each is one case in `AppTestHooks.handle` to fill.\n- **No focus step.** Nothing here needs it, and trying it showed the target must never activate itself: a regular or accessory child activated at launch and took a keystroke Jake typed. The target runs `.prohibited`. For #54: the system-wide focused-element query fails with Claude desktop frontmost (kAXErrorCannotComplete); per-app `AXFrontmost` plus the app's `AXFocusedUIElement` worked. A `.prohibited` app can't activate, so #54 will need to switch the target's policy when it focuses it.\n- **Hooks live in their own `TestHooks` module**, not LexiconCore as the issue's Modules line says: the harness needs the wire too, and an empty-in-release module means any un-gated use fails to compile. LexiconCore touch: three lines out of `LexiconSystem.swift`. `Conductor.dictate(file:)`'s comment still says \"via the inbox\"; left for #46, which owns that file.\n\nThe harness reads other apps through Accessibility it inherits from the terminal or agent app that runs it (no grant for Lexicon). It reads only Lexicon Dev and its own target field. ADR 0001 holds: the target is a test fixture, not a second Lexicon process.\n\n## Evidence\n\nLive, Lexicon Dev not running, harness launched it itself:\n\n```text\nok    Lexicon Dev 0.1 (20, fb27c36-dirty) answers test hooks (pid 44281, accessibility=true, microphone=granted)\nok    status item found by identifier lexicon.statusItem\nok    windows: none open\nok    target field reads \"lexicon harness 5013F1C9\"\nok    target field cleared\n$ ps -o ppid,args -p 44281\n    1 /Users/jakeparker/Applications/Lexicon Dev.app/Contents/MacOS/Lexicon --test-hooks\n```\n\nRunning without hooks: `FAIL  Lexicon Dev is running without test hooks. Relaunch it with them: scripts/dev-run.sh -- --test-hooks` (4 s). Target open: `lsappinfo front` stayed on Jake's app on 2 of 2 runs (was `lexicon-harness` on 3 of 3 before `.prohibited`).\n\nCompiled out: `scripts/bundle.sh daily` (release, signed, not installed) passes the new check.\n\n```text\ngrep -c -a TestHook  release Lexicon.app binary: 0\ngrep -c -a TestHook  debug Lexicon Dev binary:   7\n```\n\nWire tests (`TestHooksTests`, 5): reply round trip; no listener gives `noReply` and leaves no file; a request waiting from before launch is answered; a malformed request gets `failed`; a stale request is dropped. The stale test fails with the age rule disabled (`handled == [dictate, status]`) and passes with it.\n\n`scripts/check.sh` on the finished change: build with the import check, `check-imports: OK (20 targets)`, 63 tests pass.\n\n## Merge Danger\n\n**Door:** two-way\n\nDebug-only code and a dev tool. The daily build cannot carry hooks: `bundle.sh` refuses.\n\n**Blast Radius:** dev-tooling\n\nFor #56 (from the review, not blockers): `dictate(wav:)` takes any path, so limit it to test fixtures when wiring it (never Jake's Test set audio); `Conductor.dictate(file:)` is now gated only by the app's `#if DEBUG` hook; the harness's 10 s hook timeout is shorter than a realtime WAV. For #55: `indicator(state:)` is a String until the pill's state type exists in LexiconDomain.\n\nMerge order: #102 (#46) and this both edit the `LexiconTests` dependency line in `Package.swift`; whichever lands second takes a one-line merge. #55 and #54 build on this.\n\n## Install\n\nCode only.\n\nCheck: with Lexicon Dev installed, run `scripts/dev-run.sh -- --test-hooks` then `scripts/harness.sh check`; every line says `ok`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+   "labels": [],
+   "files": [
+    {
+     "path": "AGENTS.md"
+    },
+    {
+     "path": "Package.swift"
+    },
+    {
+     "path": "Sources/Inbox/Inbox.swift"
+    },
+    {
+     "path": "Sources/LexiconApp/AppDelegate.swift"
+    },
+    {
+     "path": "Sources/LexiconApp/Permissions.swift"
+    },
+    {
+     "path": "Sources/LexiconApp/TestHooks.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/LexiconSystem.swift"
+    },
+    {
+     "path": "Sources/LexiconDomain/AccessibilityID.swift"
+    },
+    {
+     "path": "Sources/LexiconDomain/AppPaths.swift"
+    },
+    {
+     "path": "Sources/LexiconHarness/AX.swift"
+    },
+    {
+     "path": "Sources/LexiconHarness/DevApp.swift"
+    },
+    {
+     "path": "Sources/LexiconHarness/TargetField.swift"
+    },
+    {
+     "path": "Sources/LexiconHarness/main.swift"
+    },
+    {
+     "path": "Sources/LexiconUI/StatusItem.swift"
+    },
+    {
+     "path": "Sources/TestHooks/TestHooks.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/TestHooksTests.swift"
+    },
+    {
+     "path": "docs/architecture.md"
+    },
+    {
+     "path": "scripts/bundle.sh"
+    },
+    {
+     "path": "scripts/check-imports.swift"
+    },
+    {
+     "path": "scripts/harness.sh"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T09:22:09Z",
+     "body": "Verdict: merge with notes.\n\nReviewed head `74fa78c4801930bc5e4e0135f1392af988addc26` (my `update-branch` merge of main into `c54c91f`; the change is identical), CI green. High tier (permissions, the bundle script, a way to drive the live app): I read the hook wire, the app gate, the bundle check and the import rules.\n\nWhat holds:\n- Hooks can't reach the daily app. Every TestHooks file is `#if DEBUG`, the daily app is always a release build, and `bundle.sh` now fails any release binary that mentions `TestHook` (0 in release, 7 in debug, per the evidence).\n- Even in Lexicon Dev, hooks answer only for the dev bundle id launched with `--test-hooks`.\n- Requests are deleted before they're handled (at most once). Requests older than 30 s are dropped, so a stale `dictate` can't type at the next launch. Old replies are cleared at launch.\n- `dictate` and `indicator` refuse until #56 and #55. No permission or entitlement is added. The harness reads only Lexicon Dev and its own `.prohibited` target field.\n- Moving the hooks off the one-way inbox onto their own request and reply folders is argued, and `docs/architecture.md` is updated.\n\nNo blockers.\n\n**Later:**\n- #56: limit `dictate(wav:)` to fixtures; any local process can drive Lexicon Dev while hooks are on.\n- #54: the paste checks run through the harness.\n\nNotes for #56 (limit `dictate(wav:)` to fixtures; any local process can drive Lexicon Dev while hooks are on) and #54 are on the Later list: https://github.com/jparker2006/lexicon/issues/36#issuecomment-6106073553\n\nMerge order: before #102, which then takes the one-line `Package.swift` test-dependency merge.",
+     "added": "the Later notes as bullets, each naming its owner (Q13)"
+    },
+    {
+     "createdAt": "2026-10-11T09:22:09Z",
+     "body": "## Review\n\nReviewed sha: `74fa78c`. main pass `0000000..74fa78c`. reviewer mode, high tier.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED. Dropped: 0 REFUTED, 0 UNSURE, 0 with a citation that does not hold.\n\nBlast radius (main): hooks cannot reach the daily app; every TestHooks file is `#if DEBUG` and bundle.sh fails a release binary that mentions TestHook. Proof: `scripts/bundle.sh daily`",
+     "author": {
+      "login": "jparker2006"
+     },
+     "added": "the review Workflow's table"
+    }
+   ]
+  }
+ ],
+ "issues": [
+  {
+   "number": 45,
+   "title": "M0: Test hooks and the Accessibility harness",
+   "state": "OPEN",
+   "body": "## Parent\n\n#36 (Spec: Lexicon v0)\n\n**Milestone:** M0  \n**User stories:** 111, 112  \n**Test seam:** live app  \n**Modules:** LexiconApp, LexiconCore (test hooks), test harness\n\n## What to build\n\nThe way builders prove live-app behavior. A `--test-hooks` launch argument (dev builds only) lets a harness ask the running app to dictate a WAV file, show an indicator state, or report status. A small Accessibility harness launches the dev app with `open`, opens a known target text field (a tiny test app), triggers hooks, and reads the inserted text, the app's windows and its status item by identifier. One builder at a time uses it (the live-app lane).\n\n## Acceptance criteria\n\n- [x] The harness finds the status item by identifier when the app is launched with `open`. (met: https://github.com/jparker2006/lexicon/pull/105)\n- [x] Test hooks are compiled out of the daily build. (met: https://github.com/jparker2006/lexicon/pull/105)\n- [x] The harness can read and clear its target field. (met: https://github.com/jparker2006/lexicon/pull/105)\n\n## Blocked by\n\n- #44",
+   "labels": [],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T08:50:52Z",
+     "body": "Building: taking this (Claude)"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T09:17:28Z",
+     "body": "Ready for review: PR #105, CI green"
+    }
+   ],
+   "added": "acceptance lines marked met (change 29)"
+  },
+  {
+   "number": 46,
+   "title": "M0: Headless Dictation through the Conductor",
+   "state": "OPEN",
+   "body": "## Parent\n\n#36 (Spec: Lexicon v0)\n\n**Milestone:** M0  \n**User stories:** 22, 110, 111  \n**Test seam:** headless pipeline  \n**Modules:** LexiconCore (Conductor, HeadlessSystem), Transcription (engine interface), lexicon-eval\n\n## What to build\n\nThe never-lose spine, proven without a mic, keys or network. `Conductor.dictate(file:)` through `HeadlessSystem` with a recording destination and a scripted fake engine: capture starts first (the writer), the History row is written when recording starts, the engine returns model text, rules-only Cleanup runs, text-ready is queued for History before the destination \"types\" it. A speech attempt is finished at most once. `lexicon-eval` gets its first form: run one WAV and print text, lag and status.\n\n## Acceptance criteria\n\n- [x] A Swift Testing test on a short synthetic WAV produces the expected text and a History row with model and cleaned text, status inserted (recording destination). (met: https://github.com/jparker2006/lexicon/pull/102)\n- [x] Recovered or file-origin text can't reach a real insert target (no public way to make one). (met: https://github.com/jparker2006/lexicon/pull/102)\n- [x] `lexicon-eval <wav>` prints text and lag. (met: https://github.com/jparker2006/lexicon/pull/102)\n\n## Blocked by\n\n- #41\n- #42\n- #43",
+   "labels": [
+    {
+     "name": "critical-path"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T08:38:31Z",
+     "body": "Building: taking this (Claude)"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T09:01:29Z",
+     "body": "Ready for review: PR #102, CI pending"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T09:19:23Z",
+     "body": "Ready for review: PR #102, CI pending"
+    }
+   ],
+   "added": "acceptance lines marked met (change 29)",
+   "addedLabel": "critical-path: the orchestrator's merge order, which the label now carries (change 11)"
+  }
+ ],
+ "runs": [
+  {
+   "id": 38127946396,
+   "head_sha": "899782bef7bc10a88ee3d0d8913d459a89681f2c",
+   "path": ".github/workflows/ci.yml",
+   "name": "CI",
+   "event": "push",
+   "status": "completed",
+   "conclusion": "success",
+   "html_url": "https://github.com/jparker2006/lexicon/actions/runs/38127946396",
+   "pull_requests": [
+    {
+     "number": 102
+    }
+   ]
+  },
+  {
+   "id": 38127947401,
+   "head_sha": "74fa78c4801930bc5e4e0135f1392af988addc26",
+   "path": ".github/workflows/ci.yml",
+   "name": "CI",
+   "event": "push",
+   "status": "completed",
+   "conclusion": "success",
+   "html_url": "https://github.com/jparker2006/lexicon/actions/runs/38127947401",
+   "pull_requests": [
+    {
+     "number": 105
+    }
+   ]
+  }
+ ],
+ "behind": {
+  "899782bef7bc10a88ee3d0d8913d459a89681f2c": 0,
+  "74fa78c4801930bc5e4e0135f1392af988addc26": 0
+ },
+ "lanes": "Open builder PRs against main 22fc9d7:\n#46 (PR #102 @ 899782b): 11 files; with main: clean\n  Package.swift\n  Sources/AppText/InsertGuard.swift\n  Sources/LexiconCore/Conductor+Run.swift\n  Sources/LexiconCore/Conductor.swift\n  Sources/LexiconCore/Headless.swift\n  Sources/LexiconCore/Settings.swift\n  Sources/LexiconEval/main.swift\n  Sources/Transcription/SpeechEngine.swift\n  Sources/WordStore/Lexicon.swift\n  Tests/LexiconTests/HeadlessDictationTests.swift\n  Tests/LexiconTests/UsageTests.swift\n#45 (PR #105 @ 74fa78c): 20 files; with main: clean\n  AGENTS.md\n  Package.swift\n  Sources/Inbox/Inbox.swift\n  Sources/LexiconApp/AppDelegate.swift\n  Sources/LexiconApp/Permissions.swift\n  Sources/LexiconApp/TestHooks.swift\n  Sources/LexiconCore/LexiconSystem.swift\n  Sources/LexiconDomain/AccessibilityID.swift\n  Sources/LexiconDomain/AppPaths.swift\n  Sources/LexiconHarness/AX.swift\n  Sources/LexiconHarness/DevApp.swift\n  Sources/LexiconHarness/TargetField.swift\n  Sources/LexiconHarness/main.swift\n  Sources/LexiconUI/StatusItem.swift\n  Sources/TestHooks/TestHooks.swift\n  Tests/LexiconTests/TestHooksTests.swift\n  docs/architecture.md\n  scripts/bundle.sh\n  scripts/check-imports.swift\n  scripts/harness.sh\nOverlaps:\n#46 (PR #102) and #45 (PR #105) share: Package.swift; merging both: conflicts in Package.swift\n"
+}
