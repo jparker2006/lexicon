@@ -9,8 +9,9 @@
 # left alone.
 #
 # Under Command Line Tools (ADR 0003), SwiftPM does not find Swift Testing on its
-# own, so add its framework and rpath flags. In a build slot shared with another
-# build (scripts/lib/heavy.sh), use half the cores.
+# own, so add its framework and rpath flags. In a build slot (scripts/lib/heavy.sh),
+# use the slot's share of the cores: all of them alone, half beside one other
+# build, a third beside two.
 CLT=/Library/Developer/CommandLineTools
 SWIFT_FLAGS="--explicit-target-dependency-import-check error"
 if [ "$(xcode-select -p)" = "$CLT" ]; then

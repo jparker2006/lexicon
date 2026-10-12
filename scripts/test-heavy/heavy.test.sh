@@ -1,0 +1,445 @@
+#!/bin/sh
+# scripts/lib/heavy.sh's own tests: the build slots' queue, the third slot, the
+# quiet run and the core split, on slot files in a fake HOME with the real
+# lockf. No test waits on time: each job says it holds a slot on a FIFO, a
+# holder lets go only when the test writes to its release FIFO, and a waiter's
+# line is read from another FIFO. Only heavy.sh's own tries are spaced in time
+# (HEAVY_POLL), which changes how soon a job moves, never the order. No wait
+# here has a time limit of its own: a hang is stopped by the limit
+# scripts/check.sh puts on each check step, which names the step. The verdict
+# is forced with LEXICON_MACHINE_VERDICT.
+#
+#   sh scripts/test-heavy/heavy.test.sh [name-filter]
+set -eu
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+cd "$ROOT"
+CORES=$(sysctl -n hw.ncpu)
+total=0
+failed=0
+
+# Each test runs in its own subshell with a fresh HOME and FIFOs. Job control
+# (set -m) gives each job its own process group, so cleanup stops a job's
+# lockf and command with it.
+setup() {
+    T=$(mktemp -d "${TMPDIR:-/tmp}/test-heavy.XXXXXX")
+    export HOME="$T/home"
+    mkdir -p "$HOME"
+    unset HEAVY_SLOT HEAVY_JOBS LEXICON_MACHINE_VERDICT
+    export HEAVY_POLL=0.2
+    SLOTS="$HOME/Library/Application Support/Lexicon Dev/heavy"
+    PIDS=
+    set -m
+    mkfifo "$T/events" "$T/waits" "$T/readings"
+    # Opened read-write, so a job's write never blocks on the test.
+    exec 3<> "$T/events" 4<> "$T/waits" 5<> "$T/readings"
+    # The verdict's page-out reading, once per try at slot 3: each call says
+    # so on the readings FIFO, so the test can count a waiter's tries.
+    mkdir "$T/bin"
+    printf '#!/bin/sh\necho reading > "%s/readings"\necho "Pageouts: 0."\n' "$T" > "$T/bin/vm_stat"
+    chmod +x "$T/bin/vm_stat"
+    # ps fails while $T/ps-fails exists, as it can for a moment on a busy Mac.
+    printf '#!/bin/sh\n[ ! -e "%s/ps-fails" ] || exit 1\nexec /bin/ps "$@"\n' "$T" > "$T/bin/ps"
+    # A waiter's next try at a slot is SIGKILLed with it while $T/kill-try
+    # exists: its lockf, already started, outlives it, and $T/tried appears
+    # once that lockf has ended and let go of the slot.
+    printf '#!/bin/sh\ncase "$*" in *--holding*) if [ -e "%s/kill-try" ]; then rm -f "%s/kill-try"; kill -KILL "$PPID"; /usr/bin/lockf "$@"; : > "%s/tried"; exit; fi ;; esac\nexec /usr/bin/lockf "$@"\n' "$T" "$T" "$T" > "$T/bin/lockf"
+    # A queue entry can't be read for a moment while $T/read-fails exists, as
+    # when the job ahead deletes its own entry as it takes a slot.
+    for c in /bin/cat /usr/bin/stat; do
+        printf '#!/bin/sh\ncase "$*" in *"/heavy/queue/"*) [ ! -e "%s/read-fails" ] || exit 1 ;; esac\nexec %s "$@"\n' "$T" "$c" > "$T/bin/${c##*/}"
+    done
+    # The clock reads 5 s late while $T/clock-ahead exists, as if the Mac
+    # stalled between two readings.
+    printf '#!/bin/sh\nif [ "$*" = "+%%s" ] && [ -e "%s/clock-ahead" ]; then echo $(( $(/bin/date +%%s) + 5 )); else exec /bin/date "$@"; fi\n' "$T" > "$T/bin/date"
+    chmod +x "$T/bin/ps" "$T/bin/lockf" "$T/bin/cat" "$T/bin/stat" "$T/bin/date"
+    export PATH="$T/bin:$PATH"
+    trap cleanup EXIT
+}
+
+cleanup() {
+    for p in $PIDS; do kill -TERM -- "-$p" 2> /dev/null || true; done
+    for p in $PIDS; do wait "$p" 2> /dev/null || true; done
+    rm -rf "$T"
+}
+
+fail() {
+    echo "  $*"
+    exit 1
+}
+
+# job NAME [--quiet]: starts a job in a build slot. Holding it, the job writes
+# "NAME HEAVY_SLOT HEAVY_JOBS" to the events FIFO, then waits for a line on
+# $T/release.NAME. Its pid is $NAME.
+job() {
+    name=$1
+    shift
+    mkfifo "$T/release.$name"
+    scripts/lib/heavy.sh "$@" sh -c 'echo "$1 $HEAVY_SLOT $HEAVY_JOBS" > "$2/events"; read -r x < "$2/release.$1"' job "$name" "$T" 2>&4 &
+    eval "$name=\$!"
+    PIDS="$PIDS $!"
+}
+
+# job_unreaped NAME: job, under a parent that never reaps it, so once killed it
+# stays a zombie, which kill -0 still finds. Its pid is $NAME.
+job_unreaped() {
+    name=$1
+    mkfifo "$T/release.$name"
+    perl -e '$| = 1; $p = fork; if (!$p) { exec @ARGV or exit 127 } print "$p\n"; sleep 600' \
+        scripts/lib/heavy.sh sh -c 'echo "$1 $HEAVY_SLOT $HEAVY_JOBS" > "$2/events"; read -r x < "$2/release.$1"' job "$name" "$T" > "$T/pid.$name" 2>&4 &
+    PIDS="$PIDS $!"
+    until [ -s "$T/pid.$name" ]; do :; done
+    eval "$name=\$(cat \"\$T/pid.\$name\")"
+}
+
+zombie() { [ "$(/bin/ps -o stat= -p "$1" 2> /dev/null | cut -c1)" = Z ]; }
+
+# Waits until the killed try's lockf has ended and let go of its slot.
+tried() { until [ -e "$T/tried" ]; do :; done; }
+
+# expect_event "NAME SLOT JOBS": the next job to take a slot is that one.
+expect_event() {
+    read -r got <&3 || fail "no job took a slot; expected '$1'"
+    [ "$got" = "$1" ] || fail "expected '$1' to take a slot, got '$got'"
+}
+
+# expect_wait TEXT: the next waiter's line says TEXT.
+expect_wait() {
+    read -r got <&4 || fail "no wait line; expected one with '$1'"
+    case "$got" in *"$1"*) ;; *) fail "wait line lacks '$1': $got" ;; esac
+}
+
+release() {
+    echo > "$T/release.$1"
+    eval "wait \$$1" || fail "job $1 exited $?"
+}
+
+held() {
+    st=0
+    lockf -k -s -n -t 0 "$SLOTS/slot$1" true 2> /dev/null || st=$?
+    [ "$st" -eq 75 ]
+}
+
+# Slots 1 and 2 held by H1 and H2.
+hold_two() {
+    job H1
+    expect_event "H1 1 $CORES"
+    job H2
+    expect_event "H2 2 $((CORES / 2))"
+}
+
+test_waiters_take_slots_in_the_order_they_came() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    # A tries least often, so a B or C allowed to jump the line would win.
+    export HEAVY_POLL=1
+    job A
+    expect_wait "number 1 in line"
+    export HEAVY_POLL=0.05
+    job B
+    expect_wait "number 2 in line"
+    job C
+    expect_wait "number 3 in line"
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release H2
+    expect_event "B 2 $((CORES / 2))"
+    release A
+    expect_event "C 1 $((CORES / 2))"
+    release B
+    release C
+}
+
+test_a_wait_line_names_the_holders() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job A
+    expect_wait "slot 1: "
+    case "$got" in *"running sh -c"*"slot 2: "*"running sh -c"*"slot 3: free"*) ;; *) fail "holders not named: $got" ;; esac
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release A
+    release H2
+}
+
+test_a_waiter_that_dies_drops_out_of_line() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job A
+    expect_wait "number 1 in line"
+    job B
+    expect_wait "number 2 in line"
+    kill -KILL -- "-$A"
+    wait "$A" 2> /dev/null || true
+    kill -0 "$A" 2> /dev/null && fail "A is still alive"
+    release H1
+    expect_event "B 1 $((CORES / 2))"
+    release B
+    release H2
+}
+
+test_the_third_slot_opens_while_the_mac_has_room() {
+    hold_two
+    export LEXICON_MACHINE_VERDICT=yes
+    job J
+    expect_event "J 3 $((CORES / 3))"
+    release J
+    release H1
+    release H2
+}
+
+test_a_slot_probe_never_opens_the_third_slot() {
+    export LEXICON_MACHINE_VERDICT=yes
+    job H1
+    expect_event "H1 1 $CORES"
+    # Slot 2 locked with no holder: what a status probe looks like for the
+    # instant it holds the lock. Slot 3 opens only beside two real builds.
+    mkfifo "$T/release.P"
+    lockf -k "$SLOTS/slot2" sh -c 'echo "P probe" > "$1/events"; read -r x < "$1/release.P"' probe "$T" &
+    P=$!
+    PIDS="$PIDS $P"
+    expect_event "P probe"
+    job J
+    expect_wait "number 1 in line"
+    release P
+    expect_event "J 2 $((CORES / 2))"
+    release J
+    release H1
+}
+
+test_the_third_slot_stays_shut_on_a_no() {
+    hold_two
+    export LEXICON_MACHINE_VERDICT=no
+    job J
+    expect_wait "number 1 in line"
+    # J asks the verdict on every try; after three more, slot 3 is still free.
+    for n in 1 2 3 4; do
+        read -r got <&5 || fail "J stopped trying for slot 3"
+    done
+    held 3 && fail "slot 3 was taken on a no"
+    kill -0 "$J" || fail "J stopped waiting"
+    release H1
+    expect_event "J 1 $((CORES / 2))"
+    release J
+    release H2
+}
+
+test_quiet_holds_every_slot_and_the_line_waits_behind_it() {
+    export LEXICON_MACHINE_VERDICT=yes
+    job Q --quiet
+    expect_event "Q quiet $CORES"
+    held 1 && held 2 && held 3 || fail "quiet does not hold all three slots"
+    job J
+    expect_wait "number 1 in line"
+    release Q
+    expect_event "J 1 $CORES"
+    release J
+    held 1 || held 2 || held 3 && fail "a slot is still held"
+    true
+}
+
+test_quiet_waits_in_line_like_any_job() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job Q --quiet
+    expect_wait "number 1 in line"
+    job J
+    expect_wait "number 2 in line"
+    release H1
+    release H2
+    expect_event "Q quiet $CORES"
+    release Q
+    expect_event "J 1 $CORES"
+    release J
+}
+
+test_an_entry_whose_pid_was_reused_drops_out() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    # A waiter killed long ago left this entry, written while ps could not
+    # read its start time; its pid now names another process (H1's).
+    mkdir -p "$SLOTS/queue"
+    : > "$SLOTS/queue/0000000000.$H1"
+    touch -t 202001010000 "$SLOTS/queue/0000000000.$H1"
+    job A
+    expect_wait "number 1 in line"
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release A
+    release H2
+}
+
+test_a_moment_without_ps_keeps_everyone_in_line() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job A
+    expect_wait "number 1 in line"
+    # B joins while ps fails: it still finds A ahead of it.
+    : > "$T/ps-fails"
+    job B
+    expect_wait "number 2 in line"
+    rm -f "$T/ps-fails"
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release H2
+    expect_event "B 2 $((CORES / 2))"
+    release A
+    release B
+}
+
+test_an_entry_read_that_fails_keeps_the_line() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job A
+    expect_wait "number 1 in line"
+    job B
+    expect_wait "number 2 in line"
+    : > "$T/read-fails"
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release H2
+    expect_event "B 2 $((CORES / 2))"
+    release A
+    release B
+}
+
+test_a_waiter_dead_but_unreaped_drops_out() {
+    perl -e '$| = 1; $p = fork; exit 0 unless $p; print "$p\n"; sleep 600' > "$T/pid.Z" &
+    PIDS="$PIDS $!"
+    until [ -s "$T/pid.Z" ]; do :; done
+    Z=$(cat "$T/pid.Z")
+    until zombie "$Z"; do :; done
+    mkdir -p "$SLOTS/queue"
+    : > "$SLOTS/queue/0000000001.$Z"
+    out=$(scripts/lib/heavy.sh status)
+    case "$out" in *"queue: 0 waiting"*) ;; *) fail "a dead waiter kept its place: $out" ;; esac
+}
+
+test_a_waiter_dead_but_unreaped_mid_try_runs_nothing() {
+    export LEXICON_MACHINE_VERDICT=no
+    : > "$T/kill-try"
+    job_unreaped A
+    until zombie "$A"; do :; done
+    tried
+    job B
+    expect_event "B 1 $CORES"
+    release B
+}
+
+test_a_moment_without_ps_never_runs_a_dead_waiters_command() {
+    export LEXICON_MACHINE_VERDICT=no
+    : > "$T/kill-try"
+    : > "$T/ps-fails"
+    job_unreaped A
+    until zombie "$A"; do :; done
+    tried
+    rm -f "$T/ps-fails"
+    job B
+    expect_event "B 1 $CORES"
+    release B
+}
+
+test_zsh_drops_an_entry_whose_pid_was_reused() {
+    # An entry written in 2020; its pid now names this test's shell.
+    mkdir -p "$SLOTS/queue"
+    : > "$SLOTS/queue/0000000001.$$"
+    touch -t 202001010000 "$SLOTS/queue/0000000001.$$"
+    out=$(zsh -c '. scripts/lib/heavy.sh; heavy_summary')
+    case "$out" in *"queue: 0 waiting"*) ;; *) fail "zsh kept a reused pid's entry: $out" ;; esac
+}
+
+test_a_waiter_from_before_the_clocks_go_back_keeps_its_place() {
+    # W waits in line; a second after it starts, a made-up zone's clocks go
+    # back an hour, so its local start time names the hour that repeats.
+    mkfifo "$T/release.W"
+    sh -c 'read -r x < "$1"' w "$T/release.W" &
+    W=$!
+    PIDS="$PIDS $W"
+    start=$(TZ=UTC LC_ALL=C date -j -f '%a %b %e %T %Y' "$(TZ=UTC LC_ALL=C /bin/ps -o lstart= -p "$W")" +%s 2> /dev/null)
+    [ -n "$start" ] || fail "could not read W's start time"
+    mkdir -p "$SLOTS/queue"
+    : > "$SLOTS/queue/0000000001.$W"
+    TZ=UTC touch -t "$(TZ=UTC date -r "$start" +%Y%m%d%H%M.%S)" "$SLOTS/queue/0000000001.$W"
+    back=$((start + 1 + 3600))
+    zone="AAA0BBB-1,0/0,$(( $(TZ=UTC date -r "$back" +%j | sed 's/^0*//') - 1 ))/$(TZ=UTC date -r "$back" +%H:%M:%S)"
+    out=$(TZ=$zone scripts/lib/heavy.sh status)
+    echo > "$T/release.W"
+    case "$out" in *"queue: 1 waiting"*) ;; *) fail "a waiter lost its place when the clocks went back: $out" ;; esac
+}
+
+test_a_clock_read_late_keeps_a_waiter() {
+    export LEXICON_MACHINE_VERDICT=no
+    : > "$T/clock-ahead"
+    job A
+    expect_event "A 1 $CORES"
+    release A
+}
+
+test_a_waiter_killed_mid_try_runs_nothing() {
+    export LEXICON_MACHINE_VERDICT=no
+    : > "$T/kill-try"
+    job A
+    # A's lockf took slot 1 for nobody and must let it go unrun; B tries only
+    # once that lockf has ended.
+    tried
+    wait "$A" 2> /dev/null || true
+    job B
+    expect_event "B 1 $CORES"
+    release B
+}
+
+test_a_waiting_quiet_run_holds_no_slot() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job Q --quiet
+    expect_wait "number 1 in line"
+    # Only the waiter dies, as when a session's own process is killed: nothing
+    # it started may keep a slot or run its command later. Killed once it has a
+    # child: a lockf trying the slots, or the wait between tries.
+    until pgrep -P "$Q" > /dev/null; do :; done
+    kill -KILL "$Q"
+    wait "$Q" 2> /dev/null || true
+    release H1
+    job J
+    expect_event "J 1 $((CORES / 2))"
+    release J
+    release H2
+}
+
+test_a_slot_holder_runs_nested_jobs_in_its_own_slot() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    out=$(HEAVY_SLOT=2 sh -c '. scripts/lib/heavy.sh; heavy scripts/no-such-script.sh; echo "nested in $HEAVY_SLOT"')
+    [ "$out" = "nested in 2" ] || fail "sourced: got '$out'"
+    out=$(HEAVY_SLOT=2 scripts/lib/heavy.sh sh -c 'echo "run in $HEAVY_SLOT"')
+    [ "$out" = "run in 2" ] || fail "run: got '$out'"
+    [ -z "$(ls "$SLOTS/queue" 2> /dev/null)" ] || fail "a nested job queued"
+    release H1
+    release H2
+}
+
+test_status_counts_slots_and_the_line() {
+    export LEXICON_MACHINE_VERDICT=no
+    hold_two
+    job A
+    expect_wait "number 1 in line"
+    out=$(scripts/lib/heavy.sh status)
+    case "$out" in *"build slots 2 of 3 in use | queue: 1 waiting"*) ;; *) fail "status: $out" ;; esac
+    release H1
+    expect_event "A 1 $((CORES / 2))"
+    release A
+    release H2
+}
+
+for t in $(sed -n 's/^\(test_[a-z0-9_]*\)().*/\1/p' "$0"); do
+    case "$t" in *"${1:-}"*) ;; *) continue ;; esac
+    total=$((total + 1))
+    if (setup && "$t"); then
+        echo "ok   $t"
+    else
+        failed=$((failed + 1))
+        echo "FAIL $t"
+    fi
+done
+[ "$total" -gt 0 ] || { echo "test-heavy: no test matched '${1:-}'" >&2; exit 1; }
+echo "test-heavy: $((total - failed)) of $total passed"
+[ "$failed" -eq 0 ]
