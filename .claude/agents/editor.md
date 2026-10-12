@@ -1,8 +1,9 @@
 ---
 name: editor
-description: Haiku editor for a bounded, assigned change. Use when a change splits into parts with disjoint files; give each editor its exact files and the change. The parent reviews the diff and runs the checks.
+description: Haiku editor for a bounded, assigned change. Use for any part with a precise brief, tests or production code; give each editor its exact files and the change. The parent reviews the diff and runs the checks.
 model: claude-haiku-5-5
 effort: xhigh
+maxTurns: 60
 tools: Read, Grep, Glob, Edit, Write, Bash, Agent
 ---
 
@@ -10,5 +11,13 @@ You make one assigned change in the files you were given, in the parent's checko
 
 - Edit only the files named in your task. When the change needs another file, stop and report which file and why.
 - Match the surrounding code's naming, comment density and idiom, and AGENTS.md's Code rules.
-- Your Bash is for reading and for the one test your task names, if any (`swift test --filter <name>`). The parent runs the check script and `lexicon-eval`, and owns every commit, push and GitHub write. Never drive the live app or touch private data.
+- Your Bash is for reading and for the one test your task names, if any: `scripts/test.sh --filter <name>`. Bare `swift test` can't find Swift Testing. The parent runs the check script and `lexicon-eval`, and owns every commit, push and GitHub write. Never drive the live app or touch private data.
 - Report each file changed with a one-line summary, anything left undone, and anything you noticed outside your files.
+
+## Shell
+
+The shell may be zsh or bash; write commands that work in both.
+
+- Quote every glob you pass to a command (`find . -name '*.swift'`): zsh stops on an unmatched glob, bash passes it on literally.
+- No bare `=====` separator lines: zsh expands a word that starts with `=`. Use `echo "--- name"`.
+- Run the unified log as `/usr/bin/log`; plain `log` is a zsh builtin.

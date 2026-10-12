@@ -1,0 +1,127 @@
+{
+  "_why": "Which docs/agents/review.md sections a change reaches, by path. lexicon-review runs one critic per reached section. A review.md section missing here runs on every diff, so a new section is never silently skipped; a name here that review.md no longer has is reported in the run's output. Patterns: ** crosses folders, * stays in one, no wildcard means one exact file.",
+  "skip": [
+    "Risk tiers"
+  ],
+  "sections": {
+    "Never lose a Dictation": [
+      "Sources/AudioCapture/**",
+      "Sources/History/**",
+      "Sources/SQLiteKit/**",
+      "Sources/LexiconCore/**",
+      "Sources/LexiconDomain/**",
+      "Sources/Transcription/**",
+      "Sources/LocalParakeet/**",
+      "Sources/KeyInput/**",
+      "Sources/AppText/**"
+    ],
+    "Inserting text": [
+      "Sources/AppText/**",
+      "Sources/LexiconCore/**",
+      "Sources/LexiconApp/**",
+      "Sources/TestHooks/**"
+    ],
+    "Network, keys and private data": [
+      "Sources/**",
+      "Tests/**",
+      "scorer/**",
+      "scripts/**",
+      ".claude/**",
+      ".github/**",
+      ".gitignore"
+    ],
+    "Shape and budgets": [
+      "Package.swift",
+      "Package.resolved",
+      "Sources/**",
+      "scripts/check-imports.swift",
+      "scripts/bundle.sh",
+      "scripts/app/**"
+    ],
+    "Scores": [
+      "Sources/Transcription/**",
+      "Sources/LocalParakeet/**",
+      "Sources/Cleanup/**",
+      "Sources/WordStore/**",
+      "Sources/Fixes/**",
+      "Sources/LexiconEval/**",
+      "scorer/**"
+    ],
+    "Combining with main": [
+      "**"
+    ],
+    "Correctness traps": [
+      "Sources/**",
+      "Tests/**",
+      "scripts/**",
+      ".claude/hooks/**",
+      ".github/**"
+    ],
+    "Live app and permissions": [
+      "Sources/LexiconApp/**",
+      "Sources/LexiconUI/**",
+      "Sources/KeyInput/**",
+      "Sources/TestHooks/**",
+      "Sources/LexiconHarness/**",
+      "scripts/app/**",
+      "scripts/bundle.sh",
+      "scripts/install.sh",
+      "scripts/dev-run.sh",
+      "scripts/harness.sh",
+      "scripts/live-lane.sh",
+      "scripts/bench.sh",
+      "scripts/live-request.sh",
+      "scripts/lib/install-app.sh",
+      "scripts/lib/fn-listeners.sh",
+      "scripts/lib/flavor.sh"
+    ],
+    "Tests and copy": [
+      "**"
+    ]
+  },
+  "highTier": [
+    "Sources/AudioCapture/**",
+    "Sources/History/**",
+    "Sources/SQLiteKit/**",
+    "Sources/LexiconCore/**",
+    "Sources/LexiconDomain/**",
+    "Sources/AppText/**",
+    "Sources/KeyInput/**",
+    "Sources/Transcription/**",
+    "Sources/Jev/**",
+    "Sources/Cleanup/**",
+    "Sources/LocalParakeet/**",
+    "Sources/LexiconApp/**",
+    "scripts/app/**",
+    "scripts/bundle.sh",
+    "scripts/install.sh",
+    ".claude/**",
+    ".github/**",
+    "Sources/LexiconUI/**",
+    "Sources/LexiconEval/**",
+    "scorer/**",
+    "scripts/test-set.sh",
+    "scripts/import-lexicon.sh",
+    "scripts/install-model.sh",
+    "scripts/lib/install-app.sh"
+  ],
+  "blastRadius": [
+    "Sources/AudioCapture/**",
+    "Sources/History/**",
+    "Sources/SQLiteKit/**",
+    "Sources/LexiconCore/**",
+    "Sources/AppText/**",
+    "Sources/Transcription/**",
+    "Sources/Jev/**",
+    "Sources/Cleanup/**",
+    "Sources/LocalParakeet/**",
+    "Sources/LexiconEval/**",
+    "scripts/test-set.sh",
+    "scripts/import-lexicon.sh",
+    "scripts/install-model.sh"
+  ],
+  "reviewerLenses": [
+    "Never lose a Dictation",
+    "Combining with main"
+  ]
+}
