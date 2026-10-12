@@ -51,8 +51,9 @@ public final class WholeClipSession: LocalSession {
 
 /// A model that reads long audio in `grid`'s windows. Each window is decoded
 /// as soon as its last sample is captured, one after another, so fn-up waits
-/// only for the window still open and the join. A clip of one window or less
-/// is decoded at fn-up, as a whole clip always was.
+/// only for the window still open, any window whose decode failed, and the
+/// join. A clip of one window or less is decoded at fn-up, as a whole clip
+/// always was.
 ///
 /// Holds only the audio of windows not yet decoded (at most about two
 /// windows), never the whole Dictation: the clip is the RAM copy.
