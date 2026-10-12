@@ -21,6 +21,7 @@
 # verdict is PROVISIONAL, never PASS or FAIL, while the run's median load is
 # over 1.5 times the measured background, or another app answers fn.
 set -eu
+HERE=$PWD
 cd "$(dirname "$0")/.."
 . scripts/lib/flavor.sh
 . scripts/lib/fn-listeners.sh
@@ -143,10 +144,12 @@ run() {
 
 case "${1:-}" in
     background)
+        scripts/live-lane.sh check
         seconds=${2:-60}
         file=$(mktemp -t bench)
         sample "$file" &
         sampler=$!
+        trap 'kill "$sampler" 2>/dev/null || true; rm -f "$file"' EXIT
         sleep "$seconds"
         kill "$sampler"
         median=$(load_stats < "$file" | cut -d' ' -f2)
@@ -167,6 +170,10 @@ case "${1:-}" in
         BUDGET=$1
         [ $# -eq 3 ] || [ $# -eq 4 ] || { echo "usage: bench.sh <budget> <A.app> <B.app> [runs per side]" >&2; exit 64; }
         RUNS=${4:-5}
+        # Bundle paths are the caller's, not the repo root's.
+        A=$2; case "$A" in /*) ;; *) A="$HERE/$A" ;; esac
+        B=$3; case "$B" in /*) ;; *) B="$HERE/$B" ;; esac
+        set -- "$1" "$A" "$B"
         [ "$RUNS" -ge 5 ] 2>/dev/null || die "$RUNS run(s) per side is too few to tell A from B under changing load: at least 5"
         for bundle in "$2" "$3"; do
             [ "$(plutil -extract CFBundleIdentifier raw "$bundle/Contents/Info.plist" 2>/dev/null)" = "$BUNDLE_ID" ] \

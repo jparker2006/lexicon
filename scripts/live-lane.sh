@@ -134,36 +134,36 @@ is_open() { issues | jq -e --argjson n "$1" 'any(.[]; .number == $n)' > /dev/nul
 # The parsed items of one request (scripts/live-request.sh items).
 items_of() { request_body "$1" "$2" | scripts/live-request.sh items - || die "#$1's request can't be read: fix the fields named above and post it again"; }
 
-fn_dependent() { printf '%s\n' "$1" | grep -qiE '(^|[^a-z])fn([^a-z]|$)'; }
-
 # Prints why one item can't pass at this head, one line per reason; nothing if it can.
 # $1 issue, $2 sha7, $3 the item's tab-separated line.
 static_refusals() {
     printf '%s\n' "$3" | {
-        IFS='	' read -r n title kind gesture target speak cue observable pass needs minutes
+        IFS='	' read -r n title kind gesture target speak fn cue observable pass needs minutes
         label="#$1 item $n ($title)"
         printf '%s\n' "$needs" | tr ';' '\n' | while read -r need; do
             case "$need" in
                 "" | none) ;;
                 \#*)
                     number=${need#\#}
-                    if is_open "$number"; then echo "$label needs #$number, which is still open"; fi
+                    if is_open "$number"; then printf '%s\n' "$label needs #$number, which is still open"; fi
                     ;;
                 *)
                     printf %s "$need" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$' || continue
                     git cat-file -e "$2^{commit}" 2>/dev/null || git fetch -q origin 2>/dev/null || true
-                    git cat-file -e "$2^{commit}" 2>/dev/null || { echo "$label: $2 is not in this repo; fetch it"; continue; }
-                    # A use site is any line naming it other than its declaration or a comment.
+                    git cat-file -e "$2^{commit}" 2>/dev/null || { printf '%s\n' "$label: $2 is not in this repo; fetch it"; continue; }
+                    # A use site reads it: not its declaration, a comment, an
+                    # argument label or parameter (name:), or an assignment to it.
                     uses=$(git grep -h -w -e "$need" "$2" -- Sources 2>/dev/null \
                         | grep -vE "(var|let|func|case|struct|class|enum|protocol|typealias|actor)[[:space:]]+$need([^A-Za-z0-9_]|$)" \
+                        | grep -vE "$need[[:space:]]*(:|=[^=])" \
                         | grep -vE '^[[:space:]]*//' || true)
-                    [ -n "$uses" ] || echo "$label needs $need, but nothing reads $need at this sha ($2)"
+                    [ -n "$uses" ] || printf '%s\n' "$label needs $need, but nothing reads $need at this sha ($2)"
                     ;;
             esac
         done
-        lower=$(printf %s "$title" | tr 'A-Z' 'a-z')
-        issue_text "$1" | tr 'A-Z' 'a-z' | grep 'out of scope' | grep -F -- "$lower" | head -1 | while read -r line; do
-            echo "$label: the issue marks it out of scope: \"$line\""
+        # The title as whole words on a line that says "out of scope".
+        issue_text "$1" | grep -i 'out of scope' | grep -iwF -- "$title" | head -1 | while IFS= read -r line; do
+            printf '%s\n' "$label: the issue marks it out of scope: \"$line\""
         done
     }
 }
@@ -186,9 +186,9 @@ preflight() {
     reasons=$(printf '%s\n' "$items" | while IFS= read -r item; do static_refusals "$issue" "$sha" "$item"; done)
     hooks=
     fn=
-    while IFS='	' read -r n title kind gesture rest; do
+    while IFS='	' read -r n title kind gesture target speak usesfn rest; do
         if printf '%s\n' "$gesture" | grep -qi hook; then hooks="$hooks $n"; fi
-        if fn_dependent "$gesture"; then fn="$fn $n"; fi
+        if [ "$usesfn" = yes ]; then fn="$fn $n"; fi
     done <<EOF
 $items
 EOF
@@ -198,6 +198,8 @@ $NAME is not installed: run scripts/dev-run.sh at $sha first"
     else
         commit=$(plutil -extract LexiconCommit raw "$INSTALLED/Contents/Info.plist" 2>/dev/null || true)
         case "$commit" in
+            *-dirty) reasons="$reasons
+the installed $NAME was built from a dirty tree ($commit): check out $sha clean and run scripts/dev-run.sh" ;;
             "$sha"*) ;;
             *) reasons="$reasons
 the installed $NAME is at ${commit:-an unknown commit}, not $sha: run scripts/dev-run.sh at $sha" ;;
@@ -238,6 +240,8 @@ next_slot() {
 
 # Writes $STATE/sitting.tsv (step, issue, head, item, title, fn) and prints the checklist.
 sitting_render() {
+    # Acks are by step number, so the numbers stay fixed while a sitting is open.
+    [ ! -e "$MARKER" ] || die "a sitting is open; end it before rendering the next one"
     mkdir -p "$STATE"
     steps=$(mktemp -t live-sitting)
     out=$(mktemp -t live-sitting)
@@ -261,7 +265,7 @@ sitting_render() {
         return 0
     fi
     # Prerequisites first, each its own step, once each; then the items in arrival order.
-    awk -F'\t' '$1 == "item" { print $13 }' "$steps" | while IFS= read -r needs; do prerequisites "$needs"; done \
+    awk -F'\t' '$1 == "item" { print $14 }' "$steps" | while IFS= read -r needs; do prerequisites "$needs"; done \
         | awk '!seen[$0]++' > "$out.pre"
     : > "$STATE/sitting.tsv"
     {
@@ -270,21 +274,22 @@ sitting_render() {
         while IFS= read -r pre; do
             n=$((n + 1)); minutes=$((minutes + 1))
             printf '%d\t-\t-\t-\t%s\tno\n' "$n" "$pre" >> "$STATE/sitting.tsv"
-            echo "$n. First: $pre. (1 min)"
+            printf '%s\n' "$n. First: $pre. (1 min)"
         done < "$out.pre"
         awk -F'\t' '$1 == "item"' "$steps" > "$out.items"
-        while IFS='	' read -r _ issue head item title kind gesture target speak cue observable pass needs mins; do
+        while IFS='	' read -r _ issue head item title kind gesture target speak fn cue observable pass needs mins; do
             n=$((n + 1)); minutes=$((minutes + mins))
-            if fn_dependent "$gesture"; then fn=yes; else fn=no; fi
             printf '%d\t%s\t%s\t%s\t%s\t%s\n' "$n" "$issue" "$head" "$item" "$title" "$fn" >> "$STATE/sitting.tsv"
             if [ "$speak" = yes ]; then say="Speak."; else say="Don't speak."; fi
-            echo "$n. $title (#$issue): $gesture, in $target. $say Cue: $cue. ($mins min)"
+            printf '%s\n' "$n. $title (#$issue): $gesture, in $target. $say Cue: $cue. ($mins min)"
         done < "$out.items"
         echo "$n steps, about $minutes minutes."
     } > "$out.list"
     {
         echo "Sitting: $(tail -1 "$out.list") Next default slot: $(next_slot) (move it freely)."
-        echo "Live checks quits your daily Lexicon from its menu first and reopens it after."
+        if awk -F'\t' '$6 == "yes"' "$STATE/sitting.tsv" | grep -q .; then
+            echo "It uses fn, so Live checks quits your daily Lexicon from its menu first (daily quit) and reopens it after (daily reopen)."
+        fi
         echo
         sed '$d' "$out.list"
         echo
@@ -322,18 +327,21 @@ sitting() {
             [ -n "$title" ] || die "the sitting has no step $step"
             shift 3
             printf '%s\t%s\t%s\n' "$step" "$verdict" "$*" >> "$STATE/sitting.acks"
-            echo "step $step ($title): $verdict${*:+: $*}"
+            printf '%s\n' "step $step ($title): $verdict${*:+: $*}"
             ;;
         end)
             require_lane
             [ -e "$MARKER" ] || die "no sitting is open"
+            [ -s "$STATE/sitting.tsv" ] || die "the open sitting has lost its steps ($STATE/sitting.tsv); its acks are in $STATE/sitting.acks"
             while IFS='	' read -r step issue head item title fn; do
                 ack=$(awk -F'\t' -v s="$step" '$1 == s { a = $2 ($3 != "" ? ": " $3 : "") } END { print a }' "$STATE/sitting.acks")
                 where=; [ "$issue" = - ] || where=" (#$issue $head item $item)"
-                echo "$step. $title$where: ${ack:-no ack}"
+                printf '%s\n' "$step. $title$where: ${ack:-no ack}"
             done < "$STATE/sitting.tsv"
+            fnsteps=$(awk -F'\t' '$6 == "yes"' "$STATE/sitting.tsv")
             rm -f "$MARKER" "$STATE/sitting.tsv" "$STATE/sitting.txt" "$STATE/sitting.acks"
             echo "live-lane: sitting closed"
+            [ -z "$fnsteps" ] || echo "live-lane: if you quit the daily Lexicon for it, reopen it now: scripts/live-lane.sh daily reopen"
             ;;
         *) echo "usage: live-lane.sh sitting render | start | ack <step> pass|fail|skip [note] | end" >&2; exit 64 ;;
     esac
@@ -343,22 +351,28 @@ sitting() {
 
 daily_pid() { lsappinfo info -only pid "$DAILY_ID" | sed -n 's/^"pid"=\([0-9][0-9]*\)$/\1/p'; }
 
-# A Dictation is in progress when the daily app's newest fn gesture in the last
-# 21 minutes (the 20-minute cap plus landing) is one that starts or keeps one.
+# A Dictation is in progress when the daily app's newest Dictation gesture in
+# the last 21 minutes (the 20-minute cap plus landing) began or confirmed one.
+# KeyInput logs them as "fn gesture: dictationBegan(...)" (subsystem Lexicon, category fn).
 dictating() {
     last=$(/usr/bin/log show --last 21m --style compact --predicate \
-        "subsystem == \"$DAILY_ID\" && eventMessage BEGINSWITH \"fn gesture: \"" 2>/dev/null \
+        "subsystem == \"Lexicon\" && category == \"fn\" && processImagePath CONTAINS \"/Lexicon.app/\" && eventMessage BEGINSWITH \"fn gesture: dictation\"" \
         | sed -n 's/.*fn gesture: //p' | tail -1)
-    case "$last" in began* | confirmed*) return 0 ;; *) return 1 ;; esac
+    case "$last" in dictationBegan* | dictationConfirmed*) return 0 ;; *) return 1 ;; esac
 }
 
 daily() {
+    # lsappinfo, System Events and open reach the real Mac whatever HOME says,
+    # so a run under a test's fake HOME would quit Jake's real app: refuse it.
+    real=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }')
+    [ -n "$real" ] && [ "$HOME" = "$real" ] || die "HOME ($HOME) is not your login home${real:+ ($real)}; daily quit and reopen act on the real Mac, so they refuse here"
     require_lane
     app="$HOME/Applications/Lexicon.app"
     case "${1:-}" in
         quit)
             pid=$(daily_pid)
             [ -n "$pid" ] || { echo "live-lane: the daily Lexicon is not running"; return 0; }
+            [ "$(ps -o comm= -p "$pid")" = "$app/Contents/MacOS/Lexicon" ] || die "the running daily Lexicon (pid $pid) is not $app; not quitting it"
             ! dictating || die "the daily Lexicon has a Dictation in progress; wait for it to land"
             # From its own menu, the same Quit Jake clicks: never a kill.
             osascript -e "tell application \"System Events\" to tell (first application process whose bundle identifier is \"$DAILY_ID\")" \
@@ -394,14 +408,17 @@ park() {
     require_lane
     ! dev_running || die "$NAME is running; quit it before moving its data"
     [ ! -e "$PARKED" ] || die "$PARKED exists already; restore it first"
-    mkdir -p "$PARKED"
-    printf 'parked-by=live-lane.sh\nfrom=%s\n' "$DATA" > "$PARKED/manifest"
+    # The folder never exists without its manifest, and each entry is listed
+    # before it moves, so an interrupted park still restores.
+    printf 'parked-by=live-lane.sh\nfrom=%s\n' "$DATA" > "$PARKED.manifest.$$"
+    mkdir "$PARKED"
+    mv "$PARKED.manifest.$$" "$PARKED/manifest"
     for path in "$DATA"/* "$DATA"/.[!.]*; do
         [ -e "$path" ] || [ -L "$path" ] || continue
         entry=${path##*/}
         kept "$entry" && continue
-        mv "$path" "$PARKED/$entry"
         printf 'entry=%s\n' "$entry" >> "$PARKED/manifest"
+        mv "$path" "$PARKED/$entry"
     done
     echo "live-lane: parked $(grep -c '^entry=' "$PARKED/manifest") entries of $NAME's data; restore puts them back"
 }
@@ -413,25 +430,38 @@ restore() {
         && [ "$(sed -n 2p "$PARKED/manifest")" = "from=$DATA" ] \
         || die "$PARKED was not made by live-lane.sh park; not restoring from it"
     ! dev_running || die "$NAME is running; quit it before moving its data"
-    leftovers=
+    # Whatever the parked run wrote, and anything in the parked folder the
+    # manifest doesn't name (a Finder .DS_Store), goes aside, never deleted.
+    leftovers=$(mktemp -d "${TMPDIR:-/tmp}/lexicon-dev-unparked.XXXXXX")
     for path in "$DATA"/* "$DATA"/.[!.]*; do
         [ -e "$path" ] || [ -L "$path" ] || continue
         entry=${path##*/}
         kept "$entry" && continue
-        [ -n "$leftovers" ] || leftovers=$(mktemp -d "${TMPDIR:-/tmp}/lexicon-dev-unparked.XXXXXX")
         mv "$path" "$leftovers/$entry"
     done
+    for path in "$PARKED"/* "$PARKED"/.[!.]*; do
+        [ -e "$path" ] || [ -L "$path" ] || continue
+        entry=${path##*/}
+        [ "$entry" != manifest ] || continue
+        grep -qxF "entry=$entry" "$PARKED/manifest" || mv "$path" "$leftovers/parked-$entry"
+    done
     sed -n 's/^entry=//p' "$PARKED/manifest" | while IFS= read -r entry; do
+        [ -e "$PARKED/$entry" ] || [ -L "$PARKED/$entry" ] || continue
         mv "$PARKED/$entry" "$DATA/$entry"
     done
     rm "$PARKED/manifest"
-    rmdir "$PARKED" || die "$PARKED still has files the manifest doesn't name; left in place"
+    rmdir "$PARKED"
+    if rmdir "$leftovers" 2>/dev/null; then leftovers=; fi
     echo "live-lane: restored $NAME's data${leftovers:+; what the parked run wrote is in $leftovers}"
 }
 
 # --- timers and idle -------------------------------------------------------------------
 
+# A due timer is cleared only when the lane's holder reads it, so a builder's
+# look at the queue never hides one from Live checks.
 timers() {
+    mine=
+    if read_lock 2>/dev/null && holds; then mine=1; fi
     now=$(date +%s)
     for file in "$STATE"/timer.*; do
         [ -f "$file" ] || continue
@@ -439,7 +469,7 @@ timers() {
         label=${file##*/timer.}
         if [ "$due" -le "$now" ]; then
             echo "timer $label: due"
-            rm -f "$file"
+            [ -z "$mine" ] || rm -f "$file"
         else
             echo "timer $label: due in $((due - now)) s"
         fi
@@ -469,6 +499,7 @@ case "${1:-}" in
     release)
         if ! read_lock; then echo "live-lane: nobody holds the live-app lane"; exit 0; fi
         holds || refuse
+        [ ! -e "$MARKER" ] || die "a sitting is open; sitting end closes it first"
         restore
         rm -f "$LOCK"
         echo "live-lane: $holder released the live-app lane"
@@ -499,7 +530,14 @@ case "${1:-}" in
         [ $# -eq 3 ] && [ "$2" -ge 0 ] 2>/dev/null || { echo "usage: live-lane.sh timer <seconds> <label>" >&2; exit 64; }
         mkdir -p "$STATE"
         echo $(($(date +%s) + $2)) > "$STATE/timer.$(printf %s "$3" | tr -c 'A-Za-z0-9._-' -)"
-        echo "live-lane: timer $3 due in $2 s; run other items meanwhile (queue shows it when due)"
+        # A long wait doesn't hold the lane, unless Dev's data is parked or a
+        # sitting is open: those belong to the holder until it ends them.
+        if [ -e "$PARKED" ] || [ -e "$MARKER" ]; then
+            echo "live-lane: timer $3 due in $2 s; the lane stays held (parked data or an open sitting). queue shows it when due"
+        else
+            rm -f "$LOCK"
+            echo "live-lane: timer $3 due in $2 s; released the lane meanwhile. Take it again when queue shows the timer due"
+        fi
         ;;
     timers) timers ;;
     preflight)

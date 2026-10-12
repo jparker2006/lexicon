@@ -36,6 +36,7 @@ scripts/live-lane.sh check
 . scripts/lib/fn-listeners.sh
 if [ -n "$FN" ]; then
     require_no_fn_listeners || { echo "dev-run: for WAV-hook or Accessibility-only checks, rerun with --no-fn." >&2; exit 1; }
+    echo "dev-run: $(fn_listeners_line)" >&2
 else
     echo "dev-run: --no-fn, so no fn checks on this run; $(fn_listeners_line)" >&2
 fi

@@ -34,6 +34,7 @@ expect ok '^stub install: dev .* --test-hooks$' "a --no-fn run for WAV-hook chec
 expect ok "fn listeners: the daily Lexicon \(pid $LISTENER\)" "a --no-fn run names the listener" "$REPO/scripts/dev-run.sh" --no-fn -- --test-hooks
 stop_listeners
 expect ok '^stub install: dev ' "dev-run's fn path runs once nothing else answers fn" "$REPO/scripts/dev-run.sh"
+expect ok '^dev-run: fn listeners: none$' "dev-run's fn path records fn listeners: none" "$REPO/scripts/dev-run.sh"
 
 # bench.sh: one run per side is refused before anything is installed.
 mkdir -p "$T/A.app/Contents" "$T/B.app/Contents"
@@ -42,6 +43,9 @@ for side in A B; do
 done
 expect fail '1 run\(s\) per side is too few.*at least 5' "bench refuses one run per side" "$REPO/scripts/bench.sh" history-open "$T/A.app" "$T/B.app" 1
 expect fail 'not a Lexicon Dev bundle' "bench refuses a bundle that isn't Lexicon Dev" "$REPO/scripts/bench.sh" history-open "$T/A.app" "$T/words.txt" 5
+"$REPO/scripts/live-lane.sh" release > /dev/null
+expect fail 'nobody holds the live-app lane' "bench reads relative bundle paths from the caller's folder" sh -c "cd \"$T\" && \"$REPO/scripts/bench.sh\" history-open A.app B.app 5"
+take_lane "$REPO"
 
 # The verdict, from the numbers and the load samples.
 seq 50 2 98 > "$T/a.txt"

@@ -46,6 +46,13 @@ fi
 EOF
 chmod +x "$T/bin/ps"
 
+# lsappinfo, osascript and open reach the real Mac whatever HOME says: any call
+# from a test fails loudly instead of touching Jake's apps.
+for tool in lsappinfo osascript open; do
+    printf '#!/bin/sh\necho "test stub: %s is not allowed in tests" >&2\nexit 1\n' "$tool" > "$T/bin/$tool"
+    chmod +x "$T/bin/$tool"
+done
+
 pass() { echo "ok: $1"; }
 fail() { echo "FAIL: $1" >&2; FAILED=1; }
 

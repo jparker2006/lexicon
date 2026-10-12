@@ -3,6 +3,7 @@ kind: hands-off
 gesture: hook dictate fixture.wav
 target: TextEdit's empty document
 speak: no
+fn: no
 cue: none
 pass: the text lands at the cursor and the clipboard is restored
 needs: none
