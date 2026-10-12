@@ -72,7 +72,7 @@ enum Fillers {
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
     /// Only without a comma between: "uh, huh?" is a filler and then "huh". "uh uh" and
     /// "um hmm" are left out: written that way they are as likely two fillers as a word.
-    static let interjections: Set<String> = ["uh huh", "uh oh", "mm hmm", "ah ha"]
+    static let interjections: Set<String> = ["uh huh", "uh oh", "mm hmm", "mm hm", "ah ha", "ah hah"]
 
     /// Hedges, negations and constraints. Never deleted, not even as a repeat
     /// ("it's not not working" means it works).
@@ -85,10 +85,11 @@ enum Fillers {
         "before", "after", "if", "dont", "doesnt", "cant", "wont", "ain't", "kinda", "sorta", "nah", "nope",
     ]
 
-    /// Doubles that grammar allows, on top of `protected`.
+    /// Doubles that grammar allows, on top of `protected` and numbers. A doubled
+    /// ordinal ("the first first step") stays a stutter: it makes no number.
     static let meantDoubles: Set<String> = [
         "that", "had", "is", "do", "so", "very", "bye", "ha", "knock", "much", "long", "far", "way", "super", "many",
-        "more", "well", "too", "pretty", "totally",
+        "more", "well", "too", "pretty", "totally", "double", "triple",
     ]
 
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".
@@ -97,16 +98,19 @@ enum Fillers {
         "just", "if", "because", "like",
     ]
 
-    /// Tokens ending in "." that need not end a sentence (`Fillers.clean` decides).
-    static let abbreviations: Set<String> = [
-        "e.g", "i.e", "vs", "mr", "mrs", "ms", "dr", "jr", "sr", "st", "a.m", "p.m", "u.s", "u.k", "approx", "inc",
-        "vol", "fig", "etc", "al", "cf", "ca", "est", "dept", "no", "ft", "lb", "lbs", "oz", "min", "sec", "hr",
-        "hrs", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
-    ]
-
     /// Titles: always followed by a name, so the capital after them never starts a sentence.
     /// ("ms" and "st" are left out: "20 ms." and "Main St." often end one.)
-    static let titles: Set<String> = ["mr", "mrs", "dr"]
+    static let titles: Set<String> = [
+        "mr", "mrs", "dr", "prof", "gen", "capt", "sgt", "lt", "col", "gov", "sen", "rev", "hon",
+    ]
+
+    /// Tokens ending in "." that need not end a sentence (`Fillers.clean` decides).
+    static let abbreviations: Set<String> = titles.union([
+        "e.g", "i.e", "vs", "ms", "jr", "sr", "st", "a.m", "p.m", "u.s", "u.k", "approx", "inc", "corp", "ltd",
+        "co", "bros", "vol", "fig", "etc", "al", "cf", "ca", "est", "dept", "univ", "no", "ft", "lb", "lbs", "oz",
+        "min", "sec", "hr", "hrs", "ave", "rd", "blvd", "mt", "jan", "feb", "mar", "apr", "jun", "jul", "aug",
+        "sep", "sept", "oct", "nov", "dec",
+    ])
 
     /// The filler pass over one line. A line always starts a sentence;
     /// `dictationStart`: no earlier line kept anything.
@@ -328,8 +332,9 @@ private struct Token {
     }
 
     /// Cardinals, ordinals and their plurals, fractions and multiples: "ten", "third",
-    /// "thirds", "twenties", "tenths", "hundredth", "twofold".
+    /// "thirds", "twenties", "tenths", "hundredth", "twofold", "quadruple".
     static func isNumberWord(_ word: String) -> Bool {
+        if word.hasSuffix("uple") { return true }
         var stems = [word]
         if word.hasSuffix("fold") { stems.append(String(word.dropLast(4))) }
         if word.hasSuffix("ies") { stems.append(word.dropLast(3) + "y") }

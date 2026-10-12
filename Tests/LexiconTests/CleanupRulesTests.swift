@@ -168,6 +168,7 @@ let numberRepeatCases: [Case] = [
     Case("It's a hundred hundred pixels wide.", "It's a hundred hundred pixels wide."),
     Case("We shipped in twenty uh twenty six.", "We shipped in twenty twenty six."),
     Case("We're on twenty-two twenty-two now.", "We're on twenty-two twenty-two now."),
+    Case("Get me a double double with no sugar.", "Get me a double double with no sugar."),
     // Real stutters still go, next to numbers too.
     Case("I I think the the build is fine.", "I think the build is fine."),
     Case("It takes the the twenty minutes we budgeted.", "It takes the twenty minutes we budgeted."),
@@ -201,6 +202,7 @@ let likeKeptCases: [Case] = [
     Case("We split it, like, halves and thirds.", "We split it, like, halves and thirds."),
     Case("It's, like, trillionths of a cent.", "It's, like, trillionths of a cent."),
     Case("It's, like, twofold faster.", "It's, like, twofold faster."),
+    Case("It's, like, quadruple the size.", "It's, like, quadruple the size."),
     Case("They're, like, teens.", "They're, like, teens."),
     // A number in the next sentence does not make a filler "like" a hedge.
     Case("It is, like, um. Postgres is fine.", "It is. Postgres is fine."),
@@ -238,6 +240,8 @@ let interjectionCases: [Case] = [
     Case("Uh oh, the build failed again.", "Uh oh, the build failed again."),
     Case("The leak was, ah ha, in the cache.", "The leak was, ah ha, in the cache."),
     Case("Got it, uh huh.", "Got it, uh huh."),
+    Case("Mm hm, go on.", "Mm hm, go on."),
+    Case("Ah hah, found it.", "Ah hah, found it."),
     Case("Uh huh, um, let's go.", "Uh huh, let's go."),
     // With a comma between, the filler is a filler.
     Case("Uh, huh? I missed that.", "Huh? I missed that."),
@@ -259,6 +263,9 @@ let abbreviationCases: [Case] = [
     Case("Wait ten min. um, then rerun the suite.", "Wait ten min. then rerun the suite."),
     Case("The lag is around 20 ms. Um, it's fine.", "The lag is around 20 ms. It's fine."),
     Case("Ask Dr. Smith about it.", "Ask Dr. Smith about it."),
+    Case("Ask Prof. Smith about it.", "Ask Prof. Smith about it."),
+    Case("We pay Acme Corp. um, every month.", "We pay Acme Corp. every month."),
+    Case("It's on Main Ave. uh, by the park.", "It's on Main Ave. by the park."),
     // The comma after an abbreviation's own period stays.
     Case("We ship at five p.m., so we're late.", "We ship at five p.m., so we're late."),
     Case("Add docs, tests, etc., um, and ship it.", "Add docs, tests, etc., and ship it."),
