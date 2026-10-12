@@ -113,7 +113,80 @@ import LexiconDomain
     release.yield()
 }
 
+@Test(.timeLimit(.minutes(1))) func aFnDownWaitsForASecondIdleUnloadStillRunningWhenTheFirstEnds() async throws {
+    // A Dictation that ends while an idle unload sits behind a hung call re-arms the
+    // linger, so a second unload can start before the first ends. When the first ends,
+    // the second still runs: a fn-down must wait for it too, or the model goes away
+    // under the Dictation.
+    let model = GatedUnloadModel()
+    let clock = TestClock()
+    let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)
+    let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
+    await engine.warmUp(tenMinuteLinger)
+    await clock.waitForSleep(endingAt: .seconds(600))
+    await clock.advance(by: .seconds(600))
+    await model.untilUnloadsStarted(1)
+
+    await engine.begin(feed: finishedFeed(), plan: plan).cancel()
+    await clock.waitForSleep(endingAt: .seconds(1_200))
+    await clock.advance(by: .seconds(600))
+    await model.untilUnloadsStarted(2)
+
+    await model.endOldestUnload()  // the hung call returns; the second unload still runs
+    let finishing = Task {
+        await engine.begin(feed: finishedFeed(), plan: plan).finish(AudioClip(samples: [1, 2, 3]))
+    }
+    // fn-up waits on a load that waits on the second unload: its 2 s load limit is pending.
+    // Returns at the time limit if fn-down loaded at once instead.
+    await clock.waitForSleep(endingAt: .seconds(1_202))
+    await model.endOldestUnload()
+    let outcome = await finishing.value
+    guard case .text = outcome else {
+        Issue.record("expected text, got \(outcome)")
+        return
+    }
+    #expect(await model.decodes == [true], "the Dictation decoded with the model unloaded under it")
+}
+
 // MARK: Helpers
+
+/// Holds each unload until the test ends it, oldest first; `isResident` clears when
+/// an unload ends, as a real one would. Records whether the model was resident at each decode.
+private actor GatedUnloadModel: LocalTranscriber {
+    nonisolated let model = LocalModel.parakeetUnified
+    private(set) var isResident = false
+    private(set) var decodes: [Bool] = []
+    private var unloadsStarted = 0
+    private var held: [CheckedContinuation<Void, Never>] = []
+    private var watchers: [(count: Int, wake: CheckedContinuation<Void, Never>)] = []
+
+    func load() { isResident = true }
+
+    func unload() async {
+        unloadsStarted += 1
+        let ready = watchers.filter { $0.count <= unloadsStarted }
+        watchers.removeAll { $0.count <= unloadsStarted }
+        for watcher in ready { watcher.wake.resume() }
+        await withCheckedContinuation { held.append($0) }
+        isResident = false
+    }
+
+    func untilUnloadsStarted(_ count: Int) async {
+        guard unloadsStarted < count else { return }
+        await withCheckedContinuation { watchers.append((count, $0)) }
+    }
+
+    func endOldestUnload() { held.removeFirst().resume() }
+
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { _ in await self.decode() }
+    }
+
+    private func decode() -> String {
+        decodes.append(isResident)
+        return "Hello."
+    }
+}
 
 private let tenMinuteLinger: Preferences = {
     var preferences = Preferences.defaults

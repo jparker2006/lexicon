@@ -183,9 +183,11 @@ actor LocalResidency {
         let unload = Task { [transcriber] in await transcriber.unload() }
         unloading = unload
         await unload.value
-        unloading = nil
+        // A later unload can have started while this one sat behind a hung call; it still runs.
+        if unloading == unload { unloading = nil }
         log.notice("local model unloaded: no Dictation for the linger time")
-        // Private mode turned on, or the network went down, while it unloaded.
-        if policy?.unloadAfter == nil { try? await transcriber.load() }
+        // Private mode turned on, or the network went down, while it unloaded. With
+        // another unload still running, that one loads again when it ends.
+        if unloading == nil, policy?.unloadAfter == nil { try? await transcriber.load() }
     }
 }

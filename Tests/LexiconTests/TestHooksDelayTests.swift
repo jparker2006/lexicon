@@ -7,7 +7,7 @@ import Transcription
 
 // `hook dictate <wav> --result-delay <ms>` (#156): the local model's next live
 // answer is held for the delay, so the Dictation is still transcribing while a
-// check switches apps or presses keys. The delay runs on a test clock.
+// check switches apps or presses keys. The delay and the engine share a test clock.
 
 /// The hook's delay, as a named length: a test-clock value, never waited for in real time.
 private let delay = Duration.seconds(90)
@@ -16,18 +16,26 @@ private let delay = Duration.seconds(90)
 func aResultDelayHoldsTheTextUntilTheDelayHasPassed() async throws {
     let clock = TestClock()
     let model = SlowedTranscriber(ScriptedTranscriber(text: "Ship it."), clock: clock)
-    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults, local: model)
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+                                         local: model, clock: clock)
     let wav = try writeWAV(tone(16_000), rate: 16_000, in: try scratchDirectory())
 
     let first = Task { await model.slowing(by: delay) { await system.conductor.dictate(file: wav, pace: .asFastAsPossible) } }
-    await clock.waitForSleep(endingAt: delay)
+    // The 90 s asked for is held 25 s: past the local answer limit (30 s plus a
+    // quarter of the clip) the Dictation would go waiting, never typed.
+    await clock.waitForSleep(endingAt: .seconds(25))
+    guard !Task.isCancelled else {  // the time limit: no 25 s hold was ever pending
+        Issue.record("the result delay was not held to 25 s")
+        await clock.advance(by: delay)  // lets the held Dictation end
+        _ = await first.value
+        return
+    }
     #expect(await system.conductor.destination.delivered.isEmpty)
 
-    await clock.advance(by: delay)
+    await clock.advance(by: .seconds(25))
     #expect(await first.value.status == .inserted)
-    // Once only: the next Dictation is not held.
+    // Once only: the next Dictation is not held (a held one would wait on the clock forever).
     #expect(await system.conductor.dictate(file: wav, pace: .asFastAsPossible).status == .inserted)
-    #expect(clock.sleepers == 0)
 }
 
 @Test(.timeLimit(.minutes(1)))
