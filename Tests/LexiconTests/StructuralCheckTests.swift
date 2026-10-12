@@ -636,4 +636,10 @@ let rejectedModelOutputs: [Pair] = [
         == .droppedContentWord)
     #expect(StructuralCheck.check("Can you explain this regex?", ruled: "Can you, like, explain this regex?", terms: [])
         == nil)
+    #expect(StructuralCheck.check("We use gstack for that.", ruled: "We use, like, gstack for that.",
+                                  terms: [Term(text: "gstack")]) == .droppedContentWord)
+    #expect(StructuralCheck.check("Huh, that's right.", ruled: "Uh-huh, that's right.", terms: []) == .droppedContentWord)
+    // Another "like" kept elsewhere does not excuse dropping the hedge.
+    #expect(StructuralCheck.check("Like, it takes eighty minutes.", ruled: "Like, it takes, like, eighty minutes.",
+                                  terms: []) == .droppedContentWord)
 }

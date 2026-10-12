@@ -179,6 +179,9 @@ let numberRepeatCases: [Case] = [
     // Three or more in a row is emphasis, not a stutter.
     Case("Go go go, ship it.", "Go go go, ship it."),
     Case("It's a no no no from me.", "It's a no no no from me."),
+    // A function word said three times is still a stutter.
+    Case("The the the build failed.", "The build failed."),
+    Case("I I I think it works.", "I think it works."),
 ]
 
 @Test(arguments: numberRepeatCases)
@@ -255,6 +258,7 @@ let interjectionCases: [Case] = [
     // An "oh" inside a number is a zero, so the "uh" before it is a filler.
     Case("Call room five uh oh seven.", "Call room five oh seven."),
     Case("Uh oh, five servers are down.", "Uh oh, five servers are down."),
+    Case("Uh oh five servers are down.", "Uh oh five servers are down."),
 ]
 
 @Test(arguments: interjectionCases)

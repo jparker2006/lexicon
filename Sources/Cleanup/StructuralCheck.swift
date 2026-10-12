@@ -59,13 +59,9 @@ enum StructuralCheck {
         let kept = Set(out.map(\.word))
         let retracted = retractedSpans(ref)
         let openers = openerRun(ref)
-        // A filler the rules keep as meaning ("uh huh", "like, eighty"): the rules own that call.
-        let meaningful = Fillers.meaningful(in: refText, rules: .empty)
         for (k, token) in ref.enumerated() where !retracted.contains(k) && !kept.contains(token.word) {
             let word = token.word
-            if meaningful.contains(word) {
-                failures.insert(.droppedContentWord)
-            } else if Fillers.hard.contains(word) {
+            if Fillers.hard.contains(word) {
                 continue
             } else if softFillers.contains(word) {
                 if !softFillerMayGo(ref, k, inOpener: openers[k]) { failures.insert(.droppedContentWord) }
@@ -78,6 +74,24 @@ enum StructuralCheck {
             } else {
                 failures.insert(isNumber(word) ? .numberMismatch : .droppedContentWord)
             }
+        }
+
+        // A filler the rules keep as meaning survives, unless retracted: the rules own that
+        // call. A sound of "uh huh" as often as the rules keep it; a hedging "like" with the
+        // word it hedges still after it ("like 80"), so another "like" kept elsewhere is no excuse.
+        let meaning = Fillers.meaningful(in: refText, rules: RuleSet(rules: [], terms: terms, english: []))
+        for (word, count) in meaning.fillers {
+            let retractedCount = retracted.filter { ref[$0].word == word }.count
+            if out.filter({ $0.word == word }).count < count - retractedCount { failures.insert(.droppedContentWord) }
+        }
+        let likes = ref.indices.filter { ref[$0].word == "like" }
+        var hedges: [String: Int] = [:]
+        for n in meaning.hedges where n < likes.count && !retracted.contains(likes[n]) {
+            hedges[hedge(ref, at: likes[n]), default: 0] += 1
+        }
+        for (pair, count) in hedges
+        where out.indices.filter({ out[$0].word == "like" && hedge(out, at: $0) == pair }).count < count {
+            failures.insert(.droppedContentWord)
         }
 
         let spokenWords = Set(ref.map(\.word))
@@ -442,6 +456,11 @@ enum StructuralCheck {
             open = endsSentence(token) || (open && (Fillers.hard.contains(token.word) || softFillers.contains(token.word)))
         }
         return result
+    }
+
+    /// "like 80": a "like" and the first word after it that is not a filler sound.
+    static func hedge(_ tokens: [Token], at k: Int) -> String {
+        "like " + (tokens[(k + 1)...].first { !Fillers.hard.contains($0.word) }?.word ?? "")
     }
 
     /// Where the rules would also drop it: "like" before a comma or a sentence
