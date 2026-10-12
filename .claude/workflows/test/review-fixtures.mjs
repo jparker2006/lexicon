@@ -166,6 +166,27 @@ test('a lens that could not finish its commands is INCOMPLETE', async () => {
   assert(/INCOMPLETE: .*gh pr list was refused/.test(r.result.markdown), 'the markdown should say why')
 })
 
+test("a critic's brief and schema carry the CI gate", async () => {
+  const { dir, sha } = fixtureRepo('ci-gate', ['Sources/Foo/a.swift'])
+  const r = await run(dir, { issue: 1, sha })
+  const critics = r.calls.filter(c => c.agentType && c.agentType.startsWith('critic'))
+  assert(critics.length > 0, 'critics should run')
+  for (const c of critics) {
+    for (const [what, text] of [['prompt', c.prompt], ['incomplete schema', c.schema.properties.incomplete.description]]) {
+      assert(!text.includes('""'), `${c.label} ${what} should not show a bare "", which a model copies into the field`)
+      for (const s of ['CI is the build gate', 'scripts/check.sh', 'a fixture script', 'never incomplete', 'say so in checked', 'a criterion the diff fails is still a finding']) assert(text.includes(s), `${c.label} ${what} should say "${s}"`)
+    }
+  }
+})
+
+test('any incomplete text, even a bare pair of quotes, leaves the run unstamped', async () => {
+  // incomplete is never filtered in code: a real refused read must always block the stamp.
+  const { dir, sha } = fixtureRepo('quotes', ['Sources/Foo/a.swift'])
+  const r = await run(dir, { issue: 1, sha }, () => ({ ...CLEAN, incomplete: '""' }))
+  assert(r.result.complete === false, 'complete should be false')
+  assert(r.result.reviewedSha === null, `reviewedSha should be null, got ${r.result.reviewedSha}`)
+})
+
 test('a newline in an INCOMPLETE reason stays on the INCOMPLETE line', async () => {
   const { dir, sha } = fixtureRepo('incomplete-newline', ['Sources/Foo/a.swift'])
   const r = await run(dir, { issue: 1, sha }, (p, o) =>
