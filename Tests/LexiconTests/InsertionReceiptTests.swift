@@ -31,7 +31,7 @@ private func dictate(into destination: Answering) async throws -> (DictationResu
     let paths = AppPaths.temporary()
     let history = try HistoryStore(paths: paths)
     let conductor = Conductor(
-        recorder: Recorder(), speech: SpeechEngine(local: ScriptedTranscriber(text: typed)), cleanup: Cleanup(),
+        recorder: Recorder(), speech: SpeechEngine(local: ScriptedTranscriber(text: typed), clock: TestClock()), cleanup: Cleanup(),
         lexicon: try Lexicon(paths: paths), history: history, destination: destination,
         preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
         keyboard: nil, fixes: nil, jev: nil)

@@ -1,0 +1,324 @@
+{
+ "about": "14:30:05, the Reviewer's verdict on #131 (599ed51). #129 (#56) was held: a Reviewer hold at 14:05 and CI still running on bf7c0b9 (done 14:31:03).",
+ "owner": "jparker2006",
+ "main": "f113d6253f142c2026d5bb91e4284affa85289cb",
+ "pulls": [
+  {
+   "number": 129,
+   "state": "OPEN",
+   "isDraft": false,
+   "baseRefName": "main",
+   "headRefName": "claude/issue-56",
+   "headRefOid": "bf7c0b94fdef92f49dee19d02fee7a3c1b942bcf",
+   "body": "Refs #56\n\n## Summary\n\nThe live Dictation, wired end to end: hold fn, local Parakeet, text at the cursor.\n\n```text\nmain.swift (before AppKit)\n  AppDelegate.startSystem\n    LexiconSystem.live        tap first; one InputClock\n    Task.detached system.run\n      conductor.follow(keyboard.commands)\n      conductor.recover(); history.sweepAudio\n      recorder.prepare(mic)\n      speech.warmUp(prefs)\n      preferences.changes -> speech.preferencesChanged\napplicationDidFinishLaunching\n  indicator.follow(conductor.events(), recorder.levels)\n  will-sleep -> conductor.systemWillSleep\napplicationShouldTerminate -> .terminateLater until conductor.idle()\n```\n\nThe Reviewer's must-fix from #123:\n\n```diff\n-case dictationStopped(at:)\n+case dictationStopped(DictationID, at:)   // minted at fn-down, on every command\n-keyboard.endDictation()\n+keyboard.systemWillSleep()               // a release, on the same ordered stream\n+guard captureEnd == nil else { log \"fn-down dropped\" }\n```\n\nAlso: `Recorder.levels` for the pill; a lag and engine line per Dictation (`scripts/lag-report.sh` gives p50/p95); `lexicon-eval` loads Parakeet first; the `dictate` hook takes fixtures only; `install-app.sh` keeps `<app>.old`.\n\n## Evidence\n\n- **Must-fix, before:** `sleepWithTheNextPressStillQueuedKeepsThatDictation` and `aCommandForAnotherPressNeverEndsTheRecording` failed with the ids carried but ignored: the second Dictation's row was nil (deleted by the lone tap). **After:** pass.\n- `everyPressEndsBeforeTheNextBeginsWhateverTheInputs`: 2,000 seeded random input sequences through the real `FnGesture`. The old silent reset fails it with 22,184 issues.\n- `backToBackDictationsTypeInTheOrderTheyWereSpoken`: the first Dictation's text comes last and still types first. It fails with `insertTurn` removed.\n- **Live** ([Live checks comment](https://github.com/jparker2006/lexicon/issues/56#issuecomment-6109845672), release builds, 469462f and 0d3adf5; Wi-Fi on, 8,660 zero-socket samples):\n  - Text lands at the cursor in Claude desktop, ChatGPT Codex, TextEdit and Terminal.\n  - 48 Dictations: lag p50 159 ms, p95 351 ms, max 743 ms (provisional: load average 5 to 28). Start gap p50 36 ms, p95 58 ms.\n  - Launch to fn: 42 to 80 ms. Back-to-back in order 5 of 5. Lone taps leave nothing. Crash recovery works. Quit takes 64 to 418 ms and SIGTERM 63 ms on 0d3adf5.\n  - 1 of 48 was not inserted, reason `typedSince`: a key or click came between fn-up and the paste, so the late-text rule held it for paste-last, as designed.\n- **Live, found and fixed:**\n  - SIGTERM hung on 469462f. The SIGTERM handler on the main queue called `terminate`, whose `.terminateLater` reply needs the main queue: a deadlock. A standalone AppKit repro hangs before the fix and exits after it.\n  - Once, after the first paste on a fresh install, the fn tap went silent with no disabled event. It did not come back on 0d3adf5. A 2 s check now re-enables a silently disabled tap and logs it.\n- **Size:** bundle 7.38 MB (budget 12). The binary is 7.7 MB; the linker map puts FluidAudio at 4.74 MB of 6.31 MB of symbols, leaving about 1.6 MB of ours (budget 4).\n- `scripts/check.sh` at bf7c0b9: everything passes except the 5 CodeTerms FSEvents tests, which fail on this Mac on a clean `origin/main` too (load). CI is the gate. lexicon-eval on the public fixtures: no worse verdicts.\n- Test set `lexicon-eval` not run: no baselines yet (#51 open), and it would load the Mac during Jake's live run. Speech text is unchanged; only when the model loads moved.\n\n## Merge Danger\n\n**Door:** two-way.\n\n**Blast Radius:** live-path\n\n- **Idle memory:** 24 MB 11 minutes after a Dictation with History unopened, inside the 30 MB budget ([re-check](https://github.com/jparker2006/lexicon/issues/56#issuecomment-6110131522)). The unload logged exactly 10:00 after the Dictation. The first run's 36 MB included the History window, which holds about 3.5 MiB after closing (#112), and Core ML keeps about 9 MB after unload (probe).\n- **Launch:** on one fresh install the status item came up at 1,639 ms, after the 868 ms model load (fn working at 763 ms). Relaunches bring fn up in 42 to 80 ms. Watch whether the launch warm-up delays the icon.\n- **Upgrading from 469462f:** that build's SIGTERM hang makes an install wait up to 21 min. Jake's daily copy never ran it.\n- **Merged with #66 and #71:** the Lexicon page edits the system's Lexicon, and the 2 s load wait now sits on the race's local side, so with a cloud model the cloud can still win.\n\n- fn now types for real. Wrong-place text is guarded by `InsertGuard` on every insert (#54).\n- The 2 s load wait also covers recovery and waiting retries: during a first-launch compile they go waiting again and retry in 30 s. Proposed deviation, recorded in `docs/architecture.md`.\n- Quit hangs while a recording never ends (a lost fn-up) until the 20-minute cap lands (#58).\n- Not wired, by design: Fixes, Jev (no Jev call on any Dictation), the inbox, `CodeTerms.start()`.\n- Later: recovery's unreadable-audio retry loops every 30 s (#59); a live job waits behind a running background one; a settings change re-arms the 10-minute linger; the lost-fn-up `flagsState` check and the Sounds 256-frame buffer are unmeasured.\n- Merge order: none pending in these files.\n\n## Install\n\nThe local model must be installed (`scripts/install-model.sh`, already done on this Mac). The first launch of each new build compiles it for about 25 s in the background. Code only otherwise.\n\nCheck: hold fn in Claude desktop, say a sentence, let go: the text lands at the cursor.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+   "labels": [],
+   "files": [
+    {
+     "path": "Package.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/CaptureCore.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/Internals.swift"
+    },
+    {
+     "path": "Sources/AudioCapture/Recorder.swift"
+    },
+    {
+     "path": "Sources/KeyInput/EventTap.swift"
+    },
+    {
+     "path": "Sources/KeyInput/FnGesture.swift"
+    },
+    {
+     "path": "Sources/KeyInput/Keyboard.swift"
+    },
+    {
+     "path": "Sources/LexiconApp/AppDelegate.swift"
+    },
+    {
+     "path": "Sources/LexiconApp/Permissions.swift"
+    },
+    {
+     "path": "Sources/LexiconApp/TestHooks.swift"
+    },
+    {
+     "path": "Sources/LexiconApp/main.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Conductor+Recovery.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Conductor+Run.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Conductor.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Headless.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/LexiconSystem.swift"
+    },
+    {
+     "path": "Sources/LexiconEval/main.swift"
+    },
+    {
+     "path": "Sources/LexiconHarness/main.swift"
+    },
+    {
+     "path": "Sources/TestHooks/TestHooks.swift"
+    },
+    {
+     "path": "Sources/Transcription/RacePolicy.swift"
+    },
+    {
+     "path": "Sources/Transcription/SpeechEngine.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/FnDictationTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/FnGestureTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/HeadlessDictationTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/KeyEventTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/LocalModelTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/RecorderLevelsTests.swift"
+    },
+    {
+     "path": "docs/architecture.md"
+    },
+    {
+     "path": "scripts/lag-report.sh"
+    },
+    {
+     "path": "scripts/lib/install-app.sh"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T13:01:12Z",
+     "body": "Verdict: merge with notes, once Live checks passes the head under review and CI is green.\n\nReviewed `469462f` with three critics (wiring with never-lose and inserting text, the gesture with levels and real-time safety, and the shell with privacy and install), plus `0d3adf5`. M0 critical path: I read `LexiconSystem.swift` in full and the fix commit.\n\nWhat holds:\n- Launch: the fn tap starts first, one `InputClock` is shared by the tap and `TargetApp`, the key loop runs before recovery, and recovery touches only an earlier run's rows and files. Then the retention sweep, mic prepare and the model warm-up.\n- #123's must-fix: fn-down mints a `DictationID`, every command carries it, and `endCapture` ignores other ids, so a press can only end or discard its own capture. Sleep is fed through the recognizer in the same ordered stream. 2,000 seeded random sequences pass, where the old reset fails with 22,184 issues.\n- Never lose and inserting: back-to-back Dictations type in spoken order. A model still loading 2 s after fn-up makes the Dictation wait and retry untyped. Quit waits for a recording to end and for in-flight runs (30 s cap), and can't cut a Cmd-V.\n- Real time: RMS levels are computed on the writer queue once per chunk, the sink block is unchanged, and observers are `bufferingNewest(1)`. A level is one Float, so no samples leave the capture.\n- Privacy: no network path from a live Dictation (speech cloud nil, Cleanup `.off`, Jev and Fixes nil). Keys come from the Keychain. New logs hold ids, status, lag and model only. `lag-report.sh` prints aggregates only. The test hooks stay `#if DEBUG` and are gated to dev.\n- `0d3adf5`: SIGTERM no longer hangs quit, since `terminate` runs as a run-loop block outside the handler (before, `install.sh` would have waited out its 21-minute cap). A 2 s watchdog re-enables a tap macOS turned off without notice.\n\nNo blockers. Notes are on the Later list (https://github.com/jparker2006/lexicon/issues/36#issuecomment-6106073553). The two to do soon: the AirPods check on an idle prepared mic, and have quit wait for the clipboard restore.\n\n**Before I merge:** a `Live checks:` comment on #56 for the PR's head (four apps, back-to-back, launch to fn, idle memory, crash recovery), and green CI on that head.\n"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T14:05:42Z",
+     "body": "Hold (Reviewer): don't merge yet. Live checks' results for `0d3adf5` on #56 (comment 6109845672) have two fails, now with the builder:\n1. **1 `notInserted` out of 48** scripted Dictations (`9E659272`). Explain the cause (a legitimate late-text hold, such as focus moved or typing since fn-up, or a bug) or fix it.\n2. **Idle memory 36 MB** 11.5 minutes after the last Dictation, against the 30 MB bar (67 MB at 7.5 minutes). No model unload line appears in the log. Show whether the 10-minute unload fired and how much the open History window accounts for, then re-measure.\n\nEverything else passes: launch to fn, offline (0 sockets), back to back, lone tap, quit and SIGTERM, crash recovery, and the bundle at 7.38 MB. The lag numbers (p50 159 ms, p95 351 ms) are provisional because of high load. My verdict stands otherwise: I merge once both are resolved on the head under review, with a Live checks re-check of whatever changes and green CI."
+    }
+   ]
+  },
+  {
+   "number": 131,
+   "state": "OPEN",
+   "isDraft": false,
+   "baseRefName": "main",
+   "headRefName": "claude/issue-71",
+   "headRefOid": "599ed517f144153188ad434b2156ca692abd3b02",
+   "body": "Refs #71\n\n## Summary\n\nA Lexicon page next to History, Import from a text file, and `lexicon-eval --lexicon <file>`. All three read one format, the one `scorer/testset` already reads: a bare line is a Term, `heard -> written` is a Rule, blank lines and `#` lines are skipped.\n\n```diff\n menu bar menu\n   History\n+  Lexicon                     -> LexiconWindowPresenter.show()\n Lexicon page (LexiconUI/LexiconWindow.swift)\n+  [Import…] [Add new]   [Search]\n+  one list, Terms and Rules sorted together\n+    gstack                                  [trash]\n+    ✨ codecs → Codex   (✨ = learned)        [trash]\n+  Add new: one field, one line of the file format (replaces that Term or heard side)\n+  Import: NSOpenPanel -> LexiconFile -> Lexicon.add(entries) -> \"Imported 6 Terms and 4 Rules\"\n WordStore\n+  LexiconFile(parsing:) / (contentsOf:)    # line-for-line parse_lexicon\n+  Lexicon.add([LexiconEntry]) -> ImportCounts\n+    one transaction, one recompile; an entry already there stays as it is\n lexicon-eval\n+  --lexicon <file>   # file and manifest modes; each Dictation's temp Lexicon\n+                     # manifest runs also pass the written forms as scorer --terms\n```\n\nCode Terms stay off the page (spec). One window at a time; closing drops it, like History.\n\n## Evidence\n\n- **Before:** no page, no import, `lexicon-eval --lexicon` is a usage error.\n  **After:**\n  - `LexiconImportTests` (10): parser cases mirror the scorer's. The Import button calls one store method, `Lexicon.add(contentsOf:)`, and the tests call the same one: the sample gives exactly its 6 Terms and 4 Rules (1 duplicate, 1 line not read); a second import gives `ImportCounts(terms: 0, rules: 0, duplicates: 11, unreadable: 1)` and an unchanged store; a missing file adds nothing; an import never overwrites an existing entry; it survives a reopen; imported Rules and folding apply at fn-down.\n  - `LexiconTextTests` (16): row titles (`heard → written`, ✨ on learned only), search, sort, the Add field (a Term, a Rule typed with `->` or `→`, nothing else), import summary wording.\n  - `EvalManifestTests` (+6): with the sample, a manifest run types \"Frobnicate the QuuxKit.\", without it \"Frob nicate the quux kit.\"; the file is read by path; its written forms go to the scorer once each; `--lexicon` is refused with `--transcribe` and `--install-model`; an unreadable file fails before any Dictation; a run with a private Lexicon never goes in a git tree.\n  - Scorer: a test pins `parse_lexicon` on the same sample the Swift tests read.\n  - `scripts/check.sh` on 7059060: green. On c7c7210 (main merged, Import routed through `add(contentsOf:)`): 362 of 367 Swift tests pass; the 5 that fail are CodeTerms' real-FSEvents tests, which fail the same way at 7059060 on this machine now (load average about 8), so it's the machine; the scorer tests and the fixture eval pass. CI is the gate. Earlier, at 7059060: 341 Swift tests, 131 scorer tests, the import check, and the fixture eval (`--split everyday`, no `--lexicon`) at wer 0.0 and term_error_rate 0.0, unchanged. An earlier run failed `JevClientTests.pastTheBudgetTheFallbackDecides` (50 ms wall-clock budget, machine under load; Jev untouched); it passed alone and in the green run.\n- **Scores:** no Test set scores. The Test set can't be scored until Jake reviews its gold (#51's page). Without `--lexicon` the eval pipeline is unchanged (same empty Lexicon, no `--terms`); the check script's fixture run is in the line above.\n- **Live checks** at 7059060 ([comment](https://github.com/jparker2006/lexicon/issues/71#issuecomment-6109949605)): pass on the menu line and one window, Import of the sample (\"Imported 6 Terms and 4 Rules\", 10 rows), Add a Term and a Rule (`->` and `→`), bad input kept in the sheet, search (either side, any case, \"No matches\"), delete by button and by key, and rows kept across close and relaunch (footprint 34 MB closed, 35 open, 34 closed). Not run live: the second Import (the harness couldn't drive a second open panel; `importingTwiceCreatesNoDuplicates` covers it headless through the button's own store call) and the starter import, which waits for the daily-app install step below.\n\n## Merge Danger\n\n**Door:** two-way. No schema change; Import and Add write rows to the existing `lexicon.sqlite`, and Delete on the page removes them.\n\n**Blast Radius:** small.\n\nUntil #56, the app shell opens its own `Lexicon` just after launch, off the main thread (no launch cost before the fn tap), and the menu line appears once it is open (docs/architecture.md, Implementation reconciliation; `TODO(#56)`). `LexiconUI`, `LexiconApp` and `lexicon-eval` now depend on `WordStore` (architecture table updated for LexiconUI). History's hidden main menu moved to `KeyEquivalents.swift`, shared by both windows.\n\n**Merge order with #129:** whichever lands second wires `LexiconWindowPresenter(lexicon: system.lexicon)` (store it as `public let lexicon` on `LexiconSystem`), deletes the shell's `Task` that opens a Lexicon and the `import WordStore` in AppDelegate. If #129 merges first I'll do it here. Expect small conflicts in AppDelegate.swift, LexiconEval/main.swift and architecture.md.\n\n`--lexicon` also hands the scorer the Lexicon's written forms as `--terms`, which the scorer documents as \"the whole Lexicon\": false alarms and Term refs then count every Lexicon word, so a `--lexicon` run's Term scores aren't comparable to a run without it. The baseline is scored with the same list.\n\n**Later:**\n- `COLLATE NOCASE` (#70's schema) folds ASCII only: `Émile` and `émile` are two Terms, and RuleSet keeps one. Needs a migration with a stored folded key. Verified with sqlite3.\n- eval's temp Lexicon, run file and `--terms` file are removed by `defer`, not on a signal (the run file's pattern predates this PR). They sit in the per-user temp folder.\n- After #56, a page edit or Import rereads the system word list on the Lexicon actor (about 10 ms), so an fn-down at that moment waits for it.\n\n## Install\n\nJake chose to import the starter Lexicon into the daily copy at install (recorded on #71). Run, in this order, from main:\n\n```bash\nscripts/import-lexicon.sh daily \"$HOME/Library/Application Support/Lexicon/starter-lexicon.txt\"\nscripts/install.sh\n```\n\nThe first prints counts only, expected `lexicon-eval: imported 45 Terms and 26 Rules; 0 already in the Lexicon; 0 lines not read`. It runs before the install because the app reads its Lexicon at launch. Safe to re-run: a second run imports nothing.\n\nCheck: open Lexicon from the menu bar, search for one of your Terms, and add one Rule with Add new.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+   "labels": [],
+   "files": [
+    {
+     "path": "Package.swift"
+    },
+    {
+     "path": "Sources/LexiconApp/AppDelegate.swift"
+    },
+    {
+     "path": "Sources/LexiconCore/Headless.swift"
+    },
+    {
+     "path": "Sources/LexiconDomain/AccessibilityID.swift"
+    },
+    {
+     "path": "Sources/LexiconEval/ManifestRun.swift"
+    },
+    {
+     "path": "Sources/LexiconEval/main.swift"
+    },
+    {
+     "path": "Sources/LexiconUI/HistoryWindow.swift"
+    },
+    {
+     "path": "Sources/LexiconUI/KeyEquivalents.swift"
+    },
+    {
+     "path": "Sources/LexiconUI/LexiconText.swift"
+    },
+    {
+     "path": "Sources/LexiconUI/LexiconWindow.swift"
+    },
+    {
+     "path": "Sources/WordStore/Lexicon.swift"
+    },
+    {
+     "path": "Sources/WordStore/LexiconFile.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/EvalManifestTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/LexiconImportTests.swift"
+    },
+    {
+     "path": "Tests/LexiconTests/LexiconTextTests.swift"
+    },
+    {
+     "path": "docs/architecture.md"
+    },
+    {
+     "path": "scorer/fixtures/README.md"
+    },
+    {
+     "path": "scorer/fixtures/sample-lexicon.txt"
+    },
+    {
+     "path": "scorer/tests/test_testset_units.py"
+    },
+    {
+     "path": "scripts/import-lexicon.sh"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T14:30:05Z",
+     "body": "**Reviewer verdict: merge with notes** (head 599ed51)\n\nReviewed against review.md: the import parser, the store's import transaction, the page, the eval's `--lexicon`, and privacy. A critic covered everything through 7059060. I read the merge of main (051f823 keeps #127's `cloud: CloudLink = .network` beside the shared Lexicon) and c7c7210 (Import is now one store call, `Lexicon.add(contentsOf:)`, which reads the file on the Lexicon actor, off the main thread), and 599ed51 (`lexicon-eval --import-lexicon <file> --into <folder>` and `scripts/import-lexicon.sh dev|daily <file>`: the same store call, printing counts only, re-run safe, with a test).\n\nWhat holds:\n- Import is one `BEGIN IMMEDIATE` transaction with rollback. Parse errors happen before any write. A second import adds nothing, and existing entries are left as they were. The button and the tests now go through the same call, which covers Live checks item 3.\n- The parser matches the scorer's `parse_lexicon` for comments, blank lines, splitting at the first arrow, empty sides and NFC.\n- No SQLite or word-list read on the main thread.\n- Logs and `scorer report` print counts only. The temp Lexicon and the `--terms` file are deleted when done. The fixture words are made up.\n- Live checks passed items 1, 2 and 4 to 9. The footprint was 34 to 35 MB.\n\nNotes, not blocking (copied to the Later comment on #36):\n- A file line `codecs → Codex` imports as a Term holding the arrow. The Add field treats `→` as `->`, but `LexiconFile` and `parse_lexicon` don't. The page draws it like a Rule, and dictation never applies it. Accept `→` in both parsers, or count the line as not read.\n- A Term that contains `->` (`p->next`) becomes the Rule \"p\" to \"next\". Rules match whole words in any case, so \"plan p\" would dictate as \"plan next\". The alert shows only the counts. Name new Rules' heard sides in the alert, or warn on a one-letter heard side.\n- If `reload()` throws after COMMIT, the alert says \"Nothing was added\" though the rows were saved. Only on a read failure.\n- Delete removes a row at once, with no undo. A learned Rule is gone unless it is imported again.\n\nStarter import: per Jake's decision on #71, I run `scripts/import-lexicon.sh daily <starter path>` before `scripts/install.sh` on his next \"install\", reporting counts only.\n"
+    }
+   ]
+  }
+ ],
+ "issues": [
+  {
+   "number": 56,
+   "title": "M0: M0 end to end: hold fn, local model, text at the cursor",
+   "state": "OPEN",
+   "body": "## Parent\n\n#36 (Spec: Lexicon v0)\n\n**Milestone:** M0  \n**User stories:** 1, 20, 21, 44  \n**Test seam:** live app + headless pipeline  \n**Modules:** LexiconCore (Conductor live path), LexiconApp\n\n## What to build\n\nWire the live Dictation: fn-down starts capture and the History row, loads the local model if needed and holds a latency-critical activity; fn-up runs the adaptive tail, local Parakeet, rules-only Cleanup, queues text-ready, and pastes. The pill and sounds follow. fn never waits: a new fn-down cuts the last tail and starts a new one; Dictations insert in spoken order. Lag (fn-up to text on screen) and engine are logged on every Dictation.\n\n## Acceptance criteria\n\n- [ ] Jake holds fn in Claude desktop, ChatGPT (Codex), a native text field and a terminal and sees the text land, with wifi off.\n- [ ] fn-up to text p50 and p95 over at least 50 Dictations are reported.\n- [ ] Two back-to-back Dictations insert in spoken order.\n- [ ] Launch to fn working is 150 ms or less; idle memory, bundle size and fn-down to first audio stay within the spec's budgets.\n\n## Blocked by\n\n- #47\n- #53\n- #54\n- #55",
+   "labels": [
+    {
+     "name": "critical-path"
+    }
+   ],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T12:06:10Z",
+     "body": "Building: taking this (Claude)"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T14:04:57Z",
+     "body": "Live checks: claude/issue-56 @ 469462f and 0d3adf5\n\nRelease builds (`scripts/dev-run.sh --release -- --test-hooks`; release has no test hooks). Jake spoke the 50 scripted sentences and did the presses. 469462f carries Jake's spoken items (2 to 7, 9). 0d3adf5 carries the quit, fn-tap and launch items (1, 8, 10, 11), a repeat of the fresh-install path, and the SIGTERM fix. As the builder says, the speech, paste and order paths are the same in both.\n\n**Load was high:** the 1-minute load average ran 5.5 to 28 (median 10.5) during the 50, from other sessions' `lexicon-eval`. **The lag numbers are provisional**; rerun them on a quiet Mac.\n\n| # | Item | Result |\n|---|---|---|\n| Offline | Wi-Fi stayed on (**replaced by a zero-socket check, Jake's call**) | **Pass**: 8,660 samples every 0.5 s of `lsof -i` on Lexicon Dev's pid, 05:43 to 07:04, all 0 sockets. No CloudAccess or `cloud:` lines in the log. |\n| 1 | Launch to fn (0d3adf5) | **Pass**: fn working 80, 42, 52, 52, 42, 57 ms after relaunch with `open` (main at 23 to 53 ms). The install launch was 891 ms (new signature). |\n| 2 | First Dictation during the compile | **Pass on the bar, but it exposed a bug** (469462f): the pill showed \"Saved. No text yet\" 2.04 s after fn-up, the text was transcribed 33 s later (`notInserted`), and nothing was typed late. Right after the next Dictation's paste, the fn tap went silent, then SIGTERM hung; that's the bug fixed in 0d3adf5. On 0d3adf5's fresh install, both Dictations were inserted (lag 368 and 150 ms), fn stayed alive after the paste, and Jake saw no dialog. That first Dictation came 30 s after launch, so the during-compile path itself wasn't re-run on 0d3adf5. |\n| 3 | Four apps | **Pass, with one note**: Terminal, ChatGPT Codex, a Claude desktop Code-tab prompt and TextEdit each got the text at the cursor; Jake saw no permission prompt; 0 sockets. After the first three apps, the clipboard was no longer the sentinel; Jake was deleting text and may have cut or copied. I reset the sentinel, and after a TextEdit Dictation the clipboard was the sentinel again. |\n| 4 | 50 scripted Dictations | **Lag passes (provisional); outcomes fail**: n = 48 Dictations; 47 inserted, **1 `notInserted`** (`9E659272`, \"lag 460 ms\", speech 438 ms, sentence about 9). Lag over the 47: p50 **159 ms**, p95 **351 ms**, max 743 ms (budget 700 / 1,000). Start gap: n 48, p50 **36 ms**, p95 **58 ms**, max 419 ms (budget 60). Every Dictation was \"engine prepared\", none the first after launch. |\n| 5 | Back to back ×5 | **Pass**: 10 Dictations, each pair in order (\"first one\" inserted before \"second one\" began). Next press 0.45 to 0.73 s after release. Lag 102 to 432 ms. All inserted. |\n| 6 | Lone tap, and fn+Right | **Pass**: 5 presses, each began then discarded in 70 to 230 ms. Jake saw no pill and heard no sound. No audio file left for any of their ids. The caret wasn't checked (in TextEdit, End scrolls rather than moving the caret). |\n| 7 | Pill and sounds | **Partly confirmed**: Jake said the pill at the bottom looked as it should. He didn't confirm the start sound, the bars, the dots or the check timing separately. |\n| 8 | Quit from the menu while idle (0d3adf5) | **Pass**: exited 64, 406, 395, 418, 403 ms after pressing Quit through Accessibility. SIGTERM exited in 63 ms. On 469462f, SIGTERM hung for more than 10 min and needed kill -9 (the fixed bug). |\n| 9 | Crash recovery | **Pass** (469462f): kill -9 2.5 s into a held Dictation. On reopen: \"Dictation BB96EC56 recovered\", and no insert line. |\n| 10 | Idle memory (0d3adf5) | **Fail**: **36 MB** 11 min 28 s after the last Dictation (bar 30 MB). It was 67 MB at 7 min 29 s. Right after a Dictation: 60 MB (peak 76). Jake opened the History window at 06:52, which may account for some of it. No unload line appears in the log. |\n| 11 | Bundle | **Pass**: 7.38 MB (7,738,431 bytes). Binary `Contents/MacOS/Lexicon` is 7,735,136 bytes, including FluidAudio; for the builder to attribute. |\n| 12 | Hook dictate | **Not run**: release builds have no test hooks. |\n| b | fn dead again? | Not reproduced on 0d3adf5. No \"re-enabled\" line appeared. |\n\nOther findings:\n- A TCCAccessRequest is logged at the first paste on both heads, with no dialog shown.\n- Upgrading from 469462f: `dev-run.sh` waited more than 10 min on the old copy's SIGTERM hang. `install-app.sh` waits up to 21 min, so anyone on 469462f needs kill -9 to move on.\n\nEvidence, paths only: `/private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/`: `run56.log` (the log), `sockets56.log` (sockets and load), `sample-20521*.txt` (thread samples).\n"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T14:17:55Z",
+     "body": "Ready for review: PR #129, CI pending (head bf7c0b9)."
+    }
+   ],
+   "addedLabel": "critical-path (change 11)"
+  },
+  {
+   "number": 71,
+   "title": "M3: Lexicon page and Import",
+   "state": "OPEN",
+   "body": "## Parent\n\n#36 (Spec: Lexicon v0)\n\n**Milestone:** M3  \n**User stories:** 62, 65, 70, 71, 72  \n**Test seam:** live app  \n**Modules:** LexiconUI, WordStore\n\n## What to build\n\nA Lexicon page next to History, Wispr-style: plain list, Add new, search. Rules show as `heard → written`; ✨ marks anything learned. An Import button takes a text file with one entry per line: a bare line is a Term, `heard -> written` is a Rule. Dev builds and `lexicon-eval` load the same format.\n\nJake's starter Lexicon is a private file at `~/Library/Application Support/Lexicon/starter-lexicon.txt`. Import it on Jake's Mac; never copy its contents into the repo, a ticket or a fixture.\n\n## Acceptance criteria\n\n- [ ] Add, search and delete work for Terms and Rules.\n- [ ] Importing a public sample file creates the right Terms and Rules; importing twice creates no duplicates.\n- [ ] `lexicon-eval` loads a Lexicon file by path.\n- [ ] The starter file is imported on Jake's Mac and nothing from it appears in git.\n\n## Blocked by\n\n- #70\n- #63",
+   "labels": [],
+   "comments": [
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T12:22:40Z",
+     "body": "Building: taking this (Claude)"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T14:16:43Z",
+     "body": "Live checks: claude/issue-71 @ 7059060\n\nLexicon Dev 0.1 (49, 7059060), debug, launched with `scripts/dev-run.sh -- --test-hooks`. Driven through Accessibility, and by mouse for the open panel. Lexicon Dev's own lexicon.sqlite was moved aside first, so the page started empty, and restored afterward. The test rows are kept apart in `~/Library/Application Support/Lexicon Dev/live71-test/`.\n\n| # | Item | Result |\n|---|---|---|\n| 1 | Menu and window | **Pass**: a \"Lexicon\" line right after \"History\". It opens one window, \"Lexicon\" (`lexicon.page`); pressing it again keeps one window. The empty state reads \"No Terms or Rules yet\". |\n| 2 | Import the sample | **Pass**: the alert reads \"Imported 6 Terms and 4 Rules\", detail \"1 already in the Lexicon. 1 line not read: a Rule needs both sides, heard -> written.\" Exactly 10 rows, sorted by name: cube nector → kubenector, flimDB, frob nicate → Frobnicate, quux kit → QuuxKit, QuuxKit, slash zap → /zap, snorp-ctl, Trellium.md, Vexmo, Zorblax (once). No ✨. |\n| 3 | Import again | **Not run**: my scripted keys and clicks didn't reach the macOS open panel after the first import (it runs in another process). The page wasn't at fault; it still showed 10 rows. |\n| 4 | Add a Term | **Pass**: \"Plonkify\" + Return closes the sheet, the row is added and selected, 11 rows. |\n| 5 | Add a Rule both ways | **Pass**: \"glim mer -> Glimmer\" and \"wob ble → Wobble\" both appear as \"→\" rows, 13 rows. |\n| 6 | Bad input | **Pass (the beep wasn't heard)**: \"-> nothing\" + Return keeps the sheet open with the text still in it and no row added. Esc closes it, still 13 rows. |\n| 7 | Search | **Pass**: \"quux\" shows exactly \"quux kit → QuuxKit\" and \"QuuxKit\". \"GLIMMER\" shows exactly \"glim mer → Glimmer\". \"zzzz\" shows no rows and \"No matches\". Cleared, all 13 return. Cmd-V pasted the clipboard's test text into the search field. |\n| 8 | Delete | **Pass**: the trash button on \"Plonkify\" (AX label \"Delete Plonkify\") removes it, 12 rows. With \"glim mer → Glimmer\" selected, Delete removes it, 11 rows, and the next row (\"quux kit → QuuxKit\") is selected. |\n| 9 | Persistence and lifecycle | **Pass**: Cmd-W, then reopening from the menu, gives the same 11 rows. Relaunching with `open` and reopening gives the same 11 rows. Footprint 34 MB closed, 35 MB open, 34 MB closed again. |\n| 10 | Starter Lexicon | **Not run in Dev**, pending Jake's choice: importing it would leave private data in Dev's folder, which agents read freely. Recommended instead: the daily-app import at install (PR #131's Install section). |\n\nFound by accident, not a bug: the search field is a collapsed toolbar item, so it only takes focus once clicked. Before I knew that, a scripted select-all + Delete went to the table and removed the selected row each time. Expected with the table focused, and I re-added the rows before the checks above.\n\nScreenshots (items 1 to 9 only):\n- /private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots71/1-empty.png\n- /private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots71/2-alert.png\n- /private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots71/5-added.png\n- /private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots71/6-bad.png\n- /private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots71/7-nomatch.png\n- /private/tmp/claude-501/-Users-jakeparker-code-lexicon--claude-worktrees-nice-franklin-e0ca4f/3032a3d9-1289-415b-b118-c3987ed6c686/scratchpad/live/shots71/9-relaunch.png\n"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T14:18:10Z",
+     "body": "Ready for review: PR #131, CI pending"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T14:23:37Z",
+     "body": "Ready for review: PR #131, CI pending"
+    },
+    {
+     "author": {
+      "login": "jparker2006"
+     },
+     "createdAt": "2026-10-11T14:24:53Z",
+     "body": "Decision (Jake, 2026-10-11): import the starter Lexicon into the daily app as part of the next install, not into Lexicon Dev data. The Reviewer runs it on Jake's 'install', reporting counts only."
+    }
+   ]
+  }
+ ],
+ "runs": [
+  {
+   "id": 38146541378,
+   "head_sha": "bf7c0b94fdef92f49dee19d02fee7a3c1b942bcf",
+   "path": ".github/workflows/ci.yml",
+   "name": "CI",
+   "event": "push",
+   "status": "in_progress",
+   "conclusion": null,
+   "html_url": "https://github.com/jparker2006/lexicon/actions/runs/38146541378",
+   "pull_requests": [
+    {
+     "number": 129
+    }
+   ]
+  },
+  {
+   "id": 38147190965,
+   "head_sha": "599ed517f144153188ad434b2156ca692abd3b02",
+   "path": ".github/workflows/ci.yml",
+   "name": "CI",
+   "event": "push",
+   "status": "completed",
+   "conclusion": "success",
+   "html_url": "https://github.com/jparker2006/lexicon/actions/runs/38147190965",
+   "pull_requests": [
+    {
+     "number": 131
+    }
+   ]
+  }
+ ],
+ "behind": {
+  "bf7c0b94fdef92f49dee19d02fee7a3c1b942bcf": 0,
+  "599ed517f144153188ad434b2156ca692abd3b02": 0
+ },
+ "lanes": "Open builder PRs against main f113d62:\n#56 (PR #129 @ bf7c0b9): 29 files; with main: clean\n  Sources/AudioCapture/CaptureCore.swift\n  Sources/AudioCapture/Internals.swift\n  Sources/AudioCapture/Recorder.swift\n  Sources/KeyInput/EventTap.swift\n  Sources/KeyInput/FnGesture.swift\n  Sources/KeyInput/Keyboard.swift\n  Sources/LexiconApp/AppDelegate.swift\n  Sources/LexiconApp/Permissions.swift\n  Sources/LexiconApp/TestHooks.swift\n  Sources/LexiconApp/main.swift\n  Sources/LexiconCore/Conductor+Recovery.swift\n  Sources/LexiconCore/Conductor+Run.swift\n  Sources/LexiconCore/Conductor.swift\n  Sources/LexiconCore/Headless.swift\n  Sources/LexiconCore/LexiconSystem.swift\n  Sources/LexiconEval/main.swift\n  Sources/LexiconHarness/main.swift\n  Sources/TestHooks/TestHooks.swift\n  Sources/Transcription/RacePolicy.swift\n  Sources/Transcription/SpeechEngine.swift\n  Tests/LexiconTests/FnDictationTests.swift\n  Tests/LexiconTests/FnGestureTests.swift\n  Tests/LexiconTests/HeadlessDictationTests.swift\n  Tests/LexiconTests/KeyEventTests.swift\n  Tests/LexiconTests/LocalModelTests.swift\n  Tests/LexiconTests/RecorderLevelsTests.swift\n  docs/architecture.md\n  scripts/lag-report.sh\n  scripts/lib/install-app.sh\n#71 (PR #131 @ 599ed51): 20 files; with main: clean\n  Package.swift\n  Sources/LexiconApp/AppDelegate.swift\n  Sources/LexiconCore/Headless.swift\n  Sources/LexiconDomain/AccessibilityID.swift\n  Sources/LexiconEval/ManifestRun.swift\n  Sources/LexiconEval/main.swift\n  Sources/LexiconUI/HistoryWindow.swift\n  Sources/LexiconUI/KeyEquivalents.swift\n  Sources/LexiconUI/LexiconText.swift\n  Sources/LexiconUI/LexiconWindow.swift\n  Sources/WordStore/Lexicon.swift\n  Sources/WordStore/LexiconFile.swift\n  Tests/LexiconTests/EvalManifestTests.swift\n  Tests/LexiconTests/LexiconImportTests.swift\n  Tests/LexiconTests/LexiconTextTests.swift\n  docs/architecture.md\n  scorer/fixtures/README.md\n  scorer/fixtures/sample-lexicon.txt\n  scorer/tests/test_testset_units.py\n  scripts/import-lexicon.sh\nOverlaps:\n#56 (PR #129) and #71 (PR #131) share: Sources/LexiconApp/AppDelegate.swift, Sources/LexiconCore/Headless.swift, Sources/LexiconEval/main.swift, docs/architecture.md; merging both: conflicts in Sources/LexiconApp/AppDelegate.swift, Sources/LexiconEval/main.swift, docs/architecture.md\n"
+}

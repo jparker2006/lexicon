@@ -6,14 +6,15 @@ import LexiconDomain
 
 // The measurement behind #72's budgets: a full scan of the real `~/code` under
 // 1 s adding under 5 MB, and a touched file making its repo current within a
-// second. It reads the Mac's own folders, so it runs only when asked:
+// second. A timing run only, and it reads the Mac's own folders, so it also
+// needs its own opt-in:
 //
-//   LEXICON_MEASURE_CODE=1 swift test -c release --filter CodeTermsMeasure
+//   LEXICON_TIMING=1 LEXICON_MEASURE_CODE=1 scripts/test.sh --filter CodeTermsMeasure
 //
 // It prints counts, times and memory only, never a name: repo and dependency
 // names may be private and this repo is public.
 
-private let measuring = ProcessInfo.processInfo.environment["LEXICON_MEASURE_CODE"] == "1"
+private let readsCodeFolder = ProcessInfo.processInfo.environment["LEXICON_MEASURE_CODE"] == "1"
 
 /// This process's footprint, the number Activity Monitor shows as Memory.
 private func footprint() -> Int {
@@ -31,7 +32,7 @@ private func milliseconds(_ duration: Duration) -> Double {
     Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15
 }
 
-@Test(.enabled(if: measuring)) func codeTermsMeasureTheRealCodeFolder() async throws {
+@Test(.enabled(if: timingRun && readsCodeFolder)) func codeTermsMeasureTheRealCodeFolder() async throws {
     let home = FileManager.default.homeDirectoryForCurrentUser
     let code = home.appending(path: "code")
     let clock = ContinuousClock()
@@ -74,24 +75,13 @@ private func milliseconds(_ duration: Duration) -> Double {
     #expect(growth.max() ?? .max < 5 << 20)
 }
 
-/// Waits for `repo` to become current, or 10 s.
+/// Waits for `repo` to become current. The test's time limit stops a hang.
 private func becomes(_ terms: CodeTerms, _ repo: String) async -> Bool {
-    await withTaskGroup(of: Bool.self) { group in
-        group.addTask {
-            for await current in terms.changes where current == repo { return true }
-            return false
-        }
-        group.addTask {
-            try? await Task.sleep(for: .seconds(10))
-            return false
-        }
-        let first = await group.next() ?? false
-        group.cancelAll()
-        return first
-    }
+    for await current in terms.changes where current == repo { return true }
+    return false
 }
 
-@Test(.enabled(if: measuring)) func codeTermsMeasureTouchToCurrent() async throws {
+@Test(.enabled(if: timingRun && readsCodeFolder), .timeLimit(.minutes(1))) func codeTermsMeasureTouchToCurrent() async throws {
     let root = FileManager.default.temporaryDirectory.appending(path: "code-terms-\(UUID().uuidString)")
     let code = root.appending(path: "code")
     for repo in ["quaxly", "zentrik"] {

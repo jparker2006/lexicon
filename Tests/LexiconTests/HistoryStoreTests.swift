@@ -266,34 +266,27 @@ func deleteIsRefusedWhileInFlight(stored: DictationStatus) async throws {
     #expect(try await indexSQL(reopened) == HistorySchema.derivedIndexes)
 }
 
-@Test func enqueuingAnEventNeverWaitsOnTheWriter() async throws {
+@Test(.timeLimit(.minutes(1))) func enqueuingAnEventNeverWaitsOnTheWriter() async throws {
     let (store, _) = try makeStore()
     let ids = try (0..<200).map { _ in try begin(store) }
     await store.flush()
 
-    // Hold the writer queue: if `record` waited on SQLite, this test would hang.
+    // Hold the writer queue: if `record` waited on SQLite, this test would hang
+    // until its time limit failed it. How long a record takes is not tested here:
+    // that is machine speed.
     let release = DispatchSemaphore(value: 0)
     var held: Task<Void, any Error>!
     await withCheckedContinuation { started in
-        held = Task { try await store.read { _ in started.resume(); release.wait() } }
+        held = Task { try await store.read { _ in started.resume(); release.wait() } }  // timing-ok: the held writer under test; released below
     }
 
-    var costs: [Duration] = []
-    let clock = ContinuousClock()
     for _ in 0..<5 {
-        for id in ids {
-            let event = DictationEvent.pinned(id, true)
-            costs.append(clock.measure { store.record(event) })
-        }
+        for id in ids { store.record(.pinned(id, true)) }
     }
     release.signal()
     try await held.value
     await store.flush()
 
-    costs.sort()
-    // Enqueueing is a few microseconds; the 1 ms budget leaves wide headroom on a loaded runner.
-    let p99 = costs[costs.count * 99 / 100]
-    #expect(p99 < .milliseconds(1), "p99 \(p99), max \(costs.last!)")
     #expect(await store.dictation(ids[0])?.pinned == true)
 }
 

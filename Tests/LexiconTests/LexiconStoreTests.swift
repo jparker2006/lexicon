@@ -139,7 +139,8 @@ func rulesAndFoldingRunInEveryMode(mode: String) async throws {
 
     let wav = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: try scratchDirectory())
     let system = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: prefs,
-                                         local: ScriptedTranscriber(text: "Um, ask codecs to run G stack."))
+                                         local: ScriptedTranscriber(text: "Um, ask codecs to run G stack."),
+                                         clock: TestClock())
     let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
 
     #expect(result.status == .inserted)
@@ -147,9 +148,9 @@ func rulesAndFoldingRunInEveryMode(mode: String) async throws {
 }
 
 // The target is under 1 ms for 200 Terms and Rules on a 100-word Dictation. It is
-// measured on demand with LEXICON_BENCH=1 and never runs in CI: tests never depend
-// on machine speed.
-@Test(.enabled(if: ProcessInfo.processInfo.environment["LEXICON_BENCH"] != nil))
+// measured in a timing run (LEXICON_TIMING=1) and never in the check: tests never
+// depend on machine speed.
+@Test(.enabled(if: timingRun))
 func applyingTwoHundredTermsAndRulesToAHundredWordsTakesUnderAMillisecond() async throws {
     let store = try await lexicon(terms: (0..<100).map { "Zq\($0)Kit" },
                                   rules: (0..<100).map { ("zork \($0)", "Zork\($0)") })

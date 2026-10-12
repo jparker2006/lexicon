@@ -25,7 +25,7 @@ let package = Package(
         .library(name: "LexiconUI", targets: ["LexiconUI"]),
         .library(name: "LocalParakeet", targets: ["LocalParakeet"]),
         .executable(name: "LexiconApp", targets: ["LexiconApp"]),
-        .executable(name: "lexicon-eval", targets: ["LexiconEval"]),
+        .executable(name: "lexicon-eval", targets: ["LexiconEvalCLI"]),
         .executable(name: "lexicon-harness", targets: ["LexiconHarness"]),
     ],
     dependencies: [
@@ -41,79 +41,230 @@ let package = Package(
 
         // Inbox wire format, writer and watcher (app). Tiny on purpose: a
         // short-lived writer process links only this and LexiconDomain.
-        .target(name: "Inbox", dependencies: ["LexiconDomain"]),
+        .target(
+            name: "Inbox",
+            dependencies: [
+                "LexiconDomain",
+            ]
+        ),
 
         // fn key: event tap thread, gesture recognizer, input clock.
-        .target(name: "KeyInput", dependencies: ["LexiconDomain"]),
+        .target(
+            name: "KeyInput",
+            dependencies: [
+                "LexiconDomain",
+            ]
+        ),
 
         // Mic and file capture, lock-free ring, 16 kHz CAF writer, durability.
-        .target(name: "AudioCapture", dependencies: ["LexiconDomain"]),
+        .target(
+            name: "AudioCapture",
+            dependencies: [
+                "LexiconDomain",
+            ]
+        ),
 
         // Cloud streaming adapters (one file each), local race, network reachability.
-        .target(name: "Transcription", dependencies: ["LexiconDomain"]),
+        .target(
+            name: "Transcription",
+            dependencies: [
+                "LexiconDomain",
+            ]
+        ),
 
         // FluidAudio adapter. The ONLY target allowed to import FluidAudio.
         .target(
             name: "LocalParakeet",
-            dependencies: ["LexiconDomain", "Transcription", .product(name: "FluidAudio", package: "FluidAudio")]
+            dependencies: [
+                "LexiconDomain",
+                "Transcription",
+                .product(name: "FluidAudio", package: "FluidAudio"),
+            ]
         ),
 
         // Deterministic cleanup pass plus Rules plus light app formatting. Pure.
-        .target(name: "Cleanup", dependencies: ["LexiconDomain"]),
+        .target(
+            name: "Cleanup",
+            dependencies: [
+                "LexiconDomain",
+            ]
+        ),
 
         // The Lexicon: terms, Rules, per-Dictation term selection. Owns lexicon.sqlite.
-        .target(name: "WordStore", dependencies: ["LexiconDomain", "SQLiteKit"]),
+        .target(
+            name: "WordStore",
+            dependencies: [
+                "LexiconDomain",
+                "SQLiteKit",
+            ]
+        ),
 
         // Every durable fact about a Dictation: history.sqlite plus audio/<id>.caf.
-        .target(name: "History", dependencies: ["LexiconDomain", "SQLiteKit", "AudioCapture"]),
+        .target(
+            name: "History",
+            dependencies: [
+                "AudioCapture",
+                "LexiconDomain",
+                "SQLiteKit",
+            ]
+        ),
 
         // Everything Lexicon does to text inside other apps: paste, find again, watch, replace.
-        .target(name: "AppText", dependencies: ["LexiconDomain", "KeyInput"]),
+        .target(
+            name: "AppText",
+            dependencies: [
+                "KeyInput",
+                "LexiconDomain",
+            ]
+        ),
 
         // Jev decisions over plain URLSession. Every call carries a local fallback.
-        .target(name: "Jev", dependencies: ["LexiconDomain"]),
+        .target(
+            name: "Jev",
+            dependencies: [
+                "LexiconDomain",
+            ]
+        ),
 
         // Hand fix detection, Re-speak fix, close calls, Rule proposals.
-        .target(name: "Fixes", dependencies: ["LexiconDomain", "History", "WordStore", "AppText", "Jev"]),
+        .target(
+            name: "Fixes",
+            dependencies: [
+                "AppText",
+                "History",
+                "Jev",
+                "LexiconDomain",
+                "WordStore",
+            ]
+        ),
 
         // The lifecycle owner (Conductor), composition (LexiconSystem), preferences, Keychain.
         .target(
             name: "LexiconCore",
             dependencies: [
-                "LexiconDomain", "Inbox", "KeyInput", "AudioCapture", "Transcription", "Cleanup",
-                "WordStore", "History", "AppText", "Jev", "Fixes",
+                "AppText",
+                "AudioCapture",
+                "Cleanup",
+                "Fixes",
+                "History",
+                "Inbox",
+                "Jev",
+                "KeyInput",
+                "LexiconDomain",
+                "Transcription",
+                "WordStore",
             ]
         ),
 
         // AppKit surfaces: status item, recording indicator, History window, Lexicon page, settings, fix prompt.
-        .target(name: "LexiconUI", dependencies: ["LexiconDomain", "History", "WordStore", "AudioCapture", "Fixes", "LexiconCore"]),
+        .target(
+            name: "LexiconUI",
+            dependencies: [
+                "AudioCapture",
+                "Fixes",
+                "History",
+                "LexiconCore",
+                "LexiconDomain",
+                "WordStore",
+            ]
+        ),
 
         // The app shell. scripts/bundle.sh assembles and signs Lexicon.app from the
         // SwiftPM products (ADR 0003): bundle, Info.plist, entitlements, signing (#14).
         .executableTarget(
             name: "LexiconApp",
-            dependencies: ["LexiconDomain", "KeyInput", "LexiconCore", "LexiconUI", "LocalParakeet", "AudioCapture", "TestHooks", "AppText"]
+            dependencies: [
+                "AppText",
+                "AudioCapture",
+                "KeyInput",
+                "LexiconCore",
+                "LexiconDomain",
+                "LexiconUI",
+                "LocalParakeet",
+                "TestHooks",
+            ]
         ),
 
         // `lexicon-eval`: headless pipeline on WAV files for the scorer (#15). Dev only, never shipped.
-        .executableTarget(
+        // A library, so its tests import it; its one-line main is LexiconEvalCLI.
+        .target(
             name: "LexiconEval",
-            dependencies: ["LexiconDomain", "WordStore", "LexiconCore", "AudioCapture", "Transcription", "History", "LocalParakeet"]
+            dependencies: [
+                "AudioCapture",
+                "History",
+                "LexiconCore",
+                "LexiconDomain",
+                "LocalParakeet",
+                "Transcription",
+                "WordStore",
+            ]
+        ),
+
+        .executableTarget(
+            name: "LexiconEvalCLI",
+            dependencies: [
+                "LexiconEval",
+            ]
         ),
 
         // Test hooks: the request and reply wire between a harness and the running
         // dev app (#45). Every file is `#if DEBUG`, so release builds hold none of it.
-        .target(name: "TestHooks", dependencies: ["LexiconDomain"]),
+        .target(
+            name: "TestHooks",
+            dependencies: [
+                "LexiconDomain",
+            ]
+        ),
 
         // `lexicon-harness`: drives Lexicon Dev through test hooks and the
         // Accessibility API, plus a target text field to type into (#45). Dev only.
-        .executableTarget(name: "LexiconHarness", dependencies: ["LexiconDomain", "TestHooks"]),
+        .executableTarget(
+            name: "LexiconHarness",
+            dependencies: [
+                "LexiconDomain",
+                "TestHooks",
+            ]
+        ),
 
+        // Helpers every test target shares, one owner: synthesized WAV fixtures,
+        // compile, the fake TestClock and runChild. A test reaches a helper here,
+        // never in another test's file, so a fix to one never crosses two lanes.
+        .target(
+            name: "TestSupport",
+            path: "Tests/TestSupport"
+        ),
+
+        // No test target depends on an executable target (scripts/checks/21-source-lints.sh):
+        // every test target links into one test bundle, and in a release build an
+        // executable's main then runs in place of the tests.
         .testTarget(
             name: "LexiconTests",
             dependencies: [
-                "LexiconDomain", "KeyInput", "AudioCapture", "Transcription", "Cleanup", "WordStore", "History",
-                "AppText", "Jev", "LexiconCore", "LexiconUI", "TestHooks", "LexiconEval",
+                "AppText",
+                "AudioCapture",
+                "Cleanup",
+                "History",
+                "Jev",
+                "KeyInput",
+                "LexiconCore",
+                "LexiconDomain",
+                "LexiconUI",
+                "TestHooks",
+                "TestSupport",
+                "Transcription",
+                "WordStore",
+            ]
+        ),
+
+        // lexicon-eval's own tests.
+        .testTarget(
+            name: "LexiconEvalTests",
+            dependencies: [
+                "LexiconCore",
+                "LexiconDomain",
+                "LexiconEval",
+                "TestSupport",
+                "WordStore",
             ]
         ),
     ],

@@ -30,7 +30,7 @@ private actor ChangingTranscriber: LocalTranscriber {
 
 private func system(hearing texts: String?...) throws -> HeadlessSystem {
     try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
-                            local: ChangingTranscriber(texts))
+                            local: ChangingTranscriber(texts), clock: TestClock())
 }
 
 private func wav() throws -> URL {
