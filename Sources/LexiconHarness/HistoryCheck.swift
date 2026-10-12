@@ -17,7 +17,7 @@ enum HistoryCheck {
         try AX.start()
         let app = try await DevApp.launch()
         let pid = app.status.pid
-        let before = try footprint(pid)
+        let before = try await footprint(pid)
 
         var times: [Duration] = []
         for _ in 0..<runs {
@@ -30,13 +30,13 @@ enum HistoryCheck {
         ok("History opened \(runs) times: menu item to first rows p50 \(ms(sorted[runs / 2])) ms, p95 \(ms(sorted[Int((Double(runs) * 0.95).rounded(.up)) - 1])) ms")
 
         let (window, table, _) = try await open(app)
-        let open = try footprint(pid)
+        let open = try await footprint(pid)
         do { try await copyNewest(table) } catch { print("FAIL  copy: \(error)") }
         try await scrollToTheEnd(window: window, table: table)
         if let word { try await search(word, window: window, table: table) }
         try await close(window, app)
         try await Task.sleep(for: .seconds(2))
-        let after = try footprint(pid)
+        let after = try await footprint(pid)
         ok("footprint: \(mib(before)) before opening, \(mib(open)) open, \(mib(after)) after closing")
     }
 
@@ -168,25 +168,18 @@ enum HistoryCheck {
     }
 
     static func poll<T>(_ what: String, every interval: Duration = .milliseconds(20), within limit: Duration = .seconds(5),
-                        _ probe: () -> T?) async throws -> T {
+                        _ probe: () async throws -> T?) async throws -> T {
         let deadline = ContinuousClock.now + limit
         while ContinuousClock.now < deadline {
-            if let found = probe() { return found }
+            if let found = try await probe() { return found }
             try await Task.sleep(for: interval)
         }
         throw HarnessError("timed out waiting for \(what)")
     }
 
     /// The process's physical footprint in bytes, from `footprint`.
-    static func footprint(_ pid: pid_t) throws -> Int {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(filePath: "/usr/bin/footprint")
-        process.arguments = ["-f", "bytes", String(pid)]
-        process.standardOutput = output
-        try process.run()
-        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
+    static func footprint(_ pid: pid_t) async throws -> Int {
+        let (_, text) = try await runChild("/usr/bin/footprint", ["-f", "bytes", String(pid)])
         guard let match = text.firstMatch(of: /Footprint: (\d+) B/), let bytes = Int(match.1) else {
             throw HarnessError("cannot read the footprint of pid \(pid)")
         }

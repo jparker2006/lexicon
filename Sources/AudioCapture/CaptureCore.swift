@@ -47,6 +47,10 @@ final class CaptureCore: @unchecked Sendable {
     /// Audio kept after fn-up. Set by `finish` on the writer queue; read only
     /// after `stop` returned, which orders it after the write.
     private(set) var tailLength: Duration?
+    #if DEBUG
+    /// Every frame read as zero (the `mic zeros` test hook). Set before `begin`.
+    var silenced = false
+    #endif
 
     init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, startedAt: HostTime,
           onLevel: @escaping @Sendable (AudioLevel) -> Void) {
@@ -220,6 +224,9 @@ final class CaptureCore: @unchecked Sendable {
         while true {
             let count = segment.ring.read(into: UnsafeMutableBufferPointer(start: input.floatChannelData![0], count: capacity))
             guard count > 0 else { return }
+            #if DEBUG
+            if silenced { input.floatChannelData![0].update(repeating: 0, count: count) }
+            #endif
             input.frameLength = AVAudioFrameCount(count)
             resampler.convert(emit: emit)
         }
