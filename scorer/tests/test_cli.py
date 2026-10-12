@@ -55,7 +55,14 @@ class Cli(unittest.TestCase):
         self.assertEqual(out["totals"]["wer"], 0.0)
         self.assertEqual(out["totals"]["term_error_rate"], 0.75)
         self.assertEqual(out["totals"]["term_false_alarms"], 1)
-        self.assertEqual(out["entries"][1]["false_alarm_terms"], ["Lexicon"])
+        self.assertEqual(out["entries"][1]["term_false_alarms"], 1)
+
+    def test_score_prints_term_counts_never_the_terms(self):
+        out = run("score", "--gold", self.gold, "--run", self.b, "--terms", self.terms)
+        text = json.dumps(out)
+        for term in ("Supabase", "kubectl", "useEffect", "App.tsx", "Lexicon"):
+            self.assertNotIn(term, text)
+        self.assertEqual([e["term_misses"] for e in out["entries"]], [3, 0])
 
     def test_compare_is_reproducible(self):
         args = ("compare", "--gold", self.gold, "--run-a", self.a, "--run-b", self.b,
@@ -87,19 +94,18 @@ class Cli(unittest.TestCase):
     def test_lexicon_file_may_start_with_a_bom(self):
         terms = write(Path(self.tmp.name), "bom.txt", "\ufeffLexicon\n")
         out = run("score", "--gold", self.gold, "--run", self.b, "--terms", terms)
-        self.assertEqual(out["entries"][1]["false_alarm_terms"], ["Lexicon"])
+        self.assertEqual(out["entries"][1]["term_false_alarms"], 1)
 
     def test_a_dictation_missing_from_the_run_fails(self):
         short = write(Path(self.tmp.name), "short.jsonl", RUN_A[:1])
         with self.assertRaises(SystemExit):
             run("score", "--gold", self.gold, "--run", short)
 
-    def test_gold_still_awaiting_review_is_never_scored(self):
+    def test_gold_still_awaiting_review_is_left_out_with_its_session(self):
         # A Test set entry the two speech models disagreed on holds only a draft
         # until Jake reviews it (#50, #51); scoring it would favor one model.
         gold = write(Path(self.tmp.name), "draft.jsonl", [{**GOLD[0], "gold": "agreed"}, {**GOLD[1], "gold": "review"}])
-        with self.assertRaises(SystemExit):
-            run("score", "--gold", gold, "--run", self.a)
+        self.assertEqual(run("score", "--gold", gold, "--run", self.a)["totals"]["entries"], 1)
         reviewed = write(Path(self.tmp.name), "reviewed.jsonl", [{**GOLD[0], "gold": "agreed"}, {**GOLD[1], "gold": "reviewed"}])
         self.assertEqual(run("score", "--gold", reviewed, "--run", self.a)["totals"]["entries"], 2)
 
