@@ -665,6 +665,10 @@ let rejectedModelOutputs: [Pair] = [
     #expect(guarded("It's Postgres but faster. I like it.", "It's like Postgres but faster. I like it.")
         == .droppedContentWord)
     #expect(guarded("It takes eighty. I like eighty.", "It takes, like, eighty. I like eighty.") == .droppedContentWord)
+    #expect(guarded("It's $5 more. I like it.", "It's like $5 more. I like it.") == .droppedContentWord)
+    #expect(guarded("It's S3 but cheaper. I like it.", "It's like S3 but cheaper. I like it.") == .droppedContentWord)
+    #expect(guarded("It's gstack, really. I like it.", "It's like gstack, really. I like it.", rules: gstack)
+        == .droppedContentWord)
     // The rules drop an "uh" inside a spoken number, so the AI may too.
     #expect(guarded("Call five oh oh seven.", "Call five uh oh oh seven.") == nil)
     // A "like" that ends its sentence hedges nothing in the next one.

@@ -119,6 +119,47 @@ enum Fillers {
             .joined(separator: "\n")
     }
 
+    /// The fillers the rules-only text keeps as meaning, keyed as `StructuralCheck` reads
+    /// text: "uh huh" for a sound of an interjection, "like 80" for a "like" that is a hedge
+    /// (set off by a comma) or comes before a number, a name or a Term. AI cleanup may not
+    /// drop these. `rulesOnly` is `pass`'s output; `rules`, the RuleSet it used.
+    static func heldPairs(in rulesOnly: String, rules: RuleSet) -> [String: Int] {
+        var held: [String: Int] = [:]
+        for line in rulesOnly.split(whereSeparator: \.isNewline) {
+            let tokens = line.split(whereSeparator: \.isWhitespace).map(Token.init)
+            for (i, token) in tokens.enumerated() {
+                if token.word == "like", let j = likeIndex(tokens, at: i),
+                   token.trailing == "," || isEstimate(tokens[j].word) || tokens[j].isName
+                    || rules.isWritten(tokens[j].text),
+                   let object = guardWord(tokens, at: j) {
+                    held["like " + object, default: 0] += 1
+                }
+                let parts = token.word.split(separator: "-").map(String.init)
+                if parts.count == 2, interjections.contains(parts.joined(separator: " ")) {  // "uh-huh"
+                    held[parts.joined(separator: " "), default: 0] += 1
+                } else if token.isHardFiller, i + 1 < tokens.count, token.trailing.isEmpty,
+                          interjections.contains(token.word + " " + tokens[i + 1].word) {
+                    held[token.word + " " + tokens[i + 1].word, default: 0] += 1
+                } else if token.isHardFiller, i > 0, tokens[i - 1].trailing.isEmpty,
+                          interjections.contains(tokens[i - 1].word + " " + token.word) {
+                    held[tokens[i - 1].word + " " + token.word, default: 0] += 1
+                }
+            }
+        }
+        return held
+    }
+
+    /// The word at `j` as `StructuralCheck` reads it: a spoken number run as its digits
+    /// ("twenty six" is "26"), anything else lowercased up to a hyphen ("pre-commit" is "pre").
+    private static func guardWord(_ tokens: [Token], at j: Int) -> String? {
+        var end = j + 1
+        if tokens[j].isNumber {
+            while end < tokens.count, tokens[end - 1].trailing.isEmpty, tokens[end].isNumber { end += 1 }
+        }
+        let piece = tokens[j..<end].map { String($0.text) }.joined(separator: " ")
+        return StructuralCheck.canonical(StructuralCheck.tokens(piece)).first?.word
+    }
+
     /// The filler pass over one line. A line always starts a sentence;
     /// `dictationStart`: no earlier line kept anything.
     static func clean(_ line: Substring, dictationStart: Bool, rules: RuleSet) -> String {
@@ -265,14 +306,17 @@ enum Fillers {
         return nil
     }
 
-    private static func likeObject(_ tokens: [Token], at i: Int) -> Token? {
+    private static func likeIndex(_ tokens: [Token], at i: Int) -> Int? {
         likeObject(count: tokens.count, at: i, isFiller: { tokens[$0].isHardFiller },
                    endsSentence: { tokens[$0].endsSentence },
                    youKnow: { j in
                        tokens[j].word == "you" && j + 1 < tokens.count && tokens[j + 1].word == "know"
                            && tokens[j + 1].trailing.hasPrefix(",") ? 2 : 0
                    })
-            .map { tokens[$0] }
+    }
+
+    private static func likeObject(_ tokens: [Token], at i: Int) -> Token? {
+        likeIndex(tokens, at: i).map { tokens[$0] }
     }
 
     /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written, the

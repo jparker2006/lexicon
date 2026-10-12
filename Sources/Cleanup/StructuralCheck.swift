@@ -81,16 +81,10 @@ enum StructuralCheck {
         // sound of "uh huh" and each "like" with the word it hedges ("like 80") in the
         // rules-only text appears as often in the candidate, so another "like" is no excuse.
         // A pair the rules kept counts at most as often as it stands outside a retraction.
-        let rulesOnlyText = Fillers.pass(refText, rules: rules)
-        let rulesOnly = canonical(tokens(rulesOnlyText))
-        let names = capitalizedWords(rulesOnlyText)
-        var rulesKept: [String: Int] = [:]
+        let rulesKept = Fillers.heldPairs(in: Fillers.pass(refText, rules: rules), rules: rules)
         var standing: [String: Int] = [:]
-        for k in rulesOnly.indices {
-            if let key = meaningKey(rulesOnly, k, names: names) { rulesKept[key, default: 0] += 1 }
-        }
         for k in ref.indices where !retracted.contains(k) {
-            if let key = meaningKey(ref, k, names: names) { standing[key, default: 0] += 1 }
+            if let key = meaningKey(ref, k) { standing[key, default: 0] += 1 }
         }
         for (key, count) in rulesKept
         where out.indices.filter({ meaningKey(out, $0) == key }).count < min(count, standing[key] ?? 0) {
@@ -461,21 +455,12 @@ enum StructuralCheck {
         return result
     }
 
-    /// A filler as the rules keep it for its meaning, to find again in the output:
-    /// "uh huh" for a sound of an interjection, "like 80" for a "like" and the word
-    /// after it. nil for any other word, and for "uh" before an "oh" that is a zero
-    /// inside a number ("5 uh oh 7").
-    /// With `names`, on the text the rules kept: a "like" holds the word after it when set off
-    /// by a comma (a hedge the rules kept), or when that word is a number or a name ("like
-    /// Postgres"); a verb or comparison before anything else ("I like the idea") may be
-    /// reworded around. Without, on the candidate: any "like" and the word after it.
-    static func meaningKey(_ t: [Token], _ k: Int, names: Set<String>? = nil) -> String? {
+    /// The key `Fillers.heldPairs` gives a filler, read on these tokens: "uh huh" for a sound
+    /// of an interjection, "like 80" for any "like" and the word after it. nil for any other
+    /// word, and for "uh" before an "oh" that is a zero inside a number ("5 uh oh 7").
+    static func meaningKey(_ t: [Token], _ k: Int) -> String? {
         let word = t[k].word
-        if word == "like" {
-            guard let object = likeObject(t, k)?.word else { return nil }
-            if let names, t[k].mark != ",", !isNumber(object), !names.contains(object) { return nil }
-            return "like " + object
-        }
+        if word == "like" { return likeObject(t, k).map { "like " + $0.word } }
         guard Fillers.hard.contains(word) else { return nil }
         if t[k].mark == nil, k + 1 < t.count, Fillers.interjections.contains(word + " " + t[k + 1].word) {
             let inNumber = Fillers.soundInNumber(count: t.count, at: k, word: { t[$0].word },
@@ -496,24 +481,6 @@ enum StructuralCheck {
                            endsSentence: { endsSentence(t[$0]) },
                            youKnow: { t[$0].word == "you_know" && t[$0].mark == "," ? 1 : 0 })
             .map { t[$0] }
-    }
-
-    /// Lowercased words written with a capital past a sentence's first word ("Postgres",
-    /// "useAuth"): names, as far as lowercased tokens can tell. "I" and its forms name nobody.
-    static func capitalizedWords(_ text: String) -> Set<String> {
-        var names = Set<String>()
-        var sentenceStart = true
-        for piece in text.split(whereSeparator: \.isWhitespace) {
-            var word = piece
-            while let c = word.first, !c.isLetter { word = word.dropFirst() }
-            while let c = word.last, !c.isLetter { word = word.dropLast() }
-            if word.dropFirst().contains(where: \.isUppercase) || !sentenceStart && word.first?.isUppercase == true,
-               !Fillers.firstPerson.contains(word.lowercased()) {
-                names.insert(word.lowercased())
-            }
-            sentenceStart = piece.last.map { ".!?".contains($0) } ?? false
-        }
-        return names
     }
 
     /// Where the rules would also drop it: "like" before a comma or a sentence
