@@ -126,7 +126,7 @@ let package = Package(
             ]
         ),
 
-        // Hand fix detection, Re-speak fix, close calls, Rule proposals.
+        // Hand fix detection, Re-speak fix, Rule proposals.
         .target(
             name: "Fixes",
             dependencies: [
@@ -243,6 +243,7 @@ let package = Package(
                 "AppText",
                 "AudioCapture",
                 "Cleanup",
+                "Fixes",
                 "History",
                 "Jev",
                 "KeyInput",

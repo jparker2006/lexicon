@@ -209,6 +209,11 @@ Jake: as item 57. Decided: a package, import or file name in his repos keeps the
 
 Jake: as item 57. #58 spikes the registered hotkey and falls back to (b) only if it fails; #62 uses the same approach. [ADR 0004](adr/0004-listen-only-fn-tap.md).
 
+**78. In Private mode, a Re-speak with no close match changes nothing.** Spec: Private mode "picks by sound alone". Built (#82): by sound alone, the span that sounds most alike is replaced only when its distance from what Jake said (0 the same, 1 nothing alike; mostly sound, partly spelling) is 0.5 or less; otherwise nothing changes and the pill says "no match", as when Jev says none.
+> Jake: decide what a Re-speak does in Private mode when nothing in your last Dictation sounds like the word you said again. I recommend it changes nothing and the pill says "no match", the same as when Jev says none. [...] Reply "yes" to take that.
+
+Jake, 2026-10-12 15:52:33Z: "yes". Recorded on [#82](https://github.com/jparker2006/lexicon/issues/82#issuecomment-6127755452). Asked as item 76; numbered 78 because open PRs took 76 and 77 first. The 0.5 limit and Jev's 0.75 are starting values, tuned on the Test set once Jake says yes to the paid Jev calls. Proposed, from #82's builder and not asked: the same sound-only rule when Jev can't answer outside Private mode (offline, no key, past its 250 ms budget, an error); Jev's top answer "none", at any probability, changes nothing; choices come only when Jev's top answer is a span under 0.75, up to 3 of the spans Jev ranked, never "none"; Jev is shown the 4 spans that sound most alike (#81's limit); the finder ranks by sound and spelling only, with no weight for Lexicon Terms, since the re-spoken text has already been through Cleanup with them.
+
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
 ### Proposed: built on an agent's default, never asked

@@ -101,10 +101,6 @@ public actor Lexicon {
         return counts
     }
 
-    /// Spans of `text` that sound like a Lexicon term with no Rule covering them.
-    /// Feeds Re-speak candidate search (M4).
-    public func closeCalls(in text: String) -> [CloseCall] { fatalError("not implemented") }
-
     /// `CodeTerms` hands over the current repo's code Terms whenever they change.
     func useCodeTerms(_ terms: [Term]) { codeTerms = terms }
 
@@ -154,16 +150,6 @@ public struct DictationWords: Sendable {
         self.terms = terms
         self.rules = rules
     }
-}
-
-public struct CloseCall: Sendable, Hashable {
-    /// UTF-16 offsets into the text that was searched.
-    public let location: Int
-    public let length: Int
-    public let heard: String
-    public let term: Term
-    /// 0 = identical sound. Threshold is tuned on the Test set.
-    public let distance: Double
 }
 
 enum LexiconSchema {
