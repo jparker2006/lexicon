@@ -42,7 +42,7 @@ function fixtureRepo(name, files) {
     fs.appendFileSync(path.join(dir, f), 'change\n')
   }
   git(dir, 'add', '-A')
-  git(dir, 'commit', '-q', '-m', 'change')
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'change')
   return { dir, sha: git(dir, 'rev-parse', 'HEAD') }
 }
 
@@ -123,12 +123,24 @@ test('a complete run is stamped with its sha', async () => {
 test('a blast radius that dies is INCOMPLETE, not a crash', async () => {
   const { dir, sha } = fixtureRepo('blast', ['Sources/History/a.swift'])
   const r = await run(dir, { issue: 1, sha, mode: 'reviewer' }, (p, o) => {
-    if (o.label === 'blast radius') throw new Error('helper died')
+    if (o.label.startsWith('blast radius')) throw new Error('helper died')
     return CLEAN
   })
   assert(r.result.complete === false, 'complete should be false')
   assert(/INCOMPLETE: .*blast radius/.test(r.result.markdown), 'the markdown should name blast radius as incomplete')
   assert(r.result.markdown.includes('| Verdict |'), 'the table should still be there')
+})
+
+test('a blast radius that dies once is retried', async () => {
+  const { dir, sha } = fixtureRepo('blast-retry', ['Sources/History/a.swift'])
+  let died = false
+  const r = await run(dir, { issue: 1, sha, mode: 'reviewer' }, (p, o) => {
+    if (!o.label.startsWith('blast radius')) return CLEAN
+    if (!died) { died = true; throw new Error('helper died') }
+    return { safetyFact: 'fact', proofCommand: 'true', proofResult: 'ok', findings: [] }
+  })
+  assert(r.result.complete === true, `complete should be true; ${r.result.markdown.match(/INCOMPLETE.*/)}`)
+  assert(r.result.markdown.includes('Blast radius (main): fact'), 'the retried blast radius should be reported')
 })
 
 test('a string risks is one lens, not one per character', async () => {
@@ -187,6 +199,15 @@ test('a head that does not descend from the sha leaves the run incomplete', asyn
   assert(r.result.complete === false, 'complete should be false')
 })
 
+test('an empty diff with a head that does not descend is not complete', async () => {
+  const { dir, sha } = fixtureRepo('empty-diverged', [])
+  git(dir, 'checkout', '-q', '-b', 'other', 'main')
+  const other = commit(dir, 'Sources/Foo/c.swift')
+  const r = await run(dir, { issue: 1, sha, head: other })
+  assert(r.result.markdown.includes('Nothing to review'), 'should take the nothing-to-review path')
+  assert(r.result.complete === false, 'complete should be false')
+})
+
 test('the Helpers line counts a helper that died and was retried', async () => {
   const { dir, sha } = fixtureRepo('retried', ['Sources/Foo/a.swift'])
   let died = false
@@ -215,6 +236,25 @@ test("the verifier's test brief carries the Tests rules", async () => {
   })
   const p = r.calls.find(c => c.agentType === 'verifier').prompt
   for (const s of ['highest public seam', 'never reads source files', 'for the reason this finding names']) assert(p.includes(s), `the brief should say "${s}"`)
+})
+
+// The helper briefs in .claude/agents carry the rules the #174 review found missing.
+const brief = name => fs.readFileSync(path.join(repoRoot, '.claude/agents', name + '.md'), 'utf8')
+
+test('live-prep is read-only and bans installs and launches', async () => {
+  const b = brief('live-prep')
+  for (const s of ['Read only', 'scripts/install.sh', '`open`', 'an app binary']) assert(b.includes(s), `live-prep.md should say ${s}`)
+})
+
+test("the verifier's own brief carries the Tests rules", async () => {
+  const b = brief('verifier')
+  for (const s of ['highest public seam', 'never reads source files', 'for the reason the finding names']) assert(b.includes(s), `verifier.md should say "${s}"`)
+})
+
+test('bench-runner vets its table with the benchmark checklist', async () => {
+  const b = brief('bench-runner')
+  assert(b.includes('/pstack:benchmark-checklist'), 'bench-runner.md should name /pstack:benchmark-checklist')
+  assert(/^tools: .*\bSkill\b/m.test(b), 'bench-runner needs the Skill tool to run it')
 })
 
 // review-map.json: each path reaches the lenses and tier the #174 review said it should.
