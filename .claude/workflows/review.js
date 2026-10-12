@@ -197,7 +197,11 @@ try {
   throw new Error('snapshot failed: ' + (prep ? prep.out : 'no reply'))
 }
 if (!info.main && !info.later) {
-  return { markdown: `## Review\n\nNothing to review: no change since \`${a.reviewed || a.sha}\` beyond clean merges of main.`, reviewedSha: info.sha, complete: true, confirmed: [], rows: [], snapshots: [] }
+  const what = a.reviewed ? `nothing since \`${a.reviewed.slice(0, 7)}\` but clean merges of main` : 'the diff is empty'
+  return {
+    markdown: `## Review\n\nReviewed sha: \`${info.sha.slice(0, 7)}\`. Nothing to review: ${what}.\n\nHelpers: 1 prep (haiku low).`,
+    reviewedSha: info.sha, complete: true, confirmed: [], rows: [], snapshots: [],
+  }
 }
 
 function glob(pattern) {
@@ -290,7 +294,7 @@ function blastPrompt(pass) {
 
 ${where(pass)}
 
-Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a Swift test filter, or the headless pipeline on a WAV you synthesize. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/, no network calls, and run no repo script that touches Jake's data (scripts/test-set.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set). Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
+Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a Swift test filter, or the headless pipeline on a WAV you synthesize. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/ or any key, no network calls, and run no repo script that touches Jake's data (scripts/test-set.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set). Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
 }
 
 const rows = []
