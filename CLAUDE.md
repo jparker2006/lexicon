@@ -28,7 +28,7 @@ Jake wants Haiku used heavily, where M0 showed the yield: review, verification a
 
 ### How many, by ticket type
 
-The only sizing table; workflow.md and implement-ticket point here. The counts include the review Workflow's agents, whose Helpers line measures them.
+The only sizing table: other docs point here instead of restating it. The counts include the review Workflow's agents, whose Helpers line measures them.
 
 | Ticket | Helpers in all |
 |---|---|

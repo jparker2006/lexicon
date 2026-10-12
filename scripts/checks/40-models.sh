@@ -24,6 +24,8 @@ for file in .claude/agents/*.md; do
     echo "$rows" | grep -q "^$name " || say "$file: no row for $name in CLAUDE.md's helper table; add one"
 done
 
+# The loop runs in a subshell, so it reports failures on stdout; grep -c reads them
+# all, where grep -q would stop the loop at the first.
 echo "$rows" | while read -r name model effort turns; do
     [ -n "$name" ] || continue
     file=.claude/agents/$name.md
@@ -42,7 +44,7 @@ echo "$rows" | while read -r name model effort turns; do
             echo fail
         fi
     done
-done | grep -q fail && fail=1
+done | grep -c fail > /dev/null && fail=1
 
 installed=$HOME/.claude/pstack-models.md
 if [ "${CI:-}" = true ] && [ ! -e "$installed" ]; then

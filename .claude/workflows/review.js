@@ -161,6 +161,9 @@ const delta = (from, to) => {
   const commits = git('rev-list', '--first-parent', '--no-merges', '--reverse', from + '..' + to).split('\\n').filter(Boolean)
   const files = [...new Set(commits.flatMap(c => git('diff-tree', '--no-commit-id', '--name-only', '-r', c).split('\\n')).filter(Boolean))].sort()
   const merges = git('rev-list', '--first-parent', '--merges', from + '..' + to).split('\\n').filter(Boolean)
+  // A merge's own changes are its conflict resolutions: files that differ from every parent.
+  for (const m of merges) for (const f of git('diff-tree', '--cc', '--no-commit-id', '--name-only', '-r', m).split('\\n')) if (f && !files.includes(f)) files.push(f)
+  files.sort()
   return pass(from, to, files, commits.map(c => git('log', '-1', '--format=%h %s', c)).concat(merges.map(m => git('log', '-1', '--format=%h %s (merge)', m))))
 }
 let main = null, later = null
@@ -193,7 +196,9 @@ try {
 } catch {
   throw new Error('snapshot failed: ' + (prep ? prep.out : 'no reply'))
 }
-if (!info.main && !info.later) throw new Error('nothing to review: the diff is empty')
+if (!info.main && !info.later) {
+  return { markdown: `## Review\n\nNothing to review: no change since \`${a.reviewed || a.sha}\` beyond clean merges of main.`, reviewedSha: info.sha, complete: true, confirmed: [], rows: [], snapshots: [] }
+}
 
 function glob(pattern) {
   let re = ''
@@ -285,7 +290,7 @@ function blastPrompt(pass) {
 
 ${where(pass)}
 
-Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a test filter, a headless pipeline run on a WAV, or a script. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/, no network calls, and run no builds beyond one test filter. Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
+Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a Swift test filter, or the headless pipeline on a WAV you synthesize. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/, no network calls, and run no repo script that touches Jake's data (scripts/test-set.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set). Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
 }
 
 const rows = []
@@ -348,6 +353,7 @@ for (const pass of passes) {
 // REFUTED and UNSURE findings stay in the table but don't count: only a test that fails
 // first can bring one back. A citation that doesn't hold turns a finding into a note.
 const cell = s => String(s == null ? '' : s).replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ')
+// A given finding (args.findings) comes from outside the review and needs no citation.
 const holds = r => r.seeded || Boolean(r.v && r.v.citationHolds)
 // Lenses often land on the same line: one row per path:line and verdict, its lenses joined.
 const merged = []

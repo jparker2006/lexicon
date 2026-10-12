@@ -15,6 +15,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // Claude Code's SKILL.md keys (code.claude.com/docs/en/skills).
 const ALLOWED = new Set([
@@ -30,7 +31,7 @@ const MAX_LISTED = 1536
 const argv = process.argv.slice(2)
 const installed = argv.includes('--installed')
 const roots = argv.filter(a => a !== '--installed')
-if (!roots.length) roots.push(path.join(path.dirname(new URL(import.meta.url).pathname), '..', '.claude', 'skills'))
+if (!roots.length) roots.push(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.claude', 'skills'))
 
 function frontmatter(text) {
   const lines = text.split('\n')
@@ -46,8 +47,10 @@ function frontmatter(text) {
       const block = []
       while (i + 1 < end && /^\s+\S|^\s*$/.test(lines[i + 1])) block.push(lines[++i].trim())
       value = block.join(value.startsWith('>') ? ' ' : '\n').trim()
-    } else if (/^(["']).*\1$/.test(value)) {
-      value = value.slice(1, -1)
+    } else if (value) {
+      // A plain value may wrap onto indented lines; YAML folds them with spaces.
+      while (i + 1 < end && /^\s+\S/.test(lines[i + 1])) value += ' ' + lines[++i].trim()
+      if (/^(["']).*\1$/.test(value)) value = value.slice(1, -1)
     }
     keys[m[1]] = value
   }
