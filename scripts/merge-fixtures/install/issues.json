@@ -30,9 +30,9 @@
     ]
   },
   {
-    "number": 46,
-    "title": "M0: Headless Dictation through the Conductor",
-    "state": "CLOSED",
+    "number": 63,
+    "title": "M1: History window: rows, copy and search",
+    "state": "OPEN",
     "body": "",
     "labels": [],
     "comments": [
@@ -41,35 +41,14 @@
           "login": "jparker2006"
         },
         "body": "Building: taking this (Claude)",
-        "createdAt": "2026-10-11T08:38:31Z"
+        "createdAt": "2026-10-11T09:39:21Z"
       },
       {
         "author": {
           "login": "jparker2006"
         },
-        "body": "Ready for review: PR #102, CI pending",
-        "createdAt": "2026-10-11T09:01:29Z"
-      },
-      {
-        "author": {
-          "login": "jparker2006"
-        },
-        "body": "Ready for review: PR #102, CI pending",
-        "createdAt": "2026-10-11T09:19:23Z"
-      },
-      {
-        "author": {
-          "login": "jparker2006"
-        },
-        "body": "Ready for review: PR #102, CI pending",
-        "createdAt": "2026-10-11T09:23:11Z"
-      },
-      {
-        "author": {
-          "login": "jparker2006"
-        },
-        "body": "Closed as plumbing on merge (PR #102, e3aad6c).",
-        "createdAt": "2026-10-11T09:28:03Z"
+        "body": "Ready for review: PR #112. Live-app lane released.",
+        "createdAt": "2026-10-11T11:22:28Z"
       }
     ]
   },

@@ -7,10 +7,11 @@
     "body": "Refs #45"
   },
   {
-    "number": 102,
+    "number": 112,
     "state": "MERGED",
-    "headRefName": "claude/issue-46",
-    "title": "M0: Headless Dictation through the Conductor (#46)",
-    "body": "Refs #46"
+    "headRefName": "claude/issue-63",
+    "title": "M1: History window: rows, copy and search (#63)",
+    "body": "Refs #63\n\nTry (about 3 min): open History, click a row (it copies), play, pin, Retry.",
+    "added": "the try step the orchestrator wrote for #63 on the Try list (#178)"
   }
 ]

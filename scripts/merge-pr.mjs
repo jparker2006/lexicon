@@ -9,9 +9,9 @@
 // Changed from Glox on purpose: a PR behind main is not refused. The script
 // runs `gh pr update-branch` on this PR only, just before merging, and waits
 // for CI on that exact new head, so an approved PR never waits on a builder's
-// merge round (M0: 84 main merges for 42 PRs). The update is GitHub's own
-// merge of main into the reviewed head, so it needs no new review; a conflict
-// goes back to the builder as a PR comment instead.
+// merge round. The update is GitHub's own merge of main into the reviewed head,
+// with nothing resolved by hand, and that head merges only once CI compiled and
+// tested it; a conflict goes back to the builder as a PR comment instead.
 //
 // Before anything moves, every gate is read and every refusal printed at once:
 //   - the verdict: the Reviewer's newest verdict on the PR names the reviewed
@@ -29,7 +29,7 @@
 //   - critical path: no other merge while a green, Ready critical-path PR
 //     waits, and none that shares files with a held one (scripts/lanes.sh).
 // Then it updates and waits, squash-merges, deletes the branch, closes the
-// Refs issues (every ticket closes at merge, #88 Q11) and removes the builder's
+// Refs issues (every ticket closes at merge) and removes the builder's
 // worktree and .build, unless it is dirty or a process still runs in it.
 //
 // Exit 0 merged, 1 refused or unknown, 2 bad arguments or GitHub unreadable.
@@ -119,12 +119,14 @@ export function needsOf(body) {
     text += ` ${line}`;
   }
   const parts = text.split(/(?:^|\s|-)(agent|hands-off|jake)\s*:\s*/i);
-  if (parts.length === 1) return { agent: text.trim(), jake: '' };
-  const needs = { agent: '', jake: '' };
-  for (let i = 1; i < parts.length; i += 2) needs[parts[i].toLowerCase() === 'jake' ? 'jake' : 'agent'] += parts[i + 1].replace(/[\s-]+$/, '').trim();
-  return needs;
+  if (parts.length === 1) return { agent: none(text.trim()) ? '' : text.trim(), jake: '' };
+  const needs = { agent: [], jake: [] };
+  for (let i = 1; i < parts.length; i += 2) needs[parts[i].toLowerCase() === 'jake' ? 'jake' : 'agent'].push(parts[i + 1].replace(/[\s-]+$/, '').trim());
+  // "agent: none. hands-off: X" still lists X.
+  const listed = (items) => items.filter((t) => !none(t)).join('; ');
+  return { agent: listed(needs.agent), jake: listed(needs.jake) };
 }
-const none = (text) => !text || /^none\b/i.test(text);
+function none(text) { return !text || /^none\b/i.test(text); }
 // Quoted output (`FAIL  timed out ...`) is evidence, not the verdict.
 const failed = (body) => /\bfail\b/i.test(String(body).replace(/`[^`\n]*`/g, ''));
 
@@ -144,7 +146,7 @@ export function liveGate(issue, branch, sha, owner) {
     if (!answered) reasons.push(`#${issue.number}'s "Live checks request: ${asked}" (${comments[requestAt].createdAt}) has no result yet: wait for it`);
   }
   const needs = needsOf(issue.body);
-  const live = needs ? !none(needs.agent) : comments.some((c) => /Live checks/.test(lines(c.body)[0]));
+  const live = needs ? Boolean(needs.agent) : comments.some((c) => /Live checks/.test(lines(c.body)[0]));
   if (live) {
     const results = comments.map((c) => ({ c, m: status(c.body).match(/^Live checks: (\S+) @ ([^(]*)/) }))
       .filter(({ m }) => m && m[1] === branch)
@@ -157,7 +159,7 @@ export function liveGate(issue, branch, sha, owner) {
       reasons.push(`#${issue.number}'s Live checks result at ${short(sha)} has a FAIL`);
     }
   }
-  return { issue: issue.number, reasons, jake: needs && !none(needs.jake) ? needs.jake : '' };
+  return { issue: issue.number, reasons, jake: needs?.jake ?? '' };
 }
 
 /** review-map.json's patterns: ** crosses folders, * stays in one, no wildcard is one exact file. */

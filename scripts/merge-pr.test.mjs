@@ -139,8 +139,18 @@ test('live gate: a queued request blocks the merge until its result is posted (#
   // (review fixes to live-lane.sh, then main), so 5ef22b1 itself was never live-checked.
   const answered = liveGate({ ...c.issue, comments: [...c.issue.comments, c.result] }, c.branch, c.sha, OWNER).reasons;
   assert.deepEqual(answered, ['#157 needs Live checks, and no "Live checks: claude/issue-157 @ 5ef22b1" result covers the reviewed head (results at efd2ab4)']);
+  // A re-run on the head itself, as Live checks posts it, lets the merge through.
+  const rerun = { author: { login: OWNER }, createdAt: '2026-10-12T06:30:00Z', body: 'Live checks: claude/issue-157 @ 5ef22b1\n\n| # | Item | Result |\n|---|---|---|\n| 1a | queue | **Pass.** |' };
+  assert.deepEqual(liveGate({ ...c.issue, comments: [...c.issue.comments, c.result, rerun] }, c.branch, c.sha, OWNER).reasons, []);
   const later = cases['176'];
   assert.match(liveGate(later.issue, later.branch, later.sha, OWNER).reasons[0], /^#175's "Live checks request: claude\/issue-157-live-findings @ 55dfaaf" .* has no result yet/);
+});
+
+test('live gate: hands-off items listed after an "agent: none" still need a result', () => {
+  const issue = { number: 1, body: '**Needs the Live checks session for:** agent: none. hands-off: paste into TextEdit. Jake: none.\n', comments: [] };
+  assert.equal(liveGate(issue, 'claude/issue-1', H599, OWNER).reasons.length, 1);
+  const neither = { number: 1, body: '**Needs the Live checks session for:** none.\n', comments: [] };
+  assert.deepEqual(liveGate(neither, 'claude/issue-1', H599, OWNER).reasons, []);
 });
 
 test("live gate: Jake's items are printed for the install, never a merge refusal (Q6)", () => {
@@ -350,36 +360,36 @@ test('run as a command: refused from a worktree checkout with no GitHub call; fr
   }
 });
 
-test('install.sh announce: two carried issues get one Installed comment each and a Try list entry; a rerun posts nothing', () => {
+test('install.sh announce: two carried issues get one Installed comment each, the one with a try step goes on the Try list; a rerun posts nothing', () => {
   const { dir, g } = repo();
   const gh = mkdtempSync(path.join(os.tmpdir(), 'install-gh-'));
   try {
     mkdirSync(path.join(dir, 'scripts'));
     cpSync(path.join(HERE, 'install.sh'), path.join(dir, 'scripts/install.sh'));
     g('add', '.');
-    // The real subjects of the merges the 10:05 install carried to #45 and #46.
+    // The real subjects of two main merges: #45's plumbing and #63's History window.
     g('commit', '-q', '-m', 'M0: Fix the flaky AudioCapture tests that race the wall clock (#103) (#106)');
     const previous = g('rev-parse', 'HEAD').trim();
     g('commit', '-q', '--allow-empty', '-m', 'M0: Test hooks and the Accessibility harness (#45) (#105)');
-    g('commit', '-q', '--allow-empty', '-m', 'M0: Headless Dictation through the Conductor (#46) (#102)');
+    g('commit', '-q', '--allow-empty', '-m', 'M1: History window: rows, copy and search (#63) (#112)');
     const installed = g('rev-parse', 'HEAD').trim();
     cpSync(path.join(FIXTURES, 'install'), gh, { recursive: true });
-    const env = { ...process.env, PATH: `${path.join(HERE, 'test-gh/bin')}:${process.env.PATH}`, GH_FIXTURES: gh, GH_LOG: path.join(gh, 'gh.log'), LEXICON_NOW: '2026-10-11T10:05:57Z' };
+    const env = { ...process.env, PATH: `${path.join(HERE, 'test-gh/bin')}:${process.env.PATH}`, GH_FIXTURES: gh, GH_LOG: path.join(gh, 'gh.log'), LEXICON_NOW: '2026-10-11T12:00:00Z' };
     const announce = () => spawnSync('sh', [path.join(dir, 'scripts/install.sh'), 'announce', installed, previous], { encoding: 'utf8', env });
 
     const first = announce();
     assert.equal(first.status, 0, first.stderr);
     const issues = JSON.parse(readFileSync(path.join(gh, 'issues.json'), 'utf8'));
     const sha7 = installed.slice(0, 7);
-    for (const n of [45, 46]) {
+    for (const n of [45, 63]) {
       const said = issues.find((i) => i.number === n).comments.filter((c) => c.body.startsWith(`Installed: ${sha7}`));
       assert.equal(said.length, 1, `#${n}`);
-      assert.equal(said[0].body, `Installed: ${sha7} (daily copy, ~/Applications/Lexicon.app). On the Try list: #178.`);
+      assert.equal(said[0].body, `Installed: ${sha7} (daily copy, ~/Applications/Lexicon.app). Try list: #178.`);
     }
     const tryList = issues.find((i) => i.number === 178).body;
-    assert.match(tryList, new RegExp(`\\n### Installed ${sha7} \\(\\d{4}-\\d\\d-\\d\\d\\)\\n- \\[ \\] #45 M0: Test hooks and the Accessibility harness\\n- \\[ \\] #46 M0: Headless Dictation through the Conductor$`));
-    assert.match(tryList, /Refs #88\n\n### Installed/, 'one blank line before the entry');
+    assert.match(tryList, new RegExp(`\\nRefs #88\\n\\n### Installed ${sha7} \\(\\d{4}-\\d\\d-\\d\\d\\)\\n- \\[ \\] #63 M1: History window: rows, copy and search \\(about 3 min\\): open History, click a row \\(it copies\\), play, pin, Retry\\.$`));
     assert.ok(tryList.startsWith('Things Jake can feel'), 'the earlier lines stay');
+    assert.match(first.stderr, /\(no try step: #45\)/);
 
     const comments = readFileSync(path.join(gh, 'gh.log'), 'utf8').split('\n').filter((l) => l.startsWith('gh issue comment')).length;
     const again = announce();
@@ -391,5 +401,24 @@ test('install.sh announce: two carried issues get one Installed comment each and
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(gh, { recursive: true, force: true });
+  }
+});
+
+test('install.sh installs only a clean main checkout, and refuses before it builds anything (#206)', () => {
+  const { dir, g } = repo();
+  try {
+    mkdirSync(path.join(dir, 'scripts'));
+    cpSync(path.join(HERE, 'install.sh'), path.join(dir, 'scripts/install.sh'));
+    g('add', '.');
+    g('commit', '-q', '-m', 'base');
+    // No bundle.sh or install-app.sh exists here: a refusal that came too late would fail on them instead.
+    const install = () => spawnSync('sh', [path.join(dir, 'scripts/install.sh')], { encoding: 'utf8' });
+    g('checkout', '-q', '-b', 'claude/issue-57');
+    assert.deepEqual([install().status, install().stderr], [1, 'install: the daily copy installs only main; this checkout is on claude/issue-57\n']);
+    g('checkout', '-q', 'main');
+    writeFileSync(path.join(dir, 'scripts/install.sh'), `${readFileSync(path.join(dir, 'scripts/install.sh'), 'utf8')}\n# an edit\n`);
+    assert.deepEqual([install().status, install().stderr], [1, 'install: uncommitted changes in Sources, Package.swift, Package.resolved or scripts; the daily copy installs only committed main\n']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
