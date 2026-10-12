@@ -24,12 +24,19 @@ struct SeamMerge: Sendable {
         caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
     }
 
-    /// The windows' tokens, in window order, merged as UnifiedAsrManager.decodedTokens does:
-    /// fold mergeChunks over the windows, sort by timestamp, then collapse seam duplicates.
-    /// Each window comes from `transcribeWithTimings`, which already sorted and collapsed
-    /// it, so a one-window clip is returned as it is: the one-shot path's tokens exactly.
-    func merge(_ windows: [[TokenWindow]]) -> [TokenWindow] {
-        if windows.count == 1 { return windows[0] }
+    /// The clip's text from its windows' raw tokens, in window order: the merge, then
+    /// FluidAudio's `Tokenizer.decode` (pieces joined, word marks to spaces, trimmed).
+    /// Text out, so a merged stream can never be merged and collapsed again.
+    func text(_ windows: [[TokenWindow]]) -> String {
+        merge(windows).compactMap { vocabulary[$0.token] }.joined()
+            .replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: " ")
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Merged as UnifiedAsrManager.decodedTokens does: fold mergeChunks over the windows,
+    /// sort by timestamp, then collapse seam duplicates once, one window or many. The
+    /// collapse is not idempotent, so each window must arrive raw (`WindowDecoder`).
+    private func merge(_ windows: [[TokenWindow]]) -> [TokenWindow] {
         var merged: [TokenWindow] = []
         for windowTokens in windows {
             merged = merged.isEmpty ? windowTokens : mergeChunks(merged, windowTokens)
