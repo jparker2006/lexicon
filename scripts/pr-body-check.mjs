@@ -16,8 +16,8 @@
 //   headings   Summary, Evidence, Merge Danger, Install, in that order
 //   door       **Door:** one-way or two-way
 //   blast      **Blast Radius:** one word from BLAST_RADIUS
-//   check      a closing line after Install, "Try (about N min): ..." (the form
-//              scripts/install.sh copies to Jake's Try list) or the older "Check: ...",
+//   check      a closing line after Install, "Try (about N min): ..." (the line
+//              Jake's Try list takes, #88 Q11) or the older "Check: ...",
 //              then at most one line of at most
 //              FOOTER_WORDS words: the footer a tool adds (the "Generated with" line)
 //   words      at most WORD_CAP words up to the closing line. A word is a token
@@ -103,7 +103,7 @@ export function checkBody({ body, files = [], commits = [], summary = null, modu
 
   if (!/^Refs #\d+$/.test(lines[0])) fail('refs', `the first line must be "Refs #N" alone, not "${lines[0].slice(0, 60)}"`)
 
-  if (CLOSING.test(text)) fail('closing', 'a closing keyword before an issue (such as "Fixes #12"); write Refs #N; the merge script closes the issue')
+  if (CLOSING.test(text)) fail('closing', 'a closing keyword before an issue (such as "Fixes #12"); write Refs #N; closing a ticket is the merge step\'s job (#88 Q11)')
   else {
     const bad = commits.find(c => CLOSING.test(c))
     if (bad) fail('closing', `the commit "${bad.split('\n')[0]}" has a closing keyword before an issue; reword it to Refs #N`)

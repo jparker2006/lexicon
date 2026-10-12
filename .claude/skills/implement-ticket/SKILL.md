@@ -102,5 +102,5 @@ Then stop. A ticket that would change the spec's decisions goes back to the orch
 - Touch Jake's daily copy (`~/Applications/Lexicon.app`), its data folder or its permissions.
 - Open private data (the Wispr export, the Test set, the starter Lexicon, History, keys) or put any of it in the repo, a PR, an issue or a prompt. Scripts such as `lexicon-eval` read it on the Mac; you refer to it by path only, and never print a key.
 - Read a secret from the login Keychain (`security find-generic-password -w`): it can hang for minutes on a prompt nobody sees. A check that needs the app to read a Keychain item goes on the Live checks request.
-- Write a closing keyword (close, fix or resolve before an issue number) in a commit or PR. The merge script closes the issue itself, with a comment naming the PR; what Jake can feel goes on his Try list.
+- Write a closing keyword (close, fix or resolve before an issue number) in a commit or PR. Closing a ticket is the merge step's job (#88 Q11), and what Jake can feel goes on his Try list.
 - Write the at-sign followed by "codex" or "claude" anywhere on GitHub; it can start a cloud task on Jake's plan. Write "Codex's handle".
