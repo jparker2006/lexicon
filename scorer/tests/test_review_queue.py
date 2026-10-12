@@ -233,7 +233,10 @@ class Status(Folder):
         page = self.open_review()
         for clip in page.clips[:20]:
             page.answer(clip["id"], "parakeet", None)
+        page.answer(page.clips[0]["id"], "typed", "we said Zorblat")  # its terms come from the Lexicon
+        before = {p.name: p.read_bytes() for p in self.root.iterdir() if p.is_file()}
         text = self.status()
+        self.assertEqual({p.name: p.read_bytes() for p in self.root.iterdir() if p.is_file()}, before, "only reads")
         self.assertIn("review: 20 of 36 clips answered, 16 left", text)
         self.assertIn("held-back: 6 of 6 answered, 0 left", text)
         self.assertIn("everyday: 14 of 30 answered, 16 left", text)

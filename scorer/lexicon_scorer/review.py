@@ -156,7 +156,8 @@ class ReviewError(Exception):
 class Review:
     """The review's state on disk. Not thread-safe: the server calls it under one lock."""
 
-    def __init__(self, root: Path, lexicon: Lexicon):
+    def __init__(self, root: Path, lexicon: Lexicon, *, repair: bool = True):
+        """`repair` rebuilds the manifest and marks from the answers; off, it only reads."""
         self.root = root
         self.lexicon = lexicon
         # In file order (recording order) within a session; sorted is stable.
@@ -164,7 +165,8 @@ class Review:
                                key=lambda c: (c["split"] != "held-back", rank(c["session"])))
         audit = [c for c in sorted(_read_jsonl(root / "audit.jsonl"), key=lambda c: rank(c["id"]))]
         self.audit = {c["id"] for c in audit}
-        self.clips = disagreements + [c for c in audit if c["id"] not in {d["id"] for d in disagreements}]
+        queued = {d["id"] for d in disagreements}
+        self.clips = disagreements + [c for c in audit if c["id"] not in queued]
         self.by_id = {c["id"]: c for c in self.clips}
         manifest = {e["id"] for e in _read_jsonl(root / "manifest.jsonl")}
         missing = sum(c["id"] not in manifest for c in self.clips)
@@ -177,7 +179,8 @@ class Review:
         saved = json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
         self.position = saved.get("position")
         self.toured = saved.get("toured", False)
-        self._apply()
+        if repair:
+            self._apply()
 
     # What the page reads
 
@@ -556,7 +559,7 @@ def status(root: Path, out=None) -> None:
     manifest = _read_jsonl(root / "manifest.jsonl")
     if not manifest:
         raise TestSetError(f"no Test set at {root}; run scripts/test-set.sh first")
-    review = Review(root, Lexicon((), ()))
+    review = Review(root, Lexicon((), ()), repair=False)
     duration = {e["id"]: e["duration"] for e in manifest}
     queue = [c for c in review.clips if c["id"] not in review.audit]
     left = [c for c in queue if not review.answered(c["id"])]
