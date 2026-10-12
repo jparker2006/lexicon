@@ -72,7 +72,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 | `KeyInput` | Event tap thread, `FnGesture`, hotkeys, `InputClock` (single writer) | Domain |
 | `AudioCapture` | Engine, sink node, ring, converter, CAF writer, `F_FULLFSYNC` every 1 s and at stop, device rebuild, adaptive tail | Domain |
 | `Transcription` | One adapter file per cloud provider (Muse from M2), sockets, keywords, finalize, local race, residency, reachability. No reconnect after a cloud failure: local is already racing, and with no local model the Dictation waits and is transcribed again when the network returns. `CloudLink` (adapter, socket, network path) is the one seam tests replace, with a scripted fake provider | Domain |
-| `LocalParakeet` | The FluidAudio adapter (Parakeet Unified; Ultra or v3 as the multilingual pick), model install and compile. No word boosting; Rules in code instead. The only FluidAudio importer | Domain, Transcription, the FluidAudio package |
+| `LocalParakeet` | The FluidAudio adapter (Parakeet Unified; Ultra or v3 as the multilingual pick), model install and compile. Long audio is decoded in FluidAudio's 15 s windows, each as soon as it is captured, then merged on the 2 s overlaps with FluidAudio's merge (copied, Apache 2.0). No word boosting; Rules in code instead. The only FluidAudio importer | Domain, Transcription, the FluidAudio package |
 | `Cleanup` | Rules, the AI cleanup stage (OpenRouter, from M3), the structural check, the rules-only fallback | Domain |
 | `WordStore` | The Lexicon: Terms, Rules, folding, `lexicon.sqlite`, per-Dictation selection. `CodeTerms`: code Terms (names only) and the current repo, scanned at launch and followed with FSEvents on `~/code` and the skill folders | Domain, SQLiteKit |
 | `History` | Every durable fact about a Dictation: `history.sqlite`, `audio/`, recovery, retention, the window's reader | Domain, SQLiteKit, AudioCapture |
@@ -138,7 +138,7 @@ No test target depends on an executable target: every test target links into one
 | `Conductor` actor | Lifecycle decisions, never queued behind UI |
 | Speech and Cleanup actors, URLSession | Sockets, the race, LLM calls |
 | History writer queue | Every `history.sqlite` write, FIFO, never awaited on the hot path |
-| `LocalTranscriber` | One job at a time; live work preempts recovery and retry |
+| `LocalTranscriber` | One job at a time, one window of audio per job; a live job goes ahead of queued recovery and retry windows, so it waits behind at most the one window running |
 
 ### Privacy (from [Private mode, keys, and what leaves the Mac](https://github.com/jparker2006/lexicon/issues/5))
 

@@ -1,7 +1,8 @@
 /// One job at a time on the Neural Engine, live before background: a `.live`
 /// waiter goes ahead of every queued `.background` one (recovery, Retry), so a
-/// live Dictation never waits behind them. A running job is never aborted
-/// (about 80 ms). Each `LocalTranscriber` runs its model calls through one.
+/// live Dictation never waits behind them. A running job is never aborted; a
+/// job is one window of audio (about 0.1 s), so a long Retry yields between
+/// windows. Each `LocalTranscriber` runs its model calls through one.
 public actor LocalJobQueue {
     private var busy = false
     private var live: [CheckedContinuation<Void, Never>] = []
