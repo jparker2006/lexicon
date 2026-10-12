@@ -78,8 +78,12 @@ final class RegisteredHotkey: @unchecked Sendable {
         guard status == noErr, pressed.signature == id.signature, pressed.id == id.id else {
             return OSStatus(eventNotHandledErr)
         }
-        log.notice("hotkey \(self.hotkey.keyCode, privacy: .public) pressed")
-        onPress(HostTime(carbonEventTime: GetEventTime(event), now: .now()))
+        let now = HostTime.now()
+        let at = HostTime(carbonEventTime: GetEventTime(event), now: now)
+        // The event's age shows live that Carbon's clock is HostTime's: a few ms, never exactly 0.
+        let micros = Int(now.duration(since: at) / .microseconds(1))
+        log.notice("hotkey \(self.hotkey.keyCode, privacy: .public) pressed \(micros, privacy: .public) µs after the key")
+        onPress(at)
         return noErr
     }
 }
@@ -108,6 +112,7 @@ extension HostTime {
     /// keeps the time it happened, not when the recognizer got it. Judged as a CGEvent's
     /// stamp is: unset, in the future or over a second old reads as `now`.
     init(carbonEventTime seconds: Double, now: HostTime) {
-        self.init(eventTimestamp: seconds > 0 ? CGEventTimestamp((seconds * 1e9).rounded()) : 0, now: now)
+        let valid = seconds.isFinite && seconds > 0 && seconds < Double(now.nanoseconds) / 1e9 + 1
+        self.init(eventTimestamp: valid ? CGEventTimestamp((seconds * 1e9).rounded()) : 0, now: now)
     }
 }
