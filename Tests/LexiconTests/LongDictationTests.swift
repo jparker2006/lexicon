@@ -157,14 +157,12 @@ private struct Decode: Equatable, Sendable {
 /// "w<start>:<count>", and a clip's text is its windows joined by spaces.
 private final class WindowedFake: LocalTranscriber, Sendable {
     static let grid = WindowGrid(window: 1_000, overlap: 200)
-    /// Each wait gives up after this many yields. A decode runs on another task, so
-    /// every yield gives it a turn; the budget only ends a wait that nothing answers,
-    /// so the assertion after it reports what decoded instead of the test running to
-    /// its time limit. It counts yields, not seconds, so a slow Mac only waits longer.
-    static let yieldBudget = 2_000_000
 
     let model = LocalModel.parakeetUnified
     private let state: Mutex<State>
+    /// One element per decode or append, so a wait checks again only when something changed.
+    private let changes: AsyncStream<Void>
+    private let changed: AsyncStream<Void>.Continuation
 
     private struct State: Sendable {
         var decodes: [Decode] = []
@@ -178,6 +176,7 @@ private final class WindowedFake: LocalTranscriber, Sendable {
 
     init(failingFirst: Bool = false) {
         state = Mutex(State(failNext: failingFirst))
+        (changes, changed) = AsyncStream<Void>.makeStream()
     }
 
     var isResident: Bool { get async { true } }
@@ -206,6 +205,7 @@ private final class WindowedFake: LocalTranscriber, Sendable {
 
         func append(_ samples: [Int16]) {
             fake.state.withLock { $0.appended += samples.count }
+            fake.changed.yield()
             base.append(samples)
         }
 
@@ -217,28 +217,27 @@ private final class WindowedFake: LocalTranscriber, Sendable {
         func cancel() { base.cancel() }
     }
 
-    /// Yields until the session has been handed `count` samples, or the budget is spent:
-    /// the feed is read to its end even after fn-up.
-    func waitForAppended(_ count: Int) async {
-        var yields = 0
-        while appended < count, yields < Self.yieldBudget, !Task.isCancelled {
-            await Task.yield()
-            yields += 1
-        }
-    }
 
     /// The test calls this right before `attempt.finish`: decodes logged after it are fn-up's.
     func markFnUp() {
         state.withLock { $0.fnUp = true }
     }
 
-    /// Yields until a decode for each of `starts` has been logged, or the budget is spent.
+    /// Returns once a decode for each of `starts` has been logged; the test's time limit
+    /// ends a wait that nothing answers.
     func waitForDecodes(of starts: [Int]) async {
-        var yields = 0
-        while !Set(decodes.map(\.start)).isSuperset(of: starts), yields < Self.yieldBudget, !Task.isCancelled {
-            await Task.yield()
-            yields += 1
-        }
+        await waitUntil { Set($0.decodes.map(\.start)).isSuperset(of: starts) }
+    }
+
+    /// Returns once the session has been handed `count` samples: the feed is read to its
+    /// end even after fn-up.
+    func waitForAppended(_ count: Int) async {
+        await waitUntil { $0.appended >= count }
+    }
+
+    private func waitUntil(_ done: (State) -> Bool) async {
+        if state.withLock({ done($0) }) { return }
+        for await _ in changes where state.withLock({ done($0) }) { return }
     }
 
     private func record(samples: [Int16], start: Int) throws {
@@ -247,6 +246,7 @@ private final class WindowedFake: LocalTranscriber, Sendable {
             defer { state.failNext = false }
             return state.failNext
         }
+        changed.yield()
         if fails { throw ModelHiccup() }
     }
 }

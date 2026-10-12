@@ -71,16 +71,6 @@ private actor WindowedGateModel: LocalTranscriber {
     nonisolated func closeEntries() { enteredSink.finish() }
 }
 
-/// Yields until the queue holds `count` waiting jobs. Bounded by yields, not the clock,
-/// so a queue that never fills fails the test instead of hanging it.
-private func untilQueued(_ jobs: LocalJobQueue, atLeast count: Int) async -> Bool {
-    for _ in 0..<10_000 {
-        if await jobs.waiting >= count { return true }
-        await Task.yield()
-    }
-    return false
-}
-
 /// A cloud link whose network never changes: the process-wide NWPathMonitor would
 /// re-arm the idle unload whenever the Mac's network moved mid-test.
 private func noNetworkChanges(_ clock: TestClock) -> CloudLink {
@@ -108,7 +98,7 @@ private func noNetworkChanges(_ clock: TestClock) -> CloudLink {
     input.finish()
     // The attempt is non-copyable, so it is begun and finished in the same task.
     let live = Task { await engine.begin(feed: feed, plan: plan).finish(shortClip) }
-    #expect(await untilQueued(model.jobs, atLeast: 1), "the live window should wait in the queue behind the running retry window")
+    await model.jobs.untilWaiting(atLeast: 1)  // the live window waits behind the running retry window
 
     // The running window ends; the live window's turn comes before the retry's next window.
     #expect(await model.release())
@@ -167,7 +157,7 @@ private func noNetworkChanges(_ clock: TestClock) -> CloudLink {
     let (feed, input) = AudioFeed.makeStream()
     input.yield(PCMChunk(index: 0, samples: syntheticSamples(count: windowGrid.window)))
     let attempt = await engine.begin(feed: feed, plan: plan)
-    #expect(await untilQueued(model.jobs, atLeast: 1), "the live window should queue behind the running retry window while Jake talks")
+    await model.jobs.untilWaiting(atLeast: 1)  // the live window queues behind the running retry window
 
     attempt.cancel()
     input.finish()

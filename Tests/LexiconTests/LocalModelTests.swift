@@ -166,9 +166,9 @@ import LexiconDomain
     }
     for await _ in started { break }
     let background = Task { await queue.run(.background) { await order.append("background") } }
-    while await queue.waiting < 1 { await Task.yield() }
+    await queue.untilWaiting(atLeast: 1)
     let live = Task { await queue.run(.live) { await order.append("live") } }
-    while await queue.waiting < 2 { await Task.yield() }
+    await queue.untilWaiting(atLeast: 2)
 
     releasing.yield()
     await first.value

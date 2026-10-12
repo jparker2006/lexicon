@@ -7,11 +7,19 @@ public actor LocalJobQueue {
     private var busy = false
     private var live: [CheckedContinuation<Void, Never>] = []
     private var background: [CheckedContinuation<Void, Never>] = []
+    /// Callers of `untilWaiting`, woken each time a job joins the wait.
+    private var watchers: [CheckedContinuation<Void, Never>] = []
 
     public init() {}
 
     /// Jobs waiting for their turn, not counting the one running.
     var waiting: Int { live.count + background.count }
+
+    /// Returns once at least `count` jobs wait for their turn: a test's signal that
+    /// a job is queued, with no clock and no polling.
+    func untilWaiting(atLeast count: Int) async {
+        while waiting < count { await withCheckedContinuation { watchers.append($0) } }
+    }
 
     /// Runs `job` when it is this caller's turn.
     public func run<T: Sendable>(_ priority: LocalPriority,
@@ -22,6 +30,8 @@ public actor LocalJobQueue {
                 case .live: live.append(waiter)
                 case .background: background.append(waiter)
                 }
+                for watcher in watchers { watcher.resume() }
+                watchers = []
             }
         }
         busy = true
