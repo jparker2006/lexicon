@@ -160,7 +160,20 @@ let numberRepeatCases: [Case] = [
     Case("Twenty twenty six was the year.", "Twenty twenty six was the year."),
     Case("Meet me at ten ten tomorrow.", "Meet me at ten ten tomorrow."),
     Case("Call five five five, one two one two.", "Call five five five, one two one two."),
+    Case("Um, five five five is the number I need.", "Five five five is the number I need."),
+    Case("Use the PIN one one one one.", "Use the PIN one one one one."),
+    Case("Oh oh seven, that's the one.", "Oh oh seven, that's the one."),
+    Case("The build is version two two and it's stable.", "The build is version two two and it's stable."),
+    Case("It's a hundred hundred pixels wide.", "It's a hundred hundred pixels wide."),
+    Case("We shipped in twenty uh twenty six.", "We shipped in twenty twenty six."),
+    Case("We're on twenty-two twenty-two now.", "We're on twenty-two twenty-two now."),
+    // Real stutters still go, next to numbers too.
     Case("I I think the the build is fine.", "I think the build is fine."),
+    Case("It takes the the twenty minutes we budgeted.", "It takes the twenty minutes we budgeted."),
+    Case("Meet me at at ten tomorrow.", "Meet me at ten tomorrow."),
+    Case("Our team won won the hackathon.", "Our team won the hackathon."),
+    Case("Ship it to to five users first.", "Ship it to five users first."),
+    Case("Ha ha, very funny.", "Ha ha, very funny."),
 ]
 
 @Test(arguments: numberRepeatCases)
@@ -171,8 +184,19 @@ func repeatedNumberWordsStay(_ c: Case) {
 /// "like" stays before an estimate or a name, whatever the number word or name.
 let likeKeptCases: [Case] = [
     Case("It takes, like, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("We shipped in, like, seventeen days.", "We shipped in, like, seventeen days."),
+    Case("It's, like, twenty-five percent slower.", "It's, like, twenty-five percent slower."),
+    Case("It takes, um, like, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("It takes, like, um, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("It takes, like, between ten and twenty minutes.", "It takes, like, between ten and twenty minutes."),
     Case("It's, like, Postgres but faster.", "It's, like, Postgres but faster."),
+    Case("Our CI runs on, like, GitHub Actions now.", "Our CI runs on, like, GitHub Actions now."),
+    Case("The reply is, like, JSON with a nested array.", "The reply is, like, JSON with a nested array."),
+    Case("Call, like, useAuth in the hook.", "Call, like, useAuth in the hook."),
+    // "I" is capitalized but names nobody: the filler still goes.
     Case("Like, I think it's done.", "I think it's done."),
+    Case("We could, like, I'd say, cache it.", "We could, I'd say, cache it."),
+    Case("It's, like, not eighty minutes.", "It's not eighty minutes."),
 ]
 
 @Test(arguments: likeKeptCases)
@@ -185,6 +209,14 @@ let interjectionCases: [Case] = [
     Case("Uh huh, that's right.", "Uh huh, that's right."),
     Case("Uh-huh, that's right.", "Uh-huh, that's right."),
     Case("Mm-hmm, ship it.", "Mm-hmm, ship it."),
+    Case("Mm hmm, let's do that.", "Mm hmm, let's do that."),
+    Case("Uh oh, the build failed again.", "Uh oh, the build failed again."),
+    Case("The leak was, ah ha, in the cache.", "The leak was, ah ha, in the cache."),
+    Case("Got it, uh huh.", "Got it, uh huh."),
+    Case("Uh huh, um, let's go.", "Uh huh, let's go."),
+    // With a comma between, the filler is a filler.
+    Case("Uh, huh? I missed that.", "Huh? I missed that."),
+    Case("Uh, oh no, the build broke.", "Oh no, the build broke."),
 ]
 
 @Test(arguments: interjectionCases)
@@ -197,6 +229,14 @@ let abbreviationCases: [Case] = [
     Case("Add docs, tests, etc. um, then ship it.", "Add docs, tests, etc. then ship it."),
     Case("Add docs, tests, etc. Um, ship it.", "Add docs, tests, etc. Ship it."),
     Case("It's due at 5 p.m. Um, ship it.", "It's due at 5 p.m. Ship it."),
+    Case("It's due at 5 p.m. The the plan is set.", "It's due at 5 p.m. The plan is set."),
+    Case("The paper by Chen et al. uh, is the one we want.", "The paper by Chen et al. is the one we want."),
+    Case("Wait ten min. um, then rerun the suite.", "Wait ten min. then rerun the suite."),
+    Case("The lag is around 20 ms. Um, it's fine.", "The lag is around 20 ms. It's fine."),
+    Case("Ask Dr. Smith about it.", "Ask Dr. Smith about it."),
+    // The comma after an abbreviation's own period stays.
+    Case("We ship at five p.m., so we're late.", "We ship at five p.m., so we're late."),
+    Case("Add docs, tests, etc., um, and ship it.", "Add docs, tests, etc., and ship it."),
 ]
 
 @Test(arguments: abbreviationCases)

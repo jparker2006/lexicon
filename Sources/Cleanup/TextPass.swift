@@ -34,11 +34,14 @@ public enum TextPass {
 /// What goes, and when (cases: docs/research/cleanup-pass.md on branch
 /// `research/cleanup-pass`):
 ///   - hard fillers ("um", "uh"), anywhere
+///   - hard fillers inside an interjection ("uh huh", "uh oh", "mm hmm") stay
 ///   - an immediate repeat of the word before ("the the"), unless the double can
-///     be meant ("that that", "had had", "not not")
+///     be meant ("that that", "had had", "not not") or is a number ("twenty
+///     twenty six", "ten ten", "five five five")
 ///   - "like" and "you know" only when set off on both sides: a comma or the
 ///     start of a sentence before, a comma after. "like" stays before a
-///     comparison or an estimate ("like, the primary color", "like, ten seconds").
+///     comparison, an estimate or a name ("like, the primary color", "like,
+///     eighty seconds", "like, Postgres").
 ///   - "so", "okay", "well", "basically" and "I mean" only at the start of the
 ///     Dictation, before anything is kept. Later in a Dictation they can carry
 ///     meaning: a result ("So we can see it"), a self-correction ("Delete it.
@@ -56,15 +59,19 @@ enum Fillers {
     ]
 
     /// After "like", these make it a comparison or an estimate, not a filler.
-    /// Any word with a digit counts too ("like, 5 MB", "like, $5").
+    /// So does a number, a word with a digit ("like, 5 MB", "like, $5") or a name.
     static let likeKeepers: Set<String> = [
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some",
         "many", "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice",
-        "double", "triple", "hundreds", "dozens", "lots", "one", "two", "three", "four", "five", "six", "seven",
-        "eight", "nine", "ten", "eleven", "twelve", "fifteen", "twenty", "thirty", "forty", "fifty", "hundred",
-        "thousand", "million",
+        "double", "triple", "hundreds", "dozens", "thousands", "millions", "billions", "lots", "more", "less",
+        "between", "upwards", "somewhere",
     ]
+
+    /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
+    /// Only without a comma between: "uh, huh?" is a filler and then "huh". "uh uh" is
+    /// left out: written that way it is as likely two fillers as a "no".
+    static let interjections: Set<String> = ["uh huh", "uh oh", "mm hmm", "um hmm", "uhm hmm", "ah ha"]
 
     /// Hedges, negations and constraints. Never deleted, not even as a repeat
     /// ("it's not not working" means it works).
@@ -79,7 +86,7 @@ enum Fillers {
 
     /// Doubles that grammar allows, on top of `protected`.
     static let meantDoubles: Set<String> = [
-        "that", "had", "is", "do", "so", "very", "bye", "knock", "much", "long", "far", "way", "super", "many",
+        "that", "had", "is", "do", "so", "very", "bye", "ha", "knock", "much", "long", "far", "way", "super", "many",
         "more", "well", "too", "pretty", "totally",
     ]
 
@@ -89,16 +96,26 @@ enum Fillers {
         "just", "if", "because", "like",
     ]
 
-    /// Tokens ending in "." that do not end a sentence.
+    /// Tokens ending in "." that need not end a sentence (`Fillers.clean` decides).
     static let abbreviations: Set<String> = [
         "e.g", "i.e", "vs", "mr", "mrs", "ms", "dr", "jr", "sr", "st", "a.m", "p.m", "u.s", "u.k", "approx", "inc",
-        "vol", "fig",
+        "vol", "fig", "etc", "al", "cf", "ca", "est", "dept", "no", "ft", "lb", "lbs", "oz", "min", "sec", "hr",
+        "hrs", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
     ]
+
+    /// Titles: always followed by a name, so the capital after them never starts a sentence.
+    /// ("ms" and "st" are left out: "20 ms." and "Main St." often end one.)
+    static let titles: Set<String> = ["mr", "mrs", "dr"]
 
     /// The filler pass over one line. A line always starts a sentence;
     /// `dictationStart`: no earlier line kept anything.
     static func clean(_ line: Substring, dictationStart: Bool, rules: RuleSet) -> String {
-        let tokens = line.split(whereSeparator: \.isWhitespace).map(Token.init)
+        var tokens = line.split(whereSeparator: \.isWhitespace).map(Token.init)
+        // The speech model capitalizes after a sentence end, so "etc. Um, ship it"
+        // ends a sentence and "etc. um, then ship it" does not.
+        for i in tokens.indices.dropLast() where tokens[i].isAbbreviation && !titles.contains(tokens[i].word) {
+            tokens[i].endsSentence = tokens[i + 1].isCapitalized
+        }
         var kept: [String] = []
         var keptWords: [String] = []
         var sentenceKept = 0          // tokens kept in the current sentence
@@ -121,7 +138,8 @@ enum Fillers {
             }
 
             // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
-            let drop = rules.isWritten(token.text) ? 0 : dropCount(token, next: next, after: i + 2 < tokens.count ? tokens[i + 2] : nil,
+            let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
+                                 after: i + 2 < tokens.count ? tokens[i + 2] : nil,
                                  dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
                                  previous: sentenceKept > 0 ? (kept.last!, keptWords.last!, sentenceKept == 1) : nil)
             if drop > 0 {
@@ -130,7 +148,7 @@ enum Fillers {
                     if last.endsSentence {
                         kept[kept.count - 1] = Token.merge(kept[kept.count - 1], last.trailing)
                     } else if last.trailing.contains(","), kept[kept.count - 1].hasSuffix(","),
-                              glue.contains(keptWords[keptWords.count - 1]) {
+                              glue.contains(keptWords[keptWords.count - 1]), !keptHedge(kept, keptWords, sentenceKept) {
                         kept[kept.count - 1].removeLast()
                     }
                 } else {
@@ -160,14 +178,23 @@ enum Fillers {
         return kept.joined(separator: " ")
     }
 
+    /// The last kept token is a "like" set off on both sides, kept as a hedge
+    /// ("takes, like, um, eighty"): its comma stays when a filler after it goes.
+    private static func keptHedge(_ kept: [String], _ keptWords: [String], _ sentenceKept: Int) -> Bool {
+        keptWords.last == "like" && (sentenceKept == 1 || kept[kept.count - 2].last.map { ",;:".contains($0) } == true)
+    }
+
     /// How many tokens from `token` on are fillers to delete: 0, 1 or 2.
+    /// `prior`: the token just before, kept or not.
     /// `previous`: the last kept token in this sentence, its word, and whether it opened the sentence.
     /// `dictationStart`: nothing kept yet in the Dictation. `afterOpener`: a filler already went from this sentence's start.
-    private static func dropCount(_ token: Token, next: Token?, after: Token?, dictationStart: Bool, afterOpener: Bool,
+    private static func dropCount(_ token: Token, prior: Token?, next: Token?, after: Token?, dictationStart: Bool, afterOpener: Bool,
                                   setOffBefore: Bool, previous: (text: String, word: String, opensSentence: Bool)?)
         -> Int {
         let word = token.word
         if protected.contains(word) || token.isQuoted { return 0 }
+        if let next, token.trailing.isEmpty, interjections.contains(word + " " + next.word) { return 0 }
+        if let prior, prior.trailing.isEmpty, interjections.contains(prior.word + " " + word) { return 0 }
         if hard.contains(word), !token.isAcronym { return 1 }
 
         if dictationStart, let next, !token.endsSentence {
@@ -189,11 +216,13 @@ enum Fillers {
            next.trailing.hasPrefix(","), after != nil {
             return 2
         }
-        if setOffBefore, word == "like", token.trailing.hasPrefix(","), let next, !next.keepsLike {
+        // "like, um, eighty": the filler between does not decide.
+        if setOffBefore, word == "like", token.trailing.hasPrefix(","), let next,
+           !(hard.contains(next.word) ? after ?? next : next).keepsLike {
             return 1
         }
 
-        if let previous, token.isWord, !meantDoubles.contains(word),
+        if let previous, token.isWord, !token.isNumber, !meantDoubles.contains(word),
            !previous.text.last!.isPunctuation, previous.word == word,
            previous.text == token.text || previous.opensSentence {
             return 1
@@ -211,8 +240,10 @@ private struct Token {
     let trailing: String
     /// `"uh"`, `(so)`: a word quoted on purpose, never a filler.
     let isQuoted: Bool
-    /// "...", "e.g." and "p.m." do not end a sentence.
-    let endsSentence: Bool
+    /// "..." does not end a sentence; an abbreviation's "." ends one only before a capital (`Fillers.clean`).
+    var endsSentence: Bool
+    /// "etc.", "e.g.", "p.m.": the period may be the abbreviation's own.
+    let isAbbreviation: Bool
 
     init(_ text: Substring) {
         var body = text
@@ -239,18 +270,22 @@ private struct Token {
             }
             peelMarks()
         }
+        var bare = body
+        while let c = bare.first, c.isQuote { bare = bare.dropFirst() }
+        while let c = bare.last, c.isQuote { bare = bare.dropLast() }
+        var word = bare.lowercased()
+        if word.contains("’") { word = String(word.map { $0 == "’" ? "'" : $0 }) }
+        // "p.m.,": the period is the abbreviation's own, and the comma is what follows it.
+        let ownPeriod = sentence == "." && comma && Fillers.abbreviations.contains(word)
+        if ownPeriod { sentence = "" }
         let trailing = !sentence.isEmpty ? sentence : comma ? "," : other.map(String.init) ?? ""
         // Only a sentence mark or a comma is normalized; "std::" stays as spoken.
-        self.text = sentence.isEmpty && !comma ? text : body + trailing + closing
+        self.text = sentence.isEmpty && !comma ? text : body + (ownPeriod ? "." : "") + trailing + closing
         self.trailing = trailing
-        let unquoted = body.count
-        while let c = body.first, c.isQuote { body = body.dropFirst() }
-        while let c = body.last, c.isQuote { body = body.dropLast() }
-        self.isQuoted = body.count != unquoted || !closing.isEmpty
-        var word = body.lowercased()
-        if word.contains("’") { word = String(word.map { $0 == "’" ? "'" : $0 }) }
+        self.isQuoted = bare.count != body.count || !closing.isEmpty
         self.word = word
-        self.endsSentence = !sentence.isEmpty && !sentence.hasSuffix("..") && !Fillers.abbreviations.contains(word)
+        self.isAbbreviation = !sentence.isEmpty && Fillers.abbreviations.contains(word)
+        self.endsSentence = !sentence.isEmpty && !sentence.hasSuffix("..") && !isAbbreviation
     }
 
     var isPunctuationOnly: Bool { word.isEmpty && !trailing.isEmpty }
@@ -262,7 +297,19 @@ private struct Token {
     var isCode: Bool { word.contains { $0 == "." || $0 == "/" || $0 == "_" || $0.isNumber } }
     /// "ER", "UH": a name, not a filler.
     var isAcronym: Bool { text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase } }
-    var keepsLike: Bool { word.contains(where: \.isNumber) || Fillers.likeKeepers.contains(word) }
+    /// "twenty", "twenty-six", the "oh" in "five oh five": a spoken number.
+    var isNumber: Bool {
+        word.split(separator: "-", omittingEmptySubsequences: false).allSatisfy {
+            $0 == "oh" || StructuralCheck.isCardinal(String($0))
+        }
+    }
+    /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.
+    var isName: Bool { text.contains(where: \.isUppercase) && !Token.firstPerson.contains(word) }
+    /// The speech model started a sentence here: "Um", "Then". Not "I", which is always capitalized.
+    var isCapitalized: Bool { text.first(where: \.isLetter)?.isUppercase == true && !Token.firstPerson.contains(word) }
+    var keepsLike: Bool { word.contains(where: \.isNumber) || isNumber || isName || Fillers.likeKeepers.contains(word) }
+
+    static let firstPerson: Set<String> = ["i", "i'm", "i'd", "i'll", "i've"]
 
     static func merge(_ kept: String, _ trailing: String) -> String {
         var kept = kept
