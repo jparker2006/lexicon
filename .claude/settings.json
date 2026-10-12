@@ -11,13 +11,13 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(gh pr update-branch:*)",
-      "Workflow(review)"
+      "Workflow(lexicon-review)"
     ],
     "deny": [
       "Read(~/Library/Application Support/Lexicon)",
       "Read(~/Library/Application Support/Lexicon/**)",
-      "Read(**/.env)",
-      "Read(**/.env.*)",
+      "Read(//**/.env)",
+      "Read(//**/.env.*)",
       "Bash(*Application Support/Lexicon/*)",
       "Bash(*Application Support/Lexicon)",
       "Bash(*Application\\ Support/Lexicon/*)",
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.mjs\""
+            "command": "command -v node >/dev/null 2>&1 || { echo 'guard: node not found, refusing' >&2; exit 2; }; node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.mjs\" || { echo 'guard: failed, refusing' >&2; exit 2; }"
           }
         ]
       }

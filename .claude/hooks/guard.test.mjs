@@ -973,3 +973,16 @@ test("Reviewer findings: Lexicon Dev's models link into the daily folder's model
     assertRefused(command, /private data/, options);
   }
 });
+
+test('Reviewer findings: the configured hook refuses, exiting 2, when node is missing or the guard fails', () => {
+  const { hooks } = JSON.parse(readFileSync(path.join(REPO, '.claude/settings.json'), 'utf8'));
+  const { command } = hooks.PreToolUse.find(({ matcher }) => matcher.split('|').includes('Bash')).hooks[0];
+  const run = (env, input) => spawnSync('/bin/sh', ['-c', command], { cwd: REPO, env: { ...process.env, CLAUDE_PROJECT_DIR: REPO, ...env }, input, encoding: 'utf8' });
+  const call = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' }, cwd: REPO });
+  const noNode = run({ PATH: '/usr/bin:/bin' }, call);
+  assert.equal(noNode.status, 2);
+  assert.match(noNode.stderr, /node not found/);
+  const failed = run({}, 'not json');
+  assert.equal(failed.status, 2);
+  assert.equal(run({}, call).status, 0);
+});
