@@ -1,4 +1,5 @@
 public import Foundation
+import Synchronization
 public import LexiconDomain
 
 /// Where a LiveCapture's audio comes from: the audio-source seam (#14). An enum,
@@ -52,6 +53,9 @@ public final class Recorder: Sendable {
     private let broadcaster = LevelBroadcaster()
     let microphone: Microphone
     let policy: FlushPolicy
+    #if DEBUG
+    private let silenceNext = Atomic(false)
+    #endif
 
     public convenience init() {
         self.init(hardware: .system, policy: FlushPolicy())
@@ -80,6 +84,10 @@ public final class Recorder: Sendable {
     /// tail ends now and the new capture starts at once.
     public func start(_ input: AudioInput, writingTo file: URL,
                       since keyDown: HostTime = .now()) async throws(RecorderError) -> LiveCapture {
+        #if DEBUG
+        // Spent by the next mic Dictation even when its start fails, as the hook says.
+        let silenced = if case .microphone = input { silenceNext.exchange(false, ordering: .relaxed) } else { false }
+        #endif
         let source: any CaptureSource
         var policy = policy
         switch input {
@@ -94,6 +102,9 @@ public final class Recorder: Sendable {
             source.stop()
             throw .engineFailed("no converter from \(source.firstSegment.rate) Hz to 16 kHz")
         }
+        #if DEBUG
+        core.silenced = silenced
+        #endif
         core.begin()
         return LiveCapture(core: core)
     }
@@ -108,6 +119,14 @@ public final class Recorder: Sendable {
     /// is a new stream (any number of observers) that keeps only the newest level,
     /// so a slow observer never backs up the writer.
     public var levels: AsyncStream<AudioLevel> { broadcaster.subscribe() }
+
+    #if DEBUG
+    /// The `mic zeros` test hook: the next Dictation from the mic records
+    /// digital zeros, as a dead or contended mic delivers. The engine starts and
+    /// runs as usual; its samples are zeroed before anything reads them. A start
+    /// that fails spends it too.
+    public func silenceNextMicrophoneCapture() { silenceNext.store(true, ordering: .relaxed) }
+    #endif
 }
 
 /// How a LiveCapture ends.
