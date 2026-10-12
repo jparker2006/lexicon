@@ -24,7 +24,7 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 | Event | Do |
 |---|---|
 | `READY`, `MERGED`, `JAKE-ASK`, a new Needs-you line | Status to Jake. |
-| `MERGED` | `scripts/unblocked.sh`, then chips for the new frontier. Archive a builder's session once its last ticket merged. Remove a merged ticket's worktree if the merge script skipped it. |
+| `MERGED` | `scripts/unblocked.sh`, then chips for the new frontier. Archive a builder's session once its last ticket merged. Remove a merged ticket's worktree if the merge script skipped it. Every ticket closes at merge (the merge script closes it); what Jake can feel reaches him on the Try list at install. |
 | `JAKE-ASK` | Ask Jake (below). |
 | `LIVE-REQUEST` with Jake items, `LIVE-RESULT` | Schedule a sitting (below). |
 | `CI` failed on `main` | Status to Jake with the run link. |
