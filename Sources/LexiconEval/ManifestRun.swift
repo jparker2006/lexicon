@@ -6,9 +6,9 @@ import Transcription
 import WordStore
 
 /// One manifest line: NeMo-style (`audio_filepath`, `text`, `duration`) plus
-/// Lexicon's `session`, `terms`, `speech_end`, `context` and `split`. The scorer
-/// reads `text`, `session`, `terms` and `split` from the same file; the run needs
-/// only these. `terms` are the Terms said, the answer key: they never reach the
+/// Lexicon's `session`, `terms`, `speech_end`, `context`, `split` and `gold`. The
+/// scorer reads `text`, `session`, `terms`, `split` and `gold` from the same file;
+/// the run needs only these. `terms` are the Terms said, the answer key: they never reach the
 /// engine, which gets its Terms from the Lexicon like a live Dictation.
 struct ManifestEntry: Decodable, Sendable {
     let id: String
@@ -18,11 +18,19 @@ struct ManifestEntry: Decodable, Sendable {
     /// Bundle ID of the app Jake was dictating into.
     let context: String?
     let split: String?
+    let session: String?
+    /// "review" while Jake's gold review (#51) has not answered it: its text is
+    /// only a draft, so it is never spoken for a score.
+    let gold: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, text, context, split
+        case id, text, context, split, session, gold
         case audioFilepath = "audio_filepath"
     }
+
+    var inReview: Bool { gold == "review" }
+    /// An entry with no session is a session of its own, as in the scorer.
+    var sessionKey: String { session.map { "s:\($0)" } ?? "id:\(id)" }
 }
 
 /// One Dictation's result, as the scorer reads it (`scorer/score report`).
@@ -41,6 +49,13 @@ struct RunLine: Codable, Equatable, Sendable {
     let engine: String?
     let lost: Bool
 
+    /// At fast pace a lag would not be a measurement.
+    var withoutLag: RunLine {
+        var line = self
+        line.lagMS = nil
+        return line
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, status, cleanup, engine, lost
         case speechText = "speech_text"
@@ -53,6 +68,8 @@ enum EvalError: Error, CustomStringConvertible {
     case unreadableManifest(String)
     case badLine(Int, String)
     case noEntries(split: String?)
+    case nothingOutOfReview(Int)
+    case heldBackInReview(Int)
     case missingAudio(id: String)
     case setup(String)
     case outExists
@@ -63,6 +80,10 @@ enum EvalError: Error, CustomStringConvertible {
         case .unreadableManifest(let why): "cannot read the manifest: \(why)"
         case .badLine(let n, let why): "manifest line \(n): \(why)"
         case .noEntries(let split): split.map { "no manifest entries in split \($0)" } ?? "the manifest is empty"
+        case .nothingOutOfReview(let count):
+            "all \(count) entries are left out in review; answer them with \(reviewCommand)"
+        case .heldBackInReview(let count):
+            "\(count) held-back entries are still in review, and held-back runs only whole; answer them with \(reviewCommand)"
         case .missingAudio(let id): "entry \(id): audio file not found"
         case .setup(let why): "headless setup failed: \(why)"
         case .outExists: "--out already exists"
@@ -71,32 +92,63 @@ enum EvalError: Error, CustomStringConvertible {
     }
 }
 
-/// Runs every entry (of `split`, when given) through the real headless pipeline,
-/// one at a time and in manifest order, each in its own temporary History that
-/// is deleted after. `engine` gives the speech model for an entry: the local
-/// model, a scripted fake, or nil for none. Every audio file is checked before
-/// the first entry runs, so a broken manifest fails in seconds, not mid-run.
-/// `preferences` applies to every entry. `lexicon` is imported into each entry's
-/// own temporary Lexicon, as the app's Import would.
-func runManifest(_ manifest: URL, split: String?, pace: FilePace, preferences: Preferences = .defaults,
-                 lexicon: [LexiconEntry] = [], engine: (ManifestEntry) -> (any LocalTranscriber)?,
-                 progress: (Int, Int) -> Void = { _, _ in }) async throws -> [RunLine] {
-    let entries = try readManifest(manifest).filter { split == nil || $0.split == split }
-    guard !entries.isEmpty else { throw EvalError.noEntries(split: split) }
+let reviewCommand = "scripts/test-set.sh review"
+
+/// The entries a run speaks, with their audio files, chosen before any audio
+/// plays.
+struct ManifestSelection: Sendable {
+    let entries: [ManifestEntry]
+    let audio: [URL]
+    /// Entries of the split left out in review: the ones still to answer and
+    /// every other entry in their sessions.
+    let leftOut: Int
+}
+
+/// The entries of `split` (all, when nil) to run, in manifest order, by the
+/// scorer's rule (scorer/lexicon_scorer/baselines.py gold_state): an entry still
+/// in review is skipped with every other entry in its session, since the scorer
+/// counts a session only once all of it is gold, and one in held-back refuses
+/// the run, since held-back checks milestones and is scored only whole.
+/// `sample` keeps the `sample` lowest ids of the rest, the draw
+/// `scorer/score report --sample` scores. Every audio file is checked here too,
+/// so a broken manifest fails in seconds, not mid-run.
+func selectEntries(from manifest: URL, split: String?, sample: Int? = nil) throws -> ManifestSelection {
+    let inSplit = try readManifest(manifest).filter { split == nil || $0.split == split }
+    guard !inSplit.isEmpty else { throw EvalError.noEntries(split: split) }
+    let heldBack = inSplit.count { $0.inReview && $0.split == "held-back" }
+    guard heldBack == 0 else { throw EvalError.heldBackInReview(heldBack) }
+    let open = Set(inSplit.filter(\.inReview).map(\.sessionKey))
+    var entries = inSplit.filter { !open.contains($0.sessionKey) }
+    guard !entries.isEmpty else { throw EvalError.nothingOutOfReview(inSplit.count) }
+    if let sample {
+        let drawn = Set(entries.map(\.id).sorted().prefix(sample))
+        entries = entries.filter { drawn.contains($0.id) }
+    }
     let folder = manifest.deletingLastPathComponent()
     let audio = try entries.map { entry in
         let url = URL(filePath: entry.audioFilepath, relativeTo: folder).absoluteURL
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { throw EvalError.missingAudio(id: entry.id) }
         return url
     }
+    return ManifestSelection(entries: entries, audio: audio, leftOut: inSplit.count { open.contains($0.sessionKey) })
+}
 
+/// Runs every selected entry through the real headless pipeline, one at a time
+/// and in manifest order, each in its own temporary History that is deleted
+/// after. `engine` gives the speech model for an entry: the local model, a
+/// scripted fake, or nil for none. `preferences` applies to every entry.
+/// `lexicon` is imported into each entry's own temporary Lexicon, as the app's
+/// Import would.
+func runManifest(_ selection: ManifestSelection, pace: FilePace, preferences: Preferences = .defaults,
+                 lexicon: [LexiconEntry] = [], engine: (ManifestEntry) -> (any LocalTranscriber)?,
+                 progress: (Int, Int) -> Void = { _, _ in }) async throws -> [RunLine] {
     var lines: [RunLine] = []
-    for (entry, wav) in zip(entries, audio) {
-        progress(lines.count, entries.count)
+    for (entry, wav) in zip(selection.entries, selection.audio) {
+        progress(lines.count, selection.entries.count)
         lines.append(try await run(entry, wav: wav, pace: pace, preferences: preferences, lexicon: lexicon,
                                    local: engine(entry)))
     }
-    progress(lines.count, entries.count)
+    progress(lines.count, selection.entries.count)
     return lines
 }
 
@@ -110,13 +162,9 @@ func transcribeManifest(_ manifest: URL, to out: URL, engine: (ManifestEntry) ->
     guard !FileManager.default.fileExists(atPath: out.path(percentEncoded: false)) else { throw EvalError.outExists }
     var preferences = Preferences.defaults
     preferences.privacy = .private
-    let lines = try await runManifest(manifest, split: nil, pace: .asFastAsPossible, preferences: preferences,
-                                      engine: engine, progress: progress).map { line in
-        var line = line
-        line.lagMS = nil  // fast pace: a lag here would not be a measurement
-        return line
-    }
-    try writeRun(lines, to: out)
+    let lines = try await runManifest(try selectEntries(from: manifest, split: nil), pace: .asFastAsPossible,
+                                      preferences: preferences, engine: engine, progress: progress)
+    try writeRun(lines.map(\.withoutLag), to: out)
 }
 
 /// One run line per entry, in the format the scorer reads (`scorer/score report --run`).

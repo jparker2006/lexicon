@@ -294,7 +294,7 @@ class ServerTest(Fixture):
 
     def test_the_page_will_not_start_while_the_test_set_is_locked(self):
         with locked(self.root), self.assertRaises(TestSetError):
-            review.serve(self.root, self.lexfile, open_page=False, out=io.StringIO())
+            review.serve(self.root, self.lexfile, out=io.StringIO())
 
 
 @unittest.skipUnless(sys.platform == "darwin", "runs the page's script with osascript's JavaScript")
