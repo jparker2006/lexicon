@@ -36,3 +36,25 @@ func aPasteGoesOnlyWhereTheFocusedElementTakesText(traits: FieldTraits, expected
 func anAppsFocusedElementAnswerIsAFieldNoFieldOrUnreadable(_ code: Int32, _ expected: Focus.Answer) {
     #expect(Focus.Answer(code) == expected)
 }
+
+// One slow or failed read is not the app's answer: the focus read tries once more
+// before it calls the focus unreadable (a timeout must not become a refusal).
+@Test func aFocusReadThatFailsOnceIsReadAgain() {
+    var answers: [Int32] = [-25204, 0]  // a timeout, then the element
+    var reads = 0
+    let answer = Focus.Answer.read { reads += 1; return answers.removeFirst() }
+    #expect(answer == .element)
+    #expect(reads == 2)
+}
+
+@Test func aDefiniteAnswerIsReadOnce() {
+    var reads = 0
+    #expect(Focus.Answer.read { reads += 1; return -25212 } == .none)
+    #expect(reads == 1)
+}
+
+@Test func aFocusReadThatFailsTwiceIsUnreadable() {
+    var reads = 0
+    #expect(Focus.Answer.read { reads += 1; return -25204 } == .unreadable)
+    #expect(reads == 2)
+}
