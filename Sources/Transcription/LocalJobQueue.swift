@@ -72,6 +72,11 @@ public actor LocalJobQueue {
             } onCancel: {
                 Task { await self.leave(id) }
             }
+            // Its turn came before `leave` could take it out of line: pass the turn on.
+            if Task.isCancelled {
+                handOver()
+                throw CancellationError()
+            }
         }
         busy = true
         defer { handOver() }

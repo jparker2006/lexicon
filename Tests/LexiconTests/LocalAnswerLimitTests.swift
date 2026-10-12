@@ -10,7 +10,7 @@ import LexiconDomain
 // model in the plan. Headless: a fake clock, a fake model, a scripted cloud. Each wait is
 // an explicit signal; a missing signal fails at the time limit.
 
-@Test(.timeLimit(.minutes(1))) func aHungLocalModelIsAnsweredAtThirtyAndAQuarterSecondsForAHalfSecondClip() async throws {
+@Test(.timeLimit(.minutes(1))) func aHungLocalModelIsAnsweredThirtySecondsPlusAQuarterOfTheClipAfterItLoads() async throws {
     let clock = TestClock()
     let model = HangingLocalModel()
     let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)

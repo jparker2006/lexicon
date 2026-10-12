@@ -90,9 +90,9 @@ actor LocalResidency {
         return policy
     }
     private var unloadTimer: Task<Void, Never>?
-    /// An idle unload under way. A load waits for it: until it is done the
-    /// model still reads as resident, and a load skipped for that would leave
-    /// the Dictation to load the model inside the job queue.
+    /// An idle unload under way. Until it is done the model still reads as
+    /// resident, so a fn-down waits for it before loading, or its Dictation would
+    /// load the model inside the job queue.
     private var unloading: Task<Void, Never>?
 
     var unloadScheduled: Bool { unloadTimer != nil }
@@ -109,11 +109,7 @@ actor LocalResidency {
         dictating += 1
         unloadTimer?.cancel()
         unloadTimer = nil
-        try await loadIfNeeded()
-    }
-
-    private func loadIfNeeded() async throws {
-        await unloading?.value
+        await unloading?.value  // fn-up bounds this wait (`AttemptCore.loadLimit`)
         if !(await transcriber.isResident) { try await transcriber.load() }
     }
 
@@ -157,7 +153,9 @@ actor LocalResidency {
         if policy.unloadAfter == nil {
             unloadTimer?.cancel()
             unloadTimer = nil
-            try? await loadIfNeeded()
+            // Never waits on an unload, which can sit behind a hung model call and would
+            // stop the settings and network feeds; `unloadIfIdle` loads again after it.
+            if unloading == nil, !(await transcriber.isResident) { try? await transcriber.load() }
         } else {
             armUnload()
         }
@@ -182,5 +180,7 @@ actor LocalResidency {
         await unload.value
         unloading = nil
         log.notice("local model unloaded: no Dictation for the linger time")
+        // Private mode turned on, or the network went down, while it unloaded.
+        if policy?.unloadAfter == nil { try? await transcriber.load() }
     }
 }

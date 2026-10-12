@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import Transcription
 
@@ -42,6 +43,38 @@ import Testing
     await #expect(throws: CancellationError.self) { try await cancelled.value }
     // The cancelled body never ran; the job that stayed in line ran after the first.
     #expect(await log.names == ["first", "kept"])
+}
+
+@Test(.timeLimit(.minutes(1))) func aJobCancelledAsItsTurnComesNeverRuns() async throws {
+    // The cancel lands while the job ahead is finishing, so the turn may reach the
+    // cancelled job before it leaves the line. Many rounds, since that is a race.
+    for _ in 0..<300 {
+        let queue = LocalJobQueue()
+        let log = RunLog()
+        let (release, releasing) = AsyncStream<Void>.makeStream()
+        let (started, starting) = AsyncStream<Void>.makeStream()
+        let toCancel = Mutex<Task<Void, any Error>?>(nil)
+
+        let first = Task {
+            try await queue.run(.background) { () async throws -> Void in
+                starting.yield()
+                for await _ in release { break }
+                toCancel.withLock { $0 }?.cancel()  // just before this job hands its turn over
+            }
+        }
+        for await _ in started { break }
+        let late = Task { try await queue.run(.background) { () async throws -> Void in await log.append("late") } }
+        toCancel.withLock { $0 = late }
+        await queue.untilWaiting(atLeast: 1)
+
+        releasing.yield()
+        try await first.value
+        _ = try? await late.value
+        if await log.names != [] {
+            Issue.record("a job cancelled while it waited ran when its turn came")
+            return
+        }
+    }
 }
 
 // MARK: Helpers

@@ -226,6 +226,8 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 **36. The local model loads at launch, and fn-up waits at most 2 s for it.** Spec: load on fn-down if not resident. Built: also at launch; a load still running 2 s into fn-up sends the Dictation to waiting (`localModelLoading`) and retries it, because the first load of each new build compiles for about 25 s. #56's builder (PR #129).
 
+**81. The local model gets 30 s plus a quarter of the clip to answer.** Spec: the local model transcribes the clip at fn-up, with no limit. Built (#201): once fn-down's load is done, the local side has 30 s plus a quarter of the clip's length to answer (a 20-minute clip gets 330 s); past it the Dictation waits for a working model (`localModelFailed`), with its audio kept, and a Retry stuck on "Retrying..." comes back. A hung CoreML call can't be aborted, so until Lexicon is relaunched every later Dictation waits behind it, holding fn-up up to its own limit (at least 30 s, whatever its length) before it goes waiting. Also built: when fn-down's load fails, fn-up answers with that failure at once and does not load again (that could be a 25 s compile at the cursor); the waiting loop tries the model again every 30 s (item 40). Proposed by #201's builder and its ticket's verifier, never asked: the limit holds fn-up far longer than item 36's 2 s, but only when the model has hung.
+
 **37. The pill and start sound wait for the 0.30 s hold.** Spec: "listening" shows when the first buffer arrives. Built: recording starts at fn-down, but nothing shows or sounds until the hold is confirmed, so fn+arrow chords and stray taps stay silent. #55's builder (PR #110).
 
 **38. Start at login: the daily copy only, once.** Built as the spec for the daily copy, plus: Lexicon Dev never registers itself, and the daily copy registers once, so a login item Jake removes stays removed until he turns it on in Lexicon's menu. A Dev build at login would answer fn beside the daily copy. #57's builder (PR #138).
@@ -241,8 +243,6 @@ These stand as built until Jake confirms them as a batch or names items to chang
 **43. Chord cancel shipped in M0.** Spec: M1. Built: another key in the first 0.30 s cancels silently, so fn+arrow works from the first build. Decided when #53 was written.
 
 **44. Our own fn state machine, not Hex's code.** Spec: copy Hex's state machine and tests (MIT). Built: a smaller fn-only machine with Hex's test scenarios; no Hex code copied. #53's builder (PR #123).
-
-**81. The local model gets 30 s plus a quarter of the clip to answer.** Spec: the local model transcribes the clip at fn-up, with no limit. Built (#201): once fn-down's load is done, the local side has 30 s plus a quarter of the clip's length to answer (a 20-minute clip gets 330 s); past it the Dictation waits for a working model (`localModelFailed`), with its audio kept, and a Retry stuck on "Retrying..." comes back. A hung CoreML call can't be aborted, so until Lexicon is relaunched every later Dictation waits behind it, holding fn-up up to its own limit (at least 30 s, whatever its length) before it goes waiting. Also built: when fn-down's load fails, fn-up answers with that failure at once and does not load again (that could be a 25 s compile at the cursor); the waiting loop tries the model again every 30 s (item 40). Proposed by #201's builder and its ticket's verifier, never asked: the limit holds fn-up far longer than item 36's 2 s, but only when the model has hung.
 
 ### Moved to a later milestone
 

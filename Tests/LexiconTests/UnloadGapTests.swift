@@ -60,6 +60,38 @@ import LexiconDomain
     #expect(decodes.last?.loads == 2, "the session decoded before the model was loaded again")
 }
 
+@Test(.timeLimit(.minutes(1))) func privateModeTurnedOnDuringAHeldUnloadReturnsAndLoadsTheModelAfterIt() async throws {
+    // A settings change never waits on an unload: one stuck behind a hung model call
+    // would stop every later settings and network change from reaching the model.
+    let (unloadStarts, unloadStarted) = AsyncStream<Void>.makeStream()
+    let (releases, release) = AsyncStream<Void>.makeStream()
+    let model = HeldUnloadModel(unloadStarted: unloadStarted, releases: releases)
+    let clock = TestClock()
+    let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)
+    await engine.warmUp(tenMinuteLinger)
+    await clock.waitForSleep(endingAt: .seconds(600))
+    await clock.advance(by: .seconds(600))
+    for await _ in unloadStarts { break }
+
+    var privateMode = tenMinuteLinger
+    privateMode.privacy = .private
+    let changed = ReturnFlag()
+    let changing = Task {
+        await engine.preferencesChanged(privateMode)
+        changed.set()
+    }
+    // Returns at the time limit if the change is parked, so that fails here, not hangs.
+    await until { changed.isSet }
+    #expect(changed.isSet, "the settings change waited on the held unload")
+    #expect(await model.loads == 1)
+
+    // Private mode keeps the model loaded: once the unload ends, it loads again.
+    release.yield()
+    await changing.value
+    await until { await model.loads == 2 }
+    #expect(await model.isResident)
+}
+
 // MARK: Helpers
 
 private let tenMinuteLinger: Preferences = {
