@@ -56,13 +56,18 @@ public final class HistoryWindowPresenter: NSObject {
 
     /// Builds the window once, unshown, and drops it. A process's first window pays
     /// for AppKit's one-time setup (its classes, the theme's art, the table's
-    /// machinery), which made the first open the slowest of a launch (#150). Paid
-    /// shortly after launch, the first open costs what every other open does. Its reader
-    /// looks in a folder that is always empty, so launch reads nothing from History.
+    /// machinery), which made the first open the slowest of a launch. Paid shortly
+    /// after launch, the first open costs what every other open does.
     public func warmUp() {
         guard controller == nil else { return }
+        _ = warmUpWindow()
+    }
+
+    /// Its reader looks in /var/empty, which macOS keeps empty and Lexicon cannot
+    /// write, so the warm-up reads nothing from History: it has no rows on screen to load.
+    func warmUpWindow() -> HistoryWindowController {
         let nothing = HistoryReader(paths: AppPaths(root: URL(filePath: "/var/empty", directoryHint: .isDirectory)))
-        _ = HistoryWindowController(reader: nothing, system: system, pasteboard: .general) {}
+        return HistoryWindowController(reader: nothing, system: system, pasteboard: .general) {}
     }
 
     /// Never typed: the new text replaces the old in History, and a failed Dictation becomes not inserted.
@@ -145,8 +150,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if !window.setFrameUsingName("History") { window.center() }
         window.setFrameAutosaveName("History")
 
-        // A plain field at the title bar's end, not a toolbar: an NSSearchToolbarItem
-        // was the costliest single part of opening the window (#150).
+        // A plain field at the title bar's end, not a toolbar: building an
+        // NSSearchToolbarItem and fitting the window to it cost a large share of every open.
         search.placeholderString = "Search"
         search.target = self
         search.action = #selector(searched(_:))
@@ -731,7 +736,7 @@ final class RowButtons: NSView, NSViewToolTipOwner {
 
     /// Each symbol in each color made once per appearance (made while drawing, so a
     /// system color resolves for Light or Dark): every row the table makes draws three.
-    /// Keyed by value, not a string: describing the color on each draw cost as much as drawing.
+    /// Keyed by value, not a string: describing the color on each draw cost about as much as drawing.
     private static var images: [ImageKey: NSImage] = [:]
 
     private struct ImageKey: Hashable {

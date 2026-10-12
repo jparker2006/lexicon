@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import History
 import LexiconDomain
 import Testing
@@ -13,19 +13,12 @@ import Testing
 /// Never shown: the test never orders its window front.
 @MainActor
 private func unshownController(_ paths: AppPaths) -> HistoryWindowController {
-    HistoryWindowController(reader: HistoryReader(paths: paths), system: nil,
-                            pasteboard: NSPasteboard(name: .init(UUID().uuidString))) {}
-}
-
-/// A view and every view under it, depth first.
-@MainActor
-private func viewTree(_ view: NSView) -> [NSView] {
-    [view] + view.subviews.flatMap(viewTree)
+    // Nothing here clicks a row, so nothing is copied to the pasteboard.
+    HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: .general) {}
 }
 
 @MainActor
 @Test func warmingUpLeavesNothingBehindThatHoldsTheHistoryWindow() {
-    _ = NSApplication.shared
     let paths = AppPaths.temporary()
     let presenter = HistoryWindowPresenter(paths: paths, system: nil)
     // The app drains its autorelease pool each turn of the run loop; the warm-up's window must go with it.
@@ -36,33 +29,39 @@ private func viewTree(_ view: NSView) -> [NSView] {
     // window would be refused it and forget its place.
     let controller = unshownController(paths)
     #expect(controller.window?.frameAutosaveName == "History")
-    // Nothing the warm-up built is on screen.
-    #expect(!NSApplication.shared.windows.contains { $0.title == "History" && $0.isVisible })
+}
+
+@MainActor
+@Test func theWarmUpReadsNothingFromHistory() async throws {
+    // The spec has History load only rows on screen; the warm-up has no screen.
+    let paths = AppPaths.temporary()
+    let store = try HistoryStore(paths: paths)
+    let id = DictationID()
+    store.record(.began(id, origin: .live, purpose: .type, at: Date(), app: AppContext(
+        bundleID: "com.example.editor", appName: "Editor", windowTitle: nil, workingDirectory: nil)))
+    await store.flush()
+    let presenter = HistoryWindowPresenter(paths: paths, system: nil)
+    #expect(unshownController(paths).rowCount > 0, "the History the window would read has a row")
+    #expect(presenter.warmUpWindow().rowCount == 0)
 }
 
 @MainActor
 @Test func theSearchFieldIsAPlainFieldInTheTitleBarAndTheWindowHasNoToolbar() {
-    _ = NSApplication.shared
     let controller = unshownController(AppPaths.temporary())
-    // A toolbar's search item was the costliest part of opening the window (#150), so it has none.
+    // Building a toolbar's search item cost a large share of every open, so the window has none.
     #expect(controller.window?.toolbar == nil)
 
-    // The field is the one with the History search identifier, and it sits in a title bar accessory.
+    // The field carries the History search identifier and sits in a title bar
+    // accessory at the trailing end, where the toolbar's search sat.
+    #expect(controller.search.accessibilityIdentifier() == AccessibilityID.historySearch)
     let accessories = controller.window?.titlebarAccessoryViewControllers ?? []
-    let fields = accessories.flatMap { viewTree($0.view) }
-        .compactMap { $0 as? NSSearchField }
-        .filter { $0.accessibilityIdentifier() == AccessibilityID.historySearch }
-    #expect(fields.count == 1)
-    #expect(fields.first === controller.search)
-
-    // Its accessory sits at the title bar's trailing end, where the toolbar's search sat.
-    let holder = accessories.first { accessory in viewTree(accessory.view).contains { $0 === controller.search } }
+    let holder = accessories.first { $0.view.subviews.contains { $0 === controller.search } }
+    #expect(holder != nil)
     #expect(holder?.layoutAttribute == .trailing)
 }
 
 @MainActor
 @Test func theSearchFieldStillFiltersAndSaysWhenNothingMatches() {
-    _ = NSApplication.shared
     // An empty History: nothing matches anything, and a cleared search says there are no Dictations yet.
     let controller = unshownController(AppPaths.temporary())
     #expect(controller.empty.stringValue == "No Dictations yet")

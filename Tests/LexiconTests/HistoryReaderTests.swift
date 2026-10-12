@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import Testing
 @testable import History
@@ -471,28 +470,29 @@ private func searchTimes(_ paths: AppPaths) -> [Duration] {
 /// The whole window, not just its reader: built, ordered in (transparent, never
 /// key) and drawn, as the app's "first rows drawn" line times it, on every open
 /// after launch's warm-up. Run it beside main to catch an open that got slower
-/// before a release build goes to Live checks (#150).
+/// before a release build goes to Live checks.
 @MainActor @Test(.enabled(if: timingRun)) func speedWindowOpenWithinBudget() async throws {
     let paths = try await year().paths
-    _ = NSApplication.shared
     let presenter = HistoryWindowPresenter(paths: paths, system: nil)
     autoreleasepool { presenter.warmUp() }
-    let clock = ContinuousClock()
-    var samples: [Duration] = []
-    for _ in 0..<20 {
+    /// One open, as the presenter makes it; nil times it not.
+    func open(_ clock: ContinuousClock?) -> Duration? {
+        var took: Duration?
         autoreleasepool {
-            var controller: HistoryWindowController?
-            samples.append(clock.measure {
-                let opened = HistoryWindowController(reader: HistoryReader(paths: paths), system: nil,
-                                                     pasteboard: NSPasteboard(name: .init(UUID().uuidString))) {}
-                opened.window?.alphaValue = 0
-                opened.showWindow(nil)
-                opened.window?.displayIfNeeded()
-                controller = opened
-            })
-            controller?.close()
+            let start = clock?.now
+            let controller = HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: .general) {}
+            controller.window?.alphaValue = 0
+            controller.showWindow(nil)
+            controller.window?.displayIfNeeded()
+            if let clock, let start { took = clock.now - start }
+            controller.close()
         }
+        return took
     }
+    // Untimed: the app has drawn its status item and menu before History ever opens,
+    // and a test process has drawn nothing, so its very first window pays for that.
+    _ = open(nil)
+    let samples = (0..<20).compactMap { _ in open(ContinuousClock()) }
     print("History window, open to first rows over \(perDay * yearDays) Dictations: first \(samples[0]), "
         + "p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")
     #expect(percentile(samples, 0.95) <= .milliseconds(100))
