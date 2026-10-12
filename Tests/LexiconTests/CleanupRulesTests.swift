@@ -251,6 +251,7 @@ let interjectionCases: [Case] = [
     Case("Uh-huh, that's right.", "Uh-huh, that's right."),
     Case("Mm-hmm, ship it.", "Mm-hmm, ship it."),
     Case("Mm hmm, let's do that.", "Mm hmm, let's do that."),
+    Case("Mm mm hmm, that works.", "Mm mm hmm, that works."),
     Case("Uh oh, the build failed again.", "Uh oh, the build failed again."),
     Case("The leak was, ah ha, in the cache.", "The leak was, ah ha, in the cache."),
     Case("Got it, uh huh.", "Got it, uh huh."),

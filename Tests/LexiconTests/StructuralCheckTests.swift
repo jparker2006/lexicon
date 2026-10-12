@@ -653,10 +653,14 @@ let rejectedModelOutputs: [Pair] = [
     // A retracted filler does not excuse dropping one the rules kept elsewhere.
     #expect(guarded("Keep the file. Huh, that's right.",
                     "Delete the uh file, actually no, keep the file. Uh huh, that's right.") == .droppedContentWord)
-    #expect(guarded("Ship it fast. Actually no, we ship fast. It costs, like, 80.",
-                    "Ship it, like, fast. Actually no, we ship like fast. It costs, like, 80.") == .droppedContentWord)
+    // A hedge inside a retraction may go with it; the one after it may not.
+    #expect(guarded("Use, like, SQLite.", "Use, like, Postgres, actually no, use, like, SQLite.") == nil)
+    #expect(guarded("Use SQLite.", "Use, like, Postgres, actually no, use, like, SQLite.") == .droppedContentWord)
     // Another "like" kept elsewhere does not excuse dropping the hedge.
     #expect(guarded("Like, it takes eighty minutes.", "Like, it takes, like, eighty minutes.") == .droppedContentWord)
+    // Only a set-off "like" hedges the word after it; a verb or a comparison may be reworded around.
+    #expect(guarded("I like this idea.", "I like the idea.") == nil)
+    #expect(guarded("It looks like a cache is stale.", "It looks like the cache is stale.") == nil)
     // The rules drop an "uh" inside a spoken number, so the AI may too.
     #expect(guarded("Call five oh oh seven.", "Call five uh oh oh seven.") == nil)
     // A "like" that ends its sentence hedges nothing in the next one.

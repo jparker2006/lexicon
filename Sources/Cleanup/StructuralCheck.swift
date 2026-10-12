@@ -84,9 +84,11 @@ enum StructuralCheck {
         let rulesOnly = canonical(tokens(Fillers.pass(refText, rules: rules)))
         var rulesKept: [String: Int] = [:]
         var standing: [String: Int] = [:]
-        for k in rulesOnly.indices { if let key = meaningKey(rulesOnly, k) { rulesKept[key, default: 0] += 1 } }
+        for k in rulesOnly.indices {
+            if let key = meaningKey(rulesOnly, k, hedgesOnly: true) { rulesKept[key, default: 0] += 1 }
+        }
         for k in ref.indices where !retracted.contains(k) {
-            if let key = meaningKey(ref, k) { standing[key, default: 0] += 1 }
+            if let key = meaningKey(ref, k, hedgesOnly: true) { standing[key, default: 0] += 1 }
         }
         for (key, count) in rulesKept
         where out.indices.filter({ meaningKey(out, $0) == key }).count < min(count, standing[key] ?? 0) {
@@ -461,9 +463,14 @@ enum StructuralCheck {
     /// "uh huh" for a sound of an interjection, "like 80" for a "like" and the word
     /// after it. nil for any other word, and for "uh" before an "oh" that is a zero
     /// inside a number ("5 uh oh 7").
-    static func meaningKey(_ t: [Token], _ k: Int) -> String? {
+    /// `hedgesOnly`: a "like" counts only when set off by a comma, as a hedge; a verb or a
+    /// comparison ("I like the idea", "looks like the cache") may be reworded around.
+    static func meaningKey(_ t: [Token], _ k: Int, hedgesOnly: Bool = false) -> String? {
         let word = t[k].word
-        if word == "like" { return likeObject(t, k).map { "like " + $0.word } }
+        if word == "like" {
+            if hedgesOnly, t[k].mark != "," { return nil }
+            return likeObject(t, k).map { "like " + $0.word }
+        }
         guard Fillers.hard.contains(word) else { return nil }
         if t[k].mark == nil, k + 1 < t.count, Fillers.interjections.contains(word + " " + t[k + 1].word) {
             let inNumber = Fillers.soundInNumber(count: t.count, at: k, word: { t[$0].word },
