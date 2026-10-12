@@ -6,7 +6,8 @@ name: CI
 on: push
 
 # A newer push to a branch cancels its older run, which no longer says anything
-# about the head. Runs on main are never cancelled, so each merge keeps its result.
+# about the head. A running main run is never cancelled; one still waiting is
+# dropped when a newer merge queues, whose run checks a head that includes it.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

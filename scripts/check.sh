@@ -19,11 +19,17 @@
 # and scripts/test.sh reuses both.
 #
 # Everything it prints also goes to .build/check.log, which ends with the step
-# that failed, if one did, and "check exit N". It writes .build/check-summary.json
-# (the commit, each step's result, the test count and the eval's worse list) and,
-# only when every step passed, .build/check-stamp: the commit it checked, as
-# "<sha>-dirty" when the tree had changes, so a stamp at the head means a green
-# check on exactly that commit.
+# that failed, if one did, and "check exit N". When it ends it writes
+# .build/check-summary.json (the commit, each step's result, the test count and
+# the eval's worse list) and .build/check-stamp, one key=value per line:
+#
+#   sha=<HEAD when the check started>
+#   tree=<the git tree of the files it checked, committed or not>
+#   exit=<N, as in "check exit N">
+#   finished=<UTC time>
+#
+# A commit whose tree is the stamp's was checked, so a builder can check, then
+# commit, with no second check (scripts/ticket.sh reads it).
 #
 # Each step has a time limit, so a hang fails the check and says what was
 # running instead of sitting silently. A cold build takes about 90 s in CI; every
@@ -40,11 +46,16 @@ heavy scripts/check.sh
 mkdir -p .build
 rm -f .build/check-stamp
 sha=$(git rev-parse HEAD)
-dirty=false
-[ -z "$(git status --porcelain)" ] || dirty=true
+# The tree of the working files, from a scratch index so the real one is untouched.
+tree=$(
+    GIT_INDEX_FILE=$LIMITS_DIR/index
+    export GIT_INDEX_FILE
+    git read-tree HEAD && git add -A && git write-tree
+) 2>/dev/null || tree=unknown
 
 mkfifo "$LIMITS_DIR/out"
-tee .build/check.log < "$LIMITS_DIR/out" &
+# A TERM to the whole group (a CI cancel) must not take tee before the last lines.
+( trap '' TERM; exec tee .build/check.log < "$LIMITS_DIR/out" ) &
 tee_pid=$!
 exec > "$LIMITS_DIR/out" 2>&1
 
@@ -68,8 +79,10 @@ step() {
 finish() {
     status=$?
     trap - EXIT
-    if [ -e "$LIMITS_DIR/tests.events" ]; then
-        tests="{\"run\": $(tests_started "$LIMITS_DIR/tests.events"), \"failed\": $(tests_failed "$LIMITS_DIR/tests.events")}"
+    events=$LIMITS_DIR/tests.events
+    [ "$current" != tests ] || events=$LIMITS_EVENTS
+    if [ -e "$events" ]; then
+        tests="{\"run\": $(tests_started "$events"), \"failed\": $(tests_failed "$events")}"
     fi
     if [ "$status" -ne 0 ]; then
         name=${current:-scripts/check.sh}
@@ -80,27 +93,21 @@ finish() {
     if [ -e "$LIMITS_DIR/eval.json" ]; then
         worse=$(plutil -extract worse json -o - "$LIMITS_DIR/eval.json" 2>/dev/null) || worse=null
     fi
-    printf '{"sha": "%s", "dirty": %s, "exit": %s, "failed": %s, "steps": {%s}, "tests": %s, "eval_worse": %s}\n' \
-        "$sha" "$dirty" "$status" "$failed" "${results%, }" "$tests" "$worse" > .build/check-summary.json
-    if [ "$status" -eq 0 ]; then
-        if [ "$dirty" = true ]; then echo "$sha-dirty"; else echo "$sha"; fi > .build/check-stamp
-    fi
+    printf '{"sha": "%s", "tree": "%s", "exit": %s, "failed": %s, "steps": {%s}, "tests": %s, "eval_worse": %s}\n' \
+        "$sha" "$tree" "$status" "$failed" "${results%, }" "$tests" "$worse" > .build/check-summary.json
+    printf 'sha=%s\ntree=%s\nexit=%s\nfinished=%s\n' "$sha" "$tree" "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .build/check-stamp
     echo "check exit $status"
+    # tee ends once nothing holds the log's pipe open; a process a step left
+    # behind could hold it forever, so give tee 10 s to drain and then stop it.
     exec >&- 2>&-
+    ( sleep 10; kill -KILL "$tee_pid" 2>/dev/null ) &
+    tee_limit=$!
     wait "$tee_pid" || true
+    stop "$tee_limit"
     limits_cleanup
     exit "$status"
 }
 trap finish EXIT
-
-# The test events are kept for the summary, and copied as they are written so
-# a failing or stopped run still counts.
-swift_test() {
-    test_status=0
-    swift test $SWIFT_FLAGS --event-stream-output-path "$LIMITS_EVENTS" --event-stream-version 0 || test_status=$?
-    cp "$LIMITS_EVENTS" "$LIMITS_DIR/tests.events" 2>/dev/null || true
-    return "$test_status"
-}
 
 # The scorer prints its report as JSON on stdout; it is kept for the worse list.
 eval_fixture() {
@@ -114,7 +121,9 @@ eval_fixture() {
 
 step build 900 swift build $SWIFT_FLAGS
 step "import check" 300 swift scripts/check-imports.swift
-step tests 300 swift_test
+step tests 300 swift test $SWIFT_FLAGS --event-stream-output-path "$LIMITS_EVENTS" --event-stream-version 0
+# Kept for the summary: the next step's limit clears the events file.
+cp "$LIMITS_EVENTS" "$LIMITS_DIR/tests.events"
 step "scorer tests" 300 scorer/test
 step eval 300 eval_fixture
 for check in scripts/checks/*.sh; do

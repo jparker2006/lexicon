@@ -16,25 +16,27 @@
 #     scripts/lib/heavy.sh status                     one line per slot
 #
 # A job that waits says who holds the slots. The slots are lockf(1) locks, so a
-# holder that dies frees its slot at once. They live in the git common dir, which
-# every worktree of the repo shares: <common dir>/heavy/slot-1 and slot-2, and
-# each holder's line in slot-N.holder. A job that holds a slot (HEAVY_SLOT is
+# holder that dies frees its slot at once. Every worktree and clone on the Mac
+# shares them, beside the live-app lane lock: slot1 and slot2 in
+# ~/Library/Application Support/Lexicon Dev/heavy/ (the files lockf holds;
+# scripts/machine.sh and scripts/status.sh probe them), and
+# each holder's line in slotN.holder. A job that holds a slot (HEAVY_SLOT is
 # set) runs the scripts it calls in that same slot. While the other slot is held,
 # a job builds with half the cores (HEAVY_JOBS, which scripts/lib/swift-flags.sh
 # passes as --jobs), so two builds share the Mac instead of fighting for it.
 
-HEAVY_DIR="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)/heavy"
-HEAVY_LIB="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)/scripts/lib/heavy.sh"
+HEAVY_DIR="$HOME/Library/Application Support/Lexicon Dev/heavy"
+HEAVY_LIB="$(git rev-parse --show-toplevel)/scripts/lib/heavy.sh"
 
 # Succeeds while slot $1 is held. lockf exits 75 when it can't take the lock.
 heavy_held() {
     heavy_probe=0
-    lockf -s -k -t 0 "$HEAVY_DIR/slot-$1" true || heavy_probe=$?
+    lockf -s -k -t 0 "$HEAVY_DIR/slot$1" true || heavy_probe=$?
     [ "$heavy_probe" -eq 75 ]
 }
 
 heavy_holder() {
-    cat "$HEAVY_DIR/slot-$1.holder" 2>/dev/null || echo "an unknown job"
+    cat "$HEAVY_DIR/slot$1.holder" 2>/dev/null || echo "an unknown job"
 }
 
 heavy() {
@@ -48,7 +50,7 @@ heavy() {
     while :; do
         for heavy_n in 1 2; do
             heavy_status=0
-            lockf -s -k -t 0 "$HEAVY_DIR/slot-$heavy_n" "$HEAVY_LIB" --holding "$heavy_n" "$heavy_token" "$@" || heavy_status=$?
+            lockf -s -k -t 0 "$HEAVY_DIR/slot$heavy_n" "$HEAVY_LIB" --holding "$heavy_n" "$heavy_token" "$@" || heavy_status=$?
             if [ -e "$heavy_token" ]; then
                 rm -f "$heavy_token"
                 exit "$heavy_status"
@@ -75,9 +77,9 @@ heavy_holding() {
     [ "$token" = - ] || : > "$token"
     line="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)") (pid $$) running $* since $(date '+%H:%M:%S')"
     if [ "$slot" = quiet ]; then
-        for n in 1 2; do printf '%s\n' "$line" > "$HEAVY_DIR/slot-$n.holder"; done
+        for n in 1 2; do printf '%s\n' "$line" > "$HEAVY_DIR/slot$n.holder"; done
     else
-        printf '%s\n' "$line" > "$HEAVY_DIR/slot-$slot.holder"
+        printf '%s\n' "$line" > "$HEAVY_DIR/slot$slot.holder"
         if heavy_held $((3 - slot)); then
             HEAVY_JOBS=$(( $(sysctl -n hw.ncpu) / 2 ))
             export HEAVY_JOBS
@@ -88,7 +90,9 @@ heavy_holding() {
     exec "$@"
 }
 
-case "$0" in
+# Run, not sourced. zsh sets $0 to a sourced file too, so it is asked directly.
+case "${ZSH_EVAL_CONTEXT:-}:$0" in
+*file:*) ;;
 */heavy.sh)
     set -eu
     case "${1:-}" in
@@ -106,7 +110,9 @@ case "$0" in
         done
         # Always slot 1 first, and a one-slot job never waits while holding one,
         # so two takers can never each hold the slot the other waits for.
-        exec lockf -s -k "$HEAVY_DIR/slot-1" lockf -s -k "$HEAVY_DIR/slot-2" "$HEAVY_LIB" --holding quiet - "$@"
+        # Not exec: lockf holds the slots, so the caller's child stays this
+        # wrapper and a signal to it reaches the job, never lockf alone.
+        lockf -s -k "$HEAVY_DIR/slot1" lockf -s -k "$HEAVY_DIR/slot2" "$HEAVY_LIB" --holding quiet - "$@"
         ;;
     status)
         mkdir -p "$HEAVY_DIR"
