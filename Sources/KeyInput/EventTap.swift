@@ -127,11 +127,14 @@ final class EventTapThread: @unchecked Sendable {
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
         if Self.isTypingOrClicking(type) { input.tick() }
         guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
+        let escTaken = tookEscape
         feed(key)
         switch key {
         case .fnDown(let at, _, _): logDelivery("down", at: at)
         case .fnUp(let at): logDelivery("up", at: at)
-        case .escape(let at): logDelivery("esc", at: at)  // Live checks: the tap still sees an Esc the hotkey takes
+        // Only an Esc the hotkey was holding: it shows the tap still sees one, and Esc
+        // presses outside a Dictation are never written down.
+        case .escape(let at) where escTaken: logDelivery("esc", at: at)
         default: break
         }
         return pass
