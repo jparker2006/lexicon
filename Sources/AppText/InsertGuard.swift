@@ -20,15 +20,17 @@ public enum InsertDecision: Sendable, Hashable {
 }
 
 /// The late-text rule (#4), the single home of it: insert only if Jake is still
-/// in the same app and field he was in at fn-up (in an app that exposes no
-/// field: the same app, under 5 s) and has not typed or clicked since the mark.
-/// Applied to EVERY insert, fast or late: there is no grace window, so a quick
-/// cloud final after an app switch can never land in the wrong app. Every `TextDestination.insert` calls this first.
+/// in the same app and field he was in when the target was taken (fn-up, or
+/// the ⌃⌘V press; in an app that exposes no field: the same app, under 5 s)
+/// and has not typed or clicked since the mark. Applied to EVERY insert, fast
+/// or late: there is no grace window, so a quick cloud final after an app switch
+/// can never land in the wrong app. Every `TextDestination.insert` calls this first.
 ///
 /// Pure: unit-tested from values, no Accessibility.
 public enum InsertGuard {
     /// An app that exposes no focused field can't show that Jake is still in the
-    /// same place, only the same app, so that counts only this long after fn-up.
+    /// same place, only the same app, so that counts only this long after the
+    /// target was taken.
     /// A ceiling, not a grace window: it only ever holds text back.
     public static let fieldlessWindow: Duration = .seconds(5)
 
