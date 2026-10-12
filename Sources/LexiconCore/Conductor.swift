@@ -1,6 +1,5 @@
 public import Foundation
 import os
-import Synchronization
 public import LexiconDomain
 public import KeyInput
 public import AudioCapture
@@ -21,8 +20,9 @@ public import Fixes
 /// the Dictation that is recording (at most one: one mic) and the tasks of
 /// Dictations still in flight (transcribing or waiting; any number).
 ///
-/// Read `Conductor+Run.swift` top to bottom to trace one Dictation. Each step
-/// is one call into the module that owns it; no step forwards further.
+/// Read `Conductor+Run.swift` top to bottom, then `Conductor+Land.swift`, to
+/// trace one Dictation. Each step is one call into the module that owns it; no
+/// step forwards further. Each other `Conductor+` file is one feature.
 ///
 /// Isolation: its own actor, NOT the main actor, so a busy History window can
 /// never delay fn-up -> text. Reentrant by design: while a run awaits the
@@ -133,17 +133,6 @@ public actor Conductor<Destination: TextDestination> {
         }
     }
 
-    /// ⌃⌘V: the final text of the newest Dictation that has text, at the current focus.
-    /// Same insert path as a live Dictation (target captured now).
-    public func pasteLast() async {
-        guard let (id, text) = await history.newestText() else { return emit(.notice(.nothingToPaste)) }
-        guard let target = await destination.target() else { return emit(.notice(.noFieldToPaste)) }
-        switch await destination.pasteLast(text, for: id, at: target) {
-        case .inserted(let receipt): history.record(.delivered(id, receipt, lag: nil))
-        case .notInserted, .historyOnly: break  // the row keeps its status; Jake can press it again
-        }
-    }
-
     /// The dev app's "dictate this WAV" test hook and `lexicon-eval`:
     /// the same run as a live Dictation, audio from a file, stop at end of file.
     /// In the dev app the text is typed into the focused field; headless it is recorded.
@@ -238,127 +227,4 @@ public actor Conductor<Destination: TextDestination> {
     func emit(_ event: ConductorEvent) {
         for continuation in subscribers.values { continuation.yield(event) }
     }
-}
-
-extension Conductor {
-    /// Everything `land` needs about one Dictation past fn-up, as one value, so
-    /// live, waiting, retry and recovery hand over the same thing (retry,
-    /// recovery and a waiting Dictation's later try land it with `target: nil`
-    /// and their own `cleaning` from `cleanup.begin(plan:)`).
-    struct DictationRun: Sendable {
-        let id: DictationID
-        let origin: DictationOrigin
-        let purpose: DictationPurpose
-        let context: AppContext
-        /// RAM copy of the audio, for the waiting branch's next transcription. nil
-        /// once a waiting Dictation's whole audio is on disk: it is read back per try.
-        var clip: AudioClip?
-        var cleaning: CleanupSession
-        /// Live: `Preferences.cleanupDeadline` (about 450 ms). Retry and recovery: seconds (nobody waits).
-        let cleanupDeadline: Duration
-        let access: CloudAccess?
-        /// nil: never typed (recovery, retry). No public init exists to make one up.
-        let target: Destination.Target?
-        var releasedAt: HostTime?
-        /// The status before this landing, for `DictationStatus.landed`.
-        var previous: DictationStatus?
-        /// nil when nobody waits for the text (recovery).
-        let hold: LatencyHold?
-
-        /// Jake waits at the cursor only when the text may still be typed.
-        var localPriority: LocalPriority { target == nil ? .background : .live }
-    }
-}
-
-/// Keeps App Nap and timer coalescing from delaying a Dictation: a
-/// `.userInitiated, .latencyCritical` activity from fn-down until the text
-/// lands. Begins in `Conductor.handle(.dictationBegan)` (and `dictate(file:)`);
-/// ends in `land` right after the insert, before a network wait, or when `run`
-/// returns, whichever is first. `end` is idempotent.
-final class LatencyHold: Sendable {
-    private let token: Mutex<(any NSObjectProtocol)?>
-
-    init(reason: String) {
-        token = Mutex(ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: reason))
-    }
-
-    func end() {
-        token.withLock { held in
-            if let held { ProcessInfo.processInfo.endActivity(held) }
-            held = nil
-        }
-    }
-}
-
-/// How the capture phase of a run ends.
-enum RunEnd: Sendable {
-    case stop(at: HostTime)
-    case cancel
-    case discard
-
-    /// A recording that ends in a transcription, as opposed to a dropped tap.
-    var isStop: Bool {
-        switch self {
-        case .stop, .cancel: true
-        case .discard: false
-        }
-    }
-}
-
-struct RunStart: Sendable {
-    let id: DictationID
-    let input: AudioInput
-    let preferences: Preferences
-    let origin: DictationOrigin
-    let purpose: DictationPurpose
-    let began: HostTime
-}
-
-/// What a finished run reports (eval prints it as one JSON line per clip).
-public struct DictationResult: Sendable {
-    public let id: DictationID
-    /// nil: discarded (a stray tap; nothing was recorded, nothing lost).
-    public let status: DictationStatus?
-    public let versions: TextVersions?
-    /// AI cleanup accepted, or why the rules-only text was used.
-    public let cleanup: CleanupOutcome?
-    public let model: SpeechModel?
-    /// fn-up (or end of file) -> Cmd-V posted.
-    public let lag: Duration?
-    public let attempts: [AttemptRecord]
-
-    static func nothing(_ id: DictationID) -> DictationResult {
-        DictationResult(id: id, status: nil, versions: nil, cleanup: nil, model: nil, lag: nil, attempts: [])
-    }
-}
-
-/// What the UI shows. The ONE list of things the indicator, status item and
-/// notices react to; the UI switches over it exhaustively.
-public enum ConductorEvent: Sendable {
-    case started(DictationID)
-    /// First real audio arrived: show "listening" now (#4).
-    case listening(DictationID)
-    case confirmed(DictationID, DictationMode)
-    /// The 19-minute mark: one minute until the cap stops the Dictation. (#58 emits it.)
-    case oneMinuteLeft(DictationID)
-    /// fn-up, Esc or sleep ended the recording. Not sent for a discarded tap, which was never confirmed.
-    case stopped(DictationID)
-    case transcribing(DictationID)
-    case finished(DictationID, DictationStatus)
-    case notice(Notice)
-}
-
-public enum Notice: Sendable, Hashable {
-    /// Text ready but not typed: "Dictation ready, paste-last to insert" (#4).
-    case readyToPaste(DictationID)
-    case waitingForNetwork(DictationID)
-    /// A Dictation the last run left unfinished has its text, at the top of History, never typed (#4).
-    case recovered(DictationID)
-    case microphoneUnavailable(String)
-    case microphoneSilent
-    case microphoneMuted
-    case diskTrouble
-    case accessibilityNeeded
-    case nothingToPaste
-    case noFieldToPaste
 }
