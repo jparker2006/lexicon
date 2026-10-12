@@ -72,14 +72,19 @@ struct Focus {
     /// `AXManualAccessibility` takes, or no field at all).
     let field: AXUIElement?
 
-    static func now() -> Focus? {
+    /// The app keys go to, by Accessibility, whatever its focused element says.
+    /// The frontmost app is no stand-in for a target: a non-activating panel
+    /// (Spotlight, a password manager) takes the keys while the app behind it
+    /// stays frontmost and truly has no focused element.
+    static func focusedApp() -> (pid: pid_t, app: AXUIElement)? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, AX.timeout)
-        // Only Accessibility names the app keys go to. The frontmost app is no stand-in:
-        // a non-activating panel (Spotlight, a password manager) takes the keys while
-        // the app behind it stays frontmost and truly has no focused element.
         guard let pid = AX.element(system, kAXFocusedApplicationAttribute).flatMap(AX.pid) else { return nil }
-        let app = AX.app(pid)
+        return (pid, AX.app(pid))
+    }
+
+    static func now() -> Focus? {
+        guard let (pid, app) = focusedApp() else { return nil }
         var value: CFTypeRef?
         switch Answer(AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue) {
         case .unreadable:
@@ -94,8 +99,9 @@ struct Focus {
         }
     }
 
-    /// An app's answer for its focused element, one meaning on every path. A
-    /// timeout or any other error is `unreadable`: the text is held, so a slow
+    /// An app's answer for its focused element, one meaning on every path. No
+    /// value, unsupported or not implemented is `none`; a timeout or any other
+    /// error is `unreadable`: the text is held, so a slow
     /// answer can only ever hold text, never paste it into an app read as fieldless.
     enum Answer: Equatable {
         case element
@@ -107,7 +113,7 @@ struct Focus {
         init(_ code: Int32) {
             switch AXError(rawValue: code) {
             case .success: self = .element
-            case .noValue, .attributeUnsupported, .notImplemented: self = .none
+            case .noValue, .attributeUnsupported, .notImplemented: self = .none  // the app says it has none
             default: self = .unreadable
             }
         }

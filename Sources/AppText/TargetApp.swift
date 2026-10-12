@@ -81,11 +81,12 @@ public actor TargetApp: TextDestination {
     }
 
     public func context() -> AppContext {
-        // No focused element (or no Accessibility): the frontmost app still names
-        // where Jake is, so an app he made always-private is still recognized.
-        guard let focus = Focus.now() else { return Self.context(of: NSWorkspace.shared.frontmostApplication) }
-        let app = NSRunningApplication(processIdentifier: focus.pid)
-        let window = AX.element(focus.app, kAXFocusedWindowAttribute)
+        // The app keys go to, even when its focused element can't be read, so an app
+        // Jake made always-private is recognized; the frontmost app only when
+        // Accessibility names none.
+        guard let (pid, element) = Focus.focusedApp() else { return Self.context(of: NSWorkspace.shared.frontmostApplication) }
+        let app = NSRunningApplication(processIdentifier: pid)
+        let window = AX.element(element, kAXFocusedWindowAttribute)
         return AppContext(bundleID: app?.bundleIdentifier, appName: app?.localizedName,
                           windowTitle: window.flatMap { AX.string($0, kAXTitleAttribute) }, workingDirectory: nil)
     }
