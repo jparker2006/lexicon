@@ -5,9 +5,9 @@
 # holder lets go only when the test writes to its release FIFO, and a waiter's
 # line is read from another FIFO. Only heavy.sh's own tries are spaced in time
 # (HEAVY_POLL), which changes how soon a job moves, never the order. No wait
-# here has a time limit of its own: a test that hangs is stopped and named by
-# its check step's limit (scripts/checks/33-heavy-tests.sh). The verdict is
-# forced with LEXICON_MACHINE_VERDICT.
+# here has a time limit of its own: a hang is stopped by the limit
+# scripts/check.sh puts on each check step, which names the step. The verdict
+# is forced with LEXICON_MACHINE_VERDICT.
 #
 #   sh scripts/test-heavy/heavy.test.sh [name-filter]
 set -eu
@@ -86,11 +86,19 @@ job_unreaped() {
     perl -e '$| = 1; $p = fork; if (!$p) { exec @ARGV or exit 127 } print "$p\n"; sleep 600' \
         scripts/lib/heavy.sh sh -c 'echo "$1 $HEAVY_SLOT $HEAVY_JOBS" > "$2/events"; read -r x < "$2/release.$1"' job "$name" "$T" > "$T/pid.$name" 2>&4 &
     PIDS="$PIDS $!"
+    eval "${name}_parent=\$!"
     until [ -s "$T/pid.$name" ]; do :; done
     eval "$name=\$(cat \"\$T/pid.\$name\")"
 }
 
-zombie() { [ "$(ps -o stat= -p "$1" 2> /dev/null | cut -c1)" = Z ]; }
+zombie() { [ "$(/bin/ps -o stat= -p "$1" 2> /dev/null | cut -c1)" = Z ]; }
+
+# Waits until nothing but job_unreaped NAME's parent and its zombie is left in
+# its process group: the lockf it started has let go of its slot.
+settled() {
+    eval "settled_parent=\$${1}_parent settled_job=\$$1"
+    while pgrep -g "$settled_parent" | grep -v -x -e "$settled_parent" -e "$settled_job" > /dev/null; do :; done
+}
 
 # expect_event "NAME SLOT JOBS": the next job to take a slot is that one.
 expect_event() {
@@ -313,9 +321,32 @@ test_a_waiter_dead_but_unreaped_mid_try_runs_nothing() {
     : > "$T/kill-try"
     job_unreaped A
     until zombie "$A"; do :; done
+    settled A
     job B
     expect_event "B 1 $CORES"
     release B
+}
+
+test_a_moment_without_ps_never_runs_a_dead_waiters_command() {
+    export LEXICON_MACHINE_VERDICT=no
+    : > "$T/kill-try"
+    : > "$T/ps-fails"
+    job_unreaped A
+    until zombie "$A"; do :; done
+    settled A
+    rm -f "$T/ps-fails"
+    job B
+    expect_event "B 1 $CORES"
+    release B
+}
+
+test_zsh_drops_an_entry_whose_pid_was_reused() {
+    # An entry written in 2020; its pid now names this test's shell.
+    mkdir -p "$SLOTS/queue"
+    : > "$SLOTS/queue/0000000001.$$"
+    touch -t 202001010000 "$SLOTS/queue/0000000001.$$"
+    out=$(zsh -c '. scripts/lib/heavy.sh; heavy_summary')
+    case "$out" in *"queue: 0 waiting"*) ;; *) fail "zsh kept a reused pid's entry: $out" ;; esac
 }
 
 test_a_clock_read_late_keeps_a_waiter() {
