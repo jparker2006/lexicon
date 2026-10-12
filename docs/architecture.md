@@ -103,7 +103,7 @@ No test target depends on an executable target: every test target links into one
 ### Invariants the compiler enforces
 
 - Recovered and retried text is never typed: `TextDestination.Target` has no public initializer, and only a live fn-up or a test file run produces one.
-- Every cloud key comes through `CloudAccess`: speech, Cleanup's LLM, Jev and model downloads all take one. Its only constructor returns nil in Private mode or for an always-private app, and Cleanup withholds it when "AI cleanup" is off. The socket and HTTP calls themselves are plain `URLSession` (`CloudLink`, `JevClient`, `CleanupModel`), so "no network call without a `CloudAccess`" is a review rule, not a compiler one.
+- Every cloud key comes through `CloudAccess`: speech, Cleanup's LLM, Jev and model downloads all take one. Its only constructor returns nil in Private mode, for an always-private app, or for a Test set eval of a speech model whose zero retention isn't confirmed (`CloudModel.retention`, an exhaustive switch), and Cleanup withholds it when "AI cleanup" is off. The socket and HTTP calls themselves are plain `URLSession` (`CloudLink`, `JevClient`, `CleanupModel`), so "no network call without a `CloudAccess`" is a review rule, not a compiler one.
 - Every Jev call has a local fallback: `decide(_:access:budget:fallback:)` has no other form.
 - A capture is stopped, and an attempt finished, at most once: both are `~Copyable` with `consuming` methods.
 - One list each, compiler-checked: providers, statuses (index predicates and retention derive from the enum), key commands, inbox messages, History events.
