@@ -63,6 +63,7 @@ export function stubGh(state) {
         return { total_count: statuses.length, statuses };
       }
       if ((m = b.match(/^repos\/\{owner\}\/\{repo\}\/commits\/([0-9a-f]{7,40})$/))) {
+        if (state.commitReadFails) fail(state.commitReadFails);
         const sha = [...Object.keys(state.parents), ...(state.mainCommits ?? []).map((x) => x.sha)].find((s) => s.startsWith(m[1])) ?? fail('gh: No commit found for SHA (HTTP 422)');
         return { sha, parents: (state.parents[sha] ?? []).map((p) => ({ sha: p })), commit: { tree: { sha: state.trees?.[sha] ?? 'unknown' } } };
       }

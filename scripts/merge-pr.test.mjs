@@ -332,6 +332,23 @@ test('an update-branch answer lost after GitHub applied it still merges, and so 
   assert.ok(!rerun.calls.includes('pr update-branch 95'));
 });
 
+test('a GitHub error while checking the update is an error, never "review that push"', async () => {
+  const state = fixture('0643');
+  state.commitReadFails = 'HTTP 502: Bad Gateway';
+  const result = await merge(['95', D3C], state);
+  assert.deepEqual([result.code, result.lines.at(-1)], [2, 'error #95: HTTP 502: Bad Gateway Nothing was merged.']);
+  assert.ok(!result.calls.some((c) => c.startsWith('pr merge')));
+});
+
+test('the lower critical-path PR still may not merge over files a held higher one changes (09:22, #105 held)', async () => {
+  const state = fixture('0922');
+  state.issues.find((i) => i.number === 45).labels.push({ name: 'critical-path' });
+  // #105's CI still running: held, not green.
+  state.runs = state.runs.map((r) => (r.head_sha === H74F ? { ...r, status: 'in_progress', conclusion: null } : r));
+  const result = await merge(['102', H899], state);
+  assert.deepEqual(refusals(result).filter((l) => l.includes('critical-path')), ['refused #102: it shares Package.swift with the held critical-path PR #105 (#45): merge that first']);
+});
+
 test('red CI on the updated head refuses the merge', async () => {
   const state = fixture('0643');
   const result = await merge(['95', D3C], state, { onSleep: (s) => { s.runs.push(run(990, updatedHead(95), 'failure', 'completed', 95)); } });
@@ -672,7 +689,7 @@ test('install.sh announce: a stranger\'s Try list and Installed comment count fo
     const sha7 = installed.slice(0, 7);
     const issues = JSON.parse(readFileSync(issuesFile, 'utf8'));
     // gh lists newest first, so a stranger's Try list is found before the owner's #178.
-    issues.unshift({ number: 300, title: 'Try list (mine)', state: 'OPEN', author: { login: 'someone-else' }, body: `### Installed ${previous.slice(0, 7)}\n`, labels: [], comments: [] });
+    issues.unshift({ number: 100, title: 'Try list (mine)', state: 'OPEN', author: { login: 'someone-else' }, body: `### Installed ${previous.slice(0, 7)}\n`, labels: [], comments: [] });
     issues.find((i) => i.number === 178).author = { login: OWNER };
     issues.find((i) => i.number === 45).comments.push({ author: { login: 'someone-else' }, body: `Installed: ${sha7}`, createdAt: '2026-10-11T11:00:00Z' });
     writeFileSync(issuesFile, JSON.stringify(issues));
@@ -683,7 +700,7 @@ test('install.sh announce: a stranger\'s Try list and Installed comment count fo
     const byNumber = (n) => after.find((i) => i.number === n);
     assert.equal(byNumber(45).comments.filter((c) => c.author.login === OWNER && c.body.startsWith(`Installed: ${sha7}`)).length, 1, '#45');
     assert.match(byNumber(178).body, new RegExp(`\\n### Installed ${sha7} \\(\\d{4}-\\d\\d-\\d\\d\\)\\n`), '#178 Try list');
-    assert.equal(byNumber(300).body, `### Installed ${previous.slice(0, 7)}\n`, 'the stranger\'s Try list');
+    assert.equal(byNumber(100).body, `### Installed ${previous.slice(0, 7)}\n`, 'the stranger\'s Try list');
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(gh, { recursive: true, force: true });

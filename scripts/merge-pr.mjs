@@ -203,8 +203,7 @@ export async function criticalGate(pr, owner, { gh, lanes }) {
   ]);
   const criticalIssues = new Set(labelled.map((i) => i.number));
   const isCritical = (p) => p.labels.some((l) => l.name === 'critical-path') || refsOf(p.body).some((n) => criticalIssues.has(n));
-  // Between two critical-path PRs the lower number goes first, so they never wait on each other.
-  const critical = open.filter((p) => p.number !== pr.number && isCritical(p) && !(isCritical(pr) && p.number > pr.number));
+  const critical = open.filter((p) => p.number !== pr.number && isCritical(p));
   const reasons = [];
   const held = [];
   for (const p of critical) {
@@ -221,8 +220,9 @@ export async function criticalGate(pr, owner, { gh, lanes }) {
     const word = own(view.comments, owner).filter((c) => isVerdict(c.body)).at(-1);
     const stopped = word && !merges(word.body) && (!ready || word.createdAt > ready.createdAt);
     const label = `critical-path PR #${p.number}${ticket ? ` (#${ticket})` : ''}`;
-    if (ci.state === 'green' && readyNow && !stopped) reasons.push(`${label} is green and Ready at ${short(p.headRefOid)}: merge it first`);
-    else held.push({ p, label });
+    if (!(ci.state === 'green' && readyNow && !stopped)) held.push({ p, label });
+    // Between two critical-path PRs that are both waiting, the lower number goes first, so they never wait on each other.
+    else if (!(isCritical(pr) && p.number > pr.number)) reasons.push(`${label} is green and Ready at ${short(p.headRefOid)}: merge it first`);
   }
   if (held.length) {
     const overlaps = (await lanes()).split('\n')
@@ -242,17 +242,15 @@ export async function criticalGate(pr, owner, { gh, lanes }) {
  * tree is exactly what merging the two gives, so no hand-made change rides along.
  */
 async function isUpdateOf(moved, head, { gh, git }) {
-  try {
-    const commit = await ghJson(gh, ['api', `repos/{owner}/{repo}/commits/${moved}`]);
-    const parents = commit.parents.map((p) => p.sha);
-    if (parents.length !== 2 || parents[0] !== head) return false;
-    if ((await ghJson(gh, ['api', `repos/{owner}/{repo}/compare/${parents[1]}...main`])).behind_by !== 0) return false;
-    await git(['fetch', '-q', 'origin', head, parents[1]]);
-    const tree = (await git(['merge-tree', '--write-tree', head, parents[1]])).split('\n')[0].trim();
-    return Boolean(tree) && tree === commit.commit?.tree?.sha;
-  } catch {
-    return false;
-  }
+  // A read that fails throws: a 502 is an error to retry, never a verdict on the push.
+  const commit = await ghJson(gh, ['api', `repos/{owner}/{repo}/commits/${moved}`]);
+  const parents = commit.parents.map((p) => p.sha);
+  if (parents.length !== 2 || parents[0] !== head) return false;
+  if ((await ghJson(gh, ['api', `repos/{owner}/{repo}/compare/${parents[1]}...main`])).behind_by !== 0) return false;
+  await git(['fetch', '-q', 'origin', head, parents[1]]);
+  // merge-tree exits 1 on a conflict, which no clean update has.
+  const tree = (await git(['merge-tree', '--write-tree', head, parents[1]]).catch(() => '')).split('\n')[0].trim();
+  return Boolean(tree) && tree === commit.commit?.tree?.sha;
 }
 
 /** GitHub merges main into the reviewed head; resolves to the new head, or { reason }. */
@@ -369,7 +367,8 @@ export async function mergePr(args, deps) {
     }
     // A run cut off after update-branch resumes from GitHub's update instead of asking for a new review.
     const current = (await ghJson(gh, ['pr', 'view', String(number), '--json', 'headRefOid'])).headRefOid;
-    if (current !== sha && await isUpdateOf(current, sha, deps)) {
+    // A head that can't be read as an update just isn't resumed; the gates then name it.
+    if (current !== sha && await isUpdateOf(current, sha, deps).catch(() => false)) {
       print(`resumed #${number}: ${short(current)} is main merged into ${short(sha)}`);
       head = current;
     }
