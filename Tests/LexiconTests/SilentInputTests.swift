@@ -49,8 +49,8 @@ private func sound(of samples: [Int16], rate: Int = rate) async throws -> InputS
 private func inaudibleHiss(count: Int) -> [Int16] { (0..<count).map { $0.isMultiple(of: 2) ? 1 : -1 } }
 
 /// A headless system whose local engine hears `engine`, as the other headless tests set one up.
-private func headless(_ engine: ScriptedTranscriber) throws -> HeadlessSystem {
-    try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults, local: engine,
+private func headless(_ engine: ScriptedTranscriber, paths: AppPaths = .temporary()) throws -> HeadlessSystem {
+    try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults, local: engine,
                             clock: TestClock())
 }
 
@@ -183,4 +183,34 @@ func anInputThatRoundsToZeroAt16kHzIsStillTranscribed() async throws {
     #expect(result.status == .inserted)
     let heard = await notices(events)
     #expect(!heard.contains(.microphoneSilent))
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aDeadMicsDictationLeftByACrashFailsWithoutBeingTranscribed() async throws {
+    let paths = AppPaths.temporary()
+    let id = DictationID()
+    do {
+        let crashed = try HistoryStore(paths: paths)
+        crashed.record(.began(id, origin: .live, purpose: .type, at: Date().addingTimeInterval(-60), app: .unknown))
+        try await writeOpenCAF(zeroSamples(count: rate), at: crashed.audioURL(for: id))
+        await crashed.flush()
+    }
+    // Recovery takes only what is older than the store's open, to the millisecond.
+    let written = (Date().timeIntervalSince1970 * 1_000).rounded()
+    await until { (Date().timeIntervalSince1970 * 1_000).rounded() > written }
+    let engine = ScriptedTranscriber(text: "Ship it")
+    let system = try headless(engine, paths: paths)
+    let events = await system.conductor.events()
+
+    await system.conductor.recover()
+    for await event in events {
+        if case .finished(id, _) = event { break }
+    }
+    await system.history.flush()
+
+    // A crash mid-hold on a dead mic: its zeros hold no words, so no model is asked for some.
+    #expect(await engine.heard.isEmpty)
+    #expect(try #require(await system.history.dictation(id)).status == .failed)
+    #expect(try await statusReason(system.history, id) == "microphone: zeros")
+    #expect(try CAFFile.read(system.history.audioURL(for: id)).samples.count == rate)
 }

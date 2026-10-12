@@ -143,7 +143,7 @@ private func relaunch(_ paths: AppPaths) async throws -> HistoryStore {
 }
 
 /// A closed CAF the way a finished recording leaves it: every sample in, the data size written.
-private func writeClosedCAF(_ samples: [Int16], at url: URL) async throws {
+func writeClosedCAF(_ samples: [Int16], at url: URL) async throws {
     let wav = try writeWAV(samples, rate: 16_000, in: try scratchDirectory())
     let recorder = Recorder()
     let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: url)
@@ -154,7 +154,7 @@ private func writeClosedCAF(_ samples: [Int16], at url: URL) async throws {
 }
 
 /// A CAF the way a crash leaves it: the data size is still -1, as a writer that never closed it leaves it.
-private func writeOpenCAF(_ samples: [Int16], at url: URL) async throws {
+func writeOpenCAF(_ samples: [Int16], at url: URL) async throws {
     try await writeClosedCAF(samples, at: url)
     var bytes = try Data(contentsOf: url)
     // The data chunk's tag is followed by its 8-byte size. The first "data" in the file is that chunk's

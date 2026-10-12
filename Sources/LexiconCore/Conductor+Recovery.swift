@@ -36,6 +36,14 @@ extension Conductor {
             return DictationResult(id: id, status: .failed, versions: nil, cleanup: nil, model: nil, lag: nil,
                                    attempts: [])
         }
+        // A crash mid-hold on a dead mic (DECISIONS item 70): no words to find, and a model asked anyway
+        // may make some up. No notice: at launch it would read as a mic problem now.
+        guard clip.samples.contains(where: { $0 != 0 }) else {
+            history.record(.failed(id, reason: "microphone: zeros"))
+            emit(.finished(id, .failed))
+            return DictationResult(id: id, status: .failed, versions: nil, cleanup: nil, model: nil, lag: nil,
+                                   attempts: [])
+        }
         let preferences = preferences.snapshot()
         // Local only. Whether this Dictation began in Private mode, or in an
         // always-private app, was decided at its fn-down and not kept (#5).
