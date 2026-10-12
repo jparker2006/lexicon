@@ -113,7 +113,7 @@ private final class SlowKeychain: Sendable {
     init() { (reading, entries) = AsyncStream<Void>.makeStream() }
     func read(_ key: String) -> String {
         entries.yield()
-        answered.wait()
+        answered.wait()  // timing-ok: a synchronous Keychain read, released by the test's answer(), never by time
         return key
     }
     func answer() { answered.signal() }
