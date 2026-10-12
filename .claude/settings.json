@@ -1,19 +1,40 @@
 {
   "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-haiku-5-5"
+    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-haiku-5-5",
+    "CLAUDE_CODE_SHELL": "/bin/bash",
+    "CLAUDE_CODE_DISABLE_FAST_MODE": "1"
   },
   "permissions": {
     "allow": [
       "Edit(.claude/skills/**)",
       "Write(.claude/skills/**)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(gh pr update-branch:*)",
+      "Workflow(review)"
+    ],
+    "deny": [
+      "Read(~/Library/Application Support/Lexicon)",
+      "Read(~/Library/Application Support/Lexicon/**)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Bash(*Application Support/Lexicon/*)",
+      "Bash(*Application Support/Lexicon)",
+      "Bash(*Application\\ Support/Lexicon/*)",
+      "Bash(*Application\\ Support/Lexicon)",
+      "Bash(* .env)",
+      "Bash(* .env *)",
+      "Bash(*/.env)",
+      "Bash(*/.env *)",
+      "Bash(security find-generic-password:*)",
+      "Bash(security find-internet-password:*)",
+      "Bash(security dump-keychain:*)"
     ]
   },
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Read|Grep|Glob",
         "hooks": [
           {
             "type": "command",
