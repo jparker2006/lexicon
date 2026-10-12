@@ -211,6 +211,11 @@ Jake: as item 57. #58 spikes the registered hotkey and falls back to (b) only if
 
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
+**76. A Re-speak with no close match changes nothing, Jev or not.** Spec: Private mode "picks by sound alone". Built (#82): without Jev (Private mode, offline, no key, past its 250 ms budget, an error), the span that sounds most alike is replaced only when its distance from what Jake said (0 the same, 1 nothing alike; mostly sound, partly spelling) is 0.5 or less; otherwise nothing changes and the pill says "no match", as when Jev says none.
+> Jake: decide what a Re-speak does in Private mode when nothing in your last Dictation sounds like the word you said again. I recommend it changes nothing and the pill says "no match", the same as when Jev says none.
+
+Jake, 2026-10-12: "yes". Recorded on [#82](https://github.com/jparker2006/lexicon/issues/82#issuecomment-6127755452). The 0.5 limit and Jev's 0.75 are starting values, tuned on the Test set once Jake says yes to the paid Jev calls. Proposed, from #82's builder and not asked: Jev's top answer "none", at any probability, also changes nothing; choices come only when Jev's top answer is a span under 0.75, up to 3 of the spans Jev ranked, never "none"; Jev is shown the 4 spans that sound most alike (#81's limit); the finder ranks by sound and spelling only, with no weight for Lexicon Terms, since the re-spoken text has already been through Cleanup with them.
+
 ### Proposed: built on an agent's default, never asked
 
 These stand as built until Jake confirms them as a batch or names items to change, in the next grill round.
@@ -236,8 +241,6 @@ These stand as built until Jake confirms them as a batch or names items to chang
 **43. Chord cancel shipped in M0.** Spec: M1. Built: another key in the first 0.30 s cancels silently, so fn+arrow works from the first build. Decided when #53 was written.
 
 **44. Our own fn state machine, not Hex's code.** Spec: copy Hex's state machine and tests (MIT). Built: a smaller fn-only machine with Hex's test scenarios; no Hex code copied. #53's builder (PR #123).
-
-**76. How a Re-speak finds its word, where the spec leaves it open.** Proposed. #82's builder (2026-10-12). Jev's top answer "none", at any probability, changes nothing and says "no match"; choices come only when Jev's top answer is a span under 0.75, and they are up to 3 of the spans Jev ranked, never "none". Without Jev (Private mode, offline, no key, past its 250 ms budget, an error), the span that sounds most alike is picked only when its distance from what Jake said (mostly sound, partly spelling) is 0.5 or less; otherwise nothing changes. The spec says only "picked by sound matching alone", which would replace some word even when nothing sounds close. Both 0.75 and 0.5 are starting values, tuned on the Test set once Jake says yes to the paid Jev calls.
 
 ### Moved to a later milestone
 
