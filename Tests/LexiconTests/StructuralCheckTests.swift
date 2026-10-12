@@ -35,8 +35,10 @@ struct Pair: Sendable, CustomTestStringConvertible {
 }
 
 private func check(_ output: String, ruled: String) -> CheckFailure? {
-    StructuralCheck.check(output, ruled: ruled, terms: benchLexicon)
+    StructuralCheck.check(output, ruled: ruled, terms: benchLexicon, rules: benchRules)
 }
+
+private let benchRules = RuleSet(rules: [], terms: benchLexicon, english: [])
 
 /// The bench's first 20 cases are the rules cases; their gold is the rules-only text.
 let rulesCases = (researchCases + heldOutCases).map { Accepted($0.raw, $0.raw, [$0.gold]) }
@@ -115,8 +117,8 @@ let neverAnswers: [Pair] = [
 @Test func lexiconTermsMayBeAddedOtherWordsMayNot() {
     let ruled = "Point the callback at the database, not the cache."
     let output = "Point the callback at the Supabase database, not the cache."
-    #expect(StructuralCheck.check(output, ruled: ruled, terms: [Term(text: "Supabase")]) == nil)
-    #expect(StructuralCheck.check(output, ruled: ruled, terms: []) == .addedWord)
+    #expect(StructuralCheck.check(output, ruled: ruled, terms: [Term(text: "Supabase")], rules: .empty) == nil)
+    #expect(StructuralCheck.check(output, ruled: ruled, terms: [], rules: .empty) == .addedWord)
 }
 
 @Test func negationsAndHedgesSurvive() {
@@ -628,40 +630,35 @@ let rejectedModelOutputs: [Pair] = [
 
 /// A filler the rules keep as meaning may not go in AI cleanup either.
 @Test func aFillerTheRulesKeepMustSurvive() {
-    #expect(StructuralCheck.check("Huh, that's right.", ruled: "Uh huh, that's right.", terms: []) == .droppedContentWord)
-    #expect(StructuralCheck.check("Oh, the build failed again.", ruled: "Uh oh, the build failed again.", terms: [])
-        == .droppedContentWord)
-    #expect(StructuralCheck.check("It takes eighty minutes.", ruled: "It takes, like, eighty minutes.", terms: [])
-        == .droppedContentWord)
-    #expect(StructuralCheck.check("It's Postgres but faster.", ruled: "It's, like, Postgres but faster.", terms: [])
-        == .droppedContentWord)
-    #expect(StructuralCheck.check("Can you explain this regex?", ruled: "Can you, like, explain this regex?", terms: [])
-        == nil)
-    #expect(StructuralCheck.check("We use gstack for that.", ruled: "We use, like, gstack for that.",
-                                  terms: [Term(text: "gstack")]) == .droppedContentWord)
-    #expect(StructuralCheck.check("Huh, that's right.", ruled: "Uh-huh, that's right.", terms: []) == .droppedContentWord)
-    // A Rule's written side counts like a Term.
-    let rules = RuleSet([Rule(heard: "cube cuddle", written: "kubectl")])
-    #expect(StructuralCheck.check("Use kubectl for that.", ruled: "Use, like, kubectl for that.", terms: [], rules: rules)
-        == .droppedContentWord)
+    func guarded(_ output: String, _ ruled: String, rules: RuleSet = .empty) -> CheckFailure? {
+        StructuralCheck.check(output, ruled: ruled, terms: [], rules: rules)
+    }
+    #expect(guarded("Huh, that's right.", "Uh huh, that's right.") == .droppedContentWord)
+    #expect(guarded("Huh, that's right.", "Uh-huh, that's right.") == .droppedContentWord)
+    #expect(guarded("Oh, the build failed again.", "Uh oh, the build failed again.") == .droppedContentWord)
+    #expect(guarded("It takes eighty minutes.", "It takes, like, eighty minutes.") == .droppedContentWord)
+    #expect(guarded("It takes eighty minutes.", "It takes, like, you know, eighty minutes.") == .droppedContentWord)
+    #expect(guarded("It's Postgres but faster.", "It's, like, Postgres but faster.") == .droppedContentWord)
+    #expect(guarded("Can you explain this regex?", "Can you, like, explain this regex?") == nil)
+    // Any "like" the rules keep, even a cautious one, stays.
+    #expect(guarded("Make it the primary color.", "Make it, like, the primary color.") == .droppedContentWord)
+    // A Term or a Rule's written side counts as the rules count it.
+    let gstack = RuleSet(rules: [], terms: [Term(text: "gstack")], english: [])
+    #expect(guarded("We use gstack for that.", "We use, like, gstack for that.", rules: gstack) == .droppedContentWord)
+    let kubectl = RuleSet([Rule(heard: "cube cuddle", written: "kubectl")])
+    #expect(guarded("Use kubectl for that.", "Use, like, kubectl for that.", rules: kubectl) == .droppedContentWord)
     let preCommit = RuleSet([Rule(heard: "pre commit", written: "pre-commit")])
     #expect(TextPass.run("Run, like, pre commit first.", rules: preCommit) == "Run, like, pre-commit first.")
-    #expect(StructuralCheck.check("Run pre-commit first.", ruled: "Run, like, pre-commit first.", terms: [],
-                                  rules: preCommit) == .droppedContentWord)
-    // A retracted "uh" elsewhere does not excuse dropping the "uh" of "uh huh".
-    #expect(StructuralCheck.check("Keep the file. Huh, that's right.",
-                                  ruled: "Delete the uh file, actually no, keep the file. Uh huh, that's right.",
-                                  terms: []) == .droppedContentWord)
-    #expect(StructuralCheck.check("It takes eighty minutes.", ruled: "It takes, like, you know, eighty minutes.",
-                                  terms: []) == .droppedContentWord)
-    // The rules drop an "uh" inside a spoken number, so the AI may too.
-    #expect(StructuralCheck.check("Call five oh oh seven.", ruled: "Call five uh oh oh seven.", terms: []) == nil)
-    // Any "like" the rules keep, even a cautious one, stays.
-    #expect(StructuralCheck.check("Make it the primary color.", ruled: "Make it, like, the primary color.", terms: [])
-        == .droppedContentWord)
-    // A "like" that ends its sentence hedges nothing in the next one.
-    #expect(StructuralCheck.check("It is. Ten people came.", ruled: "It is, like. Ten people came.", terms: []) == nil)
+    #expect(guarded("Run pre-commit first.", "Run, like, pre-commit first.", rules: preCommit) == .droppedContentWord)
+    // A retracted filler does not excuse dropping one the rules kept elsewhere.
+    #expect(guarded("Keep the file. Huh, that's right.",
+                    "Delete the uh file, actually no, keep the file. Uh huh, that's right.") == .droppedContentWord)
+    #expect(guarded("Ship it fast. Actually no, we ship fast. It costs, like, 80.",
+                    "Ship it, like, fast. Actually no, we ship like fast. It costs, like, 80.") == .droppedContentWord)
     // Another "like" kept elsewhere does not excuse dropping the hedge.
-    #expect(StructuralCheck.check("Like, it takes eighty minutes.", ruled: "Like, it takes, like, eighty minutes.",
-                                  terms: []) == .droppedContentWord)
+    #expect(guarded("Like, it takes eighty minutes.", "Like, it takes, like, eighty minutes.") == .droppedContentWord)
+    // The rules drop an "uh" inside a spoken number, so the AI may too.
+    #expect(guarded("Call five oh oh seven.", "Call five uh oh oh seven.") == nil)
+    // A "like" that ends its sentence hedges nothing in the next one.
+    #expect(guarded("It is. Ten people came.", "It is, like. Ten people came.") == nil)
 }

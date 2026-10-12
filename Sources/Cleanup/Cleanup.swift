@@ -115,7 +115,8 @@ public actor CleanupSession {
         guard model != nil else { return Cleaned(model: modelText, cleaned: rulesOnly, .rulesOnly(.off)) }
         // TODO(#75): let ruled = plan.rules.apply(to: modelText); let parts = Sentences.split(ruled)
         // reuse cache hits; request the misses + the sentence before the last; race against `deadline`;
-        // for each sentence: StructuralCheck.check(candidate, ruled: sentence, terms: plan.terms) ?? accept
+        // for each sentence: StructuralCheck.check(candidate, ruled: sentence, terms: plan.terms,
+        //   rules: plan.rules) ?? accept
         fatalError("not implemented")
     }
 

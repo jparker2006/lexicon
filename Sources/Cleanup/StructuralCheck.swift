@@ -47,9 +47,8 @@ enum StructuralCheck {
     static let lengthSlack = 4
 
     /// nil = accept. Otherwise the first failing check, in the order listed above.
-    /// `rules`: the RuleSet the rules pass used, so the fillers it keeps are held here the
-    /// same way; without it, one is built from `terms`.
-    static func check(_ candidate: String, ruled: String, terms: [Term], rules: RuleSet? = nil) -> CheckFailure? {
+    /// `rules`: the RuleSet the rules pass used, so the fillers it keeps are held here the same way.
+    static func check(_ candidate: String, ruled: String, terms: [Term], rules: RuleSet) -> CheckFailure? {
         if hasUnspokenCode(candidate, ruled: ruled) { return .unspokenCode }
         let (outText, markers) = stripListMarkers(candidate)
         let (refText, _) = stripListMarkers(ruled)
@@ -81,12 +80,16 @@ enum StructuralCheck {
         // A filler the rules keep survives, unless retracted: the rules own that call. Each
         // sound of "uh huh" and each "like" with the word it hedges ("like 80") in the
         // rules-only text appears as often in the candidate, so another "like" is no excuse.
-        let rulesOnly = canonical(tokens(Fillers.pass(refText,
-                                                      rules: rules ?? RuleSet(rules: [], terms: terms, english: []))))
-        var meant: [String: Int] = [:]
-        for k in rulesOnly.indices { if let key = meaningKey(rulesOnly, k) { meant[key, default: 0] += 1 } }
-        for k in retracted { if let key = meaningKey(ref, k) { meant[key, default: 0] -= 1 } }
-        for (key, count) in meant where out.indices.filter({ meaningKey(out, $0) == key }).count < count {
+        // A pair the rules kept counts at most as often as it stands outside a retraction.
+        let rulesOnly = canonical(tokens(Fillers.pass(refText, rules: rules)))
+        var rulesKept: [String: Int] = [:]
+        var standing: [String: Int] = [:]
+        for k in rulesOnly.indices { if let key = meaningKey(rulesOnly, k) { rulesKept[key, default: 0] += 1 } }
+        for k in ref.indices where !retracted.contains(k) {
+            if let key = meaningKey(ref, k) { standing[key, default: 0] += 1 }
+        }
+        for (key, count) in rulesKept
+        where out.indices.filter({ meaningKey(out, $0) == key }).count < min(count, standing[key] ?? 0) {
             failures.insert(.droppedContentWord)
         }
 
