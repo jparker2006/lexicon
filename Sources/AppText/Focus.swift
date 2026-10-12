@@ -83,38 +83,41 @@ struct Focus {
     }
 
     static func now() -> Focus? {
-        guard let (pid, app) = focusedApp() else { return nil }
-        var value: CFTypeRef?
-        switch Answer.read({ AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue }) {
-        case .unreadable:
-            return nil
-        case .none:
-            return Focus(pid: pid, app: app, field: nil)
-        case .element:
-            guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-            let field = value as! AXUIElement  // the type id was checked above
-            AXUIElementSetMessagingTimeout(field, AX.timeout)
-            return Focus(pid: pid, app: app, field: field)
+        readTwice { () -> (Answer, Focus?) in
+            // Each read names the focused app again: a retry never uses an app focus may have left.
+            guard let (pid, app) = focusedApp() else { return (.unreadable, nil) }
+            var value: CFTypeRef?
+            switch Answer(AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue) {
+            case .unreadable:
+                return (.unreadable, nil)
+            case .none:
+                return (.none, Focus(pid: pid, app: app, field: nil))
+            case .element:
+                guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return (.element, nil) }
+                let field = value as! AXUIElement  // the type id was checked above
+                AXUIElementSetMessagingTimeout(field, AX.timeout)
+                return (.element, Focus(pid: pid, app: app, field: field))
+            }
         }
+    }
+
+    /// Reads once more after an unreadable answer: one slow or failed read is not
+    /// the app's answer. Costs up to two more `AX.timeout`s (150 ms each), only
+    /// when the first read failed; a normal read is unchanged.
+    static func readTwice<Value>(_ attempt: () -> (Answer, Value?)) -> Value? {
+        let first = attempt()
+        return first.0 == .unreadable ? attempt().1 : first.1
     }
 
     /// An app's answer for its focused element, one meaning on every path. No
     /// value, unsupported or not implemented is `none`; a timeout or any other
-    /// error is `unreadable`: the text is held, so a slow
-    /// answer can only ever hold text, never paste it into an app read as fieldless.
+    /// error is `unreadable`, read once more (`readTwice`), then held: an app
+    /// that never answers only ever holds text.
     enum Answer: Equatable {
         case element
         /// The app says it has no focused element: the same-app 5 s rule covers it.
         case none
         case unreadable
-
-        /// Reads once more after an unreadable answer: one slow or failed read is
-        /// not the app's answer. Costs up to one more `AX.timeout` (150 ms), only
-        /// when the first read failed; a normal read is unchanged.
-        static func read(_ attempt: () -> Int32) -> Answer {
-            let first = Answer(attempt())
-            return first == .unreadable ? Answer(attempt()) : first
-        }
 
         /// From an `AXError` raw value, so tests need no ApplicationServices.
         init(_ code: Int32) {
