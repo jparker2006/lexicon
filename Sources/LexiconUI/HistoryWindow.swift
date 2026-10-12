@@ -56,8 +56,8 @@ public final class HistoryWindowPresenter: NSObject {
 
     /// Builds the window once, unshown, and drops it. A process's first window pays
     /// for AppKit's one-time setup (its classes, the theme's art, the table's
-    /// machinery), about 50 ms over a later open's, measured headless. Paid shortly
-    /// after launch, the first open costs what every other open does. Its reader
+    /// machinery), which made the first open the slowest of a launch (#150). Paid
+    /// shortly after launch, the first open costs what every other open does. Its reader
     /// looks in a folder that is always empty, so launch reads nothing from History.
     public func warmUp() {
         guard controller == nil else { return }
@@ -146,7 +146,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         window.setFrameAutosaveName("History")
 
         // A plain field at the title bar's end, not a toolbar: an NSSearchToolbarItem
-        // cost about 20 ms of every open, a fifth of the 100 ms budget, and more on the first.
+        // was the costliest single part of opening the window (#150).
         search.placeholderString = "Search"
         search.target = self
         search.action = #selector(searched(_:))
@@ -731,7 +731,7 @@ final class RowButtons: NSView, NSViewToolTipOwner {
 
     /// Each symbol in each color made once per appearance (made while drawing, so a
     /// system color resolves for Light or Dark): every row the table makes draws three.
-    /// Keyed by value, not a string: describing the color on each draw cost about as much as drawing.
+    /// Keyed by value, not a string: describing the color on each draw cost as much as drawing.
     private static var images: [ImageKey: NSImage] = [:]
 
     private struct ImageKey: Hashable {

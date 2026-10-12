@@ -44,7 +44,7 @@ private func viewTree(_ view: NSView) -> [NSView] {
 @Test func theSearchFieldIsAPlainFieldInTheTitleBarAndTheWindowHasNoToolbar() {
     _ = NSApplication.shared
     let controller = unshownController(AppPaths.temporary())
-    // A toolbar's search item cost about 20 ms of every open, so the window has none.
+    // A toolbar's search item was the costliest part of opening the window (#150), so it has none.
     #expect(controller.window?.toolbar == nil)
 
     // The field is the one with the History search identifier, and it sits in a title bar accessory.
