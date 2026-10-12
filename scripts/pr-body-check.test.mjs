@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkBody, numbersLine, readModules, ticketModules, WORD_CAP } from './pr-body-check.mjs'
+import { checkBody, numbersLine, readModules, scoredPatterns, ticketModules, WORD_CAP } from './pr-body-check.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const fixture = name => fs.readFileSync(path.join(here, 'test-pr-body', name), 'utf8')
@@ -196,4 +196,15 @@ test("the ticket read has a deadline and names a refusal as one", () => {
     assert.match(refused.error, /GitHub refused/)
     assert.doesNotMatch(refused.error, /again/)
   }
+  const busy = readModules('64', sources, () => { throw Object.assign(new Error('failed'), { stderr: 'GraphQL: API rate limit exceeded for user ID 1.' }) })
+  assert.match(busy.error, /again/)
+})
+
+test("the eval tooling never needs Scores, whatever review-map's key for it", () => {
+  // #211 renames the key to Sources/LexiconEval*/**.
+  const scored = scoredPatterns(['Sources/LexiconEval*/**', 'scorer/**', 'Sources/Cleanup/**'])
+  const hits = f => scored.some(re => re.test(f))
+  assert.equal(hits('Sources/LexiconEvalCLI/main.swift'), false)
+  assert.equal(hits('scorer/lexicon_scorer/score.py'), false)
+  assert.equal(hits('Sources/Cleanup/Rules.swift'), true)
 })

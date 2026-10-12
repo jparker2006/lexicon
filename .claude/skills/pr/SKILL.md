@@ -69,7 +69,7 @@ The same check runs before every `gh pr edit --body-file`. It names each rule th
 
 Paste the lexicon-review Workflow's `markdown` from its last run (the one whose reviewed sha is the head you push). Put the table's rows in a `<details><summary>Findings</summary>` block and keep the reviewed-sha line, the Counted line and any INCOMPLETE line outside it. Under it:
 
-- **Fixed:** one line per CONFIRMED finding: where, what changed, and `red test: <test name>` (the test that failed first, then passed), or `verifier: <the verifier's label in the run>` when no headless test can show it (a sentence in a skill or a doc).
+- **Fixed:** one line per CONFIRMED finding: where, what changed, and `red test: <test name>` (the test that failed first, then passed), `replay: <the case>` for a skill's prose, or `verifier: <the verifier's label in the run>` for a doc sentence no replay can show.
 - **Dropped:** any REFUTED or UNSURE finding you mention carries `verifier: <the verifier's label in the run>`, so the Reviewer can read why it was dropped.
 - **Helpers:** the Workflow's Helpers line, then one line per helper you started yourself (scouts, editors, test-writer, spec-checker, swarms, bench-runner): its type, model and effort, and what came of it ("test-writer (haiku xhigh): 4 red tests, kept 3").
 

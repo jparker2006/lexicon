@@ -16,8 +16,8 @@
 //   headings   Summary, Evidence, Merge Danger, Install, in that order
 //   door       **Door:** one-way or two-way
 //   blast      **Blast Radius:** one word from BLAST_RADIUS
-//   check      a "Check:" line after Install, then at most one short line: the
-//              footer a tool adds (the "Generated with" line)
+//   check      a "Check:" line after Install, then at most one line of at most
+//              FOOTER_WORDS words: the footer a tool adds (the "Generated with" line)
 //   words      at most WORD_CAP words up to the Check: line. A word is a token
 //              between spaces with a letter or digit, so table rules and tree
 //              branches don't count; nor does a closed <details> block, or the
@@ -59,13 +59,17 @@ function glob(pattern) {
   return new RegExp(`^${re}$`)
 }
 // review-map.json's "Scores" paths less the eval tooling: a scorer or lexicon-eval
-// change moves how a score is measured, not what Lexicon hears or types.
-const TOOLING = new Set(['Sources/LexiconEval/**', 'scorer/**'])
+// change moves how a score is measured, not what Lexicon hears or types. Matched
+// by prefix, so a renamed key for the tooling still drops out.
+const TOOLING = /^(?:Sources\/LexiconEval|scorer\/)/
+export function scoredPatterns(patterns) {
+  return patterns.filter(p => !TOOLING.test(p)).map(glob)
+}
 let scorePatterns
 function scorePaths() {
   if (!scorePatterns) {
     const map = JSON.parse(fs.readFileSync(path.join(root, '.claude/workflows/review-map.json'), 'utf8'))
-    scorePatterns = map.sections.Scores.filter(p => !TOOLING.has(p)).map(glob)
+    scorePatterns = scoredPatterns(map.sections.Scores)
   }
   return scorePatterns
 }
@@ -199,8 +203,9 @@ export function readModules(n, sources, gh = runGh) {
   } catch (e) {
     if (e.code === 'ETIMEDOUT') return { modules: [], error: `no answer from gh within ${GH_TIMEOUT_MS / 1000} s reading #${n}'s Modules line; check the network and run it again` }
     const said = String(e.stderr || e.message).trim().split('\n')[0]
-    // gh issue view says a refusal as "GraphQL: ..."; the REST paths as "HTTP 4xx".
-    if (/^GraphQL:|HTTP 4\d\d/.test(said)) return { modules: [], error: `GitHub refused reading #${n} (${said}), so the Sketch rule can't be checked` }
+    // gh issue view says a missing issue as "GraphQL: Could not resolve ..."; the
+    // REST paths a refusal as "HTTP 403" and the like. A rate limit is transient.
+    if (/^GraphQL: Could not resolve|HTTP 40[0-7]|HTTP 409/.test(said)) return { modules: [], error: `GitHub refused reading #${n} (${said}), so the Sketch rule can't be checked` }
     return { modules: [], error: `couldn't read #${n}'s Modules line with gh (${said}); check gh and run it again` }
   }
 }
@@ -209,12 +214,7 @@ export function readModules(n, sources, gh = runGh) {
 function refsModules(body) {
   const n = /^Refs #(\d+)/.exec(body)?.[1]
   if (!n) return { modules: [] }
-  let sources
-  try {
-    sources = fs.readdirSync(path.join(root, 'Sources'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
-  } catch {
-    return { modules: [], error: 'no Sources/ folder to read module names from' }
-  }
+  const sources = fs.readdirSync(path.join(root, 'Sources'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
   return readModules(n, sources)
 }
 
