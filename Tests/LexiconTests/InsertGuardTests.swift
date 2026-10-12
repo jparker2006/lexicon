@@ -14,7 +14,7 @@ private let fieldless = FocusSnapshot(pid: 42, fieldFingerprint: nil)
 
 @Test func aDetectedFieldInTheSameAppInsertsLongAfterFnUp() {
     #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false,
-                               sinceFnUp: .seconds(60)) == .insert)
+                               sinceCapture: .seconds(60)) == .insert)
 }
 
 @Test(arguments: [
@@ -25,44 +25,44 @@ private let fieldless = FocusSnapshot(pid: 42, fieldFingerprint: nil)
 ])
 func aSwitchedFieldOrAppHoldsTheTextAsFocusMoved(_ focusNow: FocusSnapshot) {
     #expect(InsertGuard.decide(target: field, focusNow: focusNow, inputSinceMark: false,
-                               sinceFnUp: .seconds(1)) == .hold(.focusMoved))
+                               sinceCapture: .seconds(1)) == .hold(.focusMoved))
 }
 
 @Test func typingSinceFnUpHoldsTheTextAsTypedSince() {
     #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: true,
-                               sinceFnUp: .seconds(1)) == .hold(.typedSince))
+                               sinceCapture: .seconds(1)) == .hold(.typedSince))
 }
 
 @Test(arguments: [field, fieldless])
 func nothingFocusedNowHoldsTheTextAsNoField(_ target: FocusSnapshot) {
     // nil is "nothing can take text", which is not the same as a snapshot with no field.
     #expect(InsertGuard.decide(target: target, focusNow: nil, inputSinceMark: false,
-                               sinceFnUp: .seconds(1)) == .hold(.noField))
+                               sinceCapture: .seconds(1)) == .hold(.noField))
 }
 
 @Test func aFieldlessAppInsertsUntilFiveSecondsAfterFnUpThenHoldsAsTooLate() {
     #expect(InsertGuard.decide(target: fieldless, focusNow: fieldless, inputSinceMark: false,
-                               sinceFnUp: .milliseconds(4_999)) == .insert)
+                               sinceCapture: .milliseconds(4_999)) == .insert)
     #expect(InsertGuard.decide(target: fieldless, focusNow: fieldless, inputSinceMark: false,
-                               sinceFnUp: .seconds(5)) == .hold(.tooLate))
+                               sinceCapture: .seconds(5)) == .hold(.tooLate))
     #expect(InsertGuard.decide(target: fieldless, focusNow: fieldless, inputSinceMark: false,
-                               sinceFnUp: .seconds(30)) == .hold(.tooLate))
+                               sinceCapture: .seconds(30)) == .hold(.tooLate))
 }
 
 @Test func aFieldAppearingInTheSameAppAfterFnUpHoldsAsFocusMoved() {
     #expect(InsertGuard.decide(target: fieldless, focusNow: field, inputSinceMark: false,
-                               sinceFnUp: .milliseconds(4_999)) == .hold(.focusMoved))
+                               sinceCapture: .milliseconds(4_999)) == .hold(.focusMoved))
 }
 
 @Test func aFieldLostInTheSameAppAfterFnUpHoldsAsFocusMoved() {
     // The app now exposes no focused field: a changed snapshot, not nothing to type into.
     #expect(InsertGuard.decide(target: field, focusNow: fieldless, inputSinceMark: false,
-                               sinceFnUp: .seconds(1)) == .hold(.focusMoved))
+                               sinceCapture: .seconds(1)) == .hold(.focusMoved))
 }
 
 @Test func typingSinceFnUpHoldsFieldlessTextAsTypedSinceUnderFiveSeconds() {
     #expect(InsertGuard.decide(target: fieldless, focusNow: fieldless, inputSinceMark: true,
-                               sinceFnUp: .milliseconds(4_999)) == .hold(.typedSince))
+                               sinceCapture: .milliseconds(4_999)) == .hold(.typedSince))
 }
 
 @Test(arguments: [
@@ -72,5 +72,5 @@ func nothingFocusedNowHoldsTheTextAsNoField(_ target: FocusSnapshot) {
 ])
 func aSwitchedAppHoldsFieldlessTextAsFocusMovedEvenUnderFiveSeconds(_ focusNow: FocusSnapshot) {
     #expect(InsertGuard.decide(target: fieldless, focusNow: focusNow, inputSinceMark: false,
-                               sinceFnUp: .milliseconds(4_999)) == .hold(.focusMoved))
+                               sinceCapture: .milliseconds(4_999)) == .hold(.focusMoved))
 }

@@ -37,13 +37,13 @@ public enum InsertGuard {
     /// - target: the focus captured at fn-up, or at the ⌃⌘V press (inside the destination's `Target`).
     /// - focusNow: the focus right before the paste; nil when nothing can take text.
     /// - inputSinceMark: `InputClock.hasInput(since: target's mark)`.
-    /// - sinceFnUp: from the target's capture to this check. No default, so no destination skips it.
+    /// - sinceCapture: from the target's capture to this check. No default, so no destination skips it.
     public static func decide(target: FocusSnapshot, focusNow: FocusSnapshot?, inputSinceMark: Bool,
-                              sinceFnUp: Duration) -> InsertDecision {
+                              sinceCapture: Duration) -> InsertDecision {
         guard let focusNow else { return .hold(.noField) }
         if focusNow != target { return .hold(.focusMoved) }
         if inputSinceMark { return .hold(.typedSince) }
-        if target.fieldFingerprint == nil, sinceFnUp >= fieldlessWindow { return .hold(.tooLate) }
+        if target.fieldFingerprint == nil, sinceCapture >= fieldlessWindow { return .hold(.tooLate) }
         return .insert
     }
 }

@@ -49,7 +49,7 @@ public actor HeadlessDestination: TextDestination {
     /// Same guard as every insert (focus never moves, nobody types here, and the
     /// field is always known, so no time counts: it inserts).
     public func insert(_ text: String, for id: DictationID, at target: Target) -> Delivery {
-        switch InsertGuard.decide(target: target.focus, focusNow: target.focus, inputSinceMark: false, sinceFnUp: .zero) {
+        switch InsertGuard.decide(target: target.focus, focusNow: target.focus, inputSinceMark: false, sinceCapture: .zero) {
         case .hold(let reason):
             return .notInserted(reason)
         case .insert:

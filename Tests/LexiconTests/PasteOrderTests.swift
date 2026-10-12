@@ -34,7 +34,7 @@ private actor Desk {
 
     func insert(_ text: String, lane: SlowLane, target: FocusSnapshot) async -> PasteOrder.Result<FocusSnapshot> {
         await PasteOrder.run(text, as: .dictation, lane: lane) {
-            (InsertGuard.decide(target: target, focusNow: focus, inputSinceMark: false, sinceFnUp: .zero), focus)
+            (InsertGuard.decide(target: target, focusNow: focus, inputSinceMark: false, sinceCapture: .zero), focus)
         }
     }
 }
@@ -72,7 +72,7 @@ private struct DeniedLane: PasteLane {
     let desk = Desk()
     let fnUp = await desk.focus
     let result = await PasteOrder.run("dictated", as: .dictation, lane: DeniedLane()) {
-        (InsertGuard.decide(target: fnUp, focusNow: fnUp, inputSinceMark: false, sinceFnUp: .zero), ())
+        (InsertGuard.decide(target: fnUp, focusNow: fnUp, inputSinceMark: false, sinceCapture: .zero), ())
     }
     guard case .held(.clipboardDenied) = result else { Issue.record("not held: \(result)"); return }
 }
@@ -85,7 +85,7 @@ func blankTextIsNeverPasted(_ text: String) async {
     for kind in [PasteKind.dictation, .pasteLast] {
         let fnUp = await desk.focus
         let result = await PasteOrder.run(text, as: kind, lane: lane) {
-            (InsertGuard.decide(target: fnUp, focusNow: fnUp, inputSinceMark: false, sinceFnUp: .zero), ())
+            (InsertGuard.decide(target: fnUp, focusNow: fnUp, inputSinceMark: false, sinceCapture: .zero), ())
         }
         guard case .failed = result else { Issue.record("not refused: \(result)"); return }
     }

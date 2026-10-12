@@ -144,7 +144,7 @@ public actor TargetApp: TextDestination {
             }
             return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
                                        inputSinceMark: input.hasInput(since: target.mark),
-                                       sinceFnUp: ContinuousClock.now - target.capturedAt), now)
+                                       sinceCapture: ContinuousClock.now - target.capturedAt), now)
         }
         let paste: ClipboardKeeper.PasteID, now: Focus?
         switch order {

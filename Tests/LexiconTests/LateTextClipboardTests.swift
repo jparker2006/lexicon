@@ -77,7 +77,7 @@ private let otherFieldFocus = FocusSnapshot(pid: 7, fieldFingerprint: "claude#2"
 /// and Jake's clipboard is what it was at fn-up, the same pasteboard change count.
 @MainActor private func refusesBeforeCmdV(_ reason: NotInsertedReason, target: FocusSnapshot,
                                           focusNow: FocusSnapshot?, inputSinceMark: Bool,
-                                          sinceFnUp: Duration = .zero) async {
+                                          sinceCapture: Duration = .zero) async {
     let board = FakePasteboard(), clock = FakeClock()
     board.jakeCopies(jakesClipboardText)
     let keeper = keeper(board, clock)
@@ -86,7 +86,7 @@ private let otherFieldFocus = FocusSnapshot(pid: 7, fieldFingerprint: "claude#2"
     let countBefore = board.changeCount
 
     let result = await PasteOrder.run("dictated", as: .dictation, lane: lane) {
-        (InsertGuard.decide(target: target, focusNow: focusNow, inputSinceMark: inputSinceMark, sinceFnUp: sinceFnUp), ())
+        (InsertGuard.decide(target: target, focusNow: focusNow, inputSinceMark: inputSinceMark, sinceCapture: sinceCapture), ())
     }
 
     guard case .held(let held) = result else { Issue.record("not held: \(result)"); return }
@@ -115,7 +115,7 @@ private let otherFieldFocus = FocusSnapshot(pid: 7, fieldFingerprint: "claude#2"
 @MainActor @Test func aFieldlessAppFiveSecondsAfterFnUpHoldsTheDictationBeforeAnyCmdV() async {
     let fieldless = FocusSnapshot(pid: 7, fieldFingerprint: nil)
     await refusesBeforeCmdV(.tooLate, target: fieldless, focusNow: fieldless, inputSinceMark: false,
-                            sinceFnUp: InsertGuard.fieldlessWindow)
+                            sinceCapture: InsertGuard.fieldlessWindow)
 }
 
 /// A paste the target never reads: it is a miss at 1 s, and Jake's clipboard is back
@@ -129,7 +129,7 @@ private let otherFieldFocus = FocusSnapshot(pid: 7, fieldFingerprint: "claude#2"
 
     let written = clock.at(0)
     let result = await PasteOrder.run("dictated", as: .dictation, lane: lane) {
-        (InsertGuard.decide(target: dictationFocus, focusNow: dictationFocus, inputSinceMark: false, sinceFnUp: .zero), ())
+        (InsertGuard.decide(target: dictationFocus, focusNow: dictationFocus, inputSinceMark: false, sinceCapture: .zero), ())
     }
     guard case .sent(let id, _, _) = result else { Issue.record("not sent: \(result)"); return }
     #expect(lane.cmdVs == 1)
