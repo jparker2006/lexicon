@@ -311,3 +311,27 @@ func theWarningSoundsOnceAndTheCapStopsTheDictationInBothModes(handsFree: Bool) 
     #expect(!gesture.takesEscape)
     #expect(gesture.handle(.fnDown(at(1_000), secureInput: false, id: b)).commands == [.dictationBegan(b, at: at(1_000))])
 }
+
+@Test func aPressStampedAfterTheCapGetsOneOutcomeWhicheverIsHandledFirst() {
+    // The cap at 10 s and a press stamped at 10.01 s share the tap thread. Handled before the
+    // cap's timer or after it, the cap stops the Dictation at 10 s and the press begins a new one.
+    let capped: [KeyCommand] = [.dictationStopped(a, at: at(10_000)), .dictationBegan(b, at: at(10_010))]
+    for keyFirst in [true, false] {
+        var gesture = FnGesture(shortCap)
+        _ = run([.fnDown(at(0), secureInput: false, id: a), .fnUp(at(90)), .fnDown(at(200), secureInput: false, id: b),
+                 .deadline(at(8_000))], gesture: &gesture)
+        let inputs: [KeyInput] = keyFirst
+            ? [.fnDown(at(10_010), secureInput: false, id: b), .deadline(at(10_000))]
+            : [.deadline(at(10_000)), .fnDown(at(10_010), secureInput: false, id: b)]
+        #expect(run(inputs, gesture: &gesture) == capped)
+    }
+}
+
+@Test func anEscStampedAfterTheCapDoesNotCancelTheCappedDictation() {
+    // The cap stopped the Dictation at 10 s, to be typed; an Esc at 10.01 s handled before the
+    // cap's timer comes after it all the same.
+    var gesture = FnGesture(shortCap)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300)), .deadline(at(8_000))], gesture: &gesture)
+    #expect(gesture.handle(.escape(at(10_010))).commands == [.dictationStopped(a, at: at(10_000))])
+    #expect(gesture.handle(.deadline(at(10_000))).commands.isEmpty)
+}
