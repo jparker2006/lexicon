@@ -122,6 +122,11 @@ Decided: (a). Lives in workflow.md, Human time.
 
 Jake, 04:31:43Z: "publish, yes to all three". The second question was about the old public text: "#19 to #22 and the #36 body carry a few totals derived from your Wispr history. Rewrite them to remove those?", also yes. The orchestrator removed those totals, and `docs/architecture.md` lost its Wispr lag figures with this file. Lives in AGENTS.md, Private data.
 
+**69. Only the orchestrator posts chips.**
+> The builder recorded the chips rule in DECISIONS.md as item 69, marked "Proposed": you raised the problem, but nobody asked you to confirm the rule itself. The rule: only the orchestrator posts chips, and other sessions file Later issues instead. Rec: yes.
+
+Jake, 2026-10-12 10:36Z: "yes to the chips rule" ([record](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6122562855)). He had raised the problem at 09:49:04Z ("sometimes builders give me chips to spin up..."). Decided: only the orchestrator posts chips; a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, verdict or `Live checks:` result, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, workflow.md, Roles, the orchestrate, review-merge and live-checks skills, and the orchestrator's start prompt.
+
 ### Earlier, while M0 was built (2026-10-11)
 
 **63. Builder sessions: up to 8.**
@@ -140,8 +145,6 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 **66. Two build slots, and builders added while the Mac has room.** Heavy jobs take turns in two slots, and builder sessions start at about 4 to 6 and step up while `scripts/machine.sh` says there is room. The orchestrator's call, shown to Jake in the same message as 65.
 
 **67. What a `// timing-ok:` line covers.** Besides a real-time deadline that only bounds a hang, the timing lint (`scripts/checks/20-test-timing.sh`) accepts a `// timing-ok:` disclosure on the line for: a poll interval, a kill moment that is the test's own input, a semaphore the test itself releases, and a cancellation-only stand-in. The Reviewer's ruling in its verdict on PR #211 (#160).
-
-**69. Only the orchestrator posts chips.** Proposed. Jake, 2026-10-12 09:49:04Z, not asked: "sometimes builders give me chips to spin up...". The orchestrator answered with the rule and wrote it on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6121815026): a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, and workflow.md, Roles.
 
 ## Current: the product (spec part 3)
 

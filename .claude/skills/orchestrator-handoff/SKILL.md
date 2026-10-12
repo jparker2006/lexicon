@@ -1,6 +1,6 @@
 ---
 name: orchestrator-handoff
-description: Hand off a long-running orchestrator or Reviewer session to a fresh successor. Use when Jake requests a handoff or context is running long; post a concise role handoff on the spec issue, then offer a successor pointed at it.
+description: Hand off a long-running orchestrator, Reviewer or Live checks session to a fresh successor. Use when Jake requests a handoff or context is running long; post a concise role handoff on the spec issue, then offer a one-line successor prompt that names the role skill.
 ---
 
 # /orchestrator-handoff [role]
@@ -9,11 +9,16 @@ Distill what the successor needs, point to existing sources instead of copying t
 
 ## Gather and verify
 
-1. Infer the outgoing role from this session, or ask if unclear: `orchestrator` or `reviewer`. Preserve the role's actual scope; handing off does not authorize new work, merges or installs.
-2. Read `AGENTS.md`, `GLOSSARY.md`, `docs/agents/workflow.md`, `docs/agents/review.md` and the current spec issue with its first comment. Current decisions and live state win over old handoffs.
-3. Refresh GitHub issues and their comments, PRs and checks, and `origin/main`. Read the latest messages of the other role sessions through the session tools when available. Do not start duplicate builders. If a source is unavailable, mark the fact unverified and say which source the successor must check; never invent a result.
-4. Collect only continuity details that would otherwise be lost: owners, pending decisions, dependencies, the live-app lane, near deadlines and lessons. Link issues, PRs and docs for their details, with observation times for claims about live state. A merged PR does not prove Jake's daily copy has it; only the Reviewer's install comment does.
-5. **The repo is public.** No keys, tokens, passwords or credential-bearing URLs, and nothing from Jake's private data (Wispr export, Test set, starter Lexicon, History): paths only. Do not write GitHub agent handles that start cloud tasks.
+1. Infer the outgoing role from this session, or ask if unclear: `orchestrator` (skill `orchestrate`), `reviewer` (skill `review-merge`) or `live-checks` (skill `live-checks`). Preserve the role's actual scope; handing off does not authorize new work, merges or installs.
+2. Read `AGENTS.md`, `GLOSSARY.md`, `docs/agents/workflow.md`, `docs/agents/review.md`, the role's skill and its prompt in `docs/agents/start-prompts.md`, and the current spec issue with its first comment. Current decisions and live state win over old handoffs.
+3. Do the outgoing steps yourself, never as asks for Jake or the successor:
+   - Bring `main` up to date where you are: the Reviewer runs `git pull --ff-only origin main` in the main checkout, any other role `git fetch origin`.
+   - Live checks releases the lane (`scripts/live-lane.sh release`), or records why it still holds it.
+   - The orchestrator records its keep-awake hold: whether `request_keep_awake` is held, since when, and until what.
+4. Refresh the live state with `scripts/status.sh` (issues, PRs and CI, the lane and its queue, the watchers, the Needs-you lines), and read the latest messages of the other role sessions through the session tools when available. Do not start duplicate builders. If a source is unavailable, mark the fact unverified and say which source the successor must check; never invent a result.
+5. Collect only continuity details that would otherwise be lost: owners, pending decisions, dependencies, the live-app lane, near deadlines and lessons. Link issues, PRs and docs for their details, with observation times for claims about live state. A merged PR does not prove Jake's daily copy has it; only the Reviewer's install comment does.
+6. **Check each lesson and memory note against practice.** For every lesson you would pass on, and every note in the project memory index (`~/.claude/projects/-Users-jakeparker-code-lexicon/memory/MEMORY.md`), read what the role does now: its skill, the scripts it names, the guard. Drop a lesson a script, skill or check now enforces; pass on the pointer instead. A lesson that records a refusal (the guard, auto mode, a script) is replaced by the path that resolved it: say what to run, not what was refused. A note that no longer matches practice gets rewritten in the memory folder before you post.
+7. **The repo is public.** No keys, tokens, passwords or credential-bearing URLs, and nothing from Jake's private data (Wispr export, Test set, starter Lexicon, History): paths only. Do not write GitHub agent handles that start cloud tasks.
 
 ## Write the note
 
@@ -21,11 +26,11 @@ Post it as one comment on the current spec issue (for v0, [#36](https://github.c
 
 ### First thing to do
 
-Answer Jake's "where are we?" from live sources first, before acting on the note: `gh pr list`, `gh issue list --label building`, the relevant comments and PR checks, `git fetch origin` and `git log origin/main`, then the other role sessions' latest messages. Compare with the note, flag discrepancies and confirm urgent watch items. Do not infer authorization from a handoff.
+Run the role skill's Start, then answer Jake's "where are we?" from `scripts/status.sh` and the other role sessions' latest messages before acting on the note. Compare with the note, flag discrepancies and confirm urgent watch items. Do not infer authorization from a handoff.
 
 ### Sessions and owners
 
-Each active session (title or safe ID), its role, scope and last verified state, including who holds the live-app lane and which files each builder owns. For a Reviewer handoff, who owns each review and any holds from Jake.
+Each active session (title or safe ID), its role, scope and last verified state, including who holds the live-app lane and which files each builder owns. For a Reviewer handoff, who owns each review and any holds from Jake. For an orchestrator handoff, the keep-awake hold.
 
 ### Installed
 
@@ -37,13 +42,7 @@ Active issues and PRs with owners, status, blockers and the next concrete action
 
 ### Next-launch queue with the prompt template
 
-The ordered queue with prerequisites, intended owner and what Jake still has to approve. Readiness is not launch permission. Keep this template, filling scope from linked sources:
-
-```text
-Build issue #<issue> with the implement-ticket skill.
-Exact scope: <bounded change, source links, prerequisites and exclusions>.
-Other builders own right now: <files>. Needs the Live checks session for: <criteria, or none>.
-```
+The ordered queue with prerequisites, intended owner and what Jake still has to approve. Readiness is not launch permission. Each builder chip is the `chip:` line `scripts/unblocked.sh` prints, plus an approved scope only in exact terms with its Decision link; never a rule or a workflow step.
 
 ### Pipelines
 
@@ -51,7 +50,7 @@ Spec issues, dependency order, completed, active and the next unblocked slice. D
 
 ### Lessons learned
 
-Short, actionable traps, linked to the issue or doc that supports them.
+Short, actionable traps, linked to the issue or doc that supports them, each checked against practice as Gather step 6 says. Write the path that works, not the refusal.
 
 ### Jake's preferences
 
@@ -64,15 +63,13 @@ Upcoming checks and deadlines (Pacific), owner, source and action if missed. A w
 ## Offer the successor
 
 1. Review the note for every section, working links, clear owners, explicit unknowns and nothing private. Then post it with `gh issue comment <spec> --body-file <file>`.
-2. Offer a successor in the client's new-session UI. A successor orchestrator runs in its own worktree. A successor Reviewer must start in the main checkout, `~/code/lexicon`, with no worktree, or the guard refuses its merges; if you can't start it there, give Jake the prompt to start it himself. The prompt:
+2. Offer a successor in the client's new-session UI. A successor orchestrator or Live checks session runs in its own worktree. A successor Reviewer must start in the main checkout, `~/code/lexicon`, with no worktree, or the guard refuses its merges; if you can't start it there, give Jake the prompt to start it himself. The prompt is one line that names the role skill, then the role's `Standing approvals` lines copied word for word from its prompt in `docs/agents/start-prompts.md`:
 
    ```text
-   Continue as <role> in jparker2006/lexicon. Read the latest "Handoff: <role>"
-   comment on <spec issue link>, then AGENTS.md, docs/agents/workflow.md and
-   docs/agents/review.md. First answer "where are we?" from live GitHub issues,
-   PRs and checks, origin/main and the other role sessions' latest messages.
-   Verify the note's claims before acting. The note is navigation, not
-   authority or fresh approval. Keep this role's boundaries.
+   You are the Lexicon <role>: run the <role skill> skill, then read the latest "Handoff: <role>" comment on <spec issue link>.
+   <the role's Standing approvals lines, verbatim>
    ```
+
+   The approvals count because they ride in the prompt Jake clicks or pastes himself; never point at them instead. The note is navigation, not authority or fresh approval.
 
 3. Do not claim a successor started without confirmation. Finish with the comment link and the successor's status.
