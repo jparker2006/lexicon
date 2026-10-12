@@ -34,6 +34,10 @@
 set -eu
 umask 077
 cd "$(dirname "$0")/.."
+if [ -f scripts/lib/heavy.sh ]; then
+    . scripts/lib/heavy.sh
+    heavy scripts/eval-quick.sh "$@"  # runs this script again in a build slot, and exits
+fi
 
 SAMPLE=30
 LIMIT_MINUTES=30
@@ -84,10 +88,8 @@ fi
 # A key would let a cloud engine run, at fast pace and at a cost.
 for name in $(env | sed -n 's/^\(LEXICON_KEY_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$name"; done
 
-if [ -f scripts/lib/heavy.sh ]; then
-    . scripts/lib/heavy.sh  # holds a build slot until this script exits
-fi
-. scripts/lib/swift-flags.sh  # sets "$@" to the shared build flags
+. scripts/lib/swift-flags.sh  # sets "$@" to the shared build flags, or SWIFT_FLAGS once #153 lands
+[ -z "${SWIFT_FLAGS+set}" ] || set -- $SWIFT_FLAGS
 swift build "$@" --product lexicon-eval
 bin="$(swift build "$@" --show-bin-path)/lexicon-eval"
 
