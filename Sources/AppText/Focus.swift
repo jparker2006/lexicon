@@ -109,7 +109,8 @@ struct Focus {
         case unreadable
 
         /// Reads once more after an unreadable answer: one slow or failed read is
-        /// not the app's answer. At fn-up this overlaps the audio tail.
+        /// not the app's answer. Costs up to one more `AX.timeout` (150 ms), only
+        /// when the first read failed; a normal read is unchanged.
         static func read(_ attempt: () -> Int32) -> Answer {
             let first = Answer(attempt())
             return first == .unreadable ? Answer(attempt()) : first
