@@ -93,7 +93,7 @@ const FINDING = {
 }
 // Critics are read-only and the snapshot has no .git, so a lens that counted an unrun build
 // as incomplete would leave every clean run unstamped. CI runs those on the pushed head.
-const CI_GATE = 'CI is the build gate, so running code is never your job: a build, a test, a fixture script (node ...), scripts/check.sh or a scripts/checks/ step that you did not run, or that cannot run in the snapshot, is never incomplete; say so in checked. A criterion the builder proves outside the diff (a real run, a Live checks result) is never incomplete either; it goes in notes.'
+const CI_GATE = 'CI is the build gate, so running code is never your job: a build, a test, a fixture script (node ...), scripts/check.sh or a scripts/checks/ step that you did not run, or that cannot run in the snapshot, is never incomplete; say so in checked. A criterion the diff cannot show (a real run, a Live checks result) is not incomplete either: name it in notes as the builder\'s to show. But a criterion the diff fails is still a finding.'
 const FINDINGS = {
   type: 'object',
   properties: {
