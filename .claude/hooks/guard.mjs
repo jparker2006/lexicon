@@ -103,7 +103,7 @@ const REASONS = {
   destructive: 'Refused: git reset --hard, git clean -f, force pushes and rebasing a pushed branch discard work or rewrite history; ask Jake (AGENTS.md).',
   envSearch: "Refused: this recursive search reaches a .env file and would print Jake's keys; leave it out (grep --exclude='.env*', rg -g '!.env*') or search a narrower folder.",
   bareBuild: 'Refused: build and test through scripts/test.sh or scripts/check.sh (or scripts/lib/heavy.sh <command>), which take a build slot.',
-  closing: 'Refused: a closing keyword before an issue number closes it on merge; write Refs #N (AGENTS.md), and Jake closes the issue.',
+  closing: 'Refused: a closing keyword before an issue number closes it on merge; write Refs #N (AGENTS.md); closing a ticket is the merge step\'s job (#88 Q11).',
   emDash: 'Refused: no em dashes in a PR (AGENTS.md); use a comma, a colon or a new sentence.',
 };
 

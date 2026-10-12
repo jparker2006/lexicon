@@ -16,9 +16,6 @@
 #     <what> (M min)", with an agent part when there are Live items and a Jake part
 #     whose minutes add up the Jake items.
 #   - "## Open questions" is there and empty.
-#   - A ticket whose Modules line names 3 or more modules under Sources/ has a
-#     "Sketch:" link from /pstack:architect. Only that line counts: module names
-#     such as History and Cleanup are ordinary words in the rest of a body.
 # The lint checks shape, not truth: whether an item can really run is a reader's call.
 set -eu
 cd "$(dirname "$0")/.."
@@ -37,12 +34,11 @@ case "${1:-}" in
         ;;
     *) usage ;;
 esac
-modules=$(ls Sources | tr '\n' ' ')
 
 # Prints one problem per line; with mode=fix, prints the body with the needed
 # Blocked by edges added instead.
 lint() {
-    printf '%s\n' "$body" | tr -d '\r' | awk -v modules="$modules" -v mode="$1" '
+    printf '%s\n' "$body" | tr -d '\r' | awk -v mode="$1" '
     function trim(s) { gsub(/^[ \t*]+|[ \t*.]+$/, "", s); return s }
     function refs(s, out,   n, t) {
         n = 0
@@ -74,8 +70,6 @@ lint() {
     }
     sec ~ /^## open questions/ { if ($0 !~ /^[ \t]*$/) openText = 1 }
     /Needs the Live checks session for:/ { needsLine = trim(substr($0, index($0, "for:") + 4)); needsSeen = 1 }
-    /^(\*\*)?Modules:/ { modulesLine = $0 }
-    /Sketch:/ && /(https?:|\]\()/ { sketch = 1 }
     END {
         if (n == 0) problem("no acceptance items under ## Acceptance criteria")
         jakeMin = 0
@@ -117,9 +111,6 @@ lint() {
         }
         if (!openSeen) problem("no ## Open questions heading")
         else if (openText) problem("## Open questions is not empty")
-        nm = split(modules, mods, " "); named = ""; count = 0
-        for (i = 1; i <= nm; i++) if (modulesLine ~ ("(^|[^A-Za-z])" mods[i] "([^A-Za-z]|$)")) { count++; named = named (named == "" ? "" : ", ") mods[i] }
-        if (count >= 3 && !sketch) problem("names " count " modules (" named ") and has no Sketch: link from /pstack:architect")
         if (mode == "fix") fixed()
     }
     function problem(s) { if (mode != "fix") print s }

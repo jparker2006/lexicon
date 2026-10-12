@@ -11,7 +11,8 @@
 #       ask goes to Jake before anyone builds.
 #   scripts/ticket.sh ready <issue>
 #       Comments "Ready for review: PR #M at <sha7>, CI pending" once and removes
-#       building. Refuses unless the branch is claude/issue-<issue> and its PR
+#       building. The line ends ", Live checks pending" while a Live checks
+#       request for this head has no result on the issue. Refuses unless the branch is claude/issue-<issue> and its PR
 #       starts "Refs #<issue>", and refuses a dirty tree, a HEAD that isn't the PR's head on GitHub,
 #       and a check stamp (.build/check-stamp, written by scripts/check.sh) that
 #       failed or is for other content. A stamp still counts after merges of
@@ -119,6 +120,11 @@ ready() {
     sha7=$(git rev-parse --short=7 HEAD)
     line="Ready for review: PR #$m at $sha7, CI pending"
     comments=$(gh issue view "$n" --json comments)
+    # A Live checks request for this head with no result yet is part of what the
+    # Reviewer waits on (scripts/live-request.sh posts it).
+    asked=$(printf '%s' "$comments" | first_lines | grep -c -F "Live checks request: $branch @ $sha7" || true)
+    answered=$(printf '%s' "$comments" | first_lines | grep -c -F "Live checks: $branch @ $sha7" || true)
+    [ "$asked" -eq 0 ] || [ "$answered" -gt 0 ] || line="$line, Live checks pending"
     if printf '%s' "$comments" | first_lines | grep -q -F "Ready for review: PR #$m at $sha7"; then
         echo "ticket: #$n already has \"Ready for review: PR #$m at $sha7\""
     else
