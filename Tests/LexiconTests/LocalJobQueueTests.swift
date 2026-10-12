@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Transcription
 
-// The local job queue's line, driven directly (#201, item 2): a job still waiting for
+// The local job queue's line, driven directly: a job still waiting for
 // its turn whose task is cancelled leaves the line at once, throws CancellationError
 // and never runs its body. Each step waits on a signal (`untilWaiting`, a stream), so
 // nothing depends on machine speed, and a missing signal fails at the time limit.

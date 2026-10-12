@@ -5,7 +5,7 @@ import Testing
 import LexiconDomain
 @testable import Transcription
 
-// #201 item 4: an idle unload that has started can swallow a fn-down. A Dictation
+// An idle unload that has started can swallow a fn-down. A Dictation
 // that begins while the unload is held must wait for the unload to end, then load
 // the model, before its text is decoded. Through SpeechEngine, with a fake local
 // model whose unload the test holds and a fake clock: no Neural Engine, no
@@ -41,10 +41,8 @@ import LexiconDomain
         returned.set()
         return outcome
     }
-    // Nothing signals "finish is waiting on the model", so this polls until finish
-    // either has its fn-up load limit pending (it waits on a load that has not
-    // finished) or has already returned.
-    await until { clock.sleepers > 0 || returned.isSet }
+    // finish waits on a load that has not finished, so its 2 s fn-up load limit is pending.
+    await clock.waitForSleep(endingAt: .seconds(602))
     #expect(!returned.isSet, "finish answered while the idle unload was still held")
 
     // Only now does the unload end. The model loads again and the text comes back.

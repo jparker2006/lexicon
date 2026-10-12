@@ -4,7 +4,7 @@ import Testing
 import LexiconDomain
 @testable import Transcription
 
-// #201, item 1: the local side of `SpeechEngine.finish` has its own limit, 30 s plus a
+// The local side of `SpeechEngine.finish` has its own limit, 30 s plus a
 // quarter of the clip's length, counted from when the load check passes. A local model
 // whose session never answers must get an answer at that limit, with or without a cloud
 // model in the plan. Headless: a fake clock, a fake model, a scripted cloud. Each wait is

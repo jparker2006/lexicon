@@ -4,7 +4,7 @@ import Testing
 import LexiconDomain
 @testable import Transcription
 
-// #201 (criterion 2): a Retry whose local model hangs. Headless: the real Conductor
+// A Retry whose local model hangs. Headless: the real Conductor
 // on a synthetic WAV, a local model whose first session answers and whose later
 // sessions hang until the test releases them, and a fake clock. Each step waits on
 // a stream event or on the clock's pending sleep; nothing waits on the wall clock.

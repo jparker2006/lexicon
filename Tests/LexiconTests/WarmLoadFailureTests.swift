@@ -4,7 +4,7 @@ import Testing
 import LexiconDomain
 @testable import Transcription
 
-// #201 (acceptance 4): when the fn-down load of the local model throws, fn-up
+// When the fn-down load of the local model throws, fn-up
 // answers at once with that failure and never runs the session's finish. Headless:
 // a fake model whose load throws and whose session would hang, a TestClock that
 // no step advances (so an answer that waited on the load limit would hang and fail

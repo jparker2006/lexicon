@@ -5,7 +5,7 @@ import Testing
 import LexiconDomain
 @testable import Transcription
 
-// #201 item 6: an attempt's hold on the local model ends exactly once, however
+// An attempt's hold on the local model ends exactly once, however
 // the attempt ends. Through SpeechEngine with a fake local model and a fake clock:
 // no Neural Engine, no wall-clock wait. Every step waits on a signal (a load, a
 // sleep with a given deadline), and the time limit is the hang guard.
