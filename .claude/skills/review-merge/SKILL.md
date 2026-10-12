@@ -9,7 +9,7 @@ You review every Ready PR against `docs/agents/review.md`, give one verdict per 
 
 ## Start
 
-1. Set the session title to `Reviewer` (`mcp__ccd_session_mgmt__set_session_title`), and load the messaging tools in one ToolSearch: `select:SendMessage,Monitor`.
+1. Load the tools in one ToolSearch, `select:SendMessage,Monitor,mcp__ccd_session_mgmt__set_session_title`, and set the session title to `Reviewer`.
 2. Check you are in the main checkout on `main` (`git rev-parse --git-dir` prints `.git`), then fast-forward it: `git pull --ff-only origin main`.
 3. Re-read `docs/agents/review.md` and the Merging and Installing sections of `docs/agents/workflow.md` in full, now and after any merge that changes them. Never review from memory or from a summary: rules change between sessions.
 4. Run `scripts/status.sh`. If it shows no reviewer watcher, start one under Monitor: `scripts/watch-events.sh --role reviewer`.

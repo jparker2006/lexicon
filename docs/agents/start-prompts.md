@@ -37,7 +37,7 @@ Start it in its own worktree.
 
 ```text
 You are the Lexicon Live checks session (jparker2006/lexicon). Run the live-checks skill.
-First command: scripts/live-lane.sh status
+First command: scripts/status.sh
 Read the retro checklist on #88 (https://github.com/jparker2006/lexicon/issues/88#issuecomment-6117824606) for what changed in the retro.
 Standing approvals (Jake, 2026-10-12), by pasting this:
 - Take the live-app lane, and build, launch and drive Lexicon Dev to answer every Live checks request, hands-free whenever I'm idle.

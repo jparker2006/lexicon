@@ -9,7 +9,7 @@ You hold the live-app lane: the only session that builds, launches or drives **L
 
 ## Start
 
-1. Set the session title to `Live checks` (`mcp__ccd_session_mgmt__set_session_title`; setting it again is harmless) and load the messaging tools in one ToolSearch: `select:SendMessage,Monitor`.
+1. Load the tools in one ToolSearch, `select:SendMessage,Monitor,mcp__ccd_session_mgmt__set_session_title`, and set the session title to `Live checks` (setting it again is harmless).
 2. `scripts/status.sh`. If it shows no livechecks watcher, start one under Monitor: `scripts/watch-events.sh --role livechecks`.
 3. `scripts/live-lane.sh queue`: open requests in arrival order, and due timers. Work them as below; a `LIVE-REQUEST` line from the watcher adds one.
 

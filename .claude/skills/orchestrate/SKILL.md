@@ -9,8 +9,8 @@ You keep the map of issues, start builders, schedule Live checks sittings, and a
 
 ## Start
 
-1. Set the session title to `Orchestrator` (`mcp__ccd_session_mgmt__set_session_title`).
-2. Load the messaging and session tools in one ToolSearch: `select:SendMessage,Monitor,mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__get_usage,mcp__ccd_session_mgmt__archive_session,mcp__ccd_host__request_keep_awake`.
+1. Load the messaging and session tools in one ToolSearch: `select:SendMessage,Monitor,mcp__ccd_session_mgmt__set_session_title,mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__get_usage,mcp__ccd_session_mgmt__archive_session,mcp__ccd_host__request_keep_awake`.
+2. Set the session title to `Orchestrator`.
 3. Run `scripts/status.sh` and `scripts/machine.sh`.
 4. Call `get_usage`: note the 5-hour and weekly percentages.
 5. Call `list_sessions`. While any Lexicon session runs, hold `request_keep_awake` until the sessions go idle. A closed lid still sleeps.
