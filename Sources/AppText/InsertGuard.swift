@@ -27,13 +27,21 @@ public enum InsertDecision: Sendable, Hashable {
 ///
 /// Pure: unit-tested from values, no Accessibility.
 public enum InsertGuard {
+    /// An app that exposes no focused field can't show that Jake is still in the
+    /// same place, only the same app, so that counts only this long after fn-up.
+    /// A ceiling, not a grace window: it only ever holds text back.
+    public static let fieldlessWindow: Duration = .seconds(5)
+
     /// - target: the focus captured at fn-up (inside the destination's `Target`).
     /// - focusNow: the focus right before the paste; nil when nothing can take text.
     /// - inputSinceMark: `InputClock.hasInput(since: target's mark)`.
-    public static func decide(target: FocusSnapshot, focusNow: FocusSnapshot?, inputSinceMark: Bool) -> InsertDecision {
+    /// - sinceFnUp: from fn-up to this check. No default, so no destination skips it.
+    public static func decide(target: FocusSnapshot, focusNow: FocusSnapshot?, inputSinceMark: Bool,
+                              sinceFnUp: Duration) -> InsertDecision {
         guard let focusNow else { return .hold(.noField) }
         if focusNow != target { return .hold(.focusMoved) }
         if inputSinceMark { return .hold(.typedSince) }
+        if target.fieldFingerprint == nil, sinceFnUp >= fieldlessWindow { return .hold(.tooLate) }
         return .insert
     }
 }

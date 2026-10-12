@@ -54,7 +54,7 @@ private func dictation(between events: [CGEvent]) async -> InsertDecision {
     var stopped = false
     for await command in commands { if case .dictationStopped = command { stopped = true } }
     #expect(stopped, "the press was a hold")
-    return InsertGuard.decide(target: field, focusNow: field, inputSinceMark: input.hasInput(since: mark))
+    return InsertGuard.decide(target: field, focusNow: field, inputSinceMark: input.hasInput(since: mark), sinceFnUp: .zero)
 }
 
 /// The key-down of the Cmd-V chord Lexicon posts, as the tap sees it from `pid`.

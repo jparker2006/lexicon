@@ -76,7 +76,8 @@ private let otherFieldFocus = FocusSnapshot(pid: 7, fieldFingerprint: "claude#2"
 /// A Dictation whose guard refuses: the paste is held for `reason` before any Cmd-V,
 /// and Jake's clipboard is what it was at fn-up, the same pasteboard change count.
 @MainActor private func refusesBeforeCmdV(_ reason: NotInsertedReason, target: FocusSnapshot,
-                                          focusNow: FocusSnapshot?, inputSinceMark: Bool) async {
+                                          focusNow: FocusSnapshot?, inputSinceMark: Bool,
+                                          sinceFnUp: Duration = .zero) async {
     let board = FakePasteboard(), clock = FakeClock()
     board.jakeCopies(jakesClipboardText)
     let keeper = keeper(board, clock)
@@ -85,7 +86,7 @@ private let otherFieldFocus = FocusSnapshot(pid: 7, fieldFingerprint: "claude#2"
     let countBefore = board.changeCount
 
     let result = await PasteOrder.run("dictated", as: .dictation, lane: lane) {
-        (InsertGuard.decide(target: target, focusNow: focusNow, inputSinceMark: inputSinceMark), ())
+        (InsertGuard.decide(target: target, focusNow: focusNow, inputSinceMark: inputSinceMark, sinceFnUp: sinceFnUp), ())
     }
 
     guard case .held(let held) = result else { Issue.record("not held: \(result)"); return }
@@ -111,6 +112,12 @@ private let otherFieldFocus = FocusSnapshot(pid: 7, fieldFingerprint: "claude#2"
     await refusesBeforeCmdV(.noField, target: dictationFocus, focusNow: nil, inputSinceMark: false)
 }
 
+@MainActor @Test func aFieldlessAppFiveSecondsAfterFnUpHoldsTheDictationBeforeAnyCmdV() async {
+    let fieldless = FocusSnapshot(pid: 7, fieldFingerprint: nil)
+    await refusesBeforeCmdV(.tooLate, target: fieldless, focusNow: fieldless, inputSinceMark: false,
+                            sinceFnUp: InsertGuard.fieldlessWindow)
+}
+
 /// A paste the target never reads: it is a miss at 1 s, and Jake's clipboard is back
 /// 2 s after the write, not later, with no real time involved.
 @MainActor @Test func aPasteNobodyReadIsBackToJakesClipboardWithin2s() async {
@@ -122,7 +129,7 @@ private let otherFieldFocus = FocusSnapshot(pid: 7, fieldFingerprint: "claude#2"
 
     let written = clock.at(0)
     let result = await PasteOrder.run("dictated", as: .dictation, lane: lane) {
-        (InsertGuard.decide(target: dictationFocus, focusNow: dictationFocus, inputSinceMark: false), ())
+        (InsertGuard.decide(target: dictationFocus, focusNow: dictationFocus, inputSinceMark: false, sinceFnUp: .zero), ())
     }
     guard case .sent(let id, _, _) = result else { Issue.record("not sent: \(result)"); return }
     #expect(lane.cmdVs == 1)

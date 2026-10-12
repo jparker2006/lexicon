@@ -29,10 +29,10 @@ import LexiconCore
 
 @Test func lateTextIsHeldWhenJakeTypedSinceFnUp() {
     let field = FocusSnapshot(pid: 42, fieldFingerprint: "f1")
-    #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false) == .insert)
-    #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: true) == .hold(.typedSince))
+    #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false, sinceFnUp: .zero) == .insert)
+    #expect(InsertGuard.decide(target: field, focusNow: field, inputSinceMark: true, sinceFnUp: .zero) == .hold(.typedSince))
     #expect(InsertGuard.decide(target: field, focusNow: FocusSnapshot(pid: 7, fieldFingerprint: "f1"),
-                               inputSinceMark: false) == .hold(.focusMoved))
+                               inputSinceMark: false, sinceFnUp: .zero) == .hold(.focusMoved))
 }
 
 @Test func structuralCheckRejectsChangedNumbers() {

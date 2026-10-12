@@ -46,9 +46,10 @@ public actor HeadlessDestination: TextDestination {
         Target(serial: delivered.count, focus: FocusSnapshot(pid: 0, fieldFingerprint: "headless"))
     }
 
-    /// Same guard as every insert (focus never moves and nobody types here, so it inserts).
+    /// Same guard as every insert (focus never moves, nobody types here, and the
+    /// field is always known, so no time counts: it inserts).
     public func insert(_ text: String, for id: DictationID, at target: Target) -> Delivery {
-        switch InsertGuard.decide(target: target.focus, focusNow: target.focus, inputSinceMark: false) {
+        switch InsertGuard.decide(target: target.focus, focusNow: target.focus, inputSinceMark: false, sinceFnUp: .zero) {
         case .hold(let reason):
             return .notInserted(reason)
         case .insert:

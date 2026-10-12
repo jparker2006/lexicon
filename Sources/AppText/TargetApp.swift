@@ -109,7 +109,8 @@ public actor TargetApp: TextDestination {
     }
 
     public func target() async -> Target? {
-        let mark = input.mark()
+        // Both name fn-up: the mark for typing since, the time for the fieldless window.
+        let mark = input.mark(), capturedAt = HostTime.now()
         guard let focus = Focus.now() else { return nil }
         // A password field never gets a Dictation, in any mode, and a link or button
         // takes none. An app that exposes no focused element at all gets the paste.
@@ -118,7 +119,7 @@ public actor TargetApp: TextDestination {
         let fingerprint = focus.durableFingerprint(bundleID: bundleID)
         await Paster.shared.prefetch()  // Jake's clipboard, read now, off the text-ready-to-Cmd-V path
         return Target(focus: focus.snapshot(durable: fingerprint), bundleID: bundleID, mark: mark,
-                      capturedAt: .now(), field: focus.field.map(FieldRef.init), fingerprint: fingerprint,
+                      capturedAt: capturedAt, field: focus.field.map(FieldRef.init), fingerprint: fingerprint,
                       pasteStart: focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute)?.location })
     }
 
@@ -139,7 +140,8 @@ public actor TargetApp: TextDestination {
                     : now.snapshot(durable: nil)
             }
             return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
-                                       inputSinceMark: input.hasInput(since: target.mark)), now)
+                                       inputSinceMark: input.hasInput(since: target.mark),
+                                       sinceFnUp: HostTime.now().duration(since: target.capturedAt)), now)
         }
         let paste: ClipboardKeeper.PasteID, now: Focus?
         switch order {

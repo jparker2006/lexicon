@@ -237,11 +237,13 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 **44. Our own fn state machine, not Hex's code.** Spec: copy Hex's state machine and tests (MIT). Built: a smaller fn-only machine with Hex's test scenarios; no Hex code copied. #53's builder (PR #123).
 
+**70. The 5 s late-text fallback counts from fn-up, and late text keeps the "Not typed" pill.** Spec (Inserting text): where "same field" can't be detected, "same app and under 5 s", with no start named; held text shows "Dictation ready, paste-last to insert", while the spec's pill list says "Not typed. Press ⌃⌘V to paste it.". Built: the fallback applies when the app exposed no focused field at fn-up; the 5 s runs from fn-up to the check right before Cmd-V, so 5 s or more is held (reason `tooLate`), and a long Dictation in such an app always waits for paste-last. Every held Dictation, and a live one with nowhere to type, shows the pill list's line. #60's builder ([sketch](https://github.com/jparker2006/lexicon/issues/60#issuecomment-6124271421)).
+
 ### Moved to a later milestone
 
 - **45.** Long hands-free Dictations: a 20-minute Dictation waits 25 to 41 s at fn-up (#47); the switch to Parakeet's streaming mode is #117 (M1).
 - **46.** Quit and the clipboard restore: quitting right after a paste, or during item 26's 2 s hold, can leave Dictation text on the clipboard. #132 (M1).
-- **47.** The "same app and under 5 s" late-text fallback for apps whose field can't be detected: not built. #60 (M1).
+- **47.** The "same app and under 5 s" late-text fallback for apps whose field can't be detected: built in #60, as item 70 says.
 - **48.** The audio retention sweep runs at launch only, not on a rolling schedule. No ticket yet.
 
 ### Facts the spec got wrong

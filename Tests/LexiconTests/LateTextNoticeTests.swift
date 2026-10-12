@@ -50,7 +50,7 @@ private func makeConductor(_ destination: RefusingDestination) throws -> (Conduc
     return (conductor, history)
 }
 
-@Test(.timeLimit(.minutes(1)), arguments: [NotInsertedReason.focusMoved, .typedSince, .noField, .pasteFailed])
+@Test(.timeLimit(.minutes(1)), arguments: [NotInsertedReason.focusMoved, .typedSince, .noField, .tooLate, .pasteFailed])
 func aRefusedInsertKeepsItsTextNotInsertedWithTheReasonAndShowsReadyToPaste(_ reason: NotInsertedReason) async throws {
     let wav = try writeWAV(syntheticSamples(count: 19_200), rate: 16_000, in: try scratchDirectory())
     let destination = RefusingDestination(answer: .notInserted(reason))
