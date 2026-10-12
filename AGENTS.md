@@ -55,7 +55,7 @@ This is the private-data rule's one home; review.md, the skills and the helper b
 A builder builds its ticket with the implement-ticket skill (`.claude/skills/implement-ticket/SKILL.md`; in Claude Code, call the Skill tool with "implement-ticket"). It runs from claim to hand-off and carries the details of the steps below.
 
 1. **Start from an issue.** GitHub issues are the shared to-do list. Claim an unclaimed one with `scripts/ticket.sh claim N`. A real change with no issue gets one first.
-2. **Stay in your own lane.** Work in your own worktree and leave changes you did not make alone. On a conflict, what's already merged wins: resolve in its favor unless keeping it would break your ticket.
+2. **Stay in your own lane.** Work in your own worktree and leave changes you did not make alone. On a conflict, what's already merged wins: resolve in its favor unless keeping it would break your ticket. **Only the orchestrator posts chips** (the one-click cards that start a session). Out-of-scope work you find becomes a `later` issue (`scripts/ticket.sh later <pr> "<note>" --owner <issue>`, or `--new`), named in your Ready line; the orchestrator decides whether and when it becomes a chip.
 3. **Test first where the issue names a seam.** A bug fix gets a test that fails before the fix.
 4. **Check once, on the finished change,** with the check script. All green, or say what is red and why.
 5. **Commit small, only your own files, with explicit paths.** Message: `type(scope): what changed (#N)`. Link the issue with `Refs #N` and **never a closing keyword** (any form of close, fix or resolve before an issue number), in commits and PR bodies alike: the merge script closes the issue itself, with a comment naming the PR. This is the rule's one home.

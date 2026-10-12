@@ -141,6 +141,8 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 **67. What a `// timing-ok:` line covers.** Besides a real-time deadline that only bounds a hang, the timing lint (`scripts/checks/20-test-timing.sh`) accepts a `// timing-ok:` disclosure on the line for: a poll interval, a kill moment that is the test's own input, a semaphore the test itself releases, and a cancellation-only stand-in. The Reviewer's ruling in its verdict on PR #211 (#160).
 
+**69. Only the orchestrator posts chips.** Jake, 2026-10-12 09:49:04Z, not asked: "sometimes builders give me chips to spin up...". The orchestrator answered with the rule and wrote it on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6121815026): a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, and workflow.md, Roles.
+
 ## Current: the product (spec part 3)
 
 Items 25 to 60 come from the spec's first comment, part 3, "what building M0 changed". Each says what the spec said, what was built, and who decided.
