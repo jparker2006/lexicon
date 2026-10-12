@@ -5,6 +5,7 @@
 #
 #   scripts/test-set.sh             grow it from his Wispr history (#50)
 #   scripts/test-set.sh review      open the gold review page (#51)
+#   scripts/test-set.sh status      the review's counts: answered and left, never a clip
 #   scripts/test-set.sh baselines   save Wispr's and local Parakeet's baselines (#51)
 #
 # The update: run it weekly until Wispr is switched off, since Wispr keeps only
@@ -14,7 +15,9 @@
 # Lines already in the Test set are never changed, except by the review.
 #
 # The review serves a page on 127.0.0.1 until Ctrl-C, for the clips where the two
-# speech models disagree; every answer is saved as it is made.
+# speech models disagree, held-back sessions first and then everyday ones, and
+# after them the agreed-gold audit; every answer is saved as it is made. Stop
+# after any session: the scorer scores every session answered in full.
 #
 # The baselines, once every clip is reviewed: plays every clip through the real
 # pipeline at the speed of speech (about as long as the audio), into
@@ -28,8 +31,8 @@ cd "$(dirname "$0")/.."
 
 command="${1:-update}"
 case "$command" in
-review)
-    exec scorer/testset review
+review | status)
+    exec scorer/testset "$command"
     ;;
 update | baselines)
     . scripts/lib/swift-flags.sh
@@ -38,7 +41,7 @@ update | baselines)
     exec scorer/testset "$command" --lexicon-eval "$bin/lexicon-eval"
     ;;
 *)
-    echo "usage: scripts/test-set.sh [update | review | baselines]" >&2
+    echo "usage: scripts/test-set.sh [update | review | status | baselines]" >&2
     exit 2
     ;;
 esac

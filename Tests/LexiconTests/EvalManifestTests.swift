@@ -21,13 +21,15 @@ private let sample = URL(filePath: #filePath).deletingLastPathComponent().deleti
     .deletingLastPathComponent().appending(path: "scorer/fixtures/sample-lexicon.txt")
 
 private func writeManifest(_ entries: [(id: String, text: String, split: String)], audio: String,
-                           in dir: URL, withText: Bool = true) throws -> URL {
+                           in dir: URL, withText: Bool = true, gold: [String: String] = [:],
+                           sessions: [String: String] = [:]) throws -> URL {
     let lines = try entries.map { entry in
         var object: [String: Any] = [
-            "id": entry.id, "audio_filepath": audio, "duration": 0.5, "session": "s-\(entry.id)",
+            "id": entry.id, "audio_filepath": audio, "duration": 0.5, "session": sessions[entry.id] ?? "s-\(entry.id)",
             "terms": [String](), "speech_end": 0.5, "context": "com.anthropic.claudefordesktop", "split": entry.split,
         ]
         if withText { object["text"] = entry.text }
+        if let state = gold[entry.id] { object["gold"] = state }
         return String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
     let url = dir.appending(path: "manifest.jsonl")
@@ -35,17 +37,18 @@ private func writeManifest(_ entries: [(id: String, text: String, split: String)
     return url
 }
 
-private func fixtureManifest(withText: Bool = true) throws -> URL {
+private func fixtureManifest(withText: Bool = true, gold states: [String: String] = [:],
+                             sessions: [String: String] = [:]) throws -> URL {
     let dir = try scratchDirectory()
     _ = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: dir)
-    let wav = try #require(try FileManager.default.contentsOfDirectory(atPath: dir.path()).first)
-    return try writeManifest(gold, audio: wav, in: dir, withText: withText)
+    let wav = try #require(try FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false)).first)
+    return try writeManifest(gold, audio: wav, in: dir, withText: withText, gold: states, sessions: sessions)
 }
 
 @Test func eachEntryOfTheSplitRunsThroughThePipelineInOrder() async throws {
     let manifest = try fixtureManifest()
 
-    let lines = try await runManifest(manifest, split: "everyday", pace: .asFastAsPossible) {
+    let lines = try await runManifest(try selectEntries(from: manifest, split: "everyday"), pace: .asFastAsPossible) {
         ScriptedTranscriber(text: $0.text ?? "")
     }
 
@@ -61,7 +64,7 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
 @Test func withNoEngineEveryEntryWaitsAndScoresAsNoText() async throws {
     let manifest = try fixtureManifest()
 
-    let lines = try await runManifest(manifest, split: nil, pace: .asFastAsPossible) { _ in nil }
+    let lines = try await runManifest(try selectEntries(from: manifest, split: nil), pace: .asFastAsPossible) { _ in nil }
 
     #expect(lines.map(\.id) == ["a", "b", "c"])
     #expect(lines.allSatisfy { $0.status == "waiting" && $0.speechText.isEmpty && $0.insertedText.isEmpty })
@@ -74,15 +77,72 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
     let engine = ScriptedTranscriber(text: "never heard")
 
     await #expect(throws: EvalError.self) {
-        try await runManifest(manifest, split: nil, pace: .asFastAsPossible) { _ in engine }
+        try await runManifest(try selectEntries(from: manifest, split: nil), pace: .asFastAsPossible) { _ in engine }
     }
     #expect(await engine.heard.isEmpty)
+}
+
+// Jake's gold review (#51) leaves entries marked "review" while it is part done:
+// their text is only a draft, so a run never spends speech time on them.
+@Test func entriesStillInReviewAreSkippedBeforeAnyIsSpoken() async throws {
+    let manifest = try fixtureManifest(gold: ["a": "agreed", "c": "review"])
+    let engine = ScriptedTranscriber(text: gold[0].text)
+
+    let selection = try selectEntries(from: manifest, split: "everyday")
+    #expect(selection.entries.map(\.id) == ["a"])
+    #expect(selection.leftOut == 1)
+    let lines = try await runManifest(selection, pace: .asFastAsPossible) { _ in engine }
+
+    #expect(lines.map(\.id) == ["a"])
+    #expect(await engine.heard.count == 1)
+}
+
+@Test func theRestOfASessionInReviewIsSkippedToo() throws {
+    // The scorer counts a session only once all of it is gold (baselines.gold_state).
+    let manifest = try fixtureManifest(gold: ["c": "review"], sessions: ["a": "s1", "c": "s1"])
+    let selection = try selectEntries(from: manifest, split: nil)
+    #expect(selection.entries.map(\.id) == ["b"])
+    #expect(selection.leftOut == 2)
+}
+
+@Test func aHeldBackEntryInReviewRefusesTheRunBeforeAnyAudioIsLookedAt() throws {
+    // The audio is missing too: the refusal comes first, before any file is opened.
+    let manifest = try writeManifest(gold, audio: "missing.wav", in: try scratchDirectory(), gold: ["b": "review"])
+
+    for split in [nil, "held-back"] {
+        let error = #expect(throws: EvalError.self) { try selectEntries(from: manifest, split: split) }
+        #expect(error.map { "\($0)" } == "1 held-back entries are still in review, and held-back runs only whole; "
+            + "answer them with scripts/test-set.sh review")
+    }
+    let everyday = #expect(throws: EvalError.self) { try selectEntries(from: manifest, split: "everyday") }
+    #expect(everyday.map { "\($0)" } == "entry a: audio file not found")
+}
+
+@Test func aRunWithNothingOutOfReviewNamesTheReview() throws {
+    let manifest = try fixtureManifest(gold: ["a": "review", "c": "review"])
+    let error = #expect(throws: EvalError.self) { try selectEntries(from: manifest, split: "everyday") }
+    #expect(error.map { "\($0)" }?.hasSuffix("answer them with scripts/test-set.sh review") == true)
+}
+
+@Test func aSampleRunsTheLowestIdsNotInReview() throws {
+    #expect(try selectEntries(from: try fixtureManifest(), split: nil, sample: 2).entries.map(\.id) == ["a", "b"])
+    let reviewed = try fixtureManifest(gold: ["a": "review"])
+    #expect(try selectEntries(from: reviewed, split: "everyday", sample: 1).entries.map(\.id) == ["c"])
+    // Drawn after the session rule, so a sample is never of clips the scorer leaves out.
+    let shared = try fixtureManifest(gold: ["a": "review"], sessions: ["a": "s1", "b": "s1"])
+    #expect(try selectEntries(from: shared, split: nil, sample: 1).entries.map(\.id) == ["c"])
+}
+
+@Test func aManifestRunRefusesABadPaceOrSample() async {
+    for extra in [["--pace", "slow"], ["--sample", "0"], ["--sample", "x"]] {
+        #expect(await runEval(arguments: ["lexicon-eval", "--manifest", "m.jsonl"] + extra) == 2)
+    }
 }
 
 @Test func aSplitWithNoEntriesIsAnError() async throws {
     let manifest = try fixtureManifest()
     await #expect(throws: EvalError.self) {
-        try await runManifest(manifest, split: "nope", pace: .asFastAsPossible) { _ in nil }
+        try await runManifest(try selectEntries(from: manifest, split: "nope"), pace: .asFastAsPossible) { _ in nil }
     }
 }
 
@@ -92,7 +152,7 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
     preferences.privacy = .private
     let engine = ScriptedTranscriber(text: gold[0].text)
 
-    let lines = try await runManifest(manifest, split: nil, pace: .asFastAsPossible, preferences: preferences) { _ in engine }
+    let lines = try await runManifest(try selectEntries(from: manifest, split: nil), pace: .asFastAsPossible, preferences: preferences) { _ in engine }
 
     #expect(lines.map(\.id) == ["a", "b", "c"])
     #expect(lines.map(\.speechText) == Array(repeating: gold[0].text, count: 3))
@@ -192,7 +252,7 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
     let manifest = try fixtureManifest()
     let entries = try LexiconFile(contentsOf: sample).entries
 
-    let lines = try await runManifest(manifest, split: nil, pace: .asFastAsPossible, lexicon: entries) { _ in
+    let lines = try await runManifest(try selectEntries(from: manifest, split: nil), pace: .asFastAsPossible, lexicon: entries) { _ in
         ScriptedTranscriber(text: "Frob nicate the quux kit.")
     }
 
@@ -203,7 +263,7 @@ private func fixtureManifest(withText: Bool = true) throws -> URL {
 @Test func withNoLexiconFileTheSameRunTypesTheWordsAsHeard() async throws {
     let manifest = try fixtureManifest()
 
-    let lines = try await runManifest(manifest, split: nil, pace: .asFastAsPossible) { _ in
+    let lines = try await runManifest(try selectEntries(from: manifest, split: nil), pace: .asFastAsPossible) { _ in
         ScriptedTranscriber(text: "Frob nicate the quux kit.")
     }
 

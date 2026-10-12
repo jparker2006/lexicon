@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,15 +9,18 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 // Built from parts so this file never carries the handle that starts a Codex cloud task.
 const HANDLE = '@' + 'codex';
+// The Keychain reader a scratch script calls.
+const SECITEM = 'SecItemCopyMatching';
 
 /** Runs the hook the way Claude Code does: the configured command, a tool call on stdin. */
-function runHook(command, { cwd = REPO, tool = 'Bash', projectDir = REPO } = {}) {
+function runTool(tool, toolInput, { cwd = REPO, projectDir = REPO, home } = {}) {
   const { hooks } = JSON.parse(readFileSync(path.join(REPO, '.claude/settings.json'), 'utf8'));
-  const entry = hooks.PreToolUse.find(({ matcher }) => matcher === 'Bash');
+  const entry = hooks.PreToolUse.find(({ matcher }) => matcher.split('|').includes(tool));
+  if (!entry) return { allowed: true };
   const result = spawnSync('sh', ['-c', entry.hooks[0].command], {
     cwd,
-    env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
-    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { command }, cwd }),
+    env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir, ...(home ? { HOME: home } : {}) },
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: toolInput, cwd }),
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
@@ -25,6 +28,10 @@ function runHook(command, { cwd = REPO, tool = 'Bash', projectDir = REPO } = {})
   const output = JSON.parse(result.stdout).hookSpecificOutput;
   assert.equal(output.permissionDecision, 'deny');
   return { allowed: false, reason: output.permissionDecisionReason };
+}
+
+function runHook(command, { tool = 'Bash', ...options } = {}) {
+  return runTool(tool, { command }, options);
 }
 
 function assertRefused(command, why, options) {
@@ -47,7 +54,7 @@ test('refuses starting Docker', () => {
     'open -a "Docker Desktop"',
     'open /Applications/Docker.app',
     'cd ops && sudo docker info',
-    'swift test; docker build .',
+    'scripts/check.sh; docker build .',
     'echo "$(docker ps -q)"',
     'bash -c "docker ps"',
     "bash -lc 'docker ps'",
@@ -143,8 +150,9 @@ test('allows the near misses', () => {
   ]) assertAllowed(command);
 });
 
-test('never looks at tools other than Bash', () => {
+test('judges Read, Grep and Glob by their paths, never as commands', () => {
   assertAllowed('docker ps', { tool: 'Read' });
+  assertAllowed('docker ps', { tool: 'Edit' });
 });
 
 test('runs from any working directory', (t) => {
@@ -541,11 +549,440 @@ test("refuses tccutil reset except on the Lexicon Dev bundle ID", () => {
   ]) {
     assertRefused(command, /tccutil reset/);
   }
-  assertAllowed('tccutil reset Accessibility com.example.lexicon.dev');
+  // Only Lexicon Dev's exact bundle ID, and only inside a sitting (see the sitting test below).
+  assertRefused('tccutil reset Accessibility com.example.lexicon.dev', /tccutil reset/);
 });
 
 test('refuses recursively deleting the guard hook itself', () => {
   for (const command of ['rm -rf .claude/hooks', 'rm -r .claude/hooks/', 'find .claude -name hooks -exec rm -rf {} +']) {
     assertRefused(command, /\.claude/);
   }
+});
+
+/** A throwaway home with empty stand-ins for the private folder and Lexicon Dev's, so no test touches Jake's real data. */
+function fakeHome(t, { sitting = false } = {}) {
+  const home = mkdtempSync(path.join(tmpdir(), 'guard-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  mkdirSync(path.join(home, 'Library/Application Support/Lexicon'), { recursive: true });
+  mkdirSync(path.join(home, 'Library/Application Support/Lexicon Dev'), { recursive: true });
+  if (sitting) writeSitting(home, process.pid);
+  return home;
+}
+
+/** The sitting marker scripts/live-lane.sh writes, naming `pid` as the holder's session and its start time. */
+function writeSitting(home, pid) {
+  const started = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC' } }).stdout.trim();
+  writeFileSync(
+    path.join(home, 'Library/Application Support/Lexicon Dev/live-sitting.open'),
+    `opened=2026-10-11T22:54:00Z\nholder=Live checks\npid=${pid}\npid-started=${started || 'Thu Jan  1 00:00:00 1970'}\n`,
+  );
+}
+
+test("refuses Jake's private folder and .env files in Bash, never Lexicon Dev's folder", (t) => {
+  const options = { home: fakeHome(t) };
+  for (const command of [
+    // The orchestrator's 09:02:37 grep of the private folder (M0), and its 04:26 read of the starter Lexicon draft.
+    'grep -rn "Lexicon" "$HOME/Library/Application Support/Lexicon/"',
+    'cat "$HOME/Library/Application Support/Lexicon/starter-lexicon-draft.md"',
+    // #50's copy of the Wispr database for a schema probe.
+    'cp "$HOME/Library/Application Support/Lexicon/wispr/flow.sqlite" /tmp/probe.sqlite',
+    'ls ~/Library/Application\\ Support/Lexicon/',
+    'ls ~/Library/Application\\ Support/Lexicon',
+    'sqlite3 ~/Library/Application\\ Support/Lexicon/history.sqlite .schema',
+    'cd ~/Library/Application\\ Support/Lexicon && ls',
+    'cd ~/Library/Application\\ Support && grep -rn x Lexicon',
+    'head -5 /Users/someone/Library/Application\\ Support/Lexicon/testset/manifest.json',
+    'find ~/Library/Application\\ Support -name "*.json"',
+    'grep -r x ~/Library/Application\\ Support/',
+    'rg -n x ~',
+    'ls ~/Library/Application\\ Support/Lex*/',
+    'wc -l < ~/Library/Application\\ Support/Lexicon/gold.txt',
+    'echo "$(cat ~/Library/Application\\ Support/Lexicon/x)"',
+    "bash -c 'cat ~/Library/Application\\ Support/Lexicon/x'",
+    'python3 -c "print(open(\'/Users/someone/Library/Application Support/Lexicon/x\').read())"',
+  ]) assertRefused(command, /private data/, options);
+  for (const command of [
+    // The 10:04:13 grep of .env.
+    'grep -n GROQ .env',
+    'cat ~/code/lexicon/.env',
+    'grep KEY /Users/someone/code/lexicon/.env.local',
+    'set -a; . ./.env; set +a',
+    'source .env',
+    'git add .env',
+  ]) assertRefused(command, /\.env/, options);
+  for (const command of [
+    'cat "$HOME/Library/Application Support/Lexicon Dev/live-lane.lock"',
+    'ls ~/Library/Application\\ Support/Lexicon\\ Dev/',
+    'cd ~/Library/Application\\ Support/Lexicon\\ Dev && ls',
+    'ls ~/Library/Application\\ Support/',
+    'ls -lrt ~/Library/Application\\ Support/',
+    'grep -rn "Library/Application Support/Lexicon/" docs',
+    'rm -rf "$(mktemp -d)"/*',
+    'scripts/test-set.sh',
+    'grep -rn x Sources',
+    'gh issue comment 5 --body "the Test set lives under ~/Library/Application Support/Lexicon/testset"',
+    'git commit -m "docs: name ~/Library/Application Support/Lexicon/ by path only"',
+    'echo "data lives in ~/Library/Application Support/Lexicon/"',
+    'cat .env.example',
+    "grep -rn --exclude='.env*' KEY docs",
+    'node -e "console.log(process.env.HOME)"',
+  ]) assertAllowed(command, options);
+});
+
+test("refuses Read, Grep and Glob in Jake's private folder and Grep or Read of .env, never Lexicon Dev's folder", (t) => {
+  const home = fakeHome(t);
+  const options = { home };
+  const priv = path.join(home, 'Library/Application Support/Lexicon');
+  const dev = path.join(home, 'Library/Application Support/Lexicon Dev');
+  for (const [tool, input] of [
+    ['Read', { file_path: path.join(priv, 'history.sqlite') }],
+    ['Read', { file_path: '/Users/someone/Library/Application Support/Lexicon/wispr/manifest.json' }],
+    ['Grep', { pattern: 'x', path: priv }],
+    ['Grep', { pattern: 'x', path: path.join(home, 'Library/Application Support') }],
+    ['Grep', { pattern: 'x', path: home }],
+    ['Glob', { pattern: '**/*.json', path: priv }],
+    ['Glob', { pattern: 'Library/Application Support/Lexicon/*', path: home }],
+    ['Glob', { pattern: `${home}/Library/Application Support/*/history.sqlite` }],
+    ['Glob', { pattern: '**/*.sqlite', path: home }],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, /private data/);
+  }
+  for (const [tool, input] of [
+    ['Read', { file_path: path.join(REPO, '.env') }],
+    ['Read', { file_path: '/Users/someone/code/lexicon/.env.local' }],
+    ['Grep', { pattern: 'KEY', path: path.join(REPO, '.env') }],
+    ['Grep', { pattern: 'KEY', path: REPO, glob: '.env*' }],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, /\.env/);
+  }
+  for (const [tool, input] of [
+    ['Read', { file_path: path.join(dev, 'live-lane.lock') }],
+    ['Read', { file_path: path.join(REPO, 'AGENTS.md') }],
+    ['Read', { file_path: path.join(REPO, '.env.example') }],
+    ['Grep', { pattern: 'x', path: dev }],
+    ['Grep', { pattern: 'x', path: REPO }],
+    ['Grep', { pattern: 'x' }],
+    ['Glob', { pattern: '**/*.swift', path: REPO }],
+    ['Glob', { pattern: '*', path: dev }],
+    ['Glob', { pattern: '**/.env*', path: REPO }],
+  ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
+});
+
+test('refuses Keychain secret reads and scratch SecItem readers, naming the Live checks checklist', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'guard-secitem-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const probe = path.join(dir, 'probe.swift');
+  writeFileSync(probe, `import Security\nvar out: AnyObject?\n_ = ${SECITEM}([:] as CFDictionary, &out)\n`);
+  for (const command of [
+    // #65's 09:46 read, which hung on the Keychain prompt until the 120 s timeout.
+    'ls -d ~/Applications/Lexicon\\ Dev.app && security find-generic-password -s dev.jparker.lexicon.dev -a readme-check-65 >/dev/null 2>&1; echo $?',
+    'security find-generic-password -s dev.jparker.lexicon -a groq -w',
+    'security find-generic-password -w -s dev.jparker.lexicon',
+    'security find-internet-password -s api.groq.com -g',
+    'security dump-keychain -d',
+    `swift - <<'EOF'\nimport Security\nvar out: AnyObject?\n_ = ${SECITEM}([:] as CFDictionary, &out)\nEOF`,
+    `swift ${probe}`,
+    `swiftc -o ${dir}/probe ${probe}`,
+    `cd ${dir} && xcrun swiftc probe.swift`,
+  ]) assertRefused(command, /Live checks checklist/);
+  for (const command of [
+    'security find-identity -p codesigning',
+    'security find-certificate -a -c "Lexicon Dev" -Z',
+    `grep -n ${SECITEM} Sources/LexiconCore/Settings.swift`,
+    'swift scripts/check-imports.swift',
+  ]) assertAllowed(command);
+});
+
+test("refuses osascript, open or kill aimed at Jake's daily Lexicon, never Lexicon Dev", () => {
+  for (const command of [
+    // The orchestrator's 09:03:08 quit of the daily app (M0).
+    `osascript -e 'tell application id "dev.jparker.lexicon" to quit' 2>&1; sleep 2; open ~/Applications/Lexicon.app`,
+    `osascript -e 'tell application "Lexicon" to quit'`,
+    "osascript <<'EOF'\ntell application id \"dev.jparker.lexicon\" to quit\nEOF",
+    'open ~/Applications/Lexicon.app',
+    'open -b dev.jparker.lexicon',
+    'open -a Lexicon',
+    'open -a "/Users/someone/Applications/Lexicon.app"',
+    'kill $(lsappinfo info -only pid dev.jparker.lexicon | cut -d= -f2)',
+  ]) assertRefused(command, /daily Lexicon/);
+  for (const command of [
+    `osascript -e 'tell application id "dev.jparker.lexicon.dev" to quit'`,
+    `osascript -e 'tell application "Lexicon Dev" to quit'`,
+    'open ~/Applications/Lexicon\\ Dev.app',
+    'open -a "Lexicon Dev" --args --test-hooks',
+    'open -b dev.jparker.lexicon.dev',
+    'scripts/install.sh',
+    'scripts/live-lane.sh daily quit',
+    `/usr/bin/log show --last 2m --predicate 'subsystem == "dev.jparker.lexicon.dev"'`,
+    'kill 4242',
+  ]) assertAllowed(command);
+});
+
+test('refuses gh pr merge from a builder whatever flags sit between pr and merge', () => {
+  const builder = builderWorktree();
+  const options = { projectDir: builder.dir, cwd: builder.dir };
+  try {
+    for (const command of [
+      // The Reviewer's 06:11:39 probe, which printed ALLOWED.
+      'gh pr -R jparker2006/lexicon merge 5 --auto',
+      'gh pr --repo jparker2006/lexicon merge 5',
+      'gh pr --repo=jparker2006/lexicon merge 5',
+      'gh pr -Rjparker2006/lexicon merge 5',
+      'gh --hostname github.com pr -R o/r merge 5',
+      'gh pr --unknown-flag merge 5',
+    ]) assertRefused(command, /only the Reviewer merges/, options);
+    for (const command of [
+      'gh pr -R jparker2006/lexicon view 5',
+      'gh pr comment 5 --body merge',
+      'gh pr create --title "merge main into the branch" --body "Refs #5"',
+    ]) assertAllowed(command, options);
+  } finally {
+    builder.cleanup();
+  }
+});
+
+test('refuses the raw merge in every session once scripts/merge-pr.mjs exists', () => {
+  const reviewer = mainCheckout();
+  const options = { projectDir: reviewer, cwd: reviewer };
+  try {
+    const raw = [
+      `gh pr merge 41 --squash --match-head-commit ${SHA}`,
+      `gh pr -R jparker2006/lexicon merge 41 --squash --match-head-commit ${SHA}`,
+    ];
+    for (const command of raw) assertAllowed(command, options);
+    mkdirSync(path.join(reviewer, 'scripts'));
+    writeFileSync(path.join(reviewer, 'scripts/merge-pr.mjs'), '');
+    for (const command of [...raw, 'gh api -X PUT repos/jparker2006/lexicon/pulls/41/merge -f merge_method=squash']) {
+      assertRefused(command, /scripts\/merge-pr\.mjs/, options);
+    }
+    assertAllowed(`node scripts/merge-pr.mjs 41 ${SHA}`, options);
+  } finally {
+    rmSync(reviewer, { recursive: true, force: true });
+  }
+});
+
+test('refuses git reset --hard, git clean -f and force pushes, asking for Jake', () => {
+  for (const command of [
+    'git reset --hard origin/main',
+    'git reset --hard',
+    'git -C /tmp/x reset --hard HEAD~1',
+    'git clean -fd',
+    'git clean -xdf',
+    'git clean --force',
+    'git push -f origin claude/issue-37',
+    'git push --force origin claude/issue-37',
+    'git push --force-with-lease origin claude/issue-37',
+    'git push origin +claude/issue-37',
+    'git push -fu origin claude/issue-37',
+  ]) assertRefused(command, /ask Jake \(AGENTS\.md\)/);
+  for (const command of [
+    'git reset HEAD~1',
+    'git reset --soft HEAD~1',
+    'git clean -n',
+    'git clean -nd',
+    'git push -u origin claude/issue-37',
+    'git commit -m "never git reset --hard or git push --force"',
+  ]) assertAllowed(command);
+});
+
+test('refuses bare swift build, test and run once scripts/test.sh and scripts/lib/heavy.sh exist', () => {
+  const repo = mainCheckout('claude/issue-99');
+  const options = { projectDir: repo, cwd: repo };
+  try {
+    const bare = [
+      // #81's and #72's logged bare commands (M0).
+      'swift build --build-tests 2>&1 | grep -E "error|warning: .*Jev|Compiling|Build" | grep -v "^.*Compiling" | head',
+      '. scripts/lib/swift-flags.sh && swift test "$@" --filter "JevClientTests" 2>&1 | grep -E "error:|Test run"',
+      '. scripts/lib/swift-flags.sh && swift test --filter "CodeTerms|PackageManifest" 2>&1 | grep -E "error|pass"',
+      'swift run lexicon-eval --quick',
+      'xcrun swift build',
+      'cd Sources && swift build',
+    ];
+    for (const command of bare) assertAllowed(command, options);
+    mkdirSync(path.join(repo, 'scripts/lib'), { recursive: true });
+    writeFileSync(path.join(repo, 'scripts/test.sh'), '');
+    for (const command of bare) assertAllowed(command, options);
+    writeFileSync(path.join(repo, 'scripts/lib/heavy.sh'), '');
+    for (const command of bare) assertRefused(command, /scripts\/test\.sh/, options);
+    for (const command of [
+      'scripts/test.sh --filter JevClientTests',
+      'scripts/check.sh',
+      'scripts/bundle.sh dev --release',
+      'scripts/lib/heavy.sh swift build',
+      'swift build --help',
+      'swift package resolve',
+      'swift --version',
+      'swift scripts/check-imports.swift',
+    ]) assertAllowed(command, options);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('refuses a reset of Lexicon Dev only outside a sitting, naming its cost', (t) => {
+  // #142's 15:54 reset.
+  const command = 'tccutil reset Microphone dev.jparker.lexicon.dev; date +%H:%M:%S';
+  assertRefused(command, /sitting/, { home: fakeHome(t) });
+  assertAllowed(command, { home: fakeHome(t, { sitting: true }) });
+  assertRefused('tccutil reset Microphone dev.jparker.lexicon', /tccutil reset/, { home: fakeHome(t, { sitting: true }) });
+  // A sitting whose holder crashed is not open: its pid is gone, or now another process's.
+  const crashed = fakeHome(t);
+  const gone = spawnSync('sh', ['-c', 'echo $$'], { encoding: 'utf8' }).stdout.trim();
+  writeSitting(crashed, Number(gone));
+  assertRefused(command, /sitting/, { home: crashed });
+});
+
+test('refuses a PR body with a closing keyword before an issue number, or an em dash', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'guard-body-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(path.join(dir, 'closes.md'), 'Refs #12\n\nCloses #12\n');
+  writeFileSync(path.join(dir, 'dash.md'), 'Refs #12\n\nFast — and small.\n');
+  writeFileSync(path.join(dir, 'ok.md'), 'Refs #12\n\nThis fixes the lag in #12.\n');
+  for (const command of [
+    'gh pr create --title "x" --body "Fixes #12"',
+    'gh pr create --title "x" --body "Refs #12. fixes: #13"',
+    'gh pr edit 5 --body "Resolves jparker2006/lexicon#12"',
+    'gh pr create --body "closed https://github.com/jparker2006/lexicon/issues/12"',
+    `gh pr create --body-file ${dir}/closes.md`,
+    `gh pr edit 5 -F ${dir}/closes.md`,
+    `gh pr create --body "$(cat ${dir}/closes.md)"`,
+    "gh pr create --title x --body-file - <<'EOF'\nRefs #12\n\nFixes #12\nEOF",
+  ]) assertRefused(command, /closing keyword/);
+  for (const command of [
+    'gh pr create --title "x" --body "Refs #12 — fast"',
+    `gh pr create --body-file ${dir}/dash.md`,
+  ]) assertRefused(command, /em dash/);
+  for (const command of [
+    'gh pr create --title "x" --body "Refs #12"',
+    `gh pr create --body-file ${dir}/ok.md`,
+    'gh pr edit 5 --add-label building',
+    'gh issue comment 12 --body "Ready for review: PR #13 - fixes in"',
+    'gh pr view 12 --json body --jq ".body | test(\\"Fixes #\\")"',
+  ]) assertAllowed(command);
+});
+
+test('review findings: links, globs, braces and patterns reach the private folder and .env only when they open them', (t) => {
+  const home = fakeHome(t);
+  const options = { home };
+  const support = path.join(home, 'Library/Application Support');
+  const repo = mkdtempSync(path.join(tmpdir(), 'guard-link-'));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  symlinkSync(support, path.join(repo, 'as'));
+  for (const command of [`ln -s "$HOME/Library/Application Support" ./as`, `rg -n x ${repo}/as`]) {
+    assertRefused(command, /private data/, options);
+  }
+  for (const [tool, input] of [
+    ['Read', { file_path: path.join(repo, 'as/Lexicon/lexicon.db') }],
+    ['Grep', { pattern: 'x', path: path.join(repo, 'as') }],
+    ['Glob', { pattern: '{Lexicon,Other}/**', path: support }],
+  ]) assert.match(runTool(tool, input, options).reason ?? '', /private data/, `${tool} ${JSON.stringify(input)}`);
+  for (const command of ['cat .en?', 'grep KEY .env*']) assertRefused(command, /\.env/, options);
+  for (const glob of ['*.env', '**/.env', '{.env,.env.local}']) {
+    assert.match(runTool('Grep', { pattern: 'KEY', path: REPO, glob }, options).reason ?? '', /\.env/, glob);
+  }
+  for (const command of [
+    'git grep -n "Library/Application Support/Lexicon/" -- docs',
+    'grep -rn -e "Library/Application Support/Lexicon/" docs',
+    'git log --oneline -S ".env" -- docs',
+    'grep -rn -e ".env" docs',
+    'ls -d .*',
+    'cat *.md',
+  ]) assertAllowed(command, options);
+});
+
+test('review findings: Keychain reads through gh, git credential helpers and scripts that shell out to security', () => {
+  for (const command of [
+    'gh auth token',
+    "printf 'protocol=https\\nhost=github.com\\n\\n' | git credential-osxkeychain get",
+    "printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill",
+    `python3 -c "import subprocess; subprocess.run(['security', 'find-generic-password', '-w'])"`,
+    `osascript -e 'do shell script "security find-generic-password -s x -w"'`,
+  ]) assertRefused(command, /Live checks checklist/);
+  assertAllowed('gh auth status');
+});
+
+test('review findings: the merge script names itself to builders, and --flag=value merges are not a squash', () => {
+  const builder = builderWorktree();
+  const reviewer = mainCheckout();
+  try {
+    mkdirSync(path.join(builder.dir, 'scripts'));
+    writeFileSync(path.join(builder.dir, 'scripts/merge-pr.mjs'), '');
+    assertRefused(`gh pr merge 5 --squash --match-head-commit ${SHA}`, /scripts\/merge-pr\.mjs/, { projectDir: builder.dir, cwd: builder.dir });
+    for (const flag of ['--admin=true', '--auto=true', '--merge=true']) {
+      assertRefused(`gh pr merge 41 --squash ${flag} --match-head-commit ${SHA}`, /squash --match-head-commit/, { projectDir: reviewer, cwd: reviewer });
+    }
+  } finally {
+    builder.cleanup();
+    rmSync(reviewer, { recursive: true, force: true });
+  }
+});
+
+test('Reviewer findings: a recursive search whose roots hold a .env refuses unless it leaves .env out', (t) => {
+  const parent = mkdtempSync(path.join(tmpdir(), 'guard-envroot-'));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const repo = path.join(parent, 'lexicon');
+  mkdirSync(path.join(repo, 'docs'), { recursive: true });
+  writeFileSync(path.join(repo, '.env'), 'LEXICON_KEY=not-a-real-key\n');
+  const options = { cwd: repo, home: fakeHome(t) };
+  for (const command of [
+    'grep -rn LEXICON_KEY .',
+    `grep -rn LEXICON_KEY ${repo}`,
+    `grep -R LEXICON_KEY ${parent}`,
+    'egrep -r LEXICON_KEY',
+    'rg -uu LEXICON_KEY .',
+    'rg --hidden --no-ignore LEXICON_KEY',
+    'ag -u LEXICON_KEY .',
+  ]) assertRefused(command, /\.env/, options);
+  for (const command of [
+    "grep -rn --exclude='.env*' LEXICON_KEY .",
+    'grep -rn LEXICON_KEY docs',
+    'grep -n LEXICON_KEY README.md',
+    'rg -n LEXICON_KEY .',
+    "rg -uu -g '!.env*' LEXICON_KEY .",
+  ]) assertAllowed(command, options);
+});
+
+test('Reviewer findings: gh pr update-branch --rebase rewrites a pushed branch, so it asks for Jake', () => {
+  assertRefused('gh pr update-branch 167 --rebase', /ask Jake \(AGENTS\.md\)/);
+  assertRefused('gh pr -R jparker2006/lexicon update-branch 167 --rebase', /ask Jake \(AGENTS\.md\)/);
+  assertAllowed('gh pr update-branch 167');
+});
+
+test('Reviewer findings: a guard that cannot read its call refuses it, exiting 2', () => {
+  const result = spawnSync('node', [path.join(REPO, '.claude/hooks/guard.mjs')], { input: 'not json', encoding: 'utf8' });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /guard/);
+});
+
+test("Reviewer findings: Lexicon Dev's models link into the daily folder's models is not private data", (t) => {
+  const home = fakeHome(t);
+  const models = path.join(home, 'Library/Application Support/Lexicon/models');
+  mkdirSync(models);
+  symlinkSync(models, path.join(home, 'Library/Application Support/Lexicon Dev/models'));
+  const options = { home };
+  for (const command of [
+    'ls -ld "$HOME/Library/Application Support/Lexicon Dev/models"',
+    'ls "$HOME/Library/Application Support/Lexicon/models/"',
+  ]) assertAllowed(command, options);
+  assert.deepEqual(runTool('Read', { file_path: path.join(home, 'Library/Application Support/Lexicon Dev/models/x.mlmodelc') }, options), { allowed: true });
+  for (const command of ['ls "$HOME/Library/Application Support/Lexicon/"', 'ls "$HOME/Library/Application Support/Lexicon/"*']) {
+    assertRefused(command, /private data/, options);
+  }
+});
+
+test('Reviewer findings: the configured hook refuses, exiting 2, when node is missing or the guard fails', () => {
+  const { hooks } = JSON.parse(readFileSync(path.join(REPO, '.claude/settings.json'), 'utf8'));
+  const { command } = hooks.PreToolUse.find(({ matcher }) => matcher.split('|').includes('Bash')).hooks[0];
+  const run = (env, input) => spawnSync('/bin/sh', ['-c', command], { cwd: REPO, env: { ...process.env, CLAUDE_PROJECT_DIR: REPO, ...env }, input, encoding: 'utf8' });
+  const call = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' }, cwd: REPO });
+  const noNode = run({ PATH: '/usr/bin:/bin' }, call);
+  assert.equal(noNode.status, 2);
+  assert.match(noNode.stderr, /node not found/);
+  const failed = run({}, 'not json');
+  assert.equal(failed.status, 2);
+  assert.equal(run({}, call).status, 0);
 });

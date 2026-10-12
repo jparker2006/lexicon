@@ -11,8 +11,10 @@ import Foundation
 ///     # comments and blank lines are skipped
 ///     issue: 54
 ///     branch: claude/issue-54
-///     sha: 4dfdca8
 ///
+/// The sha a run is reported at is the one Lexicon Dev was built from. A
+/// `sha:` line, for a request pinned to one build, makes a run on any other
+/// build refuse.
 ///     item: paste-check lands the text and puts the clipboard back
 ///     run: paste-check
 ///     repeat: 10
@@ -253,16 +255,19 @@ public struct ChecklistRun: Codable, Sendable, Equatable {
 }
 
 /// The run as a `Live checks:` comment: header, table and verdict. No output
-/// text, only fingerprints, so nothing a field held reaches GitHub.
+/// text, only fingerprints, so nothing a field held reaches GitHub. The header
+/// is `Live checks: <branch> @ <sha7>`, the line scripts/live-lane.sh reads as
+/// the answer to `Live checks request: <branch> @ <sha7>`.
 public struct ChecklistReport: Sendable, Equatable {
     public let issue: String
-    public let branch: String
+    /// nil when the checklist names none: the header says so, and answers no request.
+    public let branch: String?
     public let sha: String
     public let app: String
     public let fnListeners: String
     public let results: [ChecklistResult]
 
-    public init(issue: String, branch: String, sha: String, app: String, fnListeners: String,
+    public init(issue: String, branch: String?, sha: String, app: String, fnListeners: String,
                 results: [ChecklistResult]) {
         (self.issue, self.branch, self.sha, self.app, self.fnListeners, self.results) =
             (issue, branch, sha, app, fnListeners, results)
@@ -282,9 +287,9 @@ public struct ChecklistReport: Sendable, Equatable {
         let passed = results.filter(\.passes).count
         let issue = issue.hasPrefix("#") ? issue : "#\(issue)"
         return """
-            Live checks: \(issue), \(branch) @ \(sha.prefix(7))
+            Live checks: \(branch ?? "<no branch named>") @ \(sha.prefix(7))
 
-            \(app). fn listeners: \(fnListeners).
+            \(issue). \(app). fn listeners: \(fnListeners).
 
             \(table)
 
