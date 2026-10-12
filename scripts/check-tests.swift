@@ -12,17 +12,24 @@
 // is not enforced. A sleep, a short budget or a blocking wait passes on a quiet
 // Mac and fails on a busy one: in CI, or beside other builders.
 //
-// It fails on Task.sleep, Thread.sleep, usleep, sleep(, asyncAfter, a blocking
-// wait() (a semaphore or a group), waitUntilExit, and a Duration under 60 s
-// compared with < <= > >= or given as a timeout, deadline, within, limit or
-// budget. Comments and string literals are skipped, so a source string a test
-// compiles is not a hit. A hit passes only with `// timing-ok: <why>` on its
-// line, and only a pure hang guard qualifies: a bound that turns a hang into a
-// failure and decides nothing on a run that works, however slow.
+// It fails on Task.sleep, a real clock's sleep, Thread.sleep, usleep, nanosleep,
+// sleep(, asyncAfter, RunLoop's run(until:), a blocking wait() (a semaphore or a
+// group), waitUntilExit, and a Duration literal under 60 s compared with
+// < <= > >= or given as a timeout, deadline, within, limit or budget. It reads
+// Duration literals only: a TimeInterval or Date budget, or a Duration bound to a
+// name and compared on another line, is for review to catch. Comments and string
+// literals are skipped, so a source string a test compiles is not a hit.
+//
+// A hit passes only with `// timing-ok: <why>` in a comment on its line, and only
+// where machine speed cannot decide the outcome: a pure hang guard (a bound that
+// turns a hang into a failure), or a wait that decides nothing on a run that
+// works, however slow: a poll interval, a wedge the test itself releases, a kill
+// whose moment is the test's input, a stand-in that only cancellation ends.
 //
 // A test that measures speed against a budget runs only in a timing run,
-// `@Test(.enabled(if: timingRun))` (Tests/TestSupport/TimingRun.swift), and its
-// body is skipped here: the check never runs it.
+// `@Test(.enabled(if: timingRun))`, alone or as an && operand
+// (Tests/TestSupport/TimingRun.swift). The check never runs it, so only the
+// blocking rules apply in its body.
 //
 // Tests/TestSupport/TestClock.swift is the one file a Duration comparison
 // belongs in: the fake clock compares the deadlines it is handed.
@@ -31,9 +38,10 @@
 // it waits on real time by design. There only the blocking rules apply: a
 // blocked thread can lose its wakeup and hang the check (#52 hung 14 minutes).
 //
-// `owed` lists the hits another ticket is fixing, by file and what, so the check
-// stays green meanwhile. Each prints as owed; an entry that no longer hits fails,
-// so whoever fixes it deletes it here. Never add one without its issue.
+// `owed` lists the hits another ticket is fixing, one hit per entry, by file and
+// what, so the check stays green meanwhile. Each prints as owed; a second such
+// hit fails, and an entry that no longer hits fails, so whoever fixes it deletes
+// it here. Never add one without its issue.
 //
 // Exit 0: clean. Exit 1: one line per hit. Exit 2: could not run.
 
@@ -56,15 +64,22 @@ func fail(_ message: String) -> Never {
     exit(2)
 }
 
-/// `text` with every comment and string literal blanked to spaces, newlines kept,
-/// so line numbers still match. Handles nested block comments, multi-line
-/// strings, raw strings (`#"..."#`) and regex literals (`#/.../#`).
-func code(of text: String) -> String {
+/// `text` split into its code and its comments, each with everything else blanked
+/// to spaces and newlines kept, so line numbers still match. String literals are
+/// in neither. Handles nested block comments, multi-line strings, raw strings
+/// (`#"..."#`) and regex literals (`#/.../#`). An interpolation's code is read as
+/// part of its string.
+func split(_ text: String) -> (code: String, comments: String) {
     let chars = Array(text.unicodeScalars)
-    var out = String.UnicodeScalarView()
+    var out = String.UnicodeScalarView(), notes = String.UnicodeScalarView()
     out.reserveCapacity(chars.count)
+    notes.reserveCapacity(chars.count)
     var i = 0
-    func blank(_ c: Unicode.Scalar) { out.append(c == "\n" ? "\n" : " ") }
+    /// Blanks `c` in the code; keeps it in the comments when `comment`.
+    func blank(_ c: Unicode.Scalar, comment: Bool = false) {
+        out.append(c == "\n" ? "\n" : " ")
+        notes.append(c == "\n" || comment ? c : " ")
+    }
     func at(_ s: String, _ j: Int) -> Bool {
         let scalars = Array(s.unicodeScalars)
         guard j + scalars.count <= chars.count else { return false }
@@ -72,13 +87,13 @@ func code(of text: String) -> String {
     }
     while i < chars.count {
         if at("//", i) {
-            while i < chars.count, chars[i] != "\n" { blank(chars[i]); i += 1 }
+            while i < chars.count, chars[i] != "\n" { blank(chars[i], comment: true); i += 1 }
         } else if at("/*", i) {
             var depth = 0
             repeat {
-                if at("/*", i) { depth += 1; blank(chars[i]); blank(chars[i + 1]); i += 2 }
-                else if at("*/", i) { depth -= 1; blank(chars[i]); blank(chars[i + 1]); i += 2 }
-                else { blank(chars[i]); i += 1 }
+                if at("/*", i) { depth += 1; blank(chars[i], comment: true); blank(chars[i + 1], comment: true); i += 2 }
+                else if at("*/", i) { depth -= 1; blank(chars[i], comment: true); blank(chars[i + 1], comment: true); i += 2 }
+                else { blank(chars[i], comment: true); i += 1 }
             } while depth > 0 && i < chars.count
         } else if chars[i] == "#" || chars[i] == "\"" {
             // A string or regex literal: count the leading #s, then the delimiter.
@@ -89,7 +104,7 @@ func code(of text: String) -> String {
             if at("\"\"\"", j) { close = "\"\"\"" + hashes }
             else if j < chars.count, chars[j] == "\"" { close = "\"" + hashes }
             else if !hashes.isEmpty, j < chars.count, chars[j] == "/" { close = "/" + hashes }
-            else { out.append(chars[i]); i += 1; continue }
+            else { out.append(chars[i]); notes.append(" "); i += 1; continue }
             let open = j - i + (close.hasPrefix("\"\"\"") ? 3 : 1)
             for _ in 0..<open { blank(chars[i]); i += 1 }
             let escapes = hashes.isEmpty && close.hasPrefix("\"")
@@ -99,10 +114,10 @@ func code(of text: String) -> String {
             }
             for _ in 0..<close.unicodeScalars.count where i < chars.count { blank(chars[i]); i += 1 }
         } else {
-            out.append(chars[i]); i += 1
+            out.append(chars[i]); notes.append(chars[i] == "\n" ? "\n" : " "); i += 1
         }
     }
-    return String(out)
+    return (String(out), String(notes))
 }
 
 /// Simple word boundaries: by Unicode's default, `process.waitUntilExit` is one
@@ -134,11 +149,16 @@ struct Rule {
 // Each pattern is a string literal, so this file passes its own check.
 let rules = [
     Rule(what: "Task.sleep", pattern: #"\bTask\s*\.\s*sleep\b"#),
+    Rule(what: "a real clock's sleep", pattern: #"\b(?:ContinuousClock|SuspendingClock)\s*\(\s*\)\s*\.\s*sleep\b"#),
+    Rule(what: "nanosleep", blocks: true, pattern: #"\bnanosleep\s*\("#),
+    Rule(what: "RunLoop's run(until:)", blocks: true, pattern: #"\.\s*run\s*\(\s*(?:mode:[^)]*,\s*)?(?:until|before):"#),
     Rule(what: "Thread.sleep", blocks: true, pattern: #"\bThread\s*\.\s*sleep\b"#),
     Rule(what: "usleep", blocks: true, pattern: #"\busleep\s*\("#),
     Rule(what: "sleep(", blocks: true, pattern: #"(?:^|[^\w.])sleep\s*\("#, unless: #"\bfunc\s+sleep\s*\("#),
     Rule(what: "asyncAfter", pattern: #"\basyncAfter\b"#),
-    Rule(what: "a blocking wait() (semaphore or group)", blocks: true, pattern: #"\.\s*wait\s*\(\s*(?:\)|timeout:|wallTimeout:)"#),
+    // An awaited wait() suspends; it cannot block a thread.
+    Rule(what: "a blocking wait() (semaphore or group)", blocks: true,
+         pattern: #"\.\s*wait\s*\(\s*(?:\)|timeout:|wallTimeout:)"#, unless: #"\bawait\s+[\w.]+\s*\.\s*wait\s*\("#),
     Rule(what: "waitUntilExit", blocks: true, pattern: #"\bwaitUntilExit\b"#),
 ]
 
@@ -149,8 +169,9 @@ let durationLiteral = try! Regex<(Substring, Substring, Substring)>(
 /// A comparison: Swift requires the same spacing on both sides of a binary
 /// operator, so a spaced `<` is a comparison and `Clock<Duration>` is not.
 let comparison = regex(" (?:<|<=|>|>=) ")
-/// The argument label or name a budget is given under, right before the literal.
-let budgetLabel = regex(#"(?i)(?:timeout|deadline|within|limit|budget)\w*\s*[:=]\s*(?:Duration)?$"#)
+/// The argument label or name a budget is given under, right before the literal,
+/// typed or not: `timeout: .seconds(1)`, `let limit: Duration = .seconds(1)`.
+let budgetLabel = regex(#"(?i)(?:timeout|deadline|within|limit|budget)\w*\s*(?::\s*Duration\??\s*)?[:=]\s*(?:Duration)?$"#)
 
 func seconds(_ unit: Substring, _ value: Substring) -> Double {
     let number = Double(value.replacing("_", with: "")) ?? 0
@@ -162,11 +183,11 @@ func seconds(_ unit: Substring, _ value: Substring) -> Double {
     }
 }
 
-/// What on this line of code depends on machine speed, if anything. In the
-/// live-app harness only what blocks a thread counts.
-func hits(in line: Substring, liveApp: Bool) -> [String] {
-    var found = rules.filter { (!liveApp || $0.blocks) && $0.hits(line) }.map(\.what)
-    guard !liveApp else { return found }
+/// What on this line of code depends on machine speed, if anything; with
+/// `blockingOnly`, only what blocks a thread.
+func hits(in line: Substring, blockingOnly: Bool) -> [String] {
+    var found = rules.filter { (!blockingOnly || $0.blocks) && $0.hits(line) }.map(\.what)
+    guard !blockingOnly else { return found }
     let compares = line.contains(comparison)
     for match in line.matches(of: durationLiteral) where seconds(match.1, match.2) < 60 {
         let before = line[line.startIndex..<match.range.lowerBound]
@@ -178,7 +199,7 @@ func hits(in line: Substring, liveApp: Bool) -> [String] {
     return found
 }
 
-let timingAttribute = regex(#"@Test\s*\(.*\.enabled\s*\(\s*if:\s*timingRun\s*\)"#)
+let timingAttribute = regex(#"@Test\s*\(.*\.enabled\s*\(\s*if:\s*(?:\w+\s*&&\s*)*timingRun(?:\s*&&\s*\w+)*\s*\)"#)
 let timingOK = regex(#"//\s*timing-ok:\s*\S"#)
 
 func swiftFiles(under root: String) -> [String] {
@@ -190,34 +211,43 @@ func swiftFiles(under root: String) -> [String] {
         .map { root.hasSuffix("/") ? root + $0 : root + "/" + $0 }.sorted()
 }
 
+/// `file` relative to the package root, however it was named: `./Tests/...` or absolute.
+func relative(_ file: String) -> String {
+    let root = FileManager.default.currentDirectoryPath + "/"
+    let path = URL(filePath: file).standardizedFileURL.path(percentEncoded: false)
+    return path.hasPrefix(root) ? String(path.dropFirst(root.count)) : path
+}
+
 let roots = CommandLine.arguments.count > 1 ? Array(CommandLine.arguments.dropFirst()) : defaultRoots
 var violations: [String] = []
 var owing: [String] = []
-var paid = Set(owed.indices)
+var unpaid = Set(owed.indices)
 var files = 0
 for file in roots.flatMap(swiftFiles(under:)) {
     guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { fail("cannot read \(file)") }
     files += 1
-    let raw = text.split(separator: "\n", omittingEmptySubsequences: false)
-    let stripped = code(of: text).split(separator: "\n", omittingEmptySubsequences: false)
+    let path = relative(file)
+    let parts = split(text.replacingOccurrences(of: "\r\n", with: "\n"))
+    let comments = parts.comments.split(separator: "\n", omittingEmptySubsequences: false)
     // A timing-run test's body, from its attribute to the brace that closes it.
     var timing = (pending: false, depth: 0, inside: false)
-    for (index, line) in stripped.enumerated() {
+    for (index, line) in parts.code.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+        var inTimingRun = false
         if line.contains(timingAttribute) { timing.pending = true }
         if timing.pending || timing.inside {
+            inTimingRun = true
             for character in line where character == "{" || character == "}" {
                 timing.depth += character == "{" ? 1 : -1
                 if character == "{", timing.pending { timing = (false, timing.depth, true) }
             }
             if timing.inside, timing.depth == 0 { timing.inside = false }
-            continue
         }
-        guard !raw[index].contains(timingOK) else { continue }
-        for what in hits(in: line, liveApp: file.hasPrefix(liveApp))
-        where !(file.hasSuffix(clockFile) && what.hasSuffix("budget or comparison")) {
-            let at = "\(file):\(index + 1): \(what)"
-            if let entry = owed.indices.first(where: { owed[$0].file == file && owed[$0].what == what }) {
-                paid.remove(entry)
+        guard !comments[index].contains(timingOK) else { continue }
+        for what in hits(in: line, blockingOnly: inTimingRun || path.hasPrefix(liveApp + "/"))
+        where !(path == clockFile && what.hasSuffix("budget or comparison")) {
+            let at = "\(path):\(index + 1): \(what)"
+            if let entry = unpaid.first(where: { owed[$0].file == path && owed[$0].what == what }) {
+                unpaid.remove(entry)
                 owing.append("\(at): owed, \(owed[entry].issue) is fixing it")
             } else {
                 violations.append("\(at): tests must not depend on machine speed; \(fix)")
@@ -227,8 +257,8 @@ for file in roots.flatMap(swiftFiles(under:)) {
 }
 
 // An entry is paid only where its file was checked; another run's roots may not hold it.
-for entry in paid.sorted() where roots == defaultRoots {
-    violations.append("\(owed[entry].file): \(owed[entry].issue) fixed \(owed[entry].what); delete its OWED entry")
+for entry in unpaid.sorted() where roots == defaultRoots {
+    violations.append("\(owed[entry].file): no longer has \(owed[entry].what) (\(owed[entry].issue)); delete its owed entry")
 }
 owing.forEach { print($0) }
 if violations.isEmpty {

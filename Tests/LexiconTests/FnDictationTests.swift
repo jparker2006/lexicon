@@ -217,8 +217,10 @@ func aMicStartThatNeverReturnsEndsTheDictationAndTheNextOneRecords() async throw
     await rig.conductor.handle(.dictationBegan(stuck, at: fnAt(0)))
     await rig.conductor.handle(.dictationConfirmed(stuck, .hold))
     let wedged = try #require(await starts.next())
-    // The row is there before the mic answers.
-    await rig.history.flush()
+    // The row is there before the mic answers: the wedged start can come first,
+    // so wait for the row's own change, not a flush that may predate it.
+    var rows = rig.history.changes.makeAsyncIterator()
+    while let id = await rows.next(), id != stuck {}
     #expect(await rig.history.dictation(stuck)?.status == .recording)
 
     await clock.waitForSleepers(1)

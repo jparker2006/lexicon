@@ -183,9 +183,9 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
     for id in started.keys where byID[id] == nil {
         // The writer creates the file, and History commits the row, a few ms after fn-down.
         // A kill inside that window leaves nothing, and costs less audio than the 0.1 s
-        // a crash may lose; any later kill must leave a row. Only the Dictation the kill
-        // interrupted may be unborn. How short the window is depends on machine speed,
-        // so it is not tested here.
+        // a crash may lose. So only the Dictation the kill interrupted may be unborn, and
+        // never with audio. How short the window is depends on machine speed, so it is
+        // not tested here.
         let killedAt = unfinished.first { $0.0 == id }.map { Duration.nanoseconds(Int64($0.2) - Int64($0.1)) }
         #expect(killedAt != nil, "Dictation \(id) has no row, and no kill interrupted it")
         #expect(!FileManager.default.fileExists(atPath: relaunch.history.audioURL(for: id).path), "Dictation \(id) has audio but no row")

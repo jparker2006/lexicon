@@ -14,7 +14,7 @@ import LexiconDomain
     let model = FakeModel()
     let clock = TestClock()
     let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: tenMinuteLinger,
-                                         local: model, clock: clock)
+                                         local: model, cloud: noNetworkChanges(clock), clock: clock)
 
     let result = await system.conductor.dictate(file: try shortWAV(), pace: .asFastAsPossible)
 
@@ -36,7 +36,7 @@ import LexiconDomain
     let model = FakeModel()
     let clock = TestClock()
     let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: tenMinuteLinger,
-                                         local: model, clock: clock)
+                                         local: model, cloud: noNetworkChanges(clock), clock: clock)
 
     _ = await system.conductor.dictate(file: try shortWAV(), pace: .asFastAsPossible)
     await clock.waitForSleepers(1)
@@ -60,7 +60,7 @@ import LexiconDomain
     var preferences = tenMinuteLinger
     preferences.privacy = .private
     let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: preferences,
-                                         local: model, clock: clock)
+                                         local: model, cloud: noNetworkChanges(clock), clock: clock)
 
     let result = await system.conductor.dictate(file: try shortWAV(), pace: .asFastAsPossible)
 
@@ -75,7 +75,7 @@ import LexiconDomain
 @Test(.timeLimit(.minutes(1))) func privateModeTurnedOnMidDictationKeepsTheModelLoaded() async throws {
     let model = FakeModel()
     let clock = TestClock()
-    let engine = SpeechEngine(local: model, clock: clock)
+    let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)
     let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
     var privateMode = tenMinuteLinger
     privateMode.privacy = .private
@@ -181,7 +181,7 @@ import LexiconDomain
 @Test(.timeLimit(.minutes(1))) func theModelLoadsAtLaunchAndUnloadsAfterTenIdleMinutes() async throws {
     let model = FakeModel()
     let clock = TestClock()
-    let engine = SpeechEngine(local: model, clock: clock)
+    let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)
 
     await engine.warmUp(tenMinuteLinger)
 
@@ -198,7 +198,7 @@ import LexiconDomain
     // Jake never waits that out at the cursor: the Dictation waits instead.
     let model = SlowModel()
     let clock = TestClock()
-    let engine = SpeechEngine(local: model, clock: clock)
+    let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)
     let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
 
     let finishing = Task { await engine.begin(feed: finishedFeed(), plan: plan).finish(AudioClip(samples: [1, 2, 3])) }
@@ -226,7 +226,7 @@ import LexiconDomain
 @Test(.timeLimit(.minutes(1))) func aModelThatLoadsInTimeTranscribesWithNoWaitingTimerLeft() async throws {
     let model = SlowModel()
     let clock = TestClock()
-    let engine = SpeechEngine(local: model, clock: clock)
+    let engine = SpeechEngine(local: model, cloud: noNetworkChanges(clock), clock: clock)
     let plan = SpeechPlan.make(preferences: tenMinuteLinger, access: nil, terms: [])
 
     let finishing = Task { await engine.begin(feed: finishedFeed(), plan: plan).finish(AudioClip(samples: [1, 2, 3])) }
@@ -337,4 +337,10 @@ private actor SlowModel: LocalTranscriber {
         guard isResident else { return }
         await withCheckedContinuation { unloadWaiters.append($0) }
     }
+}
+
+/// A cloud link whose network never changes: the process-wide NWPathMonitor
+/// would re-arm the idle unload whenever the Mac's network moved mid-test.
+private func noNetworkChanges(_ clock: TestClock) -> CloudLink {
+    ScriptedCloud(clock: clock, script: []).link
 }

@@ -12,13 +12,15 @@
 #    An active tap delays every key Jake types; the fn tap is listen-only
 #    (ADR 0004, PR #123).
 #
-# A line's own comment is ignored, so a comment may name what it bans.
+# A line's own string literals and // comment are ignored, so a comment may
+# name what it bans.
 set -eu
 cd "$(dirname "$0")/../.."
 
 failed=0
 
-# grep's matches with each line's `//` comment cut off first.
+# grep's matches as path:line, one per line, judged on each line with its
+# one-line string literals blanked and its // comment cut off.
 code_matches() {
     pattern=$1
     shift
@@ -28,7 +30,7 @@ code_matches() {
             rest=${hit#*:}
             line=${rest%%:*}
             text=${rest#*:}
-            code=$(printf '%s\n' "$text" | sed 's,//.*,,')
+            code=$(printf '%s\n' "$text" | sed -E 's,"([^"\\]|\\.)*",,g; s,//.*,,')
             if printf '%s\n' "$code" | grep -qE "$pattern"; then
                 echo "$location:$line"
             fi
@@ -37,8 +39,12 @@ code_matches() {
 
 # 1. Test targets and the executables they depend on.
 describe=$(mktemp)
-trap 'rm -f "$describe"' EXIT
-swift package describe --type json > "$describe" 2>/dev/null
+trap 'rm -f "$describe" "$describe.err"' EXIT
+swift package describe --type json > "$describe" 2> "$describe.err" || {
+    cat "$describe.err" >&2
+    echo "21-source-lints: swift package describe failed" >&2
+    exit 2
+}
 field() { plutil -extract "$1" raw -o - "$describe" 2>/dev/null; }
 executables=" "
 tests=
@@ -66,6 +72,9 @@ for i in $tests; do
     done
 done
 
+# Paths may hold spaces: split the hit lists on newlines only.
+IFS='
+'
 # 2. URL.path() with no arguments.
 for hit in $(code_matches '\.path\(\)' Sources Tests); do
     echo "$hit: URL.path() percent-encodes (Application%20Support); use path(percentEncoded: false)"
