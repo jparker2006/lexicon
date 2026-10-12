@@ -17,3 +17,9 @@ You review one slice of a change through the one lens you were given. Apply ever
 - Your Bash is for reading (`git diff/show/log` with explicit shas, `gh` views and API GETs). The parent session owns every write, comment, verdict and merge.
 - A clean slice gets "No findings" plus the list of what you checked.
 - Keep the report under 400 words.
+
+## Shell (zsh)
+
+- Quote every glob you pass to a command (`find . -name '*.swift'`); an unmatched bare glob is an error in zsh.
+- No bare `=====` separator lines: zsh expands a word that starts with `=`. Use `echo "--- name"`.
+- Run the unified log as `/usr/bin/log`; plain `log` is a zsh builtin.

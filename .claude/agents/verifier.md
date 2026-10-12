@@ -17,3 +17,9 @@ You get one claimed finding. Try to disprove it.
 - Never open Jake's private data under `~/Library/Application Support/Lexicon/` or any key; name the path instead.
 - Your Bash is for reading. The parent session owns every write and decision.
 - Keep the report under 250 words, plus the test.
+
+## Shell (zsh)
+
+- Quote every glob you pass to a command (`find . -name '*.swift'`); an unmatched bare glob is an error in zsh.
+- No bare `=====` separator lines: zsh expands a word that starts with `=`. Use `echo "--- name"`.
+- Run the unified log as `/usr/bin/log`; plain `log` is a zsh builtin.

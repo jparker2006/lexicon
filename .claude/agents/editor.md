@@ -13,3 +13,9 @@ You make one assigned change in the files you were given, in the parent's checko
 - Match the surrounding code's naming, comment density and idiom, and AGENTS.md's Code rules.
 - Your Bash is for reading and for the one test your task names, if any: `scripts/test.sh --filter <name>`. Bare `swift test` can't find Swift Testing. The parent runs the check script and `lexicon-eval`, and owns every commit, push and GitHub write. Never drive the live app or touch private data.
 - Report each file changed with a one-line summary, anything left undone, and anything you noticed outside your files.
+
+## Shell (zsh)
+
+- Quote every glob you pass to a command (`find . -name '*.swift'`); an unmatched bare glob is an error in zsh.
+- No bare `=====` separator lines: zsh expands a word that starts with `=`. Use `echo "--- name"`.
+- Run the unified log as `/usr/bin/log`; plain `log` is a zsh builtin.

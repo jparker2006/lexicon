@@ -197,7 +197,7 @@ try {
   throw new Error('snapshot failed: ' + (prep ? prep.out : 'no reply'))
 }
 if (!info.main && !info.later) {
-  const what = a.reviewed ? `only clean merges of main since \`${a.reviewed.slice(0, 7)}\`` : 'the diff is empty'
+  const what = a.reviewed ? `no change of the branch's own since \`${a.reviewed.slice(0, 7)}\`` : 'the diff is empty'
   return {
     markdown: `## Review\n\nReviewed sha: \`${info.sha.slice(0, 7)}\`. Nothing to review: ${what}.\n\n| Verdict | Where | Finding | Cites | Lens |\n|---|---|---|---|---|\n\nCounted: 0 CONFIRMED.\n\nHelpers: 1 prep (haiku low).`,
     reviewedSha: info.sha, complete: true, confirmed: [], rows: [], snapshots: [],
