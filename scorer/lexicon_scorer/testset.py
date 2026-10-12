@@ -1,7 +1,8 @@
 """Builds and grows Jake's private Test set from his Wispr Flow history (#50).
 
     scorer/testset update --lexicon-eval BIN
-    scorer/testset review [--no-open]              (review.py, Jake's gold review)
+    scorer/testset review                          (review.py, Jake's gold review)
+    scorer/testset status                          (review.py, the review's counts)
     scorer/testset baselines --lexicon-eval BIN    (baselines.py)
 
 `scripts/test-set.sh` builds `lexicon-eval` and runs this; run it weekly until
@@ -30,6 +31,7 @@ import argparse
 import contextlib
 import datetime
 import fcntl
+import hashlib
 import json
 import os
 import random
@@ -69,6 +71,11 @@ HELD_BACK = 100
 # own, and the bootstrap resamples whole sessions, so its interval would widen.
 MAX_HELD_BACK_SESSION = 20
 SEED = 50
+# Agreed clips that hold a Term, drawn once for Jake to hear after the
+# disagreements (#155): where both models misheard a Term the same way, the
+# agreed gold is wrong and the Terms score cannot see it. With none wrong in
+# 60, at most about 5% are (95%); 20 would still allow about 14%.
+AUDIT = 60
 
 
 class TestSetError(Exception):
@@ -302,6 +309,12 @@ def assign_sessions(clips: dict[str, dict], existing: dict[str, dict], *, held_b
     return assigned
 
 
+def rank(key: str, seed: int = SEED) -> str:
+    """A fixed shuffled order: sort by this. Unlike a shuffled list, a key keeps
+    its place when the Test set grows, so the review queue never reorders under Jake."""
+    return hashlib.sha256(f"{seed}:{key}".encode()).hexdigest()
+
+
 # Export
 
 
@@ -486,6 +499,33 @@ def disagreement_line(entry: dict, clip: dict, parakeet: str, reasons: list[str]
     }
 
 
+def audit_lines(root: Path, size: int = AUDIT, seed: int = SEED) -> list[dict]:
+    """The agreed-gold audit (#155): a seeded sample of agreed entries that hold
+    a Term, as review lines in the shape of `disagreements.jsonl`. Their `text`
+    is the draft both models agreed on."""
+    wispr = {line["id"]: line for line in _read_jsonl(root / "wispr-run.jsonl")}
+    exported = exported_clips(root) if root.exists() else {}
+    candidates = [e for e in _read_jsonl(root / "manifest.jsonl")
+                  if e.get("gold") == "agreed" and e.get("terms") and e["id"] in wispr]
+    chosen = sorted(candidates, key=lambda e: rank(e["id"], seed))[:size]
+    return [{
+        "id": e["id"], "audio_filepath": e["audio_filepath"], "session": e["session"], "split": e["split"],
+        "reasons": ["audit"], "parakeet": e["text"], "wispr_raw": wispr[e["id"]]["speech_text"],
+        "wispr_final": wispr[e["id"]]["inserted_text"], "jake_edit": exported.get(e["id"], {}).get("editedText"),
+    } for e in chosen]
+
+
+def ensure_audit(root: Path) -> int:
+    """Draws the audit into `audit.jsonl` once, so it never changes as the Test
+    set grows. Returns how many clips it holds."""
+    path = root / "audit.jsonl"
+    if not path.exists():
+        lines = audit_lines(root)
+        if lines:
+            _write_jsonl(path, lines)
+    return len(_read_jsonl(path))
+
+
 @dataclass
 class Build:
     added: int
@@ -601,8 +641,8 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     up = sub.add_parser("update", help="export new Wispr clips, transcribe them locally, add them to the Test set")
     up.add_argument("--lexicon-eval", required=True, type=Path, help="the built lexicon-eval binary")
-    rv = sub.add_parser("review", help="open Jake's gold review page (#51)")
-    rv.add_argument("--no-open", action="store_true", help="print the link without opening it")
+    sub.add_parser("review", help="open Jake's gold review page (#51)")
+    sub.add_parser("status", help="the gold review's counts: answered and left, never a clip")
     bl = sub.add_parser("baselines", help="save Wispr's and local Parakeet's baselines on both splits (#51)")
     bl.add_argument("--lexicon-eval", required=True, type=Path, help="the built lexicon-eval binary")
     args = parser.parse_args(argv)
@@ -611,7 +651,10 @@ def main(argv=None) -> int:
             update(ROOT, WISPR_DB, LEXICON, args.lexicon_eval, datetime.date.today())
         elif args.command == "review":
             from .review import serve
-            serve(ROOT, LEXICON, open_page=not args.no_open)
+            serve(ROOT, LEXICON)
+        elif args.command == "status":
+            from .review import status
+            status(ROOT)
         else:
             from .baselines import baselines
             baselines(ROOT, args.lexicon_eval, datetime.date.today())

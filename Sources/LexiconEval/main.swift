@@ -1,4 +1,5 @@
 import Foundation
+import AudioCapture
 import LexiconDomain
 import LexiconCore
 import LocalParakeet
@@ -11,9 +12,9 @@ import WordStore
 //   swift run lexicon-eval <wav> [--scripted <text>] [--lexicon <file>]
 //       {"status": "inserted", "text": "...", "lag_ms": 42}
 //
-//   swift run lexicon-eval --manifest <manifest.jsonl> [--split <name>]
+//   swift run lexicon-eval --manifest <manifest.jsonl> [--split <name>] [--sample <n>] [--pace fast]
 //       [--baseline <run.jsonl>] [--out <run.jsonl>] [--scripted-gold] [--lexicon <file>]
-//       the report from `scorer/score report` (see scorer/README.md)
+//       the report from `scorer/score report` (see scorer/README.md and EvalManifest.swift)
 //
 //   swift run lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
 //       the speech text of every entry, as draft gold (see below)
@@ -40,7 +41,9 @@ import WordStore
 // A manifest run writes one run line per entry (`--out` keeps the file; it is
 // what a later run's `--baseline` reads), then passes it to the scorer and exits
 // with the scorer's code: 0, or 3 when a score got worse than the baseline.
-// The quick run is `--split everyday`; the full run is `--split held-back`.
+// Entries still in Jake's gold review are skipped before any audio plays, and a
+// held-back one refuses the run. The quick eval is `scripts/eval-quick.sh`; the
+// full run is `--split held-back`.
 //
 // `--transcribe` makes the draft gold for the Test set (scorer/testset): local
 // Parakeet's speech text for every entry, so the manifest needs no `text`. No
@@ -72,7 +75,7 @@ func runEval(arguments: [String]) async -> Int32 {
         switch argument {
         case "--scripted-gold": scriptedGold = true
         case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model", "--transcribe", "--lexicon",
-             "--import-lexicon", "--into":
+             "--import-lexicon", "--into", "--sample", "--pace":
             guard let value = rest.popFirst(), options[argument] == nil else { return usage() }
             options[argument] = value
         default:
@@ -95,8 +98,14 @@ func runEval(arguments: [String]) async -> Int32 {
         return await transcribe(URL(filePath: manifest), out: URL(filePath: out))
     }
     if let manifest = options["--manifest"] {
-        guard files.isEmpty, options["--scripted"] == nil else { return usage() }
-        return await evalManifest(URL(filePath: manifest), split: options["--split"],
+        let pace: FilePace? = switch options["--pace"] {
+        case nil, "realtime": .realtime
+        case "fast": .asFastAsPossible
+        default: nil
+        }
+        let sample = options["--sample"].map { Int($0) ?? 0 }
+        guard files.isEmpty, options["--scripted"] == nil, let pace, (sample ?? 1) > 0 else { return usage() }
+        return await evalManifest(URL(filePath: manifest), split: options["--split"], sample: sample, pace: pace,
                                   baseline: options["--baseline"].map { URL(filePath: $0) },
                                   out: options["--out"].map { URL(filePath: $0) },
                                   lexicon: options["--lexicon"].map { URL(filePath: $0) }, scriptedGold: scriptedGold)
@@ -131,57 +140,6 @@ func evalFile(_ wav: URL, scripted: String?, lexicon: URL?) async -> Int32 {
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     print(String(decoding: (try? encoder.encode(line)) ?? Data(), as: UTF8.self))
     return result.status == nil ? 1 : 0
-}
-
-func evalManifest(_ manifest: URL, split: String?, baseline: URL?, out: URL?, lexicon: URL?,
-                  scriptedGold: Bool) async -> Int32 {
-    if let out {
-        guard mayWriteRun(to: out, manifest: manifest, lexicon: lexicon, repo: repo) else {
-            return fail("--out is inside a git repo but the manifest or Lexicon is not public; private text never goes in a repo")
-        }
-        // Never over a manifest, a baseline or another run: they may be Jake's data.
-        guard !FileManager.default.fileExists(atPath: out.path(percentEncoded: false)) else { return fail("--out already exists") }
-    }
-    if !scriptedGold { await warmParakeet() }
-    let entries: [LexiconEntry]
-    do { entries = try readLexicon(lexicon) } catch { return fail("cannot read the Lexicon file: \(error.localizedDescription)") }
-    let lines: [RunLine]
-    do {
-        lines = try await runManifest(manifest, split: split, pace: .realtime, lexicon: entries) { entry in
-            scriptedGold ? ScriptedTranscriber(text: entry.text ?? "") as any LocalTranscriber : parakeet
-        } progress: { done, total in
-            FileHandle.standardError.write(Data("lexicon-eval: \(done)/\(total)\r".utf8))
-        }
-    } catch {
-        return fail("\(error)")
-    }
-    FileHandle.standardError.write(Data("\n".utf8))
-
-    let runFile = out ?? FileManager.default.temporaryDirectory.appending(path: "lexicon-run-\(UUID().uuidString).jsonl")
-    defer { if out == nil { try? FileManager.default.removeItem(at: runFile) } }
-    do { try writeRun(lines, to: runFile) } catch { return fail("\(error)") }
-
-    // A false alarm counts against the gold entry's Terms and the whole Lexicon, so
-    // the Lexicon's written forms go to the scorer in a file of their own.
-    let termsFile = FileManager.default.temporaryDirectory.appending(path: "lexicon-terms-\(UUID().uuidString).txt")
-    defer { if lexicon != nil { try? FileManager.default.removeItem(at: termsFile) } }
-
-    var arguments = [repo.appending(path: "scorer/score").path(percentEncoded: false), "report", "--gold", manifest.path(percentEncoded: false),
-                     "--run", runFile.path(percentEncoded: false)]
-    if let split { arguments += ["--split", split] }
-    if let baseline { arguments += ["--baseline", baseline.path(percentEncoded: false)] }
-    if lexicon != nil {
-        do { try await writtenForms(entries).write(to: termsFile, atomically: true, encoding: .utf8) } catch {
-            return fail("cannot write the Lexicon's written forms: \(error.localizedDescription)")
-        }
-        arguments += ["--terms", termsFile.path(percentEncoded: false)]
-    }
-    let scorer = Process()
-    scorer.executableURL = URL(filePath: "/bin/sh")
-    scorer.arguments = arguments
-    do { try scorer.run() } catch { return fail("cannot start the scorer: \(error.localizedDescription)") }
-    scorer.waitUntilExit()
-    return scorer.terminationStatus
 }
 
 func transcribe(_ manifest: URL, out: URL) async -> Int32 {
@@ -301,8 +259,8 @@ func fail(_ message: String) -> Int32 {
 func usage() -> Int32 {
     FileHandle.standardError.write(Data("""
         usage: lexicon-eval <wav> [--scripted <text>] [--lexicon <file>]
-               lexicon-eval --manifest <manifest.jsonl> [--split <name>] [--baseline <run.jsonl>]
-                            [--out <run.jsonl>] [--scripted-gold] [--lexicon <file>]
+               lexicon-eval --manifest <manifest.jsonl> [--split <name>] [--sample <n>] [--pace fast | realtime]
+                            [--baseline <run.jsonl>] [--out <run.jsonl>] [--scripted-gold] [--lexicon <file>]
                lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
                lexicon-eval --install-model <bundle id>
                lexicon-eval --import-lexicon <file> --into <data folder>
