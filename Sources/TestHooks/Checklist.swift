@@ -255,10 +255,12 @@ public struct ChecklistRun: Codable, Sendable, Equatable {
 }
 
 /// The run as a `Live checks:` comment: header, table and verdict. No output
-/// text, only fingerprints, so nothing a field held reaches GitHub.
+/// text, only fingerprints, so nothing a field held reaches GitHub. The header
+/// is `Live checks: <branch> @ <sha7>`, the line scripts/live-lane.sh reads as
+/// the answer to `Live checks request: <branch> @ <sha7>`.
 public struct ChecklistReport: Sendable, Equatable {
     public let issue: String
-    /// nil when the checklist names none: the header then gives the sha alone.
+    /// nil when the checklist names none: the header says so, and answers no request.
     public let branch: String?
     public let sha: String
     public let app: String
@@ -285,9 +287,9 @@ public struct ChecklistReport: Sendable, Equatable {
         let passed = results.filter(\.passes).count
         let issue = issue.hasPrefix("#") ? issue : "#\(issue)"
         return """
-            Live checks: \(issue)\(branch.map { ", \($0)" } ?? "") @ \(sha.prefix(7))
+            Live checks: \(branch ?? "<no branch named>") @ \(sha.prefix(7))
 
-            \(app). fn listeners: \(fnListeners).
+            \(issue). \(app). fn listeners: \(fnListeners).
 
             \(table)
 
