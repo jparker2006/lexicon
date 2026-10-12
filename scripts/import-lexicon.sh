@@ -17,5 +17,5 @@ flavor "$1"
 FILE=$2
 
 . scripts/lib/swift-flags.sh
-swift build "$@" --product lexicon-eval >&2
-exec "$(swift build "$@" --show-bin-path)/lexicon-eval" --import-lexicon "$FILE" --into "$HOME/Library/Application Support/$NAME"
+swift build $SWIFT_FLAGS --product lexicon-eval >&2
+exec "$(swift build $SWIFT_FLAGS --show-bin-path)/lexicon-eval" --import-lexicon "$FILE" --into "$HOME/Library/Application Support/$NAME"
