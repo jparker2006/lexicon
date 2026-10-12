@@ -131,13 +131,14 @@ issues() { cat "$ISSUES"; }
 
 # One line per open request, oldest first: created, issue, branch @ sha7, comment
 # index. Only each issue's newest request counts (a fix sends a new one), and
-# only until a `Live checks: <branch> @ <sha7>` result answers it.
+# only until a `Live checks: <branch> @ <sha7>` result answers it, as a plain
+# line or a Markdown heading.
 requests() {
     issues | jq -r --arg owner "$OWNER" '
         .[] | .number as $n | [.comments[] | select(.author.login == $owner)] as $c
         | [range(0; $c | length) | select($c[.].body | startswith("Live checks request: "))] | last // empty
         | . as $i | ($c[$i].body | split("\n")[0] | ltrimstr("Live checks request: ") | rtrimstr("\r")) as $head
-        | select([$c[$i + 1:][] | .body | startswith("Live checks: " + $head)] | any | not)
+        | select([$c[$i + 1:][] | .body | sub("^[\\s#*]+"; "") | startswith("Live checks: " + $head)] | any | not)
         | [$c[$i].createdAt, $n, $head, $i] | @tsv' | sort
 }
 
