@@ -100,7 +100,7 @@ const FINDINGS = {
     findings: { type: 'array', items: FINDING },
     notes: { type: 'array', items: { type: 'string' }, description: 'possible problems without a citation, one line each' },
     checked: { type: 'string', description: 'what you checked and found fine, briefly' },
-    incomplete: { type: 'string', description: `a read the lens needed that was refused, failed or cut short (a list at its limit), and what it left unchecked; "" when every read ran. ${CI_GATE}` },
+    incomplete: { type: 'string', description: `a read the lens needed that was refused, failed or cut short (a list at its limit), and what it left unchecked; empty when every read ran. ${CI_GATE}` },
   },
   required: ['findings', 'notes', 'checked', 'incomplete'],
 }
@@ -324,7 +324,7 @@ The standard is ${standard}. Settled decisions are never findings: the spec #36 
 
 A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes (at most 5), never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.
 
-A read this lens needs (a file, git, gh) that is refused, fails, or returns a list at its limit goes in incomplete, with what it left unchecked: never read it as empty or clean. Otherwise incomplete is "". ${CI_GATE}`
+A read this lens needs (a file, git, gh) that is refused, fails, or returns a list at its limit goes in incomplete, with what it left unchecked: never read it as empty or clean. Otherwise leave incomplete empty. ${CI_GATE}`
 }
 
 function verifyPrompt(f, pass) {
@@ -382,7 +382,8 @@ async function review(pass, isDelta) {
     (r, job) => {
       const label = `${job.lens.name} (${job.critic[0]})`
       if (!r) { incomplete.push(`no reply from ${label}`); return null }
-      if (r.incomplete) incomplete.push(`${label}: ${r.incomplete}`)
+      // A model asked for an empty string sometimes returns the two quote marks themselves.
+      if (/[^"'\s]/.test(r.incomplete || '')) incomplete.push(`${label}: ${r.incomplete}`)
       if (r.checked) checked.push(`${label}: ${r.checked}`)
       for (const n of r.notes) notes.push(`${label}: ${n}`)
       const findings = r.findings.slice(0, MAX_FINDINGS)
