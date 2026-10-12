@@ -58,6 +58,12 @@ test('passes the rewritten lines', () => {
   assert.equal(r.status, 0, r.out)
 })
 
+test('"lands with" that points at no ticket is not a future pointer', () => {
+  // implement-ticket step 7 on #158's branch.
+  const root = tree({ 'a.md': 'When the Live checks result lands with every item PASS, mark the acceptance lines. The text will land at the cursor.\n' })
+  assert.equal(run(root, '').status, 0)
+})
+
 test('a future pointer at an open ticket passes', () => {
   const root = tree({ 'AGENTS.md': 'The live-checks skill lands with #161.\n' })
   assert.equal(run(root, '38').status, 0)

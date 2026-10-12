@@ -7,7 +7,8 @@
 //   node scripts/check-docs.mjs [--root DIR] [--merged N,N,...]
 //
 // Fails on:
-//   - a future pointer ("lands with", "will land", "once #N lands") whose
+//   - a future pointer at a ticket ("lands with #N", "lands with the X ticket",
+//     "once #N lands") whose
 //     sentence names no ticket number, or names one that has merged. A ticket
 //     has merged when a commit subject on HEAD ends in "(#N)" or "(#N) (#M)";
 //     --merged replaces that list (tests). In a shallow clone, such as CI's,
@@ -57,7 +58,10 @@ function docs() {
   return found
 }
 
-const FUTURE = /\blands with\b|\bwill land\b|\b(?:once|until|when|after) \[?#\d+\]?(?:\([^)]*\))? (?:lands|merges|ships)\b/i
+// A pointer at a ticket: "lands with #38", "will land in the bundle scripts ticket",
+// "once #159 merges". Not "the result lands with every item PASS".
+const TICKET = String.raw`(?:\[?#\d+\]?|the [^.]*?\bticket\b)`
+const FUTURE = new RegExp(String.raw`\b(?:lands with|will land (?:with|in)) ${TICKET}|\b(?:once|until|when|after) \[?#\d+\]?(?:\([^)]*\))? (?:lands|merges|ships)\b`, 'i')
 // A path character may not come before it, so ~/x/scripts/y and .claude/scripts are left alone.
 const SCRIPT = /(?<![\w./~-])scripts\/[\w./-]*\w/g
 
