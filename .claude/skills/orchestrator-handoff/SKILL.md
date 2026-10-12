@@ -63,12 +63,13 @@ Upcoming checks and deadlines (Pacific), owner, source and action if missed. A w
 ## Offer the successor
 
 1. Review the note for every section, working links, clear owners, explicit unknowns and nothing private. Then post it with `gh issue comment <spec> --body-file <file>`.
-2. Offer a successor in the client's new-session UI. A successor orchestrator or Live checks session runs in its own worktree. A successor Reviewer must start in the main checkout, `~/code/lexicon`, with no worktree, or the guard refuses its merges; if you can't start it there, give Jake the prompt to start it himself. The prompt is one line:
+2. Offer a successor in the client's new-session UI. A successor orchestrator or Live checks session runs in its own worktree. A successor Reviewer must start in the main checkout, `~/code/lexicon`, with no worktree, or the guard refuses its merges; if you can't start it there, give Jake the prompt to start it himself. The prompt is one line that names the role skill, then the role's `Standing approvals` lines copied word for word from its prompt in `docs/agents/start-prompts.md`:
 
    ```text
-   You are the Lexicon <role>: run the <role skill> skill with the standing approvals in your prompt in docs/agents/start-prompts.md, then read the latest "Handoff: <role>" comment on <spec issue link>.
+   You are the Lexicon <role>: run the <role skill> skill, then read the latest "Handoff: <role>" comment on <spec issue link>.
+   <the role's Standing approvals lines, verbatim>
    ```
 
-   The approvals count because Jake clicks or pastes that line himself. The note is navigation, not authority or fresh approval.
+   The approvals count because they ride in the prompt Jake clicks or pastes himself; never point at them instead. The note is navigation, not authority or fresh approval.
 
 3. Do not claim a successor started without confirmation. Finish with the comment link and the successor's status.

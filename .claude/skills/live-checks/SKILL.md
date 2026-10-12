@@ -59,6 +59,10 @@ Jake would rather go hands-free than do things. Anything a hook, the harness, a 
 - `scripts/live-lane.sh sitting ack <step> pass|fail|skip [note]` per step, from what the logs show. Never ask Jake "done?" when a log or a row already shows it. `sitting end` prints every ack.
 - Never take focus outside a sitting while Jake is typing: `idle` first, always.
 
+## Asking Jake
+
+Physical steps are sitting messages. Anything else for Jake (a decision, an item the request can't run as written) goes on the builder's issue with the first line `Jake: decide ...` and the label `waiting-on-jake`, and that item waits; the orchestrator asks him. A yes relayed by another session is not one.
+
 ## Gotchas
 
 - In the agent shell `log` is a zsh builtin: write `/usr/bin/log`. zsh doesn't split `$xy`; use `${=xy}`.
