@@ -218,6 +218,14 @@ fake_listener "$HOME/Applications/Lexicon.app/Contents/MacOS/Lexicon"
 echo '2026-10-12 09:40:01.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationBegan(hold: true)' > "$T/log.txt"
 expect fail 'Dictation in progress' "a hands-free sitting won't quit the daily Lexicon mid-Dictation" "$LANE" sitting start --hands-free
 [ ! -e "$DEV/live-sitting.open" ] && pass "a start refused for a Dictation leaves no marker" || fail "a start refused for a Dictation left the marker"
+# A log that can't be read could hide a Dictation, so it refuses too.
+cp "$T/bin/fake-log" "$T/fake-log.ok"
+printf '#!/bin/sh\necho "log: cannot read the store" >&2\nexit 1\n' > "$T/bin/fake-log"
+: > "$T/log.txt"
+expect fail "can't read the daily Lexicon's log" "an unreadable log counts as a Dictation in progress" "$LANE" sitting start --hands-free
+[ ! -e "$DEV/live-sitting.open" ] && pass "a start refused for an unreadable log leaves no marker" || fail "a start refused for an unreadable log left the marker"
+cp "$T/fake-log.ok" "$T/bin/fake-log"
+echo '2026-10-12 09:40:01.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationBegan(hold: true)' > "$T/log.txt"
 echo '2026-10-12 09:40:09.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationLanded' >> "$T/log.txt"
 expect fail "is not your login home.*|the sitting didn't open: the daily Lexicon wasn't quit" "a hands-free sitting quits the daily Lexicon itself, here refused by the HOME check" "$LANE" sitting start --hands-free
 [ ! -e "$DEV/live-sitting.open" ] && pass "a hands-free sitting whose daily quit failed leaves no marker" || fail "a failed daily quit left the hands-free marker"
@@ -250,6 +258,14 @@ expect ok '^2\. Mic prompt \(#57\)' "a skipped step stays queued" "$LANE" sittin
 "$LANE" sitting ack 2 fail no prompt > /dev/null
 "$LANE" sitting end > /dev/null
 expect ok '^No Jake items are queued, so no sitting\.$' "a step acked pass or fail leaves the queue" "$LANE" sitting render
+# The queue is read and rewritten under a lock, so a look at it never undoes a
+# sitting end's change; a holder that died leaves a lock the next one clears.
+sleep 60 &
+held=$!
+echo "$held" > "$DEV/live-lane/jake-items.tsv.lock"
+expect fail 'the Jake queue is locked by pid' "a second writer waits for the queue's lock, then refuses" "$LANE" queue
+kill "$held"; wait "$held" 2> /dev/null || true
+expect ok '^No Jake items are queued' "a dead holder's lock is cleared" "$LANE" sitting render
 # A newer request for the issue replaces what the older head left.
 cp "$T/issues-57.json" "$T/issues.json"
 "$LANE" queue > /dev/null
@@ -263,20 +279,21 @@ request "claude/issue-64 @ $read" "$T/hook-fn.txt" > "$T/r64f"
 jq -n --rawfile r "$T/r64f" '[{number: 64, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
 expect ok '^Waiting for the daily Lexicon to quit: #64 claude/issue-64 @ [0-9a-f]+ item 1 \(WAV fn\)' "a hands-off fn item is named while it waits" "$LANE" sitting render
 
-# Idle time: seconds since the last hardware input, from CoreGraphics' HID
-# system state, which the harness's own posted keys don't reset. Only that
-# read answers here; any other osascript still fails.
-cat > "$T/bin/osascript" <<'EOF'
-#!/bin/sh
-case "$*" in
-    *CGEventSourceSecondsSinceLastEventType*kCGEventSourceStateHIDSystemState*) echo 45 ;;
-    *) echo "test stub: osascript is not allowed in tests" >&2; exit 1 ;;
-esac
-EOF
-chmod +x "$T/bin/osascript"
+# Idle time, read from ioreg in nanoseconds.
+fake_idle() { printf '#!/bin/sh\necho "    | |   \\"HIDIdleTime\\" = %s000000000"\n' "$1" > "$T/bin/ioreg"; chmod +x "$T/bin/ioreg"; }
+fake_idle 45
 expect ok '^live-lane: idle 45 s$' "45 s of HID idle passes the default 30 s" "$LANE" idle
 expect fail 'Jake is at the keyboard \(idle 45 s, want 60 s\)' "a longer wait for idle fails while he's active" "$LANE" idle 60
-printf '#!/bin/sh\necho "test stub: osascript is not allowed in tests" >&2\nexit 1\n' > "$T/bin/osascript"
+# The harness notes each window it posts keys in (from, to, the idle time when
+# it began; lexicon-harness's PostedInput). Input inside one is the harness's,
+# so idle steps back to the last input before it, across windows back to back.
+now=$(date +%s)
+printf '%s\t%s\t%s\n' $((now - 40)) $((now - 30)) 50 $((now - 12)) $((now - 6)) 25 > "$DEV/live-lane/posted-input.tsv"
+fake_idle 7
+expect ok '^live-lane: idle (89|9[01]) s$' "a paste-check's own keys don't reset idle, nor an earlier run's" "$LANE" idle 60
+fake_idle 2
+expect fail 'Jake is at the keyboard \(idle 2 s' "input after the window ends is Jake's" "$LANE" idle 60
+rm "$DEV/live-lane/posted-input.tsv"
 
 # A long wait becomes a timer and frees the lane; a due timer stays queued until the holder reads it.
 expect ok 'due in 600 s; released the lane' "a long wait becomes a timer that releases the lane" "$LANE" timer 600 memory-settle
