@@ -1,0 +1,15 @@
+# #54's hands-off paste items, as Live checks ran them on 2026-10-11.
+# Run: scripts/harness.sh run-checklist scripts/checklists/54-paste.checklist
+# Needs Lexicon Dev running with test hooks: scripts/dev-run.sh -- --test-hooks
+issue: 54
+branch: main
+sha: d347832
+
+item: paste-check lands the text in a native field and puts the clipboard back
+run: paste-check
+repeat: 10
+
+item: the fn tap ignores Lexicon's own Cmd-V (no fn line over the pastes)
+run: sh /usr/bin/log show --last 3m --style compact --predicate 'subsystem == "Lexicon" && category == "fn" && processImagePath CONTAINS "/Lexicon Dev.app/"'
+pass: exit 0
+pass: lacks [Lexicon:fn]
