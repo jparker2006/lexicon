@@ -855,8 +855,25 @@ function tccRefusal(args) {
   if (args[0] !== 'reset') return null;
   // `tccutil reset <service> [bundle id]`; with no bundle ID it resets every app.
   if ((args[2] ?? '').toLowerCase() !== DEV_ID) return REASONS.tcc;
-  // scripts/live-lane.sh sitting start writes the marker on Jake's go, and sitting end removes it.
-  return existsSync(path.join(homedir(), 'Library/Application Support/Lexicon Dev/live-sitting.open')) ? null : REASONS.sitting;
+  return sittingOpen() ? null : REASONS.sitting;
+}
+
+/**
+ * Whether a sitting is open: scripts/live-lane.sh sitting start writes the marker on Jake's go, and sitting end removes it.
+ * A sitting whose holder crashed leaves the marker behind, so its pid must still be the process that started then.
+ */
+function sittingOpen() {
+  let marker;
+  try {
+    marker = readFileSync(path.join(homedir(), 'Library/Application Support/Lexicon Dev/live-sitting.open'), 'utf8');
+  } catch {
+    return false;
+  }
+  const field = (name) => new RegExp(`^${name}=(.*)$`, 'm').exec(marker)?.[1].trim();
+  const pid = field('pid');
+  if (!/^\d+$/.test(pid ?? '')) return false;
+  const started = spawnSync('ps', ['-o', 'lstart=', '-p', pid], { encoding: 'utf8', timeout: 2000, env: { ...process.env, TZ: 'UTC' } });
+  return started.status === 0 && started.stdout.trim() === field('pid-started');
 }
 
 /** `file` with the links in its deepest existing folder followed, so a link to a folder above the private one is seen. */

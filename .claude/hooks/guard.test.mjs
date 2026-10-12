@@ -565,8 +565,17 @@ function fakeHome(t, { sitting = false } = {}) {
   t.after(() => rmSync(home, { recursive: true, force: true }));
   mkdirSync(path.join(home, 'Library/Application Support/Lexicon'), { recursive: true });
   mkdirSync(path.join(home, 'Library/Application Support/Lexicon Dev'), { recursive: true });
-  if (sitting) writeFileSync(path.join(home, 'Library/Application Support/Lexicon Dev/live-sitting.open'), 'holder=Live checks\n');
+  if (sitting) writeSitting(home, process.pid);
   return home;
+}
+
+/** The sitting marker scripts/live-lane.sh writes, naming `pid` as the holder's session and its start time. */
+function writeSitting(home, pid) {
+  const started = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC' } }).stdout.trim();
+  writeFileSync(
+    path.join(home, 'Library/Application Support/Lexicon Dev/live-sitting.open'),
+    `opened=2026-10-11T22:54:00Z\nholder=Live checks\npid=${pid}\npid-started=${started || 'Thu Jan  1 00:00:00 1970'}\n`,
+  );
 }
 
 test("refuses Jake's private folder and .env files in Bash, never Lexicon Dev's folder", (t) => {
@@ -820,6 +829,11 @@ test('refuses a reset of Lexicon Dev only outside a sitting, naming its cost', (
   assertRefused(command, /sitting/, { home: fakeHome(t) });
   assertAllowed(command, { home: fakeHome(t, { sitting: true }) });
   assertRefused('tccutil reset Microphone dev.jparker.lexicon', /tccutil reset/, { home: fakeHome(t, { sitting: true }) });
+  // A sitting whose holder crashed is not open: its pid is gone, or now another process's.
+  const crashed = fakeHome(t);
+  const gone = spawnSync('sh', ['-c', 'echo $$'], { encoding: 'utf8' }).stdout.trim();
+  writeSitting(crashed, Number(gone));
+  assertRefused(command, /sitting/, { home: crashed });
 });
 
 test('refuses a PR body with a closing keyword before an issue number, or an em dash', (t) => {
