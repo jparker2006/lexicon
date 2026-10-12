@@ -382,8 +382,7 @@ async function review(pass, isDelta) {
     (r, job) => {
       const label = `${job.lens.name} (${job.critic[0]})`
       if (!r) { incomplete.push(`no reply from ${label}`); return null }
-      // A model asked for an empty string sometimes returns the two quote marks themselves.
-      if (/[^"'\s]/.test(r.incomplete || '')) incomplete.push(`${label}: ${r.incomplete}`)
+      if (r.incomplete) incomplete.push(`${label}: ${r.incomplete}`)
       if (r.checked) checked.push(`${label}: ${r.checked}`)
       for (const n of r.notes) notes.push(`${label}: ${n}`)
       const findings = r.findings.slice(0, MAX_FINDINGS)

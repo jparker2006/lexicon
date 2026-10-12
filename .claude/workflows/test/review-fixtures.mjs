@@ -179,13 +179,6 @@ test("a critic's brief and schema carry the CI gate", async () => {
   }
 })
 
-test('a lens whose incomplete is a bare pair of quotes stamps the sha', async () => {
-  const { dir, sha } = fixtureRepo('quotes', ['Sources/Foo/a.swift'])
-  const r = await run(dir, { issue: 1, sha }, () => ({ ...CLEAN, incomplete: '""' }))
-  assert(r.result.complete === true, `complete should be true; ${r.result.markdown.match(/INCOMPLETE.*/)}`)
-  assert(r.result.reviewedSha === sha, 'reviewedSha should be the sha')
-})
-
 test('a newline in an INCOMPLETE reason stays on the INCOMPLETE line', async () => {
   const { dir, sha } = fixtureRepo('incomplete-newline', ['Sources/Foo/a.swift'])
   const r = await run(dir, { issue: 1, sha }, (p, o) =>
