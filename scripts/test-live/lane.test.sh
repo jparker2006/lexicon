@@ -112,7 +112,11 @@ fake_listener "$T/worktree/.build/bundle/debug/Lexicon Dev.app/Contents/MacOS/Le
 expect fail "a second Lexicon Dev is running \(pid $LISTENER" "a second Lexicon Dev counts as a listener" "$LANE" preflight 64
 stop_listeners
 
-# Sittings. #53's hold step without its speak field can't render.
+# Sittings. Each case starts with no Jake items kept from the cases before
+# (render keeps them past their request's result, #233).
+fresh_queue() { rm -f "$DEV/live-lane/jake-items.tsv"; }
+# #53's hold step without its speak field can't render.
+fresh_queue
 request "claude/issue-53 @ $read" "$F/53-hold-no-speak.txt" > "$T/r53b"
 jq -n --rawfile r "$T/r53b" '[{number: 53, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
 expect ok "^not in a sitting: #53 claude/issue-53 @ $read: the request can't be read: item 1 \\(Hold\\): no speak field\$" "#53's hold step can't render without its speak field" "$LANE" sitting render
@@ -176,6 +180,7 @@ expect ok 'cleared the marker of a sitting whose session ended' "a dead session'
 [ ! -e "$DEV/live-sitting.open" ] && pass "the guard no longer sees a crashed sitting as open" || fail "a crashed sitting's marker survived"
 
 # A sitting of only #57's Dictation step still counts as fn.
+fresh_queue
 only_request 57 "$T/r57b" "$T/issues-sitting.json"
 jq '[.[] | select(.number == 57)]' "$T/issues.json" > "$T/issues-57.json"
 cp "$T/issues-57.json" "$T/issues.json"
@@ -183,11 +188,8 @@ cp "$T/issues-57.json" "$T/issues.json"
 fake_listener "$T/elsewhere/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicator"
 expect fail 'Lexicon Indicator is running' "a Dictation-only sitting won't start while another app answers fn" "$LANE" sitting start
 stop_listeners
-# Its step passes in a sitting, so it leaves the queue.
-"$LANE" sitting start > /dev/null
-"$LANE" sitting ack 2 pass > /dev/null
-"$LANE" sitting end > /dev/null
 
+fresh_queue
 jq -n --rawfile r "$T/r64c" '[{number: 64, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
 expect ok '^No Jake items are queued, so no sitting\.$' "no physical items, no sitting" "$LANE" sitting render
 expect fail 'no rendered sitting' "a sitting with no steps can't start" "$LANE" sitting start
@@ -225,6 +227,7 @@ expect fail 'usage: live-lane.sh sitting' "an unknown sitting start option is re
 
 # Jake's items outlive their request's hands-off result and the issue's close
 # at merge (#233): a sitting end forgets each one acked pass or fail.
+fresh_queue
 cp "$T/issues-57.json" "$T/issues.json"
 "$LANE" queue > /dev/null
 jq --arg read "$read" '(.[0].comments) += [{createdAt: "2026-10-11T22:00:00Z", body: "Live checks: claude/issue-57 @ \($read)\n\nall pass"}]' "$T/issues-57.json" > "$T/issues.json"
