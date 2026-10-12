@@ -212,13 +212,15 @@ final class MicLane: @unchecked Sendable {
     #endif
 
     func begin(deviceUID: String?, keyDown: HostTime) throws(RecorderError) -> MicSource {
+        // fn never waits (#18): a capture still in its tail ends now. First, before
+        // anything that can fail or get stuck: once this lane is abandoned nothing
+        // else on it runs, and the tail's engine would hold the mic until relaunch.
+        active?.cutOff()
         // Queued behind the call that got stuck, and already answered by the deadline.
         guard !isAbandoned else { throw .startTimedOut }
         guard let device = hardware.findDevice(deviceUID) else { throw .noInputDevice }
         // Without permission the mic gives silence, not an error (#4).
         guard permission.current != .denied else { throw .micPermissionDenied }
-        // fn never waits (#18): a capture still in its tail ends now.
-        active?.cutOff()
 
         let ready = prepared.flatMap { $0.device == device && $0.isCurrent ? $0 : nil }
         prepared = nil
