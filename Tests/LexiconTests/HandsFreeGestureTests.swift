@@ -366,3 +366,13 @@ func aCappedDictationIsAlwaysWarnedFirst(keyFirst: Bool) {
         : [.deadline(at(10_050)), .otherKey(at(10_010))]
     #expect(run(inputs, gesture: &gesture) == [.oneMinuteLeft(a), .dictationStopped(a, at: at(10_000))])
 }
+
+@Test(arguments: [true, false])
+func aKeyStampedAfterTheWarningMarkGetsTheWarningFirstWhicheverIsHandledFirst(keyFirst: Bool) {
+    // Still recording at the warning's mark by its own time: the warning goes out once, before
+    // whatever the key does, whether the tap handles the key or the mark's timer first.
+    var gesture = FnGesture(shortCap)
+    _ = run([.fnDown(at(0), secureInput: false, id: a), .deadline(at(300))], gesture: &gesture)
+    let inputs: [KeyInput] = keyFirst ? [.escape(at(8_010)), .deadline(at(8_000))] : [.deadline(at(8_000)), .escape(at(8_010))]
+    #expect(run(inputs, gesture: &gesture) == [.oneMinuteLeft(a), .dictationCancelled(a)])
+}
