@@ -50,12 +50,14 @@ async function gated(fn) {
 }
 
 const helpers = {}
-function hire(type, model, effort, prompt, opts) {
-  const key = `${type} (${model} ${effort})`
-  helpers[key] = (helpers[key] || 0) + 1
+// Counts the helpers that answered, by type, model and effort, for the Helpers line.
+async function hire(type, model, effort, prompt, opts) {
   const call = { ...opts, model, effort }
   if (type !== 'prep') call.agentType = type
-  return gated(() => agent(prompt, call))
+  const result = await gated(() => agent(prompt, call))
+  const key = `${type} (${model} ${effort})`
+  if (result) helpers[key] = (helpers[key] || 0) + 1
+  return result
 }
 
 const OUT = { type: 'object', properties: { out: { type: 'string' } }, required: ['out'] }
@@ -85,8 +87,8 @@ const FINDINGS = {
   type: 'object',
   properties: {
     findings: { type: 'array', items: FINDING },
-    notes: { type: 'array', items: { type: 'string' }, description: 'anything without a citation' },
-    checked: { type: 'string', description: 'what you checked, one line' },
+    notes: { type: 'array', items: { type: 'string' }, description: 'possible problems without a citation, one line each' },
+    checked: { type: 'string', description: 'what you checked and found fine, briefly' },
   },
   required: ['findings', 'notes', 'checked'],
 }
@@ -259,7 +261,7 @@ ${isDelta ? `This is a delta pass: these commits landed after ${pass.from.slice(
 ${lens.name === 'Combining with main' ? 'Also compare against the newest origin/main and every open PR (gh pr list; gh pr diff N --name-only): same files, same dependency lists, same status list. Name the merge order.\n' : ''}
 The standard is ${standard}. Settled decisions are never findings: the spec #36 and its first comment (its supersessions)${info.decisions ? `, and ${info.decisions}` : ''}.
 
-A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. What you can't cite goes in notes, never in findings. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.`
+A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes, never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.`
 }
 
 function verifyPrompt(f, pass) {
@@ -301,7 +303,15 @@ async function review(pass, isDelta) {
   for (const lens of lensesFor(pass.files)) for (const c of critics()) jobs.push({ lens, critic: c })
   await pipeline(
     jobs,
-    job => hire(job.critic[0], job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), { label: `${job.critic[0]}: ${job.lens.name}`, phase: pass.phase, schema: FINDINGS }),
+    async job => {
+      const opts = { label: `${job.critic[0]}: ${job.lens.name}`, phase: pass.phase, schema: FINDINGS }
+      let r = null
+      try { r = await hire(job.critic[0], job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts) } catch {}
+      // A session started before critic-deep.md existed can't find it; same rules, critic's file.
+      if (r || job.critic[0] !== 'critic-deep') return r
+      log(`critic-deep not available for ${job.lens.name}; running critic on ${job.critic[1]} instead`)
+      return hire('critic', job.critic[1], job.critic[2], criticPrompt(job.lens, pass, isDelta), opts)
+    },
     (r, job) => {
       const label = `${job.lens.name} (${job.critic[0]})`
       if (!r) { incomplete.push(`no reply from ${label}`); return null }
