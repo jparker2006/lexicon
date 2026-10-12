@@ -1,6 +1,6 @@
 {
   "skill_name": "review-merge",
-  "_how": "Tabletop replays of real M0 cases (#161's Prove steps). Each runs twice in a fresh Opus subagent that acts on nothing and writes the tool calls it would make, turn by turn: once told to follow this skill, once (the baseline) told to follow AGENTS.md, workflow.md and review.md as they stood before the retro. Outputs the procedure would read are given in the prompt. A case passes when the with-skill trace meets every assertion; the baseline shows the past mistake.",
+  "_how": "Tabletop replays of real M0 cases (#161's Prove steps). Each runs twice in a fresh Opus subagent that acts on nothing and writes the tool calls it would make, turn by turn: once told to follow this skill, once (the baseline) told to follow AGENTS.md, workflow.md and review.md as they stood before the retro. Outputs the procedure would read are given in the prompt. A case passes when the with-skill trace meets every assertion; the baseline shows the past mistake. #133's merge-script lines are the script's own output for this case, as scripts/merge-pr.test.mjs pins it ('red CI on the updated head refuses the merge'); the run link is a stand-in, because in M0 no CI ran on main merged into ee6da56: the Reviewer caught the compile break by reading the diff.",
   "evals": [
     {
       "id": 1,

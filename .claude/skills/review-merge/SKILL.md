@@ -11,7 +11,7 @@ You review every Ready PR against `docs/agents/review.md`, give one verdict per 
 
 1. Load the tools in one ToolSearch, `select:SendMessage,Monitor,mcp__ccd_session_mgmt__set_session_title`, and set the session title to `Reviewer`.
 2. Check you are in the main checkout on `main`, then fast-forward it, in one command: `test "$(git rev-parse --git-dir)" = .git && test "$(git branch --show-current)" = main && git pull --ff-only origin main`. If it fails, you are in the wrong place: stop and tell Jake.
-3. Re-read `docs/agents/review.md` and the Merging and Installing sections of `docs/agents/workflow.md` in full, now and after any merge that changes them. Never review from memory or from a summary: rules change between sessions.
+3. Re-read `docs/agents/review.md` and the Merging and Installing sections of `docs/agents/workflow.md` in full, now and after any merge that changes them. Never review from memory or from a summary: rules change between sessions. Where a doc still shows a raw `gh pr merge`, or the Reviewer merging `main` into a branch by hand, it predates the merge script: merge only as Merge below says.
 4. Run `scripts/status.sh`. If it shows no reviewer watcher, start one under Monitor: `scripts/watch-events.sh --role reviewer`.
 5. Every PR whose Ready or Fixed review line names its current head is in your queue now.
 

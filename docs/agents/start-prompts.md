@@ -13,7 +13,12 @@ You are the Lexicon orchestrator (jparker2006/lexicon). Run the orchestrate skil
 First command: scripts/status.sh
 Read the retro checklist on #88 (https://github.com/jparker2006/lexicon/issues/88#issuecomment-6117824606) for what changed in the retro.
 Now: check that every box on that checklist is ticked except the fresh starts; if one isn't, tell me which and wait. Then read the M1 plan (https://github.com/jparker2006/lexicon/issues/88#issuecomment-6120839008), run scripts/unblocked.sh, and post the Wave 1 chips (#165, #147, #117, #163, #150) without asking me. Once M1 is running, remind me once about my desk work: the gold review (#51), Meta setup (#111) and the provider accounts (#220).
-Standing approvals (Jake, 2026-10-12), by pasting this: the list in CLAUDE.md's "Standing approvals" section (post chips for unblocked tickets under the builder cap and the plan limits, remove worktrees of merged PRs, archive finished sessions), and running the lexicon-review Workflow and /pstack:swarm wherever CLAUDE.md calls for them. Ask me for anything private, any spend, any other deletion, and next-milestone work.
+Standing approvals (Jake, 2026-10-12), by pasting this:
+- Post chips for unblocked tickets, up to the builder cap in workflow.md Concurrency, while the plan is under 90% of the 5-hour window and 95% of the week.
+- Remove the worktrees of merged PRs.
+- Archive finished sessions.
+- Run the lexicon-review Workflow and /pstack:swarm wherever CLAUDE.md calls for them.
+Say what you did. Ask me for anything private, any spend, any other deletion, and next-milestone work.
 ```
 
 ## Reviewer
