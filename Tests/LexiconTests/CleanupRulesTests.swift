@@ -197,6 +197,8 @@ let likeKeptCases: [Case] = [
     Case("It runs in, like, twenties of milliseconds.", "It runs in, like, twenties of milliseconds."),
     Case("It's, like, a hundredth of the size.", "It's, like, a hundredth of the size."),
     Case("It's, like, hundredth in line.", "It's, like, hundredth in line."),
+    Case("It's off by, like, quarters of an inch.", "It's off by, like, quarters of an inch."),
+    Case("We split it, like, halves and thirds.", "We split it, like, halves and thirds."),
     Case("It holds, like, dozen jobs at most.", "It holds, like, dozen jobs at most."),
     Case("We run, like, thirty-something servers.", "We run, like, thirty-something servers."),
     Case("It took, like, two-ish hours.", "It took, like, two-ish hours."),

@@ -34,7 +34,7 @@ public enum TextPass {
 /// What goes, and when (cases: docs/research/cleanup-pass.md on branch
 /// `research/cleanup-pass`):
 ///   - hard fillers ("um", "uh"), anywhere
-///   - hard fillers inside an interjection ("uh huh", "uh oh", "mm hmm") stay
+///   - hard fillers inside an interjection ("uh huh", "uh oh", "mm hmm", "ah ha") stay
 ///   - an immediate repeat of the word before ("the the"), unless the double can
 ///     be meant ("that that", "had had", "not not") or is a number ("twenty
 ///     twenty six", "ten ten", "five five five")
@@ -64,8 +64,8 @@ enum Fillers {
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some",
         "many", "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice",
-        "double", "triple", "dozen", "dozens", "tens", "hundreds", "thousands", "millions", "billions", "trillion",
-        "trillions", "lots", "more", "less", "between", "upwards", "somewhere",
+        "double", "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "trillion", "trillions",
+        "lots", "more", "less", "between", "upwards", "somewhere",
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
