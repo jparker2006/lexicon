@@ -17,17 +17,13 @@ public final class SlowedTranscriber: LocalTranscriber {
         self.clock = clock
     }
 
-    /// The longest hold: under the local answer limit (30 s plus a quarter of the
-    /// clip), past which the Dictation would go waiting instead of being typed.
-    public static let longestDelay: Duration = .seconds(25)
-
     /// Runs `dictation` with the next `.live` session (its fn-down) answering
-    /// `delay` (at most `longestDelay`) after the model does; one that throws
-    /// spends it too. Recovery and Retry (`.background`) are never slowed. Disarmed when `dictation` returns,
+    /// `delay` after the model does; one that throws spends it too. Recovery and Retry
+    /// (`.background`) are never slowed. Disarmed when `dictation` returns,
     /// whatever happened: one that never reached the model (an unreadable file,
     /// a model still loading) must not slow the next real Dictation.
     public func slowing<Value: Sendable>(by delay: Duration, _ dictation: @Sendable () async -> Value) async -> Value {
-        next.withLock { $0 = min(delay, Self.longestDelay) }
+        next.withLock { $0 = delay }
         defer { next.withLock { $0 = nil } }
         return await dictation()
     }

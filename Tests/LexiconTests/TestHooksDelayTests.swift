@@ -10,7 +10,9 @@ import Transcription
 // check switches apps or presses keys. The delay and the engine share a test clock.
 
 /// The hook's delay, as a named length: a test-clock value, never waited for in real time.
-private let delay = Duration.seconds(90)
+/// Under the local answer limit (30 s plus a quarter of the clip), past which the
+/// Dictation would go waiting instead of being typed.
+private let delay = Duration.seconds(20)
 
 @Test(.timeLimit(.minutes(1)))
 func aResultDelayHoldsTheTextUntilTheDelayHasPassed() async throws {
@@ -21,18 +23,10 @@ func aResultDelayHoldsTheTextUntilTheDelayHasPassed() async throws {
     let wav = try writeWAV(tone(16_000), rate: 16_000, in: try scratchDirectory())
 
     let first = Task { await model.slowing(by: delay) { await system.conductor.dictate(file: wav, pace: .asFastAsPossible) } }
-    // The 90 s asked for is held 25 s: past the local answer limit (30 s plus a
-    // quarter of the clip) the Dictation would go waiting, never typed.
-    await clock.waitForSleep(endingAt: .seconds(25))
-    guard !Task.isCancelled else {  // the time limit: no 25 s hold was ever pending
-        Issue.record("the result delay was not held to 25 s")
-        await clock.advance(by: delay)  // lets the held Dictation end
-        _ = await first.value
-        return
-    }
+    await clock.waitForSleep(endingAt: delay)
     #expect(await system.conductor.destination.delivered.isEmpty)
 
-    await clock.advance(by: .seconds(25))
+    await clock.advance(by: delay)
     #expect(await first.value.status == .inserted)
     // Once only: the next Dictation is not held (a held one would wait on the clock forever).
     #expect(await system.conductor.dictate(file: wav, pace: .asFastAsPossible).status == .inserted)

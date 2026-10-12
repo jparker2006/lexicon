@@ -177,7 +177,7 @@ enum AppTestHooks {
         }
         let dictate = { @Sendable in await system.conductor.dictate(file: wav, pace: .realtime) }
         let result = if let model, let resultDelay {
-            await model.slowing(by: .seconds(max(0, resultDelay)), dictate)
+            await model.slowing(by: .seconds(max(0, min(resultDelay, 120))), dictate)
         } else {
             await dictate()
         }

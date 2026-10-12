@@ -146,6 +146,7 @@ import LexiconDomain
         return
     }
     #expect(await model.decodes == [true], "the Dictation decoded with the model unloaded under it")
+    #expect(await model.loadsDuringAnUnload == 0, "fn-down loaded the model while the second unload still ran")
 }
 
 // MARK: Helpers
@@ -156,11 +157,16 @@ private actor GatedUnloadModel: LocalTranscriber {
     nonisolated let model = LocalModel.parakeetUnified
     private(set) var isResident = false
     private(set) var decodes: [Bool] = []
+    /// Loads made while an unload was still held: each one is dropped when that unload ends.
+    private(set) var loadsDuringAnUnload = 0
     private var unloadsStarted = 0
     private var held: [CheckedContinuation<Void, Never>] = []
     private var watchers: [(count: Int, wake: CheckedContinuation<Void, Never>)] = []
 
-    func load() { isResident = true }
+    func load() {
+        if !held.isEmpty { loadsDuringAnUnload += 1 }
+        isResident = true
+    }
 
     func unload() async {
         unloadsStarted += 1

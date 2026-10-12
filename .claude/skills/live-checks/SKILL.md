@@ -38,7 +38,7 @@ Keep evidence (the run output, `pill --shots` pictures, samples and their `stats
 | `paste-check` | a paste through the real path lands in a native field and the clipboard comes back |
 | `hook status` | the running app's state as JSON |
 | `fixture "<text>"` | a 16 kHz WAV of that text; prints its path |
-| `hook dictate <wav> [--result-delay <ms>]` | a Dictation through the live path; types into the focused field; the delay is held at most 25 s |
+| `hook dictate <wav> [--result-delay <ms>]` | a Dictation through the live path; types into the focused field. Keep the delay under 30 s: past the local answer limit (30 s plus a quarter of the clip) the Dictation goes waiting, never typed |
 | `hook fn down up ... [--shift]`, `hook key esc`, `hook sleep`, `hook mic zeros` | fn edges through Dev's own tap, Esc, the Mac sleeping, a silent mic next |
 | `hook indicator <state>`, `hook sound <cue>`, `pill [--shots <dir>]` | the pill and the sounds |
 | `hook privacy on\|off [--always-private <ids>]` | Private mode |

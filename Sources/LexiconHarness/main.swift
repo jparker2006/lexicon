@@ -37,7 +37,7 @@ let usage = """
       hook    send one test hook to the running Lexicon Dev and print the reply
               states: hidden held handsfree warning finishing landed paste error
               cues:   start stop warning error
-              dictate: --result-delay holds the local model's answer that many ms, at most 25 s
+              dictate: --result-delay holds the local model's answer that many ms
               fn, key: pressed through the fn tap's own handler, in order, back to
               back (so `fn down up down` is a double tap); --shift holds Shift
               sleep: the Mac is going to sleep. mic zeros: the next Dictation's
