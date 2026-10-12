@@ -17,15 +17,7 @@ public import LexiconDomain
 /// hedge, negation or constraint (`Fillers.protected`).
 public enum TextPass {
     public static func run(_ modelText: String, rules: RuleSet) -> String {
-        let ruled = rules.isEmpty ? modelText : rules.apply(to: modelText)
-        var dictationStart = true
-        return ruled.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-            .map { line in
-                let cleaned = Fillers.clean(line, dictationStart: dictationStart, rules: rules)
-                if !cleaned.isEmpty { dictationStart = false }
-                return cleaned
-            }
-            .joined(separator: "\n")
+        Fillers.pass(rules.isEmpty ? modelText : rules.apply(to: modelText), rules: rules)
     }
 }
 
@@ -113,6 +105,19 @@ enum Fillers {
         "min", "sec", "hr", "hrs", "ave", "rd", "blvd", "mt", "jan", "feb", "mar", "apr", "jun", "jul", "aug",
         "sep", "sept", "oct", "nov", "dec",
     ])
+
+    /// The filler pass over Rules-applied text, line by line. `StructuralCheck` runs it too,
+    /// to hold AI cleanup to the fillers it keeps.
+    static func pass(_ ruled: String, rules: RuleSet) -> String {
+        var dictationStart = true
+        return ruled.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .map { line in
+                let cleaned = clean(line, dictationStart: dictationStart, rules: rules)
+                if !cleaned.isEmpty { dictationStart = false }
+                return cleaned
+            }
+            .joined(separator: "\n")
+    }
 
     /// The filler pass over one line. A line always starts a sentence;
     /// `dictationStart`: no earlier line kept anything.
@@ -268,12 +273,6 @@ enum Fillers {
                            && tokens[j + 1].trailing.hasPrefix(",") ? 2 : 0
                    })
             .map { tokens[$0] }
-    }
-
-    /// After "like", this word makes it a hedge, a comparison or an estimate, so the rules
-    /// keep it, and `StructuralCheck` holds AI cleanup to the same call.
-    static func keepsLike(_ word: String, isName: Bool) -> Bool {
-        isEstimate(word) || isName || likeKeepers.contains(word)
     }
 
     /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written, the
@@ -439,7 +438,7 @@ private struct Token {
     var isCapitalized: Bool {
         text.first(where: \.isLetter)?.isUppercase == true && !Fillers.firstPerson.contains(word)
     }
-    var keepsLike: Bool { Fillers.keepsLike(word, isName: isName) }
+    var keepsLike: Bool { Fillers.isEstimate(word) || isName || Fillers.likeKeepers.contains(word) }
 
     static func merge(_ kept: String, _ trailing: String) -> String {
         var kept = kept

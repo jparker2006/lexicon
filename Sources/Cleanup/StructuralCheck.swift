@@ -47,8 +47,8 @@ enum StructuralCheck {
     static let lengthSlack = 4
 
     /// nil = accept. Otherwise the first failing check, in the order listed above.
-    /// `rules`: the RuleSet the rules pass used, so a "like" before a Rule's written side
-    /// is a hedge here too; without it, only `terms` count.
+    /// `rules`: the RuleSet the rules pass used, so the fillers it keeps are held here the
+    /// same way; without it, one is built from `terms`.
     static func check(_ candidate: String, ruled: String, terms: [Term], rules: RuleSet? = nil) -> CheckFailure? {
         if hasUnspokenCode(candidate, ruled: ruled) { return .unspokenCode }
         let (outText, markers) = stripListMarkers(candidate)
@@ -78,21 +78,14 @@ enum StructuralCheck {
             }
         }
 
-        // A filler the rules keep survives, unless retracted: a sound of "uh huh", and a set-off
-        // "like" the rules keep (`Fillers.keepsLike`, a Term or a Rule's written side), with the
-        // word it hedges still after it ("like 80"), so another "like" kept elsewhere is no excuse.
+        // A filler the rules keep survives, unless retracted: the rules own that call. Each
+        // sound of "uh huh" and each "like" with the word it hedges ("like 80") in the
+        // rules-only text appears as often in the candidate, so another "like" is no excuse.
+        let rulesOnly = canonical(tokens(Fillers.pass(refText,
+                                                      rules: rules ?? RuleSet(rules: [], terms: terms, english: []))))
         var meant: [String: Int] = [:]
-        let names = capitalizedWords(refText)
-        let written = writtenWords(refText, rules: rules, terms: terms)
-        for k in ref.indices where !retracted.contains(k) {
-            guard let key = meaningKey(ref, k) else { continue }
-            if ref[k].word == "like" {
-                guard ref[k].mark == ",", let object = likeObject(ref, k)?.word,
-                      Fillers.keepsLike(object, isName: names.contains(object)) || written.contains(object)
-                else { continue }
-            }
-            meant[key, default: 0] += 1
-        }
+        for k in rulesOnly.indices { if let key = meaningKey(rulesOnly, k) { meant[key, default: 0] += 1 } }
+        for k in retracted { if let key = meaningKey(ref, k) { meant[key, default: 0] -= 1 } }
         for (key, count) in meant where out.indices.filter({ meaningKey(out, $0) == key }).count < count {
             failures.insert(.droppedContentWord)
         }
@@ -488,36 +481,6 @@ enum StructuralCheck {
                            endsSentence: { endsSentence(t[$0]) },
                            youKnow: { t[$0].word == "you_know" && t[$0].mark == "," ? 1 : 0 })
             .map { t[$0] }
-    }
-
-    /// The first word, as `tokens` reads it, of each Term and of each Rule's written side in
-    /// `text` ("pre-commit" gives "pre", "Next.js" gives "next.js"): what a "like" before one hedges.
-    static func writtenWords(_ text: String, rules: RuleSet?, terms: [Term]) -> Set<String> {
-        var words = Set(terms.compactMap { tokens($0.text).first?.word })
-        if let rules {
-            for piece in text.split(whereSeparator: \.isWhitespace) where rules.isWritten(piece) {
-                if let first = tokens(String(piece)).first?.word { words.insert(first) }
-            }
-        }
-        return words
-    }
-
-    /// Lowercased words written with a capital past a sentence's first word ("Postgres",
-    /// "useAuth"): names, as far as lowercased tokens can tell. "I" and its forms name nobody.
-    static func capitalizedWords(_ text: String) -> Set<String> {
-        var names = Set<String>()
-        var sentenceStart = true
-        for piece in text.split(whereSeparator: \.isWhitespace) {
-            var word = piece
-            while let c = word.first, !c.isLetter { word = word.dropFirst() }
-            while let c = word.last, !c.isLetter { word = word.dropLast() }
-            if word.dropFirst().contains(where: \.isUppercase) || !sentenceStart && word.first?.isUppercase == true,
-               !Fillers.firstPerson.contains(word.lowercased()) {
-                names.insert(word.lowercased())
-            }
-            sentenceStart = piece.last.map { ".!?".contains($0) } ?? false
-        }
-        return names
     }
 
     /// Where the rules would also drop it: "like" before a comma or a sentence
