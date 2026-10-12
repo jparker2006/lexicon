@@ -28,6 +28,7 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(result.status == .inserted)
     #expect(result.versions == TextVersions(model: spoken, cleaned: typed))
     #expect(result.lag != nil)
+    #expect(await system.conductor.destination.delivered[result.id] == typed)
     #expect(await engine.heard.map(\.samples) == [source])
 
     let row = try #require(await system.history.dictation(result.id))
@@ -40,6 +41,35 @@ private let typed = "Can you refactor the useAuth hook so it doesn't re-render o
     #expect(row.lag != nil)  // stored in whole milliseconds
     #expect(row.audio == .onDisk)
     #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples == source)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aFillerOnlyDictationIsSilenceAndPastesNothing() async throws {
+    let source = syntheticSamples(count: 19_200)
+    let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
+    // Past the engine's silence check, but Cleanup drops the filler and leaves nothing.
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+                                         local: ScriptedTranscriber(text: "Um."))
+    let events = await system.conductor.events()
+
+    let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
+    await system.history.flush()
+
+    #expect(result.status == .failed)
+    #expect(await system.conductor.destination.typedOrder.isEmpty)
+    let row = try #require(await system.history.dictation(result.id))
+    #expect(row.status == .failed)
+    #expect(try await statusReason(system.history, result.id) == "silence")
+    #expect(row.audio == .onDisk)
+    #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples == source)
+    var notices: [Notice] = []
+    var finished: DictationStatus?
+    for await event in events {
+        if case .notice(let notice) = event { notices.append(notice) }
+        if case .finished(_, let status) = event { finished = status; break }
+    }
+    #expect(finished == .failed)  // the pill's "No speech heard"
+    #expect(!notices.contains(.readyToPaste(result.id)))
 }
 
 @Test func textIsQueuedForHistoryBeforeItIsTyped() async throws {

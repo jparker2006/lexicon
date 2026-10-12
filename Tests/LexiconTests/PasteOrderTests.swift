@@ -76,3 +76,18 @@ private struct DeniedLane: PasteLane {
     }
     guard case .held(.clipboardDenied) = result else { Issue.record("not held: \(result)"); return }
 }
+
+@Test(arguments: ["", " ", "\n"])
+func blankTextIsNeverPasted(_ text: String) async {
+    let lane = SlowLane(), desk = Desk()
+    await lane.release()
+
+    for kind in [PasteKind.dictation, .pasteLast] {
+        let fnUp = await desk.focus
+        let result = await PasteOrder.run(text, as: kind, lane: lane) {
+            (InsertGuard.decide(target: fnUp, focusNow: fnUp, inputSinceMark: false), ())
+        }
+        guard case .failed = result else { Issue.record("not refused: \(result)"); return }
+    }
+    #expect(await lane.pasted.isEmpty)
+}
