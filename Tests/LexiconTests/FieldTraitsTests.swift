@@ -27,7 +27,7 @@ func aPasteGoesOnlyWhereTheFocusedElementTakesText(traits: FieldTraits, expected
 // What an app's focused-element answer means for the late-text rule, on every
 // path to the focus (#60): an element is a field, a definite "none" is an app
 // with no field (the 5 s rule), and anything else, a timeout included, can't be
-// read, so the text is held. A slow answer can only ever hold text, never paste it.
+// read. An app that never answers only ever holds text.
 // AXError raw values: success 0, noValue -25212, attributeUnsupported -25205,
 // notImplemented -25208, cannotComplete -25204 (a timeout), failure -25200,
 // apiDisabled -25211, invalidUIElement -25202.
@@ -37,24 +37,25 @@ func anAppsFocusedElementAnswerIsAFieldNoFieldOrUnreadable(_ code: Int32, _ expe
     #expect(Focus.Answer(code) == expected)
 }
 
-// One slow or failed read is not the app's answer: the focus read tries once more
-// before it calls the focus unreadable (a timeout must not become a refusal).
-@Test func aFocusReadThatFailsOnceIsReadAgain() {
-    var answers: [Int32] = [-25204, 0]  // a timeout, then the element
+// One slow or failed read is not the app's answer: the focus is read once more
+// before it is called unreadable, and each read names the focused app again, so
+// a retry never uses an app that focus may have left (review on PR #241).
+@Test func aFocusReadThatFailsOnceIsReadAgainAndTheSecondReadNamesTheApp() {
+    var attempts: [(Focus.Answer, String?)] = [(.unreadable, "Notes"), (.none, "Finder")]
     var reads = 0
-    let answer = Focus.Answer.read { reads += 1; return answers.removeFirst() }
-    #expect(answer == .element)
+    let app = Focus.readTwice { reads += 1; return attempts.removeFirst() }
+    #expect(app == "Finder")
     #expect(reads == 2)
 }
 
 @Test func aDefiniteAnswerIsReadOnce() {
     var reads = 0
-    #expect(Focus.Answer.read { reads += 1; return -25212 } == .none)
+    #expect(Focus.readTwice { reads += 1; return (Focus.Answer.none, "Finder") } == "Finder")
     #expect(reads == 1)
 }
 
 @Test func aFocusReadThatFailsTwiceIsUnreadable() {
     var reads = 0
-    #expect(Focus.Answer.read { reads += 1; return -25204 } == .unreadable)
+    #expect(Focus.readTwice { reads += 1; return (Focus.Answer.unreadable, String?.none) } == nil)
     #expect(reads == 2)
 }
