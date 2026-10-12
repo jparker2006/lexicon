@@ -90,6 +90,10 @@ actor LocalResidency {
         return policy
     }
     private var unloadTimer: Task<Void, Never>?
+    /// An idle unload under way. A load waits for it: until it is done the
+    /// model still reads as resident, and a load skipped for that would leave
+    /// the Dictation to load the model inside the job queue.
+    private var unloading: Task<Void, Never>?
 
     var unloadScheduled: Bool { unloadTimer != nil }
 
@@ -98,15 +102,19 @@ actor LocalResidency {
         self.clock = clock
     }
 
-    /// fn-down: stop the unload timer and load if not resident.
-    func dictationBegan(_ policy: ResidencyPolicy) async {
+    /// fn-down: stop the unload timer and load if not resident. Throws the
+    /// load's error, so fn-up answers with it instead of loading again.
+    func dictationBegan(_ policy: ResidencyPolicy) async throws {
         snapshot = policy
         dictating += 1
         unloadTimer?.cancel()
         unloadTimer = nil
-        if !(await transcriber.isResident) {
-            try? await transcriber.load()  // a failed load shows up as a failed transcription
-        }
+        try await loadIfNeeded()
+    }
+
+    private func loadIfNeeded() async throws {
+        await unloading?.value
+        if !(await transcriber.isResident) { try await transcriber.load() }
     }
 
     /// Launch: load now if not resident, then follow `policy` (the idle unload),
@@ -149,7 +157,7 @@ actor LocalResidency {
         if policy.unloadAfter == nil {
             unloadTimer?.cancel()
             unloadTimer = nil
-            if !(await transcriber.isResident) { try? await transcriber.load() }
+            try? await loadIfNeeded()
         } else {
             armUnload()
         }
@@ -169,7 +177,10 @@ actor LocalResidency {
     private func unloadIfIdle() async {
         guard dictating == 0, !Task.isCancelled else { return }
         unloadTimer = nil
-        await transcriber.unload()
+        let unload = Task { [transcriber] in await transcriber.unload() }
+        unloading = unload
+        await unload.value
+        unloading = nil
         log.notice("local model unloaded: no Dictation for the linger time")
     }
 }

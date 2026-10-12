@@ -33,7 +33,7 @@ import Testing
 
     // The first job still holds the Neural Engine: only the cancelled job may leave the line.
     cancelled.cancel()
-    await untilWaiting(queue, is: 1)
+    await queue.untilWaiting(atMost: 1)
     #expect(await queue.waiting == 1)
 
     releasing.yield()
@@ -49,14 +49,4 @@ import Testing
 private actor RunLog {
     private(set) var names: [String] = []
     func append(_ name: String) { names.append(name) }
-}
-
-/// Yields until `queue.waiting` is `count`. Nothing signals a job leaving the line, so
-/// this polls, but only for a bounded number of turns: a count that never drops must be
-/// an #expect failure at head, not a hang at the time limit.
-private func untilWaiting(_ queue: LocalJobQueue, is count: Int) async {
-    for _ in 0..<10_000 {
-        if await queue.waiting == count { return }
-        await Task.yield()
-    }
 }

@@ -92,8 +92,9 @@ public actor ParakeetTranscriber: LocalTranscriber {
     }
 
     /// Waits for any running transcription, so the model never goes away under one.
+    /// Only a cancelled unload, which keeps the model, can throw.
     public func unload() async {
-        await jobs.run(.background) { await self.dropModel() }
+        try? await jobs.run(.background) { await self.dropModel() }
     }
 
     /// `terms` is ignored: no FluidAudio boosting (see the type's doc).
