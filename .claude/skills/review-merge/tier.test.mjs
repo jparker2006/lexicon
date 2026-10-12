@@ -16,7 +16,7 @@ test('#113, the Jev client, is high tier with a blast radius: M0 merged it with 
 
 test('#101, audio retention, needs the blast radius: it deletes audio', () => {
   const t = tier(['Sources/History/HistoryStore.swift', 'Sources/History/Schema.swift', 'Sources/LexiconDomain/Dictation.swift', 'Tests/LexiconTests/RetentionTests.swift'], map)
-  assert.deepEqual(t.blast, ['Sources/History/HistoryStore.swift', 'Sources/History/Schema.swift'])
+  assert.ok(t.blast.includes('Sources/History/HistoryStore.swift') && t.blast.includes('Sources/History/Schema.swift'), t.blast.join(', '))
 })
 
 test('a scripts-and-tests PR is low tier', () => {

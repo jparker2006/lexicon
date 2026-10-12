@@ -1,6 +1,6 @@
 {
   "skill_name": "review-merge",
-  "_how": "Tabletop replays of real M0 cases (#161's Prove steps). Each runs twice in a fresh Opus subagent that acts on nothing and writes the tool calls it would make, turn by turn: once told to follow this skill, once (the baseline) told to follow AGENTS.md, workflow.md and review.md as they stood before the retro. Outputs the procedure would read are given in the prompt. A case passes when the with-skill trace meets every assertion; the baseline shows the past mistake. #133's merge-script lines are the script's own output for this case, as scripts/merge-pr.test.mjs pins it ('red CI on the updated head refuses the merge'); the run link is a stand-in, because in M0 no CI ran on main merged into ee6da56: the Reviewer caught the compile break by reading the diff.",
+  "_how": "Tabletop replays of real M0 cases (#161's Prove steps). Each runs twice in a fresh Opus subagent that acts on nothing and writes the tool calls it would make, turn by turn: once told to follow this skill, once (the baseline) told to follow AGENTS.md, workflow.md and review.md as they stand on main without the role skills. Outputs the procedure would read are given in the prompt. A case passes when the with-skill trace meets every assertion; the baseline shows the past mistake. #133's merge-script lines are the script's own output for this case, as scripts/merge-pr.test.mjs pins it ('red CI on the updated head refuses the merge'); the run link is a stand-in, because in M0 no CI ran on main merged into ee6da56: the Reviewer caught the compile break by reading the diff. No low-tier PR has carried a builder Review table yet (the Workflow is new), so the light pass is not replayed on a real case; #172 shows the fallback to a full review.",
   "evals": [
     {
       "id": 1,
@@ -17,7 +17,7 @@
     {
       "id": 2,
       "name": "113-high-tier-no-critic",
-      "prompt": "2026-10-11 10:20 UTC. The watcher prints: `READY #81 PR #113 at 7ce479e` (M4: Jev client with a local fallback). Full head 7ce479edcf15978d433eca36411beb578f5cb3db, CI success on it. Files: Package.swift, Sources/Jev/JevClient.swift, Tests/LexiconTests/JevClientTests.swift, docs/architecture.md. The PR body starts `Refs #81` and its Merge Danger names the network call to OpenRouter and the local fallback as the top risks. It has no `## Review` table. `node .claude/skills/review-merge/tier.mjs 113` prints `high: Sources/Jev/JevClient.swift` and `blast radius: Sources/Jev/JevClient.swift`. Review PR #113 and, if it earns it, merge it.",
+      "prompt": "2026-10-11 10:20 UTC. The watcher prints: `READY #81 PR #113 at 7ce479e` (M4: Jev client with a local fallback). Full head 7ce479edcf15978d433eca36411beb578f5cb3db, CI success on it. Files: Package.swift, Sources/Jev/JevClient.swift, Tests/LexiconTests/JevClientTests.swift, docs/architecture.md. The PR body starts `Refs #81` and its Merge Danger names the TypeSafe call (POST https://api.typesafe.ai/v1/systemone) and a keyless prewarm HEAD on every fn-down as the top risks. It has no `## Review` table. `node .claude/skills/review-merge/tier.mjs 113` prints `high: Sources/Jev/JevClient.swift` and `blast radius: Sources/Jev/JevClient.swift`. Review PR #113 and, if it earns it, merge it.",
       "expected_output": "Finds the tier first, runs the lexicon-review Workflow in reviewer mode with the PR's risks before any verdict, and posts a verdict carrying the Review table and a blast-radius line before merging through the merge script.",
       "assertions": [
         "Determines the tier (tier.mjs or the review map) before reviewing",
@@ -30,11 +30,11 @@
     {
       "id": 3,
       "name": "three-ready-at-once",
-      "prompt": "The watcher prints three lines at once: `READY #55 PR #110 at 9e11d49` (M0: Recording pill, menu bar states and sounds; full head 9e11d4941596b8bb07c6c490c0ee5c8613052d2e), `READY #52 PR #115 at 994ee3f` (M0: Live mic capture; full head 994ee3f92140691c380ec9619f6ea1a53d25f51c), and `READY #151 PR #172 at 7eea01b` (Retro: status board, watcher and ticket scripts; full head 7eea01b563b67703d2229af8c302c77af72b9c57). tier.mjs prints: #110 `high: Sources/LexiconApp/AppDelegate.swift, Sources/LexiconCore/Conductor.swift, ...` with `blast radius: Sources/LexiconCore/Conductor+Run.swift, ...`; #115 `high: Sources/AudioCapture/Recorder.swift, ...` with `blast radius: Sources/AudioCapture/...`; #172 `low`. #172's body carries the builder's ## Review table at 7eea01b with every CONFIRMED row fixed through a red test. Review all three.",
-      "expected_output": "Starts the three reviews in the same turn: the full Workflow for #110 and #115, the light pass for #172; judges each as it finishes.",
+      "prompt": "The watcher prints three lines at once: `READY #55 PR #110 at 9e11d49` (M0: Recording pill, menu bar states and sounds; full head 9e11d4941596b8bb07c6c490c0ee5c8613052d2e), `READY #52 PR #115 at 994ee3f` (M0: Live mic capture; full head 994ee3f92140691c380ec9619f6ea1a53d25f51c), and `READY #151 PR #172 at 7eea01b` (Retro: status board, watcher and ticket scripts; full head 7eea01b563b67703d2229af8c302c77af72b9c57). tier.mjs prints: #110 `high: Sources/LexiconApp/AppDelegate.swift, Sources/LexiconCore/Conductor.swift, ...` with `blast radius: Sources/LexiconCore/Conductor+Run.swift, ...`; #115 `high: Sources/AudioCapture/Recorder.swift, ...` with `blast radius: Sources/AudioCapture/...`; #172 `low`. #172's body has no `## Review` table: it says 28 findings were confirmed and fixed in b473d82, except two it lists. Review all three.",
+      "expected_output": "Starts the three reviews in the same turn. #172 has no Review table, so all three get the full Workflow; each is judged as it finishes.",
       "assertions": [
-        "In one turn, starts a review for each of the three PRs (two Workflows in reviewer mode and the light pass), not one after another",
-        "#110 and #115 get the lexicon-review Workflow in reviewer mode; #172 gets a light pass that reads the builder's Review table, the riskiest hunk and the tests, with no Workflow",
+        "In one turn, starts a review for each of the three PRs, not one after another",
+        "#110 and #115 get the lexicon-review Workflow in reviewer mode, and so does #172: low tier, but with no builder Review table to rely on",
         "Each PR gets its own verdict comment naming its own head"
       ]
     }

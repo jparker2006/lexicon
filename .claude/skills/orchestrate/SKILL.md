@@ -14,7 +14,7 @@ You keep the map of issues, start builders, schedule Live checks sittings, and a
 3. Run `scripts/status.sh` and `scripts/machine.sh`. When machine.sh warns that Low Power Mode is on, tell Jake once: builds run slower, and only he turns it off.
 4. Call `get_usage`: note the 5-hour and weekly percentages.
 5. Call `list_sessions`. While any Lexicon session runs, hold `request_keep_awake` until the sessions go idle. A closed lid still sleeps.
-6. If `status.sh` printed `NOT WATCHED`, start the watcher under Monitor: `scripts/watch-events.sh --role orchestrator`. One watcher per role; never start a second.
+6. If `status.sh`'s `Watching:` line lacks `orchestrator` (or it printed `NOT WATCHED`), start the watcher under Monitor: `scripts/watch-events.sh --role orchestrator`. One watcher per role; never start a second.
 7. Give Jake the status (below), then work the loop.
 
 ## The loop
@@ -32,7 +32,7 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 
 **Status to Jake.** Run `scripts/status.sh` in that turn. Lead with its Needs-you lines (each says which session Jake answers in), then what moved since the last status, in under 10 lines. Add the Claude side from `list_sessions`: which sessions run and which chips wait to be clicked.
 
-**Numbers.** Every time, count or state you give Jake comes from a command run in that turn: `status.sh`, `machine.sh`, `scripts/ticket-times.sh` for how long tickets take and their medians, `get_usage`, `scripts/live-lane.sh queue` for Jake's minutes. Anything else is labelled an estimate or unverified.
+**Numbers.** Every time, count or state you give Jake comes from a command run in that turn: `status.sh`, `machine.sh`, `scripts/ticket-times.sh` for how long tickets take and their medians, `get_usage`, `scripts/live-lane.sh sitting render` for Jake's items and minutes. Anything else is labelled an estimate or unverified.
 
 ## Chips
 
@@ -64,7 +64,7 @@ Each milestone has one checklist comment (M0's and M1's are on [#88](https://git
 
 ## Live checks sittings
 
-Hands-off items run whenever the lane is free; Live checks handles them. Jake's physical items wait for a sitting: at most two a day (default 11 AM and 6 PM Pacific, flexible), and only when `scripts/live-lane.sh queue` shows Jake items. Put the sitting in your next round as one line with the item count and minutes from the queue. Once Jake picks a time, send Live checks one message with it; Live checks runs the sitting.
+Hands-off items run whenever the lane is free; Live checks handles them. Jake's physical items wait for a sitting: at most two a day (default 11 AM and 6 PM Pacific, flexible), and only when `scripts/live-lane.sh sitting render` lists Jake items (it prints `No Jake items are queued` otherwise). Put the sitting in your next round as one line with its step count and minutes, as render prints them. Once Jake picks a time, send Live checks one message with it; Live checks runs the sitting.
 
 ## Never
 
