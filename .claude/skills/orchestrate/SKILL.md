@@ -24,7 +24,7 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 | Event | Do |
 |---|---|
 | `READY`, `MERGED`, `JAKE-ASK`, a new Needs-you line | Status to Jake. |
-| `MERGED` | `scripts/unblocked.sh`, then chips for the new frontier. Archive finished sessions: a builder whose last ticket merged, a role session that handed off. Remove a merged ticket's worktree if the merge script skipped it. Every ticket closes at merge (the merge script closes it); what Jake can feel reaches him on the Try list at install. |
+| `MERGED` | `scripts/unblocked.sh`, then chips for the new frontier. Archive finished sessions: a builder whose last ticket merged, a role session that handed off. A worktree the merge script kept (dirty, or a process still in it) stays: say which and why in your next status. Every ticket closes at merge (the merge script closes it); what Jake can feel reaches him on the Try list at install. |
 | `JAKE-ASK` | Ask Jake (below). |
 | `LIVE-RESULT` | Send the builder a pointer to the result comment. With Jake items left, schedule a sitting (below). |
 | `LIVE-REQUEST` with Jake items | Schedule a sitting (below). |
@@ -42,12 +42,14 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 Post a chip (`mcp__ccd_session__spawn_task`) for each ticket `scripts/unblocked.sh` lists, without asking Jake (standing approval in `CLAUDE.md`), while all of these hold:
 
 - `scripts/machine.sh` says `room for more builders: yes`. That verdict is the only machine gauge; on a no, name the top processes it lists outside Lexicon, and Jake decides about them. Swap used is not one: in M0, builders were held for swap while memory pressure showed 46 percent free.
-- `get_usage` is under 90 percent of the 5-hour window and 95 percent of the week. Above that, ask Jake.
+- `get_usage` is under 90 percent of the 5-hour window and 95 percent of the week. Above that, post no new chip and say so in your status; running builders carry on.
 - Running builders, counted from `list_sessions`, are under the cap in workflow.md Concurrency.
 - `scripts/lanes.sh` shows no open PR changing the ticket's files, and no running builder owns them.
 - The ticket belongs to the current milestone. Next-milestone work needs Jake's yes.
 
 The chip prompt is the `chip:` line `unblocked.sh` prints, word for word. It already carries the ticket's Needs line. Add only an approved scope, in exact terms (a call count, an endpoint, a text set, a date), with the link to its Decision record. Nothing else: no workflow text and no rules. Title the chip `Build #N: <short title>`. A builder's start is confirmed from `list_sessions`, never by asking Jake. Say in your next status what you posted, removed and archived without asking.
+
+**Merge order.** The milestone plan names the critical path. Label its open PR `critical-path` (`gh pr edit <pr> --add-label critical-path`) as soon as it opens, and take the label off once it merges; the merge script merges it before any other.
 
 **Ticket lint.** Before any ticket gets `ready-for-agent`, `scripts/ticket-lint.sh N` passes (`--fix` adds missing Blocked by edges), and one Haiku `verifier` judges whether each acceptance item can run when the ticket is built, with what is on `main` then. A lint checks shape, not truth.
 

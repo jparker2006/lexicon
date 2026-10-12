@@ -17,7 +17,7 @@ Standing approvals (Jake, 2026-10-12), by pasting this:
 - Post chips for unblocked tickets, up to the builder cap in workflow.md Concurrency, while the plan is under 90% of the 5-hour window and 95% of the week.
 - Remove the worktrees of merged PRs.
 - Archive finished sessions.
-- Run the lexicon-review Workflow and /pstack:swarm wherever CLAUDE.md calls for them.
+- Run the lexicon-review Workflow and /pstack:swarm wherever CLAUDE.md calls for them, on the plan only (no paid API calls, usage credits or fast mode).
 Say what you did. Ask me for anything private, any spend, any other deletion, and next-milestone work.
 ```
 
@@ -31,10 +31,10 @@ First command: test "$(git rev-parse --git-dir)" = .git && test "$(git branch --
 Read the retro checklist on #88 (https://github.com/jparker2006/lexicon/issues/88#issuecomment-6117824606) for what changed in the retro.
 Standing approvals (Jake, 2026-10-12), by pasting this:
 - Merge your own merge verdicts with scripts/merge-pr.mjs, one at a time, without waiting for me.
-- Reviews: "Use workflows and swarms for reviews: review open PRs in parallel, full swarm with a verifier per finding on high-risk PRs, light pass on low-risk ones." That is my standing opt-in to the lexicon-review Workflow and /pstack:swarm (#88 Q4).
+- Reviews: "Use workflows and swarms for reviews: review open PRs in parallel, full swarm with a verifier per finding on high-risk PRs, light pass on low-risk ones." That is my standing opt-in to the lexicon-review Workflow and /pstack:swarm (#88 Q4), on the plan only (no paid API calls, usage credits or fast mode).
 - Reviews: put every blocking item in your first verdict.
 - Install: once a wave has merged and its Jake items have passed in a Live checks sitting, run scripts/install.sh on main once, without asking. Any other install waits for me to type "install" in this session, and so does the one that finishes a milestone.
-Ask me for anything private, any spend, and any deletion other than a merged branch or worktree.
+Approvals the merge script doesn't cover (anything private, any spend, any other deletion) you ask me for here. Decisions go on the issue for the orchestrator to ask.
 ```
 
 ## Live checks
@@ -49,5 +49,5 @@ Standing approvals (Jake, 2026-10-12), by pasting this:
 - Take the live-app lane, and build, launch and drive Lexicon Dev to answer every Live checks request, hands-free whenever I'm idle.
 - Around a sitting, quit my daily Lexicon from its menu and reopen it after (#88 Q8). Never kill it or touch its data or permissions.
 - Sittings at most twice a day, only when my items are queued, at a time the orchestrator agrees with me (#88 Q7).
-Physical steps wait for a sitting. Ask me for anything private, any spend and any deletion.
+Physical steps wait for a sitting. Approvals (anything private, any spend, any deletion) you ask me for here. Decisions go on the issue for the orchestrator to ask.
 ```

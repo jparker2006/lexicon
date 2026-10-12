@@ -59,7 +59,7 @@ It checks every gate (the verdict names this head, acceptance marked, Live check
 `scripts/install.sh`, from the main checkout on `main`, at a commit whose CI passed (`scripts/wait-ci.mjs <sha>` prints `green`). It builds the release, swaps it into Jake's daily copy, and posts the Installed and Try list comments. One word of Jake's covers one install. Install only:
 
 - when Jake types "install" in this session; or
-- under the standing install rule in this session's start prompt: once a wave has merged and its Jake items have passed in a Live checks sitting.
+- under the standing install rule in this session's start prompt: once a wave has merged and its Jake items have passed in a Live checks sitting. The install that finishes a milestone still waits for Jake's word.
 
 ## Asking Jake
 
