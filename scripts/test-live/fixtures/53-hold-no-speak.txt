@@ -1,0 +1,9 @@
+item: Hold
+kind: jake
+gesture: hold fn 1 to 2 s, four times
+target: Live checks' own test window
+cue: the start sound
+observable: began, confirmed(hold), fn up and stopped in the fn log
+pass: confirmed(hold) 0.28 to 0.32 s after began, on every hold
+needs: none
+minutes: 2
