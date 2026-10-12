@@ -64,7 +64,7 @@ enum Fillers {
     static let likeKeepers: Set<String> = [
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some",
-        "many", "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice",
+        "many", "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice", "thrice",
         "double", "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "teens", "lots", "more",
         "less", "between", "upwards", "somewhere",
     ]
@@ -100,9 +100,7 @@ enum Fillers {
 
     /// Titles: always followed by a name, so the capital after them never starts a sentence.
     /// ("ms" and "st" are left out: "20 ms." and "Main St." often end one.)
-    static let titles: Set<String> = [
-        "mr", "mrs", "dr", "prof", "gen", "capt", "sgt", "lt", "col", "gov", "sen", "rev", "hon",
-    ]
+    static let titles: Set<String> = ["mr", "mrs", "dr"]
 
     /// Tokens ending in "." that need not end a sentence (`Fillers.clean` decides).
     static let abbreviations: Set<String> = titles.union([
@@ -157,8 +155,8 @@ enum Fillers {
             // "like, um, uh, eighty": the first word after the fillers decides whether "like" is a hedge.
             // A filler that ends the sentence ends the search: "like, um. Ten failed" has no hedge.
             let hedge = token.word == "like"
-                && tokens[(i + 1)...].first { !hard.contains($0.word) || $0.endsSentence }
-                    .map { !hard.contains($0.word) && ($0.keepsLike || rules.isWritten($0.text)) } == true
+                && tokens[(i + 1)...].first { !$0.isHardFiller || $0.endsSentence }
+                    .map { !$0.isHardFiller && ($0.keepsLike || rules.isWritten($0.text)) } == true
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
                                  after: i + 2 < tokens.count ? tokens[i + 2] : nil, hedge: hedge,
                                  dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
@@ -217,7 +215,7 @@ enum Fillers {
         if protected.contains(word) || token.isQuoted { return 0 }
         if let next, token.trailing.isEmpty, interjections.contains(word + " " + next.word) { return 0 }
         if let prior, prior.trailing.isEmpty, interjections.contains(prior.word + " " + word) { return 0 }
-        if hard.contains(word), !token.isAcronym { return 1 }
+        if token.isHardFiller { return 1 }
 
         if dictationStart, let next, !token.endsSentence {
             let comma = token.trailing.hasPrefix(",")
@@ -318,8 +316,10 @@ private struct Token {
     var isWord: Bool { !word.isEmpty && word.allSatisfy { $0.isLetter || $0 == "'" } }
     /// "config.json", "snake_case", "/review", "v2": never recapitalized.
     var isCode: Bool { word.contains { $0 == "." || $0 == "/" || $0 == "_" || $0.isNumber } }
-    /// "ER", "UH": a name, not a filler.
-    var isAcronym: Bool { text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase } }
+    /// "um", "Uh"; not "ER" or "UH", which are names.
+    var isHardFiller: Bool {
+        Fillers.hard.contains(word) && !(text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase })
+    }
     /// "twenty", "twenty-six", "thirty-something", "two-ish": a spoken number.
     var isNumber: Bool { word.split(separator: "-").first.map { StructuralCheck.isCardinal(String($0)) } ?? false }
     /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.

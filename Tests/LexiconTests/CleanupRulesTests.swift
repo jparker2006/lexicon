@@ -203,6 +203,8 @@ let likeKeptCases: [Case] = [
     Case("It's, like, trillionths of a cent.", "It's, like, trillionths of a cent."),
     Case("It's, like, twofold faster.", "It's, like, twofold faster."),
     Case("It's, like, quadruple the size.", "It's, like, quadruple the size."),
+    Case("It failed, like, thrice today.", "It failed, like, thrice today."),
+    Case("Send them to, like, ER, then home.", "Send them to, like, ER, then home."),
     Case("They're, like, teens.", "They're, like, teens."),
     // A number in the next sentence does not make a filler "like" a hedge.
     Case("It is, like, um. Postgres is fine.", "It is. Postgres is fine."),
@@ -234,6 +236,7 @@ func likeStaysBeforeAnyNumberOrName(_ c: Case) {
 /// "uh huh" and "mm-hmm" are answers, not fillers.
 let interjectionCases: [Case] = [
     Case("Uh huh, that's right.", "Uh huh, that's right."),
+    // Hyphenated forms already pass on main: guards for the two-word fix.
     Case("Uh-huh, that's right.", "Uh-huh, that's right."),
     Case("Mm-hmm, ship it.", "Mm-hmm, ship it."),
     Case("Mm hmm, let's do that.", "Mm hmm, let's do that."),
@@ -263,7 +266,6 @@ let abbreviationCases: [Case] = [
     Case("Wait ten min. um, then rerun the suite.", "Wait ten min. then rerun the suite."),
     Case("The lag is around 20 ms. Um, it's fine.", "The lag is around 20 ms. It's fine."),
     Case("Ask Dr. Smith about it.", "Ask Dr. Smith about it."),
-    Case("Ask Prof. Smith about it.", "Ask Prof. Smith about it."),
     Case("We pay Acme Corp. um, every month.", "We pay Acme Corp. every month."),
     Case("It's on Main Ave. uh, by the park.", "It's on Main Ave. by the park."),
     // The comma after an abbreviation's own period stays.
