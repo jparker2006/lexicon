@@ -1,28 +1,26 @@
 #if DEBUG
 import Foundation
 import IOKit
+import TestHooks
 
-/// The windows a check posts input in, for `scripts/live-lane.sh idle`. The
-/// keys and clicks a check posts (History's own, and Dev's Cmd-V after a paste
-/// or a Dictation) reset the Mac's idle time as Jake's would, so a second run
-/// read its own keys as Jake at the keyboard and waited them out. Each window
-/// is one line, "from to idle" in seconds since 1970, with the idle time read
-/// as it began, so `idle` can step back over it to the input before.
+/// Times each window a check posts input in and notes it in `PostedWindows`'
+/// file, which `scripts/live-lane.sh idle` skips.
 enum PostedInput {
     /// Runs `body` as one window. A body that throws still posted, so it is noted too.
     static func during<T>(_ body: () async throws -> T) async rethrows -> T {
         let from = Date().timeIntervalSince1970
         let idle = idleSeconds()
-        defer { if let idle { note(from: from, idle: idle) } }
+        defer {
+            if let idle { PostedWindows.append(PostedWindows.line(from: from, to: Date().timeIntervalSince1970, idle: idle), to: file) }
+        }
         return try await body()
     }
 
-    /// Where live-lane.sh reads them: its state folder in Lexicon Dev's data.
     /// HOME as the shell has it, so a test's fake HOME holds its own.
     static var file: URL {
         let home = ProcessInfo.processInfo.environment["HOME"].map { URL(filePath: $0, directoryHint: .isDirectory) }
             ?? FileManager.default.homeDirectoryForCurrentUser
-        return home.appending(path: "Library/Application Support/Lexicon Dev/live-lane/posted-input.tsv")
+        return PostedWindows.file(home: home)
     }
 
     /// IOHIDSystem's HIDIdleTime in seconds, the reading `idle` takes.
@@ -32,18 +30,6 @@ enum PostedInput {
         defer { IOObjectRelease(service) }
         let value = IORegistryEntryCreateCFProperty(service, "HIDIdleTime" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
         return (value as? NSNumber).map { $0.doubleValue / 1_000_000_000 }
-    }
-
-    /// Appends one window as a single write, so two checks at once can't lose
-    /// each other's line. The harness is the file's only writer and never
-    /// trims it (about 40 bytes a window); `idle` reads only the newest 50.
-    static func note(from: Double, idle: Double) {
-        let line = String(format: "%.3f\t%.3f\t%.3f\n", from, Date().timeIntervalSince1970, idle)
-        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let fd = open(file.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
-        guard fd >= 0 else { return }
-        defer { close(fd) }
-        _ = line.withCString { write(fd, $0, strlen($0)) }
     }
 }
 #endif
