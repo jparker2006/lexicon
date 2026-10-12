@@ -183,16 +183,90 @@ cp "$T/issues-57.json" "$T/issues.json"
 fake_listener "$T/elsewhere/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicator"
 expect fail 'Lexicon Indicator is running' "a Dictation-only sitting won't start while another app answers fn" "$LANE" sitting start
 stop_listeners
+# Its step passes in a sitting, so it leaves the queue.
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 pass > /dev/null
+"$LANE" sitting end > /dev/null
 
 jq -n --rawfile r "$T/r64c" '[{number: 64, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
 expect ok '^No Jake items are queued, so no sitting\.$' "no physical items, no sitting" "$LANE" sitting render
 expect fail 'no rendered sitting' "a sitting with no steps can't start" "$LANE" sitting start
 
-# Idle time, read from ioreg in nanoseconds.
-printf '#!/bin/sh\necho "    | |   \\"HIDIdleTime\\" = 45000000000"\n' > "$T/bin/ioreg"
-chmod +x "$T/bin/ioreg"
+# A hands-free sitting (#225): Jake typed "hands free", so it opens with no steps.
+expect ok '^live-lane: hands-free sitting open \(0 steps\)\. fn listeners: none$' "a hands-free sitting opens with no rendered steps" "$LANE" sitting start --hands-free
+grep -qx 'hands-free=yes' "$DEV/live-sitting.open" && pass "the marker says hands-free, for the guard" || fail "the hands-free marker has no hands-free=yes line"
+expect ok 'a hands-free sitting is open' "status names a hands-free sitting" "$LANE" status
+expect fail 'no step 1' "a hands-free sitting has no step to ack" "$LANE" sitting ack 1 pass
+expect ok '^live-lane: sitting closed$' "sitting end closes a hands-free sitting with zero steps" "$LANE" sitting end
+[ ! -e "$DEV/live-sitting.open" ] && pass "the end removes the hands-free marker" || fail "the hands-free marker outlived the sitting"
+
+# Another app answering fn refuses it, whether or not fn steps are rendered.
+fake_listener "$T/elsewhere/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicator"
+expect fail "Lexicon Indicator is running \(pid $LISTENER" "a hands-free sitting with no steps won't start while another app answers fn" "$LANE" sitting start --hands-free
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" sitting render > /dev/null
+expect fail "Lexicon Indicator is running \(pid $LISTENER" "a hands-free sitting won't start over rendered fn steps while another app answers fn" "$LANE" sitting start --hands-free
+[ ! -e "$DEV/live-sitting.open" ] && pass "a refused hands-free start leaves no marker" || fail "a refused hands-free start left the marker"
+[ -s "$DEV/live-lane/sitting.tsv" ] && pass "a refused hands-free start keeps the rendered steps" || fail "a refused hands-free start lost the rendered steps"
+stop_listeners
+
+# With the daily Lexicon listening: a Dictation in progress refuses before any
+# quit; without one, it reaches daily quit, which refuses under this fake HOME.
+fake_listener "$HOME/Applications/Lexicon.app/Contents/MacOS/Lexicon"
+echo '2026-10-12 09:40:01.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationBegan(hold: true)' > "$T/log.txt"
+expect fail 'Dictation in progress' "a hands-free sitting won't quit the daily Lexicon mid-Dictation" "$LANE" sitting start --hands-free
+[ ! -e "$DEV/live-sitting.open" ] && pass "a start refused for a Dictation leaves no marker" || fail "a start refused for a Dictation left the marker"
+echo '2026-10-12 09:40:09.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationLanded' >> "$T/log.txt"
+expect fail "is not your login home.*|the sitting didn't open: the daily Lexicon wasn't quit" "a hands-free sitting quits the daily Lexicon itself, here refused by the HOME check" "$LANE" sitting start --hands-free
+[ ! -e "$DEV/live-sitting.open" ] && pass "a hands-free sitting whose daily quit failed leaves no marker" || fail "a failed daily quit left the hands-free marker"
+: > "$T/log.txt"
+stop_listeners
+expect fail 'usage: live-lane.sh sitting' "an unknown sitting start option is refused" "$LANE" sitting start --hands
+
+# Jake's items outlive their request's hands-off result and the issue's close
+# at merge (#233): a sitting end forgets each one acked pass or fail.
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" queue > /dev/null
+jq --arg read "$read" '(.[0].comments) += [{createdAt: "2026-10-11T22:00:00Z", body: "Live checks: claude/issue-57 @ \($read)\n\nall pass"}]' "$T/issues-57.json" > "$T/issues.json"
+absent '#57' "the answered request leaves the queue" "$LANE" queue
+expect ok '^2\. Mic prompt \(#57\)' "its Jake item stays in the next sitting after the hands-off result" "$LANE" sitting render
+echo '[]' > "$T/issues.json"
+expect ok '^2\. Mic prompt \(#57\)' "and after the issue closes at merge" "$LANE" sitting render
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 skip > /dev/null
+"$LANE" sitting end > /dev/null
+expect ok '^2\. Mic prompt \(#57\)' "a skipped step stays queued" "$LANE" sitting render
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 fail no prompt > /dev/null
+"$LANE" sitting end > /dev/null
+expect ok '^No Jake items are queued, so no sitting\.$' "a step acked pass or fail leaves the queue" "$LANE" sitting render
+# A newer request for the issue replaces what the older head left.
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" queue > /dev/null
+request "claude/issue-57 @ ccccccc" "$T/hook.txt" > "$T/r57c"
+only_request 57 "$T/r57c" "$T/issues-57.json"
+expect ok '^No Jake items are queued, so no sitting\.$' "a newer request with no Jake items replaces the older head's" "$LANE" sitting render
+
+# A hands-off fn item has no Jake step, so render names it for a hands-free sitting.
+sed 's/^fn: no$/fn: yes/; s/^item: WAV paste$/item: WAV fn/' "$T/hook.txt" > "$T/hook-fn.txt"
+request "claude/issue-64 @ $read" "$T/hook-fn.txt" > "$T/r64f"
+jq -n --rawfile r "$T/r64f" '[{number: 64, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
+expect ok '^Waiting for the daily Lexicon to quit: #64 claude/issue-64 @ [0-9a-f]+ item 1 \(WAV fn\)' "a hands-off fn item is named while it waits" "$LANE" sitting render
+
+# Idle time: seconds since the last hardware input, from CoreGraphics' HID
+# system state, which the harness's own posted keys don't reset. Only that
+# read answers here; any other osascript still fails.
+cat > "$T/bin/osascript" <<'EOF'
+#!/bin/sh
+case "$*" in
+    *CGEventSourceSecondsSinceLastEventType*kCGEventSourceStateHIDSystemState*) echo 45 ;;
+    *) echo "test stub: osascript is not allowed in tests" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$T/bin/osascript"
 expect ok '^live-lane: idle 45 s$' "45 s of HID idle passes the default 30 s" "$LANE" idle
 expect fail 'Jake is at the keyboard \(idle 45 s, want 60 s\)' "a longer wait for idle fails while he's active" "$LANE" idle 60
+printf '#!/bin/sh\necho "test stub: osascript is not allowed in tests" >&2\nexit 1\n' > "$T/bin/osascript"
 
 # A long wait becomes a timer and frees the lane; a due timer stays queued until the holder reads it.
 expect ok 'due in 600 s; released the lane' "a long wait becomes a timer that releases the lane" "$LANE" timer 600 memory-settle
