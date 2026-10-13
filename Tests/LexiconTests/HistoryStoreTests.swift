@@ -253,15 +253,21 @@ func deleteIsRefusedWhileInFlight(stored: DictationStatus) async throws {
 }
 
 @Test func derivedIndexesAreRebuiltWhenTheirSQLChanges() async throws {
-    let (store, paths) = try makeStore()
-    #expect(try await indexSQL(store) == HistorySchema.derivedIndexes)
+    let paths: AppPaths
+    do {
+        let (store, folder) = try makeStore()
+        paths = folder
+        #expect(try await indexSQL(store) == HistorySchema.derivedIndexes)
 
-    // An index an older build generated from a different status list.
-    try await store.read { db in
-        try db.execute("DROP INDEX dictation_unfinished")
-        try db.execute("CREATE INDEX dictation_unfinished ON dictation(status) WHERE status IN ('recording')")
+        // An index an older build generated from a different status list.
+        try await store.read { db in
+            try db.execute("DROP INDEX dictation_unfinished")
+            try db.execute("CREATE INDEX dictation_unfinished ON dictation(status) WHERE status IN ('recording')")
+        }
+        #expect(try await indexSQL(store) != HistorySchema.derivedIndexes)
+        await store.flush()
     }
-    #expect(try await indexSQL(store) != HistorySchema.derivedIndexes)
+    // Released as a quit does, so the reopen can take the folder's lock.
     let reopened = try HistoryStore(paths: paths)
     #expect(try await indexSQL(reopened) == HistorySchema.derivedIndexes)
 }

@@ -10,6 +10,11 @@ public enum CAFFile {
         /// Header says data size -1: the writer never closed it (crash or power loss).
         case open
         case closed
+        /// No sample yet: zero bytes, a header with no data chunk, or a data chunk holding no sample.
+        case empty
+        /// The open failed for a reason other than "no such file" (EMFILE, EIO, a permission):
+        /// the audio may be fine, so a later look may read it.
+        case unavailable
         case unreadable
     }
 

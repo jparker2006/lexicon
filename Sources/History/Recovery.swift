@@ -99,6 +99,8 @@ extension HistoryStore {
             files[id] = switch CAFFile.state(of: audioURL(for: id)) {
             case .open: .open
             case .closed: .closed
+            case .empty: .empty
+            case .unavailable: .unavailable
             case .unreadable: .unreadable
             }
         }
@@ -121,6 +123,7 @@ extension HistoryStore {
                          in db: Database) throws -> UnfinishedDictation? {
         func record(_ event: DictationEvent) throws {
             guard let applied = try db.transaction({ try apply(event, in: $0) }) else { return }
+            if applied.dropAudio { try dropAudio(applied.id) }
             if applied.changed { changed.yield(applied.id) }
         }
 
@@ -133,8 +136,10 @@ extension HistoryStore {
         case .deleteGarbage(let id):
             try dropAudio(id)
             changed.yield(id)
-        case .dropExpiredAudio(let id):
+        case .dropExpiredAudio(let id), .deleteEmptyFile(let id):
             try removeAudioFile(id)
+        case .discard(let id):
+            try record(.discarded(id))
         case .markFailed(let id, let reason):
             try record(.failed(id, reason: reason))
         case .markInterrupted(let id):
@@ -162,13 +167,15 @@ enum RecoveryPlan {
         let status: DictationStatus
         let audio: AudioStorage
     }
-    enum FileState: Sendable, Hashable { case open, closed, unreadable }
+    enum FileState: Sendable, Hashable { case open, closed, empty, unavailable, unreadable }
 
     enum Action: Sendable, Hashable {
         case finalize(DictationID)                 // CAF still open: write its real size
         case adoptOrphan(DictationID)              // file with no row: insert row, origin recovered
         case deleteGarbage(DictationID)            // row says deleted: a crash cut a delete short
         case dropExpiredAudio(DictationID)         // retention marked it expired; the crash beat the unlink
+        case deleteEmptyFile(DictationID)          // a file that never got a sample: nothing to keep
+        case discard(DictationID)                  // a recording that never heard anything, like a stray tap
         case markFailed(DictationID, String)       // unfinished row, no readable audio
         case markInterrupted(DictationID)          // crashed mid-paste: notInserted(.interrupted), never retyped
         case transcribe(DictationID, wasWaiting: Bool)
