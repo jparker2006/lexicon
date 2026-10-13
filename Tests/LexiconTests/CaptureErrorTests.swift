@@ -135,7 +135,7 @@ private func framesAt16kHz(_ duration: Duration) -> Int {
 }
 
 // The end-of-stream flush is a converter call too, and at 48 kHz the converter
-// holds a few ms back until it. (A CONFIRMED review finding on #179.)
+// holds a few ms back until it.
 
 @Test(.timeLimit(.minutes(1))) func aConverterErrorOnTheFlushCountsTheAudioItHeldAsLost() async throws {
     let dir = try scratchDirectory()
@@ -191,7 +191,7 @@ private final class FlushFailure: Sendable {
 }
 
 // At a resampled rate the converter holds a few ms between blocks. A failed block
-// costs only itself: what the converter held still comes out. (CONFIRMED review findings.)
+// costs only itself: what the converter held still comes out.
 
 @Test(.timeLimit(.minutes(1))) func aConverterErrorAt48kCountsOnlyTheFailedBlockAsLost() async throws {
     let dir = try scratchDirectory()
