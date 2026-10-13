@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { MODEL, strict } from './codex-review.mjs';
+import { EFFORTS, MODEL, strict } from './codex-review.mjs';
 import { tierGate } from './merge-pr.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,8 +25,8 @@ const prompt = fs.readFileSync(0, 'utf8');
 const log = process.env.FAKE_CODEX_LOG;
 if (process.env.FAKE_CODEX_HANG && prompt.includes('one lens: ' + process.env.FAKE_CODEX_HANG)) setInterval(() => {}, 1000);
 else {
-const n = fs.readdirSync(log).length;
-fs.writeFileSync(path.join(log, n + '.json'), JSON.stringify({ args, prompt, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
+// Named by pid: helpers run in parallel, so a count of the folder could repeat.
+fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
 const finding = { path: 'Sources/History/a.swift', line: 1, claim: 'a dictation can be lost', scenario: 'X, so Y', severity: 'blocker', confidence: 'high', cite: { kind: 'rule', source: 'review.md', quote: 'q' } };
 let reply;
 if (prompt.includes('Try to disprove')) reply = { verdict: 'CONFIRMED', citationHolds: true, evidence: 'e', trigger: 't', decider: '', headless: true, test: '' };
@@ -87,7 +87,7 @@ test('a reviewer-mode run prints the Review table merge-pr.mjs accepts, with Cod
   assert.match(markdown, new RegExp(`^Reviewed sha: \`${f.sha.slice(0, 7)}\``, 'm'));
   assert.match(markdown, /^\| CONFIRMED \| `Sources\/History\/a\.swift:1` \| a dictation can be lost \|/m);
   assert.equal(result.reviewedSha, f.sha);
-  assert.match(markdown, new RegExp(`^Helpers: 1 snapshot \\(script, no model\\), .*critic-deep \\(Codex ${MODEL.replace(/\./g, '\\.')} high\\)`, 'm'));
+  assert.match(markdown, new RegExp(`^Helpers: 1 snapshot \\(script, no model\\), .*critic-deep \\(Codex ${MODEL.replace(/\./g, '\\.')} ${EFFORTS.sonnet}\\)`, 'm'));
   assert.doesNotMatch(markdown, /\((haiku|sonnet|opus) /);
   assert.ok(calls.length >= 3, 'critics, a verifier and blast radius ran through codex');
 });
@@ -103,7 +103,7 @@ test('each helper runs as codex exec with its role prompt, model, effort and a s
     assert.equal(args[0], 'exec');
     assert.ok(prompt.startsWith(role), 'the critic role prompt leads');
     assert.equal(args[args.indexOf('-m') + 1], MODEL);
-    assert.ok(args.includes('model_reasoning_effort="medium"'));
+    assert.ok(args.includes(`model_reasoning_effort="${EFFORTS.haiku}"`));
     assert.ok(args.includes('--ephemeral'));
     assert.ok(args.some((arg) => arg.startsWith('hooks.state={ ') && arg.includes(`${realpathSync(f.repo)}/.codex/hooks.json:pre_tool_use:0:0`)), 'the guard hook is trusted for the run');
     assert.equal(schema.additionalProperties, false);

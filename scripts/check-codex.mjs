@@ -1,16 +1,22 @@
-// The Codex side of the workflow stays wired to the Claude side it mirrors
-// (docs/agents/codex.md): the skills Codex loads, the helpers it runs and the page
-// Jake reads. Run by scripts/checks/45-codex.sh.
+#!/usr/bin/env node
+// check-codex: the Codex side of the workflow stays wired to the Claude side it mirrors
+// (docs/agents/codex.md): the skills Codex loads, the helpers it runs and the page Jake
+// reads. A check over the repo's own files, like check-skills.mjs, not a test of code.
+// Run by scripts/checks/45-codex.sh; prints each failure with its fix.
+//
+//   node scripts/check-codex.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const at = (...parts) => path.join(REPO, ...parts);
 const read = (rel) => readFileSync(at(rel), 'utf8');
+
+const checks = [];
+const test = (name, fn) => checks.push({ name, fn });
 
 test('every repo skill is reachable where Codex loads skills (.agents/skills)', () => {
   const skills = readdirSync(at('.claude/skills')).filter((name) => existsSync(at('.claude/skills', name, 'SKILL.md')));
@@ -53,3 +59,15 @@ test('each typed helper has a .codex/agents/<name>.toml with the same prompt and
   const run = spawnSync(process.execPath, [at('scripts/codex-agents.mjs'), '--check'], { encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
 });
+
+let failed = 0;
+for (const { name, fn } of checks) {
+  try {
+    await fn();
+  } catch (error) {
+    failed += 1;
+    console.error(`check-codex: ${name}: ${error.message.split('\n')[0]}`);
+  }
+}
+if (failed) process.exit(1);
+console.log(`check-codex: ${checks.length} checks ok`);
