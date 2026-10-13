@@ -1,6 +1,6 @@
 # Voice harness grill record (2026-10-13)
 
-The grill on [#136](https://github.com/jparker2006/lexicon/issues/136), "Idea: Lexicon as a domain-specific harness for voice (after v0)". Jake asked for it in the orchestrator's session on 2026-10-13 and answered in a grill session from 16:22Z to 18:00Z, one question at a time, each with a recommendation. **Nothing here is built or planned.** No entry in [DECISIONS.md](../DECISIONS.md) changes; where the idea would reopen a recorded decision, [Reopens](#what-it-would-reopen) names it. When and whether any of it is built goes back to the orchestrator.
+The grill on [#136](https://github.com/jparker2006/lexicon/issues/136), "Idea: Lexicon as a domain-specific harness for voice (after v0)". Jake asked for it in the orchestrator's session on 2026-10-13 and answered in a grill session from 16:22Z to 18:00Z, one question at a time, each with a recommendation. **Nothing here is built or planned.** The answers shape a parked idea; none changes what Lexicon does or what v0 plans, so no entry in [DECISIONS.md](../DECISIONS.md) changes. If the idea is planned, each answer that still holds goes into DECISIONS.md with the words and times below, and [What it would reopen](#what-it-would-reopen) names the entries it touches. When and whether any of it is built goes back to the orchestrator.
 
 ## The idea in one paragraph
 
@@ -37,7 +37,7 @@ Times are UTC on 2026-10-13. Each answer is Jake's, verbatim.
 >
 > "not even neccesarily only when the pipeline runs. even in the background since it can analyze your history" (16:29:16)
 
-Outcome: the agent runs any time, including in the background over History, not only around a Dictation.
+Outcome: the agent runs any time, in the background as well as around a Dictation. Q21 later narrowed what it reads to agent sessions and the Dictations into them.
 
 **Q3. What may the background agent change without asking?** Options: nothing, anything the Test set says helps, small learning alone and bigger changes ask. Rec: the last: a Term or Rule on its own only when two or more of Jake's Fixes back it and the Test set scores no worse; anything that changes how he is written is a proposal; a weekly list with undo.
 > "C is fine I guess. The thing im thinking about is more proactive than were thinking. I also have a feeling the technical implementation to get this working is to abuse Jev calls" (16:42:03)
@@ -53,10 +53,12 @@ Outcome: the domain narrows to prompting coding agents; "fixes after typing" yes
 **Q6. How far may Lexicon change what you said?** Options: spell it the session's way, also attach what you pointed at, turn it into a better prompt. Rec: spell only.
 > "hmm this is the interesting part. we know were dictating into one prompt box for this specific use case were thinking of. maybe C? idk i feel like we should harden the idea before we decide this part. dont make a decision on this" (16:49:32)
 
-Outcome, settled by Q11 and Q15 and stated to Jake without objection: on its own Lexicon only fixes what it heard; meaning changes come as a toast.
+Outcome: Proposed. Jake said not to decide this. After Q11 and Q15 the session stated a reading, which Jake did not answer either way: on its own Lexicon only fixes what it heard; meaning changes come as a toast.
 
 **Q7. What counts as doing well?** Options: words right, prompts sent untouched, the agent gets it right the first time, thought to agent working. Rec: the third as the goal, the second as the everyday score, the first as the floor.
-> "Yeah I guess C. I feel like theres a lot of things that can be improved on in current voice to text. Like it should be more proactive. It is the tool i use the most yet it is so dumb! All it does is go voice to text! It should be more like a personal agent with all that data" (16:52:38)
+> "Yeah I guess C"
+>
+> "I feel like theres a lot of things that can be improved on in current voice to text. Like it should be more proactive. It is the tool i use the most yet it is so dumb! All it does is go voice to text! It should be more like a personal agent with all that data" (16:52:38)
 
 Outcome: the goal is the agent getting it right the first time. "Prompts sent untouched" and "words right as the floor" were the recommendation, not his answer: Proposed.
 
@@ -119,7 +121,7 @@ Outcome: the brain reads only his Claude Code and Codex sessions and the Dictati
 **Q22. Which subscription runs the brain?** Options: Codex for everything, each session to its own provider, Codex with Claude sessions summarized on the Mac first. Rec: Codex for everything, after a one-hour test of startup and usage.
 > "lets just do codex for everything. since these are longer, smarter background calls lets use Sol 6.1" (17:47:18)
 
-Outcome: Codex for everything, on Jake's ChatGPT login. Claude session text then goes to OpenAI, a step past Q21's "nothing goes anywhere new", which Jake took knowingly. The model check found only `gpt-6-luna` named as the small model on a ChatGPT login; Sol 6.1 is Jake's pick, to be checked against Codex's model list before it is built.
+The question had said: "A Codex brain reading your Claude Code sessions would send Claude session text to OpenAI, which is new." Outcome: Codex for everything, on Jake's ChatGPT login, so Claude session text goes to OpenAI. The model check found only `gpt-6-luna` named as the small model on a ChatGPT login; Sol 6.1 is Jake's pick, to be checked against Codex's model list before it is built.
 
 **Q23. Is the grill done?** Jake reopened it:
 > "Bro, I don't know if the gorilla's done. I feel like there's still something we're missing. Like something I hate about Wispr Flow is their insights page is so shit. You would think they have all that data, their insights page shouldn't be that bad. [...] People are building domain-specific harnesses nowadays, and my domain is voiced text, right? But let's break it down to first principles. [...] First principles is I say what I want to be built, right? [...] How do we provide value to that? [...] Help me break it down to first principles" (17:51:03)
@@ -175,6 +177,9 @@ Building any of this reopens these, each through Jake in DECISIONS.md first:
 - DECISIONS part 2, item 17: code context is names only, "no identifiers or file names". The session brief carries both.
 - GLOSSARY, Hook: Lexicon has no product hooks "unless the after-M1 grill brings them back". The session tool may need one.
 - The structural check and Cleanup's "never changes what you asked for": the "tighter version" and "add this" toasts change meaning, but only when Jake clicks them.
+- DECISIONS part 2, item 10: when a Fix becomes a Rule is the after-M1 grill. Q3's rule (two or more Fixes, the Test set no worse) is an answer to that question.
+- architecture.md, Privacy: "Jev gets only the few words around a Re-speak or Hand fix target plus candidates." The session brief sends Jev far more, on every Dictation.
+- What leaves the Mac: the Dictations into agent apps are History rows, and Q21 and Q22 send their text, with the session text, to OpenAI. Today every cloud call (speech, Cleanup, Jev, model downloads) takes a `CloudAccess`, and none happens in Private mode. The brain's calls would need the same door and the same Private mode cut.
 - Grill D5, no screenshots, stays: the brain reads session files and text, never pixels.
 
 ## Open, for the orchestrator
