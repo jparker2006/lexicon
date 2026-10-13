@@ -182,8 +182,8 @@ Building any of this reopens these, each through Jake in DECISIONS.md first:
 - DECISIONS part 2, item 10: when a Fix becomes a Rule is the after-M1 grill. Q3's Proposed thresholds (two or more Fixes, the Test set no worse) are a candidate answer that item 10's grill still has to ask Jake.
 - architecture.md, Privacy: "Jev gets only the few words around a Re-speak or Hand fix target plus candidates." The session brief sends Jev far more, on every Dictation.
 - What leaves the Mac: the Dictations into agent apps are History rows, and Q21 and Q22 send their text, with the session text, to OpenAI. Today every cloud call (speech, Cleanup, Jev, model downloads) takes a `CloudAccess`, and none happens in Private mode. The brain's calls would need the same door and the same Private mode cut.
-- review.md, Never lose a Dictation: "Nothing on the fn-up path waits on SQLite, Jev or Fix watching." Jev's calls stay off the fn-up path; a plan that puts any Jev call there reopens this rule. The same section's "Every Jev call has a local fallback" applies to every call made while he talks.
-- Spec #36, Privacy: "Never sent anywhere: screen text, clipboard, file contents, or text around the cursor beyond the last Dictation." Agent session text can hold file contents the agent read, so sending it to OpenAI (Q22) reopens this line.
+- review.md, Never lose a Dictation: "Nothing on the fn-up path waits on SQLite, Jev or Fix watching." Jev's calls stay off the fn-up path; a plan that puts any Jev call there reopens this rule. review.md's Network, keys and private data section adds "Every Jev call has a local fallback", which applies to every call made while he talks.
+- Spec #36, Private mode, keys, data leaving the Mac: "Never sent anywhere: screen text, clipboard, file contents, or text around the cursor beyond the last Dictation." Agent session text can hold file contents the agent read, so sending it to OpenAI (Q22) reopens this line.
 - Grill D5, no screenshots, stays: the brain reads session files and text, never pixels.
 
 ## Open, for the orchestrator
