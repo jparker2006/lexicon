@@ -102,6 +102,10 @@ public final class HistoryReader {
     /// "Show versions": model, cleaned, final, what each Retry replaced, plus every engine's run.
     public func detail(_ id: DictationID) -> HistoryDetail? {
         guard let db else { return nil }
+        // One snapshot for the row and its child rows: a Retry committing between the reads
+        // would show the replaced text as current and again as an earlier version.
+        try? db.execute("BEGIN")
+        defer { try? db.execute("COMMIT") }
         // The list's rule: a row mid-delete, or a status this build cannot draw, is not shown.
         let found = try? db.query("""
             SELECT \(HistoryRow.columns), model_text, cleaned_text FROM dictation WHERE id = ? AND \(Filter(nil).sql)
