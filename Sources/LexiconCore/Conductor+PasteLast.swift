@@ -13,7 +13,9 @@ extension Conductor {
         case .inserted(let receipt):
             history.record(.delivered(newest.id, receipt, lag: nil))
             emit(.pasted(newest.id, newerOnItsWay: newest.newerOnItsWay))
-        case .notInserted, .historyOnly: break  // the row keeps its status; Jake can press it again
+        case .notInserted, .historyOnly:
+            // Nothing took it: the row keeps its status, and Jake is told where to click to press again.
+            emit(.notice(.noFieldToPaste))
         }
     }
 }

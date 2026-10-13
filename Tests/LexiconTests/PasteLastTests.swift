@@ -27,14 +27,18 @@ private struct PasteCall: Equatable, Sendable {
     let id: DictationID
 }
 
-/// Answers a live `insert` with `answer`, answers every paste-last with an inserted receipt,
-/// and records each paste-last in the order it was asked for.
+/// Answers a live `insert` with `answer`, answers every paste-last with an inserted receipt
+/// (or with `pasteAnswer` when one is given), and records each paste-last in the order it was asked for.
 private actor PastingDestination: TextDestination {
     struct Target: Sendable {}
     let answer: Delivery
+    let pasteAnswer: Delivery?
     private(set) var pasteCalls: [PasteCall] = []
 
-    init(answer: Delivery) { self.answer = answer }
+    init(answer: Delivery, pasteAnswer: Delivery? = nil) {
+        self.answer = answer
+        self.pasteAnswer = pasteAnswer
+    }
 
     func context() -> AppContext { .unknown }
     func appChanges() -> AsyncStream<AppContext> { AsyncStream { $0.yield(.unknown) } }
@@ -42,6 +46,7 @@ private actor PastingDestination: TextDestination {
     func insert(_ text: String, for id: DictationID, at target: Target) -> Delivery { answer }
     func pasteLast(_ text: String, for id: DictationID, at target: Target) -> Delivery {
         pasteCalls.append(PasteCall(text: text, id: id))
+        if let pasteAnswer { return pasteAnswer }
         return .inserted(InsertionReceipt(appBundleID: "com.example.editor", fieldFingerprint: "paste",
                                           caretAfter: text.utf16.count, contextBefore: "", contextAfter: "",
                                           insertedAt: Date()))
@@ -273,4 +278,23 @@ func pasteLastPastesARecoveredDictation() async throws {
 
     #expect(await destination.pasteCalls == [PasteCall(text: cleanedText, id: id)])
     #expect(await history.dictation(id)?.status == .inserted)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aPasteLastNoAppReadsSaysSoAndKeepsTheDictationWaiting() async throws {
+    let wav = try writeWAV(syntheticSamples(count: 19_200), rate: 16_000, in: try scratchDirectory())
+    let destination = PastingDestination(answer: .notInserted(.focusMoved), pasteAnswer: .notInserted(.pasteFailed))
+    let (conductor, history) = try makeConductor(destination)
+    var events = await conductor.events().makeAsyncIterator()
+
+    let result = await conductor.dictate(file: wav, pace: .asFastAsPossible)
+    _ = await eventsUntilFinished(&events)
+
+    await conductor.pasteLast()
+    await history.flush()
+    let pasted = await eventsOfPasteLast(&events)
+
+    // Nothing read the paste: Jake is told where to click, and the Dictation still waits for ⌃⌘V.
+    #expect(pasted.contains(where: { if case .notice(.noFieldToPaste) = $0 { true } else { false } }))
+    #expect(await history.dictation(result.id)?.status == .notInserted)
 }
