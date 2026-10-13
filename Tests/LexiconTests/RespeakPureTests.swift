@@ -404,5 +404,20 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
         #expect(RespeakText.replacement(".env.", replacing: "dot env", terms: [], isEnglish: notEnglish) == ".env")
         #expect(RespeakText.replacement("@jake.", replacing: "at jake", terms: [], isEnglish: notEnglish) == "@jake")
     }
+
+    /// A mark that is part of the selected word is replaced with it, never kept beside the new words.
+    @Test func replacementReplacesMarksThatArePartOfTheSelectedWord() {
+        let notEnglish: (String) -> Bool = { _ in false }
+        #expect(RespeakText.replacement("50%.", replacing: "100%", terms: [], isEnglish: notEnglish) == "50%")
+        #expect(RespeakText.replacement("F#.", replacing: "C#", terms: [], isEnglish: notEnglish) == "F#")
+        #expect(RespeakText.replacement("Java.", replacing: ".NET", terms: [], isEnglish: notEnglish) == "Java")
+        #expect(RespeakText.replacement("Java.", replacing: "(.NET),", terms: [], isEnglish: notEnglish) == "(Java),")
+    }
+
+    /// A comma or colon Jake said stays; only Cleanup's closing . ! ? go.
+    @Test func replacementKeepsACommaOrColonJakeSaid() {
+        #expect(RespeakText.replacement("Note:", replacing: "not", terms: [], isEnglish: { _ in true }) == "note:")
+        #expect(RespeakText.replacement("Well,", replacing: "will", terms: [], isEnglish: { _ in true }) == "well,")
+    }
 }
 
