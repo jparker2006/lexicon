@@ -192,15 +192,14 @@ func aPressWhoseHotkeyReportWasLostNeverPairsWithTheNextPress() {
 
 @Test func aHotkeyPressesTwoReportsPairOnlyWhenTheyAreTheSameMoment() {
     var presses = HotkeyPresses()
-    // One press, either order: the first report counts, its partner doesn't.
-    #expect(presses.isFirstReport(.tapCopy, at: at(0)))
-    #expect(!presses.isFirstReport(.hotkey, at: at(3)))
-    #expect(presses.isFirstReport(.hotkey, at: at(1_000)))
-    #expect(!presses.isFirstReport(.tapCopy, at: at(1_001)))
-    // A report whose partner never came is not the partner of a press 600 ms later.
-    #expect(presses.isFirstReport(.tapCopy, at: at(2_000)))
-    #expect(presses.isFirstReport(.hotkey, at: at(2_600)))
-    // Two reports of one kind are two presses.
-    #expect(presses.isFirstReport(.tapCopy, at: at(4_000)))
-    #expect(presses.isFirstReport(.tapCopy, at: at(4_100)))
+    let counted = [
+        // One press, either order: the first report counts, its partner doesn't.
+        presses.isFirstReport(.tapCopy, at: at(0)), presses.isFirstReport(.hotkey, at: at(3)),
+        presses.isFirstReport(.hotkey, at: at(1_000)), presses.isFirstReport(.tapCopy, at: at(1_001)),
+        // A report whose partner never came is not the partner of a press 600 ms later.
+        presses.isFirstReport(.tapCopy, at: at(2_000)), presses.isFirstReport(.hotkey, at: at(2_600)),
+        // Two reports of one kind are two presses.
+        presses.isFirstReport(.tapCopy, at: at(4_000)), presses.isFirstReport(.tapCopy, at: at(4_100)),
+    ]
+    #expect(counted == [true, false, true, false, true, true, true, true])
 }
