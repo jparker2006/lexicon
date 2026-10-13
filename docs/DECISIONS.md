@@ -153,6 +153,10 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 **70. A hands-free sitting.** Proposed. A sitting with no steps for Jake, opened only after he types "hands free" in the Live checks session (`scripts/live-lane.sh sitting start --hands-free`), so hands-off fn items run while his daily app is quit and reopened as Q8 says. It uses neither of Q7's two daily slots, since it asks nothing of his hands. Jake's yes on the M1 plan covers building #225 (its fillers line: "a hands-free sitting must quit the daily app", [plan](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6120839008)), but his own words on the sitting itself are not recorded. #225's builder. Lives in AGENTS.md, Dev builds and the live app, and workflow.md, Live checks.
 
+**94. Codex sessions run with no OS sandbox, fenced by the guard hook.** Proposed. On a Codex day ([codex.md](agents/codex.md)) the Reviewer, Live checks and builders start with `codex --sandbox danger-full-access`, as Claude sessions here run with no OS sandbox. Codex's sandbox blocks `ps`, which `scripts/live-lane.sh` needs to find its holder (the #325 probe got `operation not permitted: ps`), and builds, `gh` and the harness reach outside the checkout. The guard hook (`.codex/hooks.json`) is the fence. #325's builder.
+
+**95. Codex models: `gpt-6-astra` for every role, effort by tier.** Proposed. Jake's ChatGPT plan offers Codex one current model: on 2026-10-13 Codex refused `gpt-5.4`, `gpt-6-luna`, `gpt-6-sol` and `gpt-6.1-sol` on it, and 0.139.0 needs an update for `gpt-6-astra`. Sessions and the Sonnet-tier `critic-deep` run at high effort, every Haiku-tier helper at medium (`.codex/config.toml`, `scripts/codex-agents.mjs`, `scripts/codex-review.mjs`). #325's builder.
+
 ## Current: the product (spec part 3)
 
 Items 25 to 60 come from the spec's first comment, part 3, "what building M0 changed". Each says what the spec said, what was built, and who decided.

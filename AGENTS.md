@@ -24,6 +24,7 @@ Two things are always true. Judge every change against them:
 - `docs/architecture.md`: modules, who owns what, the invariants the compiler enforces, budgets and how each is read.
 - `docs/adr/`: decisions that are hard to reverse. `GLOSSARY.md`: the words to use.
 - `docs/agents/`: how Jake, the orchestrator, builders, Live checks and the Reviewer work ([workflow.md](docs/agents/workflow.md)), the review checklist ([review.md](docs/agents/review.md)), labels and the issue tracker.
+- When Claude's plan runs out, builders, the Reviewer and Live checks run on OpenAI's Codex CLI for a day or two: [docs/agents/codex.md](docs/agents/codex.md) is how. `.codex/` holds its config, hook and helper roles; `.agents/skills` links the repo's skills.
 - `.claude/skills/`: the repo's skills, starting with `implement-ticket` and `pr`. `.claude/agents/`: the typed helpers. `.claude/workflows/`: the `lexicon-review` Workflow. `.claude/hooks/guard.mjs`: the guard hook.
 - Code: `Package.swift`, one SwiftPM target per module under `Sources/`, tests under `Tests/`, the check script `scripts/check.sh` with its steps in `scripts/checks/`, CI in `.github/workflows/ci.yml`. Every script under `scripts/` says what it does in its header.
 
