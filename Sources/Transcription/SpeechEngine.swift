@@ -420,7 +420,7 @@ final class AttemptCore: Sendable {
         if decision == .wait {
             for await event in events {
                 switch event {
-                case .cloud(.text(let text)) where !text.contains(where: { !$0.isWhitespace }):
+                case .cloud(.text(let text)) where text.isBlank:
                     // No words is no answer: local may have heard what the cloud missed.
                     cloudState = .failed
                     cloudError = "heard nothing"
@@ -499,7 +499,7 @@ final class AttemptCore: Sendable {
             }
             return .unavailable(localFailure ?? .noModel)
         }
-        guard won.text.contains(where: { !$0.isWhitespace }) else { return .unavailable(.silence) }
+        guard !won.text.isBlank else { return .unavailable(.silence) }
         return .text(SpeechText(text: won.text, model: won.model, finalizeToText: won.latency ?? .zero,
                                 attempts: attempts))
     }
