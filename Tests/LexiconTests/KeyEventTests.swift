@@ -248,7 +248,9 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
 @Test func theFnKeysOwnKeyDownIsNotAnotherKey() {
     // On a Mac with the Globe key, macOS can send a key-down for fn itself (keycode 63, or 179
     // for Globe) when a short tap is released. It is fn, not a chord: it must not end the tap.
-    #expect(KeyInput(keyEvent(63), secureInput: { false }, now: at(0)) == nil)
+    let fnKeyDown = keyEvent(63)
+    fnKeyDown.type = .keyDown  // built for keycode 63, CGEvent makes a flag change
+    #expect(KeyInput(fnKeyDown, secureInput: { false }, now: at(0)) == nil)
     #expect(KeyInput(keyEvent(179), secureInput: { false }, now: at(0)) == nil)
 }
 

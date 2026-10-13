@@ -129,7 +129,17 @@ final class EventTapThread: @unchecked Sendable {
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
         if Self.isTypingOrClicking(type) { input.tick() }
         guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
+        #if DEBUG
+        let pressing = gesture.isRecording && !gesture.takesEscape  // a press or a tap not yet confirmed
+        #endif
         feed(key)
+        #if DEBUG
+        // Dev builds only: which key ended an unconfirmed press, so a live check can tell a
+        // real chord from a key macOS sends for fn itself. Never in the daily app.
+        if case .otherKey = key, pressing, !gesture.isRecording {
+            log.notice("fn press ended by key \(event.getIntegerValueField(.keyboardEventKeycode), privacy: .public)")
+        }
+        #endif
         switch key {
         case .fnDown(let at, _, _): logDelivery("down", at: at)
         case .fnUp(let at): logDelivery("up", at: at)
@@ -184,6 +194,10 @@ private let tapCallback: CGEventTapCallBack = { _, type, event, info in
 extension KeyInput {
     /// The fn key's virtual keycode (kVK_Function).
     static let fnKeyCode: Int64 = 63
+    /// The Globe key's keycode in a key-down. With the Globe key, macOS can send a
+    /// key-down for fn itself when a short tap is released (its own Globe action);
+    /// that is fn, not another key, so it must not end the tap as a chord would.
+    static let globeKeyCode: Int64 = 179
 
     /// What the recognizer sees of one event, or nil for an event it ignores.
     /// fn is a flag change on keycode 63; every other flag change (Shift, Cmd,
@@ -197,10 +211,12 @@ extension KeyInput {
             self = event.flags.contains(.maskSecondaryFn)
                 ? .fnDown(at, secureInput: secureInput(), id: DictationID()) : .fnUp(at)
         case .keyDown:
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            guard keyCode != Self.fnKeyCode, keyCode != Self.globeKeyCode else { return nil }
             let at = HostTime(eventTimestamp: event.timestamp, now: now)
             // Plain Esc, fn or not (a hold keeps fn down); with Cmd, Option, Control or Shift it is a shortcut.
             let plain = event.flags.isDisjoint(with: [.maskCommand, .maskAlternate, .maskControl, .maskShift])
-            self = event.getIntegerValueField(.keyboardEventKeycode) == Int64(kVK_Escape) && plain
+            self = keyCode == Int64(kVK_Escape) && plain
                 ? .escape(at) : .otherKey(at)
         default:
             return nil
