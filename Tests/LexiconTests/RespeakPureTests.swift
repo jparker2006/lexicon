@@ -384,4 +384,16 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
         #expect(RespeakText.replacement("Jeopardy!", replacing: "jeopardy", terms: ["Jeopardy!"],
                                         isEnglish: { _ in true }) == "Jeopardy")
     }
+
+    /// The selection's own punctuation stays around the new words: only the words change (PR #298 review).
+    @Test func replacementKeepsTheSelectionsOwnPunctuation() {
+        let english: (String) -> Bool = { _ in true }
+        #expect(RespeakText.replacement("The.", replacing: "teh,", terms: [], isEnglish: english) == "the,")
+        #expect(RespeakText.replacement("The.", replacing: "teh)", terms: [], isEnglish: english) == "the)")
+        #expect(RespeakText.replacement("The.", replacing: "\"teh\"", terms: [], isEnglish: english) == "\"the\"")
+        #expect(RespeakText.replacement("The.", replacing: "(teh", terms: [], isEnglish: english) == "(the")
+        #expect(RespeakText.replacement("The.", replacing: " teh, ", terms: [], isEnglish: english) == " the, ")
+        #expect(RespeakText.replacement("The.", replacing: "teh.\"", terms: [], isEnglish: english) == "the.\"")
+    }
 }
+
