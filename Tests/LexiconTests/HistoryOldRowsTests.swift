@@ -3,8 +3,8 @@ import Testing
 @testable import History
 import LexiconDomain
 
-// Old rows: the `cleanup` column as the builds before this one wrote it, pinned
-// as literal JSON. The reader has to decode those exact bytes. A test that round-trips
+// Old rows: the `cleanup` column in the shape History stores it, pinned as literal
+// JSON for every outcome this build can write. The reader has to decode those exact bytes. A test that round-trips
 // through the encoder would pass after an encoding change that old rows cannot read,
 // so the literals are copied from the encoder once and never regenerated.
 //
