@@ -178,7 +178,7 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
         == .fnUp(HostTime(nanoseconds: fixedNow.nanoseconds - 200_000_000)))
 }
 
-@Test func aHoldLongerThanASecondIsConfirmedAndStops() throws {
+@Test func aHoldStampedOverASecondAgoIsConfirmedAndStops() throws {
     // A press held 0.5 s, its events stamped 3 s and 2.5 s before the read. Read as "now",
     // the hold would look like a lone tap, and the Dictation would be discarded instead.
     var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))

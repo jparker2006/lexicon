@@ -99,7 +99,7 @@ final class EventTapThread: @unchecked Sendable {
     private func watchdog() -> CFRunLoopTimer {
         let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + 2, 2, 0, 0) { [self] _ in
             guard let tap, !CGEvent.tapIsEnabled(tap: tap) else { return }
-            // The cause is unknown (seen once); these name a lost permission if it happens again.
+            // The cause is unknown; these name a lost permission if it happens again.
             log.error("fn tap off with no notice: accessibility \(AXIsProcessTrusted(), privacy: .public), listen \(CGPreflightListenEventAccess(), privacy: .public)")
             reenable(because: "no notice")
         }!
@@ -176,17 +176,30 @@ final class EventTapThread: @unchecked Sendable {
     }
 
     /// One timer slot: a new deadline replaces the old one, and a stale one that
-    /// still fires is ignored by the recognizer (it judges by time).
+    /// still fires is ignored by the recognizer (it judges by time). A timer that
+    /// fires late waits for the keys queued behind it (`deferral`).
     private func schedule(_ wakeAt: HostTime) {
         guard let runLoop else { return }  // a tap never started (tests): fn-up still judges the hold
         if let deadline { CFRunLoopTimerInvalidate(deadline) }
         let (whole, atto) = wakeAt.duration(since: .now()).components
         let seconds = Double(whole) + Double(atto) / 1e18
         let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + max(seconds, 0), 0, 0, 0) {
-            [self] _ in feed(.deadline(.now()))
+            [self] _ in
+            let now = HostTime.now()
+            if let later = Self.deferral(due: wakeAt, now: now) { schedule(later) } else { feed(.deadline(now)) }
         }
         deadline = timer
         CFRunLoopAddTimer(runLoop, timer, .commonModes)
+    }
+
+    /// When a deadline timer fires, nil means feed `.deadline(now)`. A time means it
+    /// fired more than `FnGesture.lateKeyGrace` late: the tap thread was stalled, and
+    /// the run loop may run the timer before keys queued in the stall, which are
+    /// judged by their own (older) stamps. Waiting one grace lets them go first, so
+    /// a double tap's second press or a short tap's fn-up is seen before the window
+    /// or the hold is judged. The re-armed timer is on time, so a stall defers once.
+    static func deferral(due: HostTime, now: HostTime) -> HostTime? {
+        now.duration(since: due) > FnGesture.lateKeyGrace ? now.advanced(by: FnGesture.lateKeyGrace) : nil
     }
 
     /// fn delivery latency through the tap: the key event's own time to now.
