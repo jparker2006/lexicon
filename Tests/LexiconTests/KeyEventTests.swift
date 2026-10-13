@@ -162,8 +162,11 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     #expect(HostTime(eventTimestamp: fixedNow.nanoseconds + 1_000_000, now: fixedNow) == fixedNow)
 }
 
-@Test func stampFiveSecondsOldIsTakenAsNow() {
-    #expect(HostTime(eventTimestamp: fixedNow.nanoseconds - 5_000_000_000, now: fixedNow) == fixedNow)
+@Test func stampFiveSecondsOldIsThatTime() {
+    // Five seconds old is still the key's own time: a long hold is judged on its stamps,
+    // not on the moment the tap happened to read them.
+    #expect(HostTime(eventTimestamp: fixedNow.nanoseconds - 5_000_000_000, now: fixedNow)
+        == HostTime(nanoseconds: fixedNow.nanoseconds - 5_000_000_000))
 }
 
 @Test func theEventsOwnTimeIsUsedNotWhenItWasDelivered() {
@@ -173,6 +176,23 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     up.timestamp = fixedNow.nanoseconds - 200_000_000
     #expect(KeyInput(up, secureInput: { false }, now: fixedNow)
         == .fnUp(HostTime(nanoseconds: fixedNow.nanoseconds - 200_000_000)))
+}
+
+@Test func aHoldLongerThanASecondIsConfirmedAndStops() throws {
+    // A press held 0.5 s, its events stamped 3 s and 2.5 s before the read. Read as "now",
+    // the hold would look like a lone tap, and the Dictation would be discarded instead.
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
+    let down = flagsChanged(63, [.maskSecondaryFn])
+    down.timestamp = fixedNow.nanoseconds - 3_000_000_000
+    let up = flagsChanged(63, [])
+    up.timestamp = fixedNow.nanoseconds - 2_500_000_000
+    var commands = feed(down, at: fixedNow, into: &gesture)
+    commands += feed(up, at: fixedNow, into: &gesture)
+    commands += gesture.handle(.deadline(at(400))).commands  // past a lone tap's window and its grace: a discard would show here
+    let id = try #require(beganID(commands))
+    #expect(commands.contains(.dictationConfirmed(id, .hold)))
+    #expect(stops(id, in: commands))
+    #expect(!commands.contains(.dictationDiscarded(id)))
 }
 
 @Test func onlyKeyDownsAndClicksCountAsTyping() {
@@ -282,4 +302,77 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     #expect(!input.hasInput(since: mark))
     _ = tap.handle(.keyDown, fromKeyboard(keyEvent(0)))
     #expect(input.hasInput(since: mark))
+}
+
+/// As the keyboard sends it (pid 0): the tap drops events this process posted.
+private func fromKeyboard(_ event: CGEvent) -> CGEvent {
+    event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+    return event
+}
+
+/// Whether `commands` stops the Dictation `id`: a stop, not a discard or a cancel.
+private func stops(_ id: DictationID, in commands: [KeyCommand]) -> Bool {
+    commands.contains { command in
+        if case .dictationStopped(let stopped, _) = command { stopped == id } else { false }
+    }
+}
+
+@Test func aTimeoutEndsAPressWhenFnIsNoLongerDown() async throws {
+    // The tap was turned off with fn's release lost in the gap. The timeout is the only
+    // fn-up this press will get, so it must end the press.
+    let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: InputClock(),
+                             continuation: continuation, secureInput: { false }, fnHeld: { false })
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
+    _ = tap.handle(.tapDisabledByTimeout, keyEvent(0))
+    continuation.finish()
+    var yielded: [KeyCommand] = []
+    for await command in commands { yielded.append(command) }
+    let id = try #require(beganID(yielded))
+    #expect(stops(id, in: yielded))
+}
+
+@Test func aTimeoutLeavesAPressAloneWhileFnIsStillHeld() async throws {
+    // fn is still down at the timeout, so the press goes on: the timeout must not stop a
+    // Dictation Jake is still holding. The press itself is checked first, so the absence means something.
+    let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: InputClock(),
+                             continuation: continuation, secureInput: { false }, fnHeld: { true })
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
+    _ = tap.handle(.tapDisabledByTimeout, keyEvent(0))
+    continuation.finish()
+    var yielded: [KeyCommand] = []
+    for await command in commands { yielded.append(command) }
+    _ = try #require(beganID(yielded))
+    #expect(!yielded.contains { if case .dictationStopped = $0 { true } else { false } })
+}
+
+@Test func aFnUpAfterATimeoutWhileFnWasHeldStillStopsTheDictation() async throws {
+    // The press the timeout left alone ends on the real fn-up, as any hold does.
+    let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: InputClock(),
+                             continuation: continuation, secureInput: { false }, fnHeld: { true })
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
+    _ = tap.handle(.tapDisabledByTimeout, keyEvent(0))
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [])))
+    continuation.finish()
+    var yielded: [KeyCommand] = []
+    for await command in commands { yielded.append(command) }
+    let id = try #require(beganID(yielded))
+    #expect(stops(id, in: yielded))
+}
+
+@Test func aTimeoutWithNoPressInProgressYieldsNothingAndDoesNotAskAboutFn() async {
+    // Nothing to end: the tap is re-enabled, and the system's fn state is not even read.
+    let asked = Mutex(0)
+    let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: InputClock(),
+                             continuation: continuation, secureInput: { false },
+                             fnHeld: { asked.withLock { $0 += 1 }; return false })
+    _ = tap.handle(.tapDisabledByTimeout, keyEvent(0))
+    continuation.finish()
+    var yielded: [KeyCommand] = []
+    for await command in commands { yielded.append(command) }
+    #expect(yielded.isEmpty)
+    #expect(asked.withLock { $0 } == 0)
 }
