@@ -332,6 +332,9 @@ final class FakeMic: Sendable {
         for asked in waiting { asked.resume() }
     }
 
+    /// Lets the start wedged now return, as a slow Core Audio call that finishes does.
+    func unwedgeOneStart() { gate.signal() }
+
     /// Lets every wedged start and device lookup return, as a Core Audio call that was stuck finally does. Once.
     func unwedge() {
         guard !unwedged.exchange(true, ordering: .relaxed) else { return }

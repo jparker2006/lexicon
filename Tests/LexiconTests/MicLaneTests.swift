@@ -300,9 +300,9 @@ func theDeviceRebuildWaitsOnTheClockBetweenTries() async throws {
 }
 
 @Test(.timeLimit(.minutes(1)))
-func fnUpWhileARebuildWaitsKeepsWhatWasCapturedAndBuildsNothingMore() async throws {
-    // The device keeps failing until Jake lets go: the stop must end the capture
-    // with what came before, and the try still waiting must not build an engine after it.
+func fnUpWhileARebuildWaitsKeepsWhatWasCapturedAndEndsTheWait() async throws {
+    // The device keeps failing until Jake lets go: the stop ends the capture with
+    // what came before, and the try still waiting is called off, not left to run.
     let clock = TestClock()
     let mic = FakeMic(diesAtStart: [1], clock: clock)
     let recorder = Recorder(hardware: mic.hardware)
@@ -318,12 +318,51 @@ func fnUpWhileARebuildWaitsKeepsWhatWasCapturedAndBuildsNothingMore() async thro
 
     let take = await capture.stop(.immediately)
     await recorder.settle()
-    // The stop prepares the next Dictation's engine: that build is not a rebuild try.
-    await withCheckedContinuation { done in recorder.microphone.queue.async { done.resume() } }
-    let made = mic.timesMade
-    await clock.advance(by: .milliseconds(100))
     await withCheckedContinuation { done in recorder.microphone.queue.async { done.resume() } }
 
     #expect(take.clip.samples.count == FakeEngine.frames)
-    #expect(mic.timesMade == made)
+    #expect(clock.sleepers == 0)
+}
+
+// MARK: Queued, not stuck
+
+@Test(.timeLimit(.minutes(1)))
+func aHoldQueuedBehindSlowPressesWaitsItsTurnInsteadOfFailing() async throws {
+    // A run of quick presses queues engine work on the one lane. Each piece is
+    // slow but finishes, so the hold behind them is queued, not stuck: the start
+    // limit counts only time in which the lane finishes nothing.
+    let clock = TestClock()
+    let mic = FakeMic(wedgesAtStart: [0, 1], clock: clock)
+    defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
+    let recorder = Recorder(hardware: mic.hardware)
+    var wedged = mic.wedged.makeAsyncIterator()
+    let files = try (0..<3).map { try scratchDirectory().appending(path: "press\($0).caf") }
+    func press(_ file: URL) -> Task<RecorderError?, Never> {
+        Task {
+            do throws(RecorderError) {
+                let capture = try await recorder.start(.microphone(deviceUID: nil), writingTo: file)
+                _ = await capture.stop(.immediately)
+                return nil
+            } catch {
+                return error
+            }
+        }
+    }
+
+    let first = press(files[0])
+    _ = await wedged.next()
+    let second = press(files[1]), hold = press(files[2])
+    await clock.waitForSleepers(3)
+
+    // The first press's engine starts in 1.5 s, inside its limit; the second's start is slow too.
+    await clock.advance(by: .milliseconds(1_500))
+    mic.unwedgeOneStart()
+    _ = await wedged.next()
+    // 2 s after the hold's fn-down, but the lane finished something 0.5 s ago.
+    await clock.advance(by: .milliseconds(500))
+    mic.unwedgeOneStart()
+
+    #expect(await first.value == nil)
+    #expect(await second.value == nil)
+    #expect(await hold.value == nil)
 }
