@@ -111,20 +111,31 @@ import Testing
     #expect(board.showing == "copied later")
 }
 
-/// A paste made after quit began (a Dictation fn started meanwhile) has its own 2 s
-/// hold: the cap for the paste quit waited on never cuts it short.
-@MainActor @Test(.timeLimit(.minutes(1))) func aQuitCapNeverCutsTheHoldOfALaterPaste() async {
+/// A paste made after quit began (a Dictation fn started meanwhile) is waited for too,
+/// with its own cap from when quit takes it up, so its 2 s hold is never cut short.
+@MainActor @Test(.timeLimit(.minutes(1))) func quitWaitsForALaterPasteWithoutCuttingItsHold() async {
     let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
     board.jakeCopies("jake's text")
     let keeper = keeper(board, clock)
     _ = keeper.put("dictation")
     _ = board.targetReads()
 
-    let quit = Task { await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock) }
-    while quitClock.sleepers != 1, !Task.isCancelled { await Task.yield() }
+    var finished = false
+    let quit = Task {
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
+        finished = true
+    }
+    await quitClock.waitForSleep(endingAt: ClipboardKeeper.missedHold)  // quit waits on the first paste
+    await quitClock.advance(by: .seconds(1))
     _ = keeper.put("later dictation")  // nobody has read it yet: it is in its hold
+    // Quit takes the later paste up a second in: its cap ends a hold's length after that.
+    while !finished, !Task.isCancelled,
+          quitClock.sleepers != 1 || quitClock.now.offset != .seconds(1) { await Task.yield() }
+    #expect(!finished, "quit waits for the later paste too")
 
-    await quitClock.advance(by: ClipboardKeeper.missedHold)
-    await quit.value
+    await quitClock.advance(by: .seconds(1))
     #expect(board.showing == "later dictation", "the later paste's text is still up for a queued Cmd-V")
+    await quitClock.advance(by: .seconds(1))
+    await quit.value
+    #expect(board.showing == "jake's text")
 }

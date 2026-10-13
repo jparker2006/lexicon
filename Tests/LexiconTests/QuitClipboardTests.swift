@@ -90,7 +90,7 @@ import Testing
     #expect(showingWhenQuitReturned == "jake's text")
 }
 
-/// No target read the Dictation, so the text is held for 2 s after the 1 s miss.
+/// No target read the Dictation: it missed at 1 s and its text is held until 2 s after the write.
 /// Quit starts inside that hold and must return only after the restore at 2 s.
 @MainActor @Test(.timeLimit(.minutes(1))) func quittingDuringThePostMissHoldGivesJakesClipboardBack() async {
     let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
