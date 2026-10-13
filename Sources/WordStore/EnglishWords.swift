@@ -90,7 +90,7 @@ enum EnglishWords {
     }
 }
 
-/// One word at a time, for a Re-speak's first capital: each call reads the list, about 10 ms.
+/// One word at a time, for a Re-speak's first capital: each call scans the list.
 public enum PlainEnglish {
     /// A plain English word that the list never writes with a capital: "dog",
     /// but not "will" (the list also has "Will", a name) or "supabase".

@@ -20,7 +20,7 @@ extension Conductor {
     }
 
     /// What fitting the spoken words needs that takes time: the Lexicon's Terms
-    /// and the system word list (about 10 ms). Read before the insert turn, so a
+    /// and a scan of the system word list. Read before the insert turn, so a
     /// Dictation spoken after the Re-speak never waits on it.
     struct RespeakWords: Sendable {
         let terms: Set<String>

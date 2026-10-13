@@ -10,17 +10,17 @@ public enum RespeakText {
     public static func replacement(_ spoken: String, replacing before: String, terms: Set<String>,
                                    isEnglish: (String) -> Bool = { _ in true }) -> String {
         // Only the words change: the selection's own spaces and punctuation around
-        // them stay ("teh," -> "the,"), and Cleanup's sentence marks go.
+        // them stay ("teh," -> "the,"), and Cleanup's closing sentence marks go.
         let lead = String(before.prefix(while: isEdge))
         let trail = String(before.dropFirst(lead.count).reversed().prefix(while: isEdge).reversed())
         let selected = before.dropFirst(lead.count).dropLast(trail.count)
-        var text = words(of: spoken)
-        guard !text.isEmpty else { return "" }
+        var text = sentence(spoken)
+        guard text.contains(where: { !$0.isPunctuation }) else { return "" }
         // Mid-sentence, a plain English word loses the sentence's capital. "I", a
         // name, a Term, or a word like GitHub keeps its form (DECISIONS.md item 85).
         let word = firstWord(text)
         if let first = text.first, selected.first?.isLowercase == true, word != "I", !word.hasPrefix("I'"),
-           !terms.contains(where: { firstWord(words(of: $0)) == word }),
+           !terms.contains(where: { firstWord($0) == word }),
            !word.dropFirst().contains(where: \.isUppercase), isEnglish(word.lowercased()) {
             text = first.lowercased() + text.dropFirst()
         }
@@ -32,6 +32,14 @@ public enum RespeakText {
     public static func firstWord(_ spoken: String) -> String {
         let text = words(of: spoken)
         return String(text.prefix { !$0.isWhitespace }.reversed().drop(while: isEdge).reversed())
+    }
+
+    /// What Jake said without the marks Cleanup ends a sentence with: "C#." is
+    /// "C#", and a mark that is part of his words (#, %, a leading dot) stays.
+    private static func sentence(_ spoken: String) -> String {
+        var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = text.last, ".!?,;:".contains(last) || last.isWhitespace { text.removeLast() }
+        return text
     }
 
     /// The text without the spaces and punctuation at its edges.
