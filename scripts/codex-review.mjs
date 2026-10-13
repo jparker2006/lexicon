@@ -12,7 +12,7 @@
 // <args json> is the Workflow's args ({issue, sha, pr?, base?, head?, reviewed?, mode?,
 // risks?, findings?, sideBySide?}). Run it from the checkout under review. It prints the
 // markdown; --out also writes the Workflow's whole result as JSON. CODEX_BIN names the
-// codex binary (default: codex on PATH).
+// codex binary (default: codex on PATH); CODEX_REVIEW_HELPER_TIMEOUT_MS a helper's deadline.
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -27,6 +27,10 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const MODEL = 'gpt-6-astra';
 export const EFFORTS = { haiku: 'medium', sonnet: 'high', opus: 'high' };
 const modelOf = (tier) => `${MODEL} ${EFFORTS[tier] ?? 'high'}`;
+// Deadlines that only bound a hang: a helper past its deadline is stopped and counts as one
+// that died, which review.js reports as incomplete. A real critic takes minutes, not half an hour.
+const HELPER_TIMEOUT_MS = Number(process.env.CODEX_REVIEW_HELPER_TIMEOUT_MS) || 30 * 60_000;
+const SNAPSHOT_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * The schema in the strict form Codex's --output-schema needs: every object closed
@@ -83,7 +87,10 @@ async function codex(prompt, opts, scratch, n) {
   let err = '';
   child.stderr.on('data', (d) => { err += d; });
   child.stdin.end(full);
-  const status = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, HELPER_TIMEOUT_MS);
+  const status = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); }).finally(() => clearTimeout(timer));
+  if (timedOut) throw new Error(`codex exec for ${opts.label} gave no answer in ${HELPER_TIMEOUT_MS / 60_000} minutes; stopped`);
   if (status !== 0) throw new Error(`codex exec for ${opts.label} exited ${status}: ${err.trim().split('\n').pop()}`);
   return JSON.parse(readFileSync(outFile, 'utf8'));
 }
@@ -98,7 +105,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
   const agent = async (prompt, opts = {}) => {
     if (opts.label === 'snapshot') {
       const command = prompt.slice(prompt.indexOf('node --input-type=module'));
-      return { out: execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8', maxBuffer: 1 << 28 }) };
+      return { out: execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8', maxBuffer: 1 << 28, timeout: SNAPSHOT_TIMEOUT_MS }) };
     }
     n += 1;
     log(`codex: ${opts.label} (${modelOf(opts.model)})`);
