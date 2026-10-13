@@ -42,7 +42,9 @@ extension Conductor {
         let landedIn = run.releasedAt.map { "\(HostTime.now().duration(since: $0).milliseconds) ms" } ?? "?"
         switch step {
         case .noSelection:
-            _ = await fixes?.respeak(spoken, fixing: fixing, access: run.access)
+            // Until #85 finds the words by sound, nothing selected means nothing to fix.
+            guard let fixes else { return emit(.notice(.fixNotLanded(.noSelection))) }
+            _ = await fixes.respeak(spoken, fixing: fixing, access: run.access)
             return
         case .notLanded(let problem):
             log.notice("Re-speak \(run.id, privacy: .public) not landed (\(String(describing: problem), privacy: .public)) after \(landedIn, privacy: .public)")

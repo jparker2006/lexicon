@@ -94,8 +94,9 @@ extension Conductor {
                 if run.origin == .live, run.purpose == .type, !run.isRetry {
                     emit(.notice(.readyToPaste(id)))
                 }
-                // A live Re-speak lands here only when nothing could take text at its fn-up.
-                if run.origin == .live, case .respeak = run.purpose { emit(.notice(.fixNotLanded(.noField))) }
+                // Released, with no target: nothing could take text at its fn-up. Esc, a
+                // waiting retry, a Retry and recovery have no release, and say nothing here.
+                if run.releasedAt != nil, case .respeak = run.purpose { emit(.notice(.fixNotLanded(.noField))) }
             }
             if case .respeak(let fixing) = run.purpose, let respeak {
                 await settleRespeak(respeak, cleaned.versions.cleaned, fixing: fixing, run)
