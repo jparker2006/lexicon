@@ -153,3 +153,23 @@ func aControlCommandVTheHotkeyNeverSawStillCountsAsTyping() {
     _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
     #expect(input.hasInput(since: afterFirst), "each press the hotkey never reported is typing")
 }
+
+@Test(.timeLimit(.minutes(1)))
+func holdingControlCommandVNeverLetsALaterPressHoldItsOwnPaste() {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    // Jake holds ⌃⌘V: one hotkey report, and the key repeats at the tap.
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    tap.send(.pasteLast)
+    for _ in 0..<3 {
+        let repeated = keyDown(9, [.maskControl, .maskCommand])
+        repeated.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        _ = tap.handle(.keyDown, repeated)
+    }
+    // His next press: this time the hotkey's report comes first, the paste marks, then the tap's copy.
+    tap.send(.pasteLast)
+    let mark = input.mark()
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    #expect(!input.hasInput(since: mark), "the press counted before its command, not after its paste's mark")
+}
