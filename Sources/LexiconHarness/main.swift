@@ -89,10 +89,12 @@ let rest = Array(arguments.dropFirst())
 do {
     switch arguments.first {
     case "check": try await check()
+    // These post input, Dev's Cmd-V or History's own keys: idle skips their windows.
+    case "hook" where ["dictate", "insert"].contains(rest.first): try await PostedInput.during { try await hook(rest) }
     case "hook": try await hook(rest)
     case "pill": try await pill(rest)
-    case "paste-check": try await pasteCheck()
-    case "history": try await HistoryCheck.run(search: rest.first)
+    case "paste-check": try await PostedInput.during { try await pasteCheck() }
+    case "history": try await PostedInput.during { try await HistoryCheck.run(search: rest.first) }
     case "relaunch": try await relaunch(rest)
     case "wait-fn": try await waitFn(rest)
     case "fixture": try await fixture(rest)

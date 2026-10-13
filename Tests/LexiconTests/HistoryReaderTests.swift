@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import History
 import LexiconDomain
+@testable import LexiconUI
 
 // The History window's reader over a throwaway data folder. Small cases go in
 // through History's write API; the year-sized cases are seeded with synthetic
@@ -464,4 +465,45 @@ private func searchTimes(_ paths: AppPaths) -> [Duration] {
     print("History search over \(total) Dictations: p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")
     print("History search over \(perDay * yearDays) Dictations: p50 \(percentile(heavy, 0.5)), p95 \(percentile(heavy, 0.95))")
     #expect(percentile(samples, 0.5) <= .milliseconds(25))
+}
+
+/// The whole window, not just its reader: built, ordered in (transparent, never
+/// key) and drawn, as the app's "first rows drawn" line times it, on every open
+/// after launch's warm-up. Run it beside main to catch an open that got slower
+/// before a release build goes to Live checks.
+@MainActor @Test(.enabled(if: timingRun)) func speedWindowOpenWithinBudget() async throws {
+    let paths = try await year().paths
+    let presenter = HistoryWindowPresenter(paths: paths, system: nil)
+    autoreleasepool { _ = presenter.warmUp() }
+    /// Orders the window in and draws it, as the presenter's show() does.
+    func show(_ controller: HistoryWindowController) {
+        controller.window?.alphaValue = 0
+        controller.showWindow(nil)
+        controller.window?.displayIfNeeded()
+    }
+    // Untimed: the app has drawn its status item and menu before History ever opens,
+    // and a test process has drawn nothing, so its very first window pays for that.
+    // Its pasteboard, never Jake's, serves every timed open, so none is made inside the timing.
+    var first: HistoryWindowController? = HistoryWindowController(
+        reader: HistoryReader(paths: paths), system: nil, pasteboard: .withUniqueName()) {}
+    let pasteboard = first!.pasteboard
+    autoreleasepool {
+        show(first!)
+        first?.close()
+        first = nil
+    }
+    let clock = ContinuousClock()
+    let samples = (0..<20).map { _ in
+        autoreleasepool {
+            let start = clock.now
+            let controller = HistoryWindowController(reader: HistoryReader(paths: paths), system: nil, pasteboard: pasteboard) {}
+            show(controller)
+            let took = clock.now - start
+            controller.close()
+            return took
+        }
+    }
+    print("History window, open to first rows over \(perDay * yearDays) Dictations: first \(samples[0]), "
+        + "p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")
+    #expect(percentile(samples, 0.95) <= .milliseconds(100))
 }

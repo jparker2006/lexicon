@@ -21,6 +21,10 @@ private actor ChangingTranscriber: LocalTranscriber {
     func load() {}
     func unload() {}
     /// `nil` in `texts`: no model installed yet, so the Dictation waits.
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in try await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
         let text = texts.count > 1 ? texts.removeFirst() : texts[0]
         guard let text else { throw LocalModelNotInstalled(model) }
