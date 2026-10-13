@@ -80,13 +80,17 @@ final class CaptureCore: @unchecked Sendable {
         // The file is made here, on the caller, so it exists when `Recorder.start`
         // returns: the shared writer queue may still be closing the last Dictation,
         // and a kill before its turn would leave no trace (recovery adopts a file
-        // with no row). One file open, no sync; the ring holds the first audio meanwhile.
-        if hasRoom() { writer = try? CAFWriter(creating: file, calls: policy.files) }
+        // with no row). One file open, no sync, and no free-space read (`begin`
+        // does that); the ring holds the first audio meanwhile.
+        writer = try? CAFWriter(creating: file, calls: policy.files)
     }
 
-    /// Arms the drain timer on the writer queue and starts the producer. A file
-    /// `init` could not create (under 1 GB free, a failed or refused create) makes
-    /// the capture RAM-only from the start, reported before anything the producer does.
+    /// Arms the drain timer on the writer queue and starts the producer. Under
+    /// 1 GB free the still-empty file goes; that, or a file `init` could not
+    /// create, makes the capture RAM-only from the start, reported before
+    /// anything the producer does. The free-space read is here, not in `init`:
+    /// its first call after an idle gap can take tens of ms, and fn-down's
+    /// `Recorder.start` must not wait on it.
     func begin() {
         defer {
             let (first, end) = (signals.first, signals.end)
@@ -94,6 +98,10 @@ final class CaptureCore: @unchecked Sendable {
                                       switched: { [weak self] in self?.switchSegment(to: $0) }))
         }
         queue.async { [self] in
+            if writer != nil, !hasRoom() {
+                closeFile()
+                try? FileManager.default.removeItem(at: fileURL)  // no sample is in it yet
+            }
             if writer == nil { diskTrouble() }
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now() + policy.drainEvery.dispatch, repeating: policy.drainEvery.dispatch,

@@ -176,3 +176,28 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     let row = await store.dictation(id)
     #expect(!fileRemains || row != nil, "a file with no History row after recovery")
 }
+
+// MARK: The free-space check is off fn-down's path
+
+// The first free-space read after an idle gap can take tens of ms, and `Recorder.start`
+// is what fn-down's `.started` and the speech stream wait on. So start makes the file
+// without asking, and the writer queue asks before anything is written: under the
+// floor, the still-empty file goes and the capture is RAM-only, as before.
+@Test(.timeLimit(.minutes(1))) func aFullDiskIsCheckedAfterStartAndLeavesNoFile() async throws {
+    let source = syntheticSamples(count: 8_000)
+    let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
+    let caf = try scratchDirectory().appending(path: "audio/full.caf")
+
+    let recorder = Recorder(policy: .diskFull)
+    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: caf)
+    #expect(FileManager.default.fileExists(atPath: caf.path))  // made before any free-space read
+    let problems = capture.signals.problems
+    let ended = try #require(await capture.signals.inputEnded())
+    let take = await capture.stop(.released(at: ended))
+    await recorder.settle()
+
+    #expect(take.clip.samples == source)
+    #expect(take.summary.storage == .ramOnly)
+    #expect(await problems.first { _ in true } == .diskTrouble)
+    #expect(!FileManager.default.fileExists(atPath: caf.path))
+}
