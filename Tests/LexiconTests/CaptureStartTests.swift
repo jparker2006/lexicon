@@ -244,3 +244,11 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     #expect(FreeSpace.hasRoom(at: folder, minimum: 1_000, readers: readers(quick: nil, thorough: nil)))
     #expect(thoroughReads.withLock { $0 } == 3)
 }
+
+// A volume that reports "unlimited" (some network and FUSE filesystems give UInt64.max
+// blocks) must read as room, not trap inside fn-down's `Recorder.start`.
+@Test func freeBlocksPastInt64ReadAsRoomInsteadOfTrapping() {
+    #expect(FreeSpace.bytes(availableBlocks: 1_000, blockSize: 4_096) == 4_096_000)
+    #expect(FreeSpace.bytes(availableBlocks: .max, blockSize: 4_096) == .max)
+    #expect(FreeSpace.bytes(availableBlocks: UInt64(Int64.max / 2), blockSize: 4) == .max)
+}

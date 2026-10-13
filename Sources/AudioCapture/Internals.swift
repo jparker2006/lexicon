@@ -222,12 +222,19 @@ enum FreeSpace {
         var quick: @Sendable (URL) -> Int64? = { folder in
             var info = statfs()
             guard statfs(folder.path, &info) == 0 else { return nil }
-            return Int64(info.f_bavail) * Int64(info.f_bsize)
+            return FreeSpace.bytes(availableBlocks: info.f_bavail, blockSize: info.f_bsize)
         }
         var thorough: @Sendable (URL) -> Int64? = { folder in
             try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
                 .volumeAvailableCapacityForImportantUsage
         }
+    }
+
+    /// Never traps: a volume that reports "unlimited" (UInt64.max blocks, from
+    /// some network and FUSE filesystems) reads as `.max`, which is room.
+    static func bytes(availableBlocks: UInt64, blockSize: UInt32) -> Int64 {
+        let (product, overflow) = Int64(clamping: availableBlocks).multipliedReportingOverflow(by: Int64(blockSize))
+        return overflow ? .max : product
     }
 
     static func hasRoom(at folder: URL, minimum: Int64, readers: Readers = Readers()) -> Bool {
