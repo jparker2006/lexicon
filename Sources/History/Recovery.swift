@@ -214,8 +214,9 @@ enum RecoveryPlan {
                 } else if file == .empty, row.status == .recording {
                     // It never heard anything: no row, as for a stray tap.
                     actions.append(.discard(row.id))
-                } else if file == .empty {
-                    // Deleted first: a crash in between leaves no file, which fails it the same way.
+                } else if file == .empty || file == .closedEmpty {
+                    // Its words, if any, were only in RAM. Deleted first: a crash in between
+                    // leaves no file, which fails it the same way.
                     actions.append(.deleteEmptyFile(row.id))
                     actions.append(.markFailed(row.id, "audio missing"))
                 } else {
@@ -229,8 +230,8 @@ enum RecoveryPlan {
         for (id, file) in files.sorted(by: { $0.key.description < $1.key.description }) where !known.contains(id) {
             switch file {
             case .unavailable: continue  // looked at again next launch
-            case .empty: actions.append(.deleteEmptyFile(id)); continue  // nothing to adopt
-            case .open, .closed, .closedEmpty, .unreadable: break
+            case .empty, .closedEmpty: actions.append(.deleteEmptyFile(id)); continue  // nothing to adopt
+            case .open, .closed, .unreadable: break
             }
             if file == .open { actions.append(.finalize(id)) }
             actions.append(.adoptOrphan(id))

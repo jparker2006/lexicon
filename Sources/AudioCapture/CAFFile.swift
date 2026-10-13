@@ -38,7 +38,7 @@ public enum CAFFile {
         case .unavailable: .unavailable
         case .notCAF: .unreadable
         case .noSample: .empty
-        case .data(_, let size): size == -1 ? .open : .closed
+        case .data(_, let size): size == -1 ? .open : size - 4 < 2 ? .closedEmpty : .closed
         }
     }
 
@@ -79,8 +79,8 @@ public enum CAFFile {
         case notCAF
         /// Nothing past the header yet: zero bytes, no data chunk, or a data chunk
         /// with no whole sample on disk. What a capture leaves when it dies before its
-        /// first write. Not a file the writer closed with no sample: it closes one and
-        /// goes on in RAM when the disk fails, so a closed file proves nothing was heard.
+        /// first write. Not a file the writer closed saying it holds no sample: that
+        /// is `.data`, read as `State.closedEmpty`.
         case noSample
         /// The data chunk: where its header starts, and its size field (-1 while open).
         case data(offset: off_t, size: Int64)
