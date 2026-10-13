@@ -37,7 +37,7 @@ final class EventTapThread: @unchecked Sendable {
     private let secureInput: @Sendable () -> Bool
     /// Whether fn is down right now, asked after the tap was off with a press in
     /// progress. System-wide state; tests pass their own. Reading it needs listen
-    /// access, which the tap exists only with.
+    /// access, which the tap is created only with.
     private let fnHeld: @Sendable () -> Bool
     private let log = Logger(subsystem: "Lexicon", category: "fn")
     /// Takes Esc from the app in front (true) or gives it back (false): the
@@ -99,17 +99,16 @@ final class EventTapThread: @unchecked Sendable {
     private func watchdog() -> CFRunLoopTimer {
         let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + 2, 2, 0, 0) { [self] _ in
             guard let tap, !CGEvent.tapIsEnabled(tap: tap) else { return }
-            // The cause is unknown; these name a lost permission if it happens again.
-            log.error("fn tap off with no notice: accessibility \(AXIsProcessTrusted(), privacy: .public), listen \(CGPreflightListenEventAccess(), privacy: .public)")
-            reenable(because: "no notice")
+            // The cause is unknown; the grants name a lost permission if it happens again.
+            reenable(because: "no notice", grants: "; accessibility \(AXIsProcessTrusted()), listen \(CGPreflightListenEventAccess())")
         }!
         CFRunLoopTimerSetTolerance(timer, 0.5)
         return timer
     }
 
-    private func reenable(because reason: StaticString) {
+    private func reenable(because reason: StaticString, grants: String = "") {
         if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-        log.error("fn tap was disabled (\(String(describing: reason), privacy: .public)); re-enabled")
+        log.error("fn tap was disabled (\(String(describing: reason), privacy: .public)\(grants, privacy: .public)); re-enabled")
         input.tick()  // Jake may have typed while it was off: late text must not assume he didn't
         // An fn-up lost while the tap was off would leave the mic recording until the next press.
         if gesture.isRecording, !fnHeld() {
