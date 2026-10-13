@@ -109,3 +109,17 @@ func everyOtherVKeyDownStillCountsAsTyping(_ flags: CGEventFlags) {
     _ = tap.handle(.keyDown, keyDown(9, flags))
     #expect(input.hasInput(since: mark), "v, ⌘V and ⌃⇧⌘V are Jake typing; only ⌃⌘V itself is not")
 }
+
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func aPasteLastPressStillCountsAsTypingForADictationInFlight(tapCopyFirst: Bool) {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    // An earlier Dictation took its target at fn-up; then Jake presses ⌃⌘V. Its text,
+    // still on the way, must not land after the paste he asked for.
+    let fnUp = input.mark()
+    if tapCopyFirst { _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand])) }
+    tap.send(.pasteLast)
+    if !tapCopyFirst { _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand])) }
+    #expect(input.hasInput(since: fnUp), "⌃⌘V is typing since that fn-up")
+}
