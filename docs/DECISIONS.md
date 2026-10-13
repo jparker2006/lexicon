@@ -222,10 +222,10 @@ Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 14:54:52Z):
 
 Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 15:15:50Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127137470)). Decided: the 19-minute warning acts 50 ms after its mark too.
 
-**90. After a stall, a late fn timer waits 5 ms for the keys queued behind it.**
+**93. A late fn timer waits 5 ms for the keys queued behind a stall.**
 > Jake: decide whether Lexicon should wait 5 ms before acting on a late fn timer, so keys that piled up while its fn handler was briefly frozen (a stall) are read first. I recommend yes. [...] The cost: after a stall, the double-tap drop, the 19-minute warning and the 20-minute stop come up to 5 ms later than item 79's 50 ms after their mark, on top of the stall itself. It waits at most once per timer, so a handler that keeps freezing can't hold off the 20-minute stop. ([#199](https://github.com/jparker2006/lexicon/issues/199#issuecomment-6144055463))
 
-Jake, asked by the orchestrator in its session, 2026-10-13 (recorded 13:21:05Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/199#issuecomment-6146509035)). Decided: after a stall, a late fn deadline timer waits 5 ms before it acts, at most once per timer. `EventTapThread.fired`.
+Jake, asked by the orchestrator in its session, 2026-10-13 (recorded 13:21:05Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/199#issuecomment-6146509035)). Decided: a late fn deadline timer waits 5 ms before it acts, at most once per timer, so keys queued behind a stall are read first. `EventTapThread.fired`. What counts as late is decided below.
 
 > Jake: decide how late an fn timer must be before your 5 ms wait kicks in. I recommend 1 ms. [...] 1 ms (recommended): catches every stall [...] The cost: if a timer runs more than 1 ms late in normal use (how often is unmeasured), the start sound, the pill or the double-tap drop comes 5 ms later. ([#199](https://github.com/jparker2006/lexicon/issues/199#issuecomment-6146952591))
 

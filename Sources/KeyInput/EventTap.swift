@@ -197,7 +197,7 @@ final class EventTapThread: @unchecked Sendable {
 
     /// A timer later than this may have been held up by a stall, with keys queued behind it.
     static let lateTimer: Duration = .milliseconds(1)
-    /// How long a late timer waits for those keys (Jake, DECISIONS.md item 90).
+    /// How long a late timer waits for those keys (Jake, DECISIONS.md item 93).
     static let queuedKeysWait: Duration = .milliseconds(5)
 
     /// A deadline timer fired at `now`. Tap thread only; tests call it on a tap
