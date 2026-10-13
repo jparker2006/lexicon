@@ -76,6 +76,11 @@ enum HistorySchema {
         DROP INDEX dictation_by_time;
         CREATE INDEX dictation_by_time ON dictation(started_at DESC, status, audio_storage);
         """,
+        """
+        -- Where a Fix's words start in the final text before it (UTF-16): the
+        -- same words can appear twice, and a Fix belongs to one of them.
+        ALTER TABLE fix ADD COLUMN text_location INTEGER;
+        """,
     ]
 
     /// Indexes whose SQL is generated from Swift enums. Not migrations (a
