@@ -61,7 +61,7 @@ public enum MicProbe {
     }
 
     /// A probe holds the real mic for its whole length, so a typo can't keep it for days.
-    /// The closed ranges also refuse NaN, which `Duration.seconds` would trap on.
+    /// Both checks also refuse NaN, which `Duration.seconds` would trap on.
     static func check(seconds: Double, preparedIdle: Double?) throws(RecorderError) {
         guard seconds > 0, seconds <= 120 else { throw .engineFailed("probe seconds \(seconds) not in (0, 120]") }
         guard (0...30).contains(preparedIdle ?? 0) else {

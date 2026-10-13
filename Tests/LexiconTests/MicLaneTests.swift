@@ -252,8 +252,8 @@ func theDeviceRebuildWaitsOnTheClockBetweenTries() async throws {
     var engines = mic.made.makeAsyncIterator()
     var feed = capture.feed.makeAsyncIterator()
 
-    // Two drains: a try that a queued try schedules runs behind the first drain, so only
-    // the second drain shows it. After both, every try that is not waiting on the clock has run.
+    // After a drain, every try that is not waiting on the clock has run. The second
+    // drain also covers lane work that a drained block queued behind itself.
     func drain() async {
         for _ in 0..<2 {
             await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in

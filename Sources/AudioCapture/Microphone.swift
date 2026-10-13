@@ -176,7 +176,7 @@ final class Microphone: Sendable {
         lane.withLock { current in
             if current === stuck { current = MicLane(hardware: hardware, permission: permission, elapsed: elapsed) }
         }
-        Self.log.error("mic start passed \(Self.startLimit.ms, privacy: .public) ms: engine queue abandoned")
+        Self.log.error("mic lane finished nothing for \(Self.startLimit.ms, privacy: .public) ms: engine queue abandoned")
     }
 
     private static let log = Logger(subsystem: "Lexicon", category: "audio")
@@ -439,8 +439,8 @@ final class MicSource: CaptureSource, @unchecked Sendable {
             }
         } catch {
             // Mid-switch a device can report no format for a while, and no
-            // device at all is possible: keep trying until fn-up stops the
-            // Dictation, which keeps everything captured so far.
+            // device at all is possible: keep trying until the Dictation stops
+            // (fn-up, Esc or the cap), which keeps everything captured so far.
             if attempt == 5 { Self.log.error("device change: still no engine after \(attempt, privacy: .public) tries") }
             retry(lostAt: lostAt, attempt: attempt + 1)
         }
