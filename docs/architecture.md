@@ -154,7 +154,7 @@ No test target depends on an executable target: every test target links into one
 
 - `history.sqlite`: `dictation` (status, origin, model, cleaned and final text, speech model, lag, Cleanup outcome, audio state, pin), `attempt` (every engine try), `fix`, `insertion` (receipts). Enum columns store Swift raw values; partial indexes are generated from `DictationStatus`.
 - `audio/<id>.caf`: 16 kHz mono 16-bit, kept a rolling 14 days or 1 GB (whichever first), never deleted while a Dictation needs it, pinned audio kept forever.
-- A failed F_FULLFSYNC (and fsync) also moves a capture to memory, as a failed write does. A file that fails to close is repaired with `CAFFile.finalize`. A Dictation that lost part of its audio (frames the 2 s ring refused, input the converter failed on, a file input that broke off) is typed from the rest and shows "Part of the audio was lost" (DECISIONS item 84).
+- A sync where F_FULLFSYNC and fsync both fail also moves a capture to memory, as a failed write does. A file that fails to close gets its header written by `CAFFile.finalize`, and the log says whether that worked. A Dictation that lost part of its audio (frames the 2 s ring refused, input the converter failed on, a file input that broke off) is typed from the rest and shows "Part of the audio was lost" (DECISIONS item 84: Jake decided the mic case; the other two are Proposed there).
 - `lexicon.sqlite`: Terms and Rules (each Rule with a source field: added or learned), owned by WordStore. Code Terms are held in memory, not stored.
 - `models/`: Parakeet weights (about 614 MB), never in the bundle.
 - `inbox/`: hook messages, only if hooks come back.
