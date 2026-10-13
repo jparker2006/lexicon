@@ -16,6 +16,8 @@ final class FileSource: CaptureSource, @unchecked Sendable {
     let firstSegment: Segment
     var deviceName: String? { nil }
     var gaps: [Duration] { [] }
+    /// The unread rest of the file after a read that threw; zero after a stop or the end.
+    var lostAudio: Duration { Duration(frames: unread.load(ordering: .relaxed), rate: sampleRate) }
     private let file: AVAudioFile
     private let pace: FilePace
     private let stopRequested = Atomic<Bool>(false)
@@ -23,6 +25,7 @@ final class FileSource: CaptureSource, @unchecked Sendable {
     private let wake = DispatchSemaphore(value: 0)
     private let exited = DispatchSemaphore(value: 0)
     private let started = Atomic<Bool>(false)
+    private let unread = Atomic<Int>(0)
 
     init(url: URL, pace: FilePace) throws(RecorderError) {
         guard let file = try? AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false),
@@ -69,7 +72,12 @@ final class FileSource: CaptureSource, @unchecked Sendable {
         var framesRead = 0
 
         while !stopping {
-            guard (try? file.read(into: buffer, frameCount: Self.blockFrames)) != nil else { return nil }
+            guard (try? file.read(into: buffer, frameCount: Self.blockFrames)) != nil else {
+                // The input broke off: the capture ends here, and the rest is counted as lost.
+                // A read that throws because a stop came mid-read is a stop, not a loss.
+                if !stopping { unread.store(max(0, Int(file.length) - framesRead), ordering: .relaxed) }
+                return nil
+            }
             let count = Int(buffer.frameLength)
             guard count > 0 else { return HostTime.now() }
             let data = buffer.floatChannelData!

@@ -221,6 +221,8 @@ final class FakeMic: Sendable {
     private let diesAtStart: Set<Int>
     /// Engines, by the order they are made, that run but deliver no frames, as a stalled device does.
     private let mute: Set<Int>
+    /// Engines, by the order they are made, that write past their ring, as a device outrunning the writer does.
+    private let overflows: Set<Int>
     /// Starts, by the order they happen, that block their thread until `unwedge`.
     private let wedgesAtStart: Set<Int>
     /// Each engine whose start is blocked, as it blocks.
@@ -244,12 +246,13 @@ final class FakeMic: Sendable {
 
     /// The default clock never moves: no start hits the limit because the machine is slow.
     init(diesAtStart: Set<Int> = [], mute: Set<Int> = [], wedgesAtStart: Set<Int> = [], wedgesAtFind: Set<Int> = [],
-         clock: any Clock<Duration> = TestClock(), askingPermission: Bool = false) {
+         overflows: Set<Int> = [], clock: any Clock<Duration> = TestClock(), askingPermission: Bool = false) {
         (made, continuation) = AsyncStream.makeStream()
         (wedged, wedging) = AsyncStream.makeStream()
         (findWedged, findWedging) = AsyncStream.makeStream()
         self.diesAtStart = diesAtStart
         self.mute = mute
+        self.overflows = overflows
         self.wedgesAtStart = wedgesAtStart
         self.wedgesAtFind = wedgesAtFind
         self.clock = clock
@@ -272,7 +275,8 @@ final class FakeMic: Sendable {
                 defer { count += 1 }
                 return count
             }
-            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index), mute: mute.contains(index), wedge: { [self] engine in
+            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index), mute: mute.contains(index),
+                                    overflows: overflows.contains(index), wedge: { [self] engine in
                 let index = starts.withLock { count in
                     defer { count += 1 }
                     return count
@@ -321,6 +325,8 @@ final class FakeMic: Sendable {
 /// itself on a hardware change as AVAudioEngine does.
 final class FakeEngine: InputEngine, Sendable {
     static let frames = 1_600
+    /// Frames an overflowing engine writes past its 2 s ring: the ring refuses exactly these.
+    static let overflow = 1_600
 
     let device: AudioDeviceID = 1
     let segment = Segment(rate: Double(PCM16k.sampleRate))
@@ -333,16 +339,18 @@ final class FakeEngine: InputEngine, Sendable {
 
     private let diesAtStart: Bool
     private let mute: Bool
+    private let overflows: Bool
     /// Asked at each start: a semaphore to block on, as a stuck Core Audio call does.
     private let wedge: @Sendable (FakeEngine) -> DispatchSemaphore?
     private let running = Atomic(false)
     private let stamp = Mutex<HostTime?>(nil)
     private let stops: AsyncStream<Void>.Continuation
 
-    init(diesAtStart: Bool, mute: Bool = false,
+    init(diesAtStart: Bool, mute: Bool = false, overflows: Bool = false,
          wedge: @escaping @Sendable (FakeEngine) -> DispatchSemaphore? = { _ in nil }) {
         self.diesAtStart = diesAtStart
         self.mute = mute
+        self.overflows = overflows
         self.wedge = wedge
         (stopped, stops) = AsyncStream.makeStream()
     }
@@ -352,8 +360,14 @@ final class FakeEngine: InputEngine, Sendable {
         guard !diesAtStart else { return }
         running.store(true, ordering: .relaxed)
         guard !mute else { return }
-        let tone = (0..<Self.frames).map { Float(sin(2 * Double.pi * 440 * Double($0) / 16_000)) / 4 }
-        _ = tone.withUnsafeBufferPointer { segment.ring.write($0) }
+        let count = overflows ? 2 * PCM16k.sampleRate + Self.overflow : Self.frames
+        let tone = (0..<count).map { Float(sin(2 * Double.pi * 440 * Double($0) / 16_000)) / 4 }
+        if overflows {
+            // The mic's own write: what the ring has no room for is refused and counted.
+            tone.withUnsafeBufferPointer { segment.ring.writeOrDrop($0) }
+        } else {
+            _ = tone.withUnsafeBufferPointer { segment.ring.write($0) }
+        }
         stamp.withLock { $0 = .now() }
     }
 

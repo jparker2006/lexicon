@@ -9,8 +9,6 @@ public struct FixID: Hashable, Sendable, Codable {
 public enum FixKind: String, Sendable, Codable, CaseIterable {
     case respeak
     case hand
-    /// A close call Jev settled after insertion (#10). Behaves like a Re-speak fix Jake didn't have to make.
-    case auto
 }
 
 public enum FixSource: String, Sendable, Codable, CaseIterable {
@@ -19,7 +17,6 @@ public enum FixSource: String, Sendable, Codable, CaseIterable {
     case codexHook
     case justFixedShortcut
     case respeak
-    case closeCall
 }
 
 public enum FixVerdict: String, Sendable, Codable, CaseIterable {

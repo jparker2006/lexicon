@@ -119,6 +119,8 @@ public actor Conductor<Destination: TextDestination> {
             endCapture(id, .cancel)
         case .dictationDiscarded(let id):
             endCapture(id, .discard)
+        case .oneMinuteLeft(let id):
+            if id == capturingID { emit(.oneMinuteLeft(id)) }
         case .pasteLast:
             Task { await self.pasteLast() }
         case .justFixed:
@@ -157,8 +159,11 @@ public actor Conductor<Destination: TextDestination> {
 
     /// Quit: returns once no Dictation is recording or finishing, History and the
     /// audio files have everything, and the last paste gave Jake's clipboard back
-    /// (at most 2 s per paste, `TargetApp.finishClipboard`). A recording Dictation ends the normal way,
-    /// at its fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
+    /// (at most 2 s per paste, `TargetApp.finishClipboard`). A recording Dictation
+    /// ends the normal way, at its fn-up, its stop press or Esc, so an install never
+    /// cuts one (`scripts/lib/install-app.sh` waits). One whose fn-up was lost ends
+    /// at the cap (`KeyboardConfig.cap`), so this waits no longer than that and the
+    /// recognizer's 50 ms late-key grace, plus the clipboard's.
     /// Dictations past fn-up get `limit` to land: one stuck in the model must not
     /// hold Quit forever, and its row stays for launch recovery. Launch recovery
     /// and waiting Dictations are not waited for: their text is never typed, and

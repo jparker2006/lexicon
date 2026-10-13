@@ -9,13 +9,13 @@
 #   scripts/harness.sh hook status           one test hook, reply printed as JSON
 #   scripts/harness.sh hook dictate <wav> [--result-delay <ms>]   dictate a WAV through the live path
 #   scripts/harness.sh hook fn down|up... [--shift]   fn edges through the tap's own handler
-#   scripts/harness.sh hook key esc | sleep | mic zeros   Esc, the Mac sleeping, a silent mic next
+#   scripts/harness.sh hook key esc | sleep | mic zeros | audio drops   Esc, the Mac sleeping, a silent mic or lost audio next
 #   scripts/harness.sh hook indicator <state> [message]   show one pill state
 #   scripts/harness.sh hook sound <cue>      play one sound, reply with its latency
 #   scripts/harness.sh hook privacy on|off [--always-private <ids>]   Private mode and the always-private apps
 #   scripts/harness.sh pill [--shots <dir>]  every pill state checked, sounds timed
 #   scripts/harness.sh history [word]        History window: open time, copy, search, close
-#   scripts/harness.sh relaunch [--release] [--test-hooks [--dev-data]]   warm relaunch, launch timings
+#   scripts/harness.sh relaunch [--release] [--test-hooks [--dev-data] [--short-cap]]   warm relaunch, launch timings; --short-cap: a 20 s cap
 #   scripts/harness.sh wait-fn [--count n] [--timeout s]   Dictation outcomes from the log (real fn)
 #   scripts/harness.sh fixture <text>        a 16 kHz WAV of <text>; prints its path
 #   scripts/harness.sh stats <file>          n, p50, p95, max of a saved sample

@@ -63,8 +63,8 @@ extension Conductor {
         let signals = capture.signals
         Task { if await signals.firstAudio() != nil { self.emit(.listening(id)) } }
 
-        // Wait for fn-up (or Esc, a stray tap, sleep, end of file). The 20-minute cap and
-        // the 19-minute warning chime are M1's (#58), as a normal stop from FnGesture.
+        // Wait for fn-up (or the hands-free stop press, Esc, a stray tap, sleep, the cap,
+        // end of file). The cap is a normal stop from FnGesture.
         switch await nextEnd(ends, signals: signals) {
         case .discard:
             _ = await capture.stop(.immediately)
@@ -118,9 +118,12 @@ extension Conductor {
         return context
     }
 
-    /// The disk was nearly full or a write failed: the Dictation finishes from
-    /// RAM as normal, and Jake is told its audio was not saved (#4).
+    /// Audio lost on the way (DECISIONS item 84): the Dictation is heard and
+    /// typed from the rest, and Jake is told. The disk was nearly full or a write
+    /// failed: it finishes from RAM as normal, and Jake is told its audio was not
+    /// saved (#4). That comes last, so when both happen the pill keeps the disk line.
     func noteStorage(_ summary: AudioSummary) {
+        if summary.lost > .zero { emit(.notice(.audioLost)) }
         if summary.storage == .ramOnly { emit(.notice(.diskTrouble)) }
     }
 

@@ -220,4 +220,8 @@ struct FlushPolicy: Sendable {
     var chunk: Duration = .milliseconds(100)
     var fullSyncEvery: Duration = .seconds(1)
     var minimumFreeBytes: Int64 = 1_000_000_000
+    /// The converter call, so a test can make it fail.
+    var convert: Resampler.Convert = Resampler.realConvert
+    /// The file calls whose failures a test can force.
+    var files = FileCalls()
 }
