@@ -79,7 +79,7 @@ import Testing
     }
     // Wait until the quit sleeps on the clock or has already returned. Waiting for
     // the sleep alone would hang forever at a quit that returns at once.
-    while !finished, quitClock.sleepers != 1 { await Task.yield() }
+    while !finished, quitClock.sleepers != 1, !Task.isCancelled { await Task.yield() }
     #expect(!finished, "quit returned before its 2 s cap passed")
 
     await quitClock.advance(by: ClipboardKeeper.missedHold)
@@ -101,7 +101,7 @@ import Testing
         await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
         finished = true
     }
-    while !finished, quitClock.sleepers != 1 { await Task.yield() }
+    while !finished, quitClock.sleepers != 1, !Task.isCancelled { await Task.yield() }
     // The guard: the overwrite check below only means something while the wait is still running.
     #expect(!finished, "quit returned before its 2 s cap passed")
 
@@ -109,4 +109,22 @@ import Testing
     await quitClock.advance(by: ClipboardKeeper.missedHold)
     await quit.value
     #expect(board.showing == "copied later")
+}
+
+/// A paste made after quit began (a Dictation fn started meanwhile) has its own 2 s
+/// hold: the cap for the paste quit waited on never cuts it short.
+@MainActor @Test(.timeLimit(.minutes(1))) func aQuitCapNeverCutsTheHoldOfALaterPaste() async {
+    let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
+    board.jakeCopies("jake's text")
+    let keeper = keeper(board, clock)
+    _ = keeper.put("dictation")
+    _ = board.targetReads()
+
+    let quit = Task { await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock) }
+    while quitClock.sleepers != 1, !Task.isCancelled { await Task.yield() }
+    _ = keeper.put("later dictation")  // nobody has read it yet: it is in its hold
+
+    await quitClock.advance(by: ClipboardKeeper.missedHold)
+    await quit.value
+    #expect(board.showing == "later dictation", "the later paste's text is still up for a queued Cmd-V")
 }
