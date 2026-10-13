@@ -69,8 +69,8 @@
 //     search with no path from a folder above the private one, and anything a script opens itself are
 //     not seen. gh, echo, printf and git commit, tag and notes only name paths, so only gh's body files are judged;
 //   - a SecItem reader is seen only in the source swift, swiftc, python or osascript is given;
-//   - Codex's login file is seen in an interpreter's inline script only where it names auth.json with .codex, or
-//     from ~/.codex; a script file that opens it is not read;
+//   - Codex's login file is seen in a command's words (any command but echo, printf, git and gh) only where they name
+//     auth.json with .codex, or from ~/.codex; a script file that opens it is not read;
 //   - a recursive search is judged by its roots and one folder below them, and by the main checkout's .env;
 //   - deliberate hiding: a word built by a substitution (`$(echo icon)`), git and gh aliases, `security -i` on
 //     stdin, and a path inside a script or a heredoc body the guard doesn't parse. It is a seatbelt against honest
@@ -1066,17 +1066,17 @@ function envSearchRefusal(name, args, cwd) {
   return null;
 }
 
-// Interpreters, under any version suffix, and the runners that start them, whose inline script (-c, -e) may open
-// Codex's login file by a path it builds from parts. A name, not a list of words: commit messages and greps may
-// mention the file freely.
-const LOGIN_READERS = /^(?:python|pypy|ruby|perl|php|node|nodejs|bun|deno|swiftc?|osascript|g?awk|uvx?|npx|pipx|env)[\d.]*$/;
+// Commands that only carry text: a commit message, a PR body or an echo may name Codex's login file freely.
+const LOGIN_TEXT_ONLY = new Set([...NAMES_ONLY, 'git', 'gh']);
 
 /**
- * Why an interpreter is refused for opening Codex's login file, or null: its inline script names auth.json with .codex,
- * or names auth.json while the shell sits in ~/.codex. Script files are not read: the guard and its tests name the file.
+ * Why a command is refused for opening Codex's login file, or null: its words name auth.json together with .codex, or
+ * name auth.json while the shell sits in ~/.codex. Any command that runs code counts, not a list of interpreters, so a
+ * path an inline script builds from parts is seen under any interpreter, version or runner. Script files are not
+ * read: the guard and its tests name the file.
  */
 function codexLoginScriptRefusal(name, command, cwd) {
-  if (!LOGIN_READERS.test(name)) return null;
+  if (LOGIN_TEXT_ONLY.has(name)) return null;
   const source = text(command);
   if (!/auth\.json/i.test(source)) return null;
   const inCodexHome = typeof cwd === 'string' && reach(cwd, path.join(homedir(), '.codex')) === 'inside';
