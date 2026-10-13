@@ -91,3 +91,34 @@ func blankTextIsNeverPasted(_ text: String) async {
     }
     #expect(await lane.pasted.isEmpty)
 }
+
+/// Records the lane calls in order: ⌃⌘V's own keys must be up before its check and Cmd-V.
+private actor RecordingLane: PasteLane {
+    private(set) var calls: [String] = []
+    func keysReleased() { calls.append("keysReleased") }
+    func idle() { calls.append("idle") }
+    func paste(_ text: String, as kind: PasteKind) -> PasteAttempt {
+        calls.append("paste")
+        return .sent(ClipboardKeeper.PasteID(value: calls.count))
+    }
+}
+
+@Test func aPasteLastWaitsForJakesKeysToBeUpBeforeItsCheckAndCmdV() async {
+    // Jake's real ⌃⌘V: his fingers are still on ⌃, ⌘ and V when the paste is ready.
+    // A Cmd-V posted then is not read by the app; it waits for the keys first.
+    let lane = RecordingLane()
+    let field = FocusSnapshot(pid: 7, fieldFingerprint: "notes#1")
+    _ = await PasteOrder.run("pasted", as: .pasteLast, lane: lane) {
+        (InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false, sinceCapture: .zero), field)
+    }
+    #expect(await lane.calls == ["keysReleased", "idle", "paste"])
+}
+
+@Test func aDictationNeverWaitsForKeys() async {
+    let lane = RecordingLane()
+    let field = FocusSnapshot(pid: 7, fieldFingerprint: "notes#1")
+    _ = await PasteOrder.run("dictated", as: .dictation, lane: lane) {
+        (InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false, sinceCapture: .zero), field)
+    }
+    #expect(await lane.calls == ["idle", "paste"])
+}

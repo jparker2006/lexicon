@@ -10,6 +10,12 @@ protocol PasteLane: Sendable {
     func idle() async
     /// Puts the text up and sends Cmd-V now, without waiting.
     func paste(_ text: String, as kind: PasteKind) async -> PasteAttempt
+    /// Returns once no key Jake is holding could join or swallow Lexicon's Cmd-V.
+    func keysReleased() async
+}
+
+extension PasteLane {
+    func keysReleased() async {}  // scaffold (#62): filled test-first
 }
 
 enum PasteAttempt: Equatable {
