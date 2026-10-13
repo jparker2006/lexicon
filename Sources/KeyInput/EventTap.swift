@@ -177,38 +177,34 @@ final class EventTapThread: @unchecked Sendable {
 
     /// One timer slot: a new deadline replaces the old one, and a stale one that
     /// still fires is ignored by the recognizer (it judges by time).
-    private func schedule(_ wakeAt: HostTime, deferrable: Bool = true) {
+    private func schedule(_ wakeAt: HostTime) {
         guard let runLoop else { return }  // a tap never started (tests): fn-up still judges the hold
         if let deadline { CFRunLoopTimerInvalidate(deadline) }
         let (whole, atto) = wakeAt.duration(since: .now()).components
         let seconds = Double(whole) + Double(atto) / 1e18
         let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + max(seconds, 0), 0, 0, 0) {
-            [self] _ in deadlineFired(due: wakeAt, now: .now(), deferrable: deferrable)
+            [self] _ in deadlineFired(due: wakeAt, now: .now())
         }
         deadline = timer
         CFRunLoopAddTimer(runLoop, timer, .commonModes)
     }
 
     /// A deadline timer fired at `now`. Tap thread only; tests call it on a tap
-    /// never started. Feeds `.deadline(now)`, unless it is a first timer that fired
-    /// late: then it re-arms once (`deferral`), and the re-armed timer always feeds,
-    /// so a busy thread can't push a deadline (the cap) back forever.
-    func deadlineFired(due: HostTime, now: HostTime, deferrable: Bool = true) {
-        if deferrable, let later = Self.deferral(due: due, now: now) { schedule(later, deferrable: false) }
-        else { feed(.deadline(now)) }
+    /// never started. Feeds `.deadline(now)`, or re-arms when it fired late (`deferral`).
+    func deadlineFired(due: HostTime, now: HostTime) {
+        if let later = Self.deferral(due: due, now: now) { schedule(later) } else { feed(.deadline(now)) }
     }
 
-    /// A timer later than this was held up, and keys may be queued behind it.
-    static let lateTimer: Duration = .milliseconds(1)
-
-    /// When a first deadline timer fires, nil means feed `.deadline(now)`. A time
-    /// means it fired more than `lateTimer` late: the tap thread was held up, and
-    /// the run loop may run the timer before keys queued meanwhile, which are judged
-    /// by their own (older) stamps. Waiting one grace lets them go first, so a short
-    /// tap's fn-up or a double tap's second press is seen before the hold or the
-    /// window is judged.
+    /// When a deadline timer fires, nil means feed `.deadline(now)`. A time means it
+    /// fired more than `FnGesture.lateKeyGrace` late: the tap thread was stalled, and
+    /// the run loop may run the timer before keys queued in the stall, which are
+    /// judged by their own (older) stamps. Waiting one grace lets them go first, so
+    /// a double tap's second press or a short tap's fn-up is seen before the window
+    /// or the hold is judged. Up to one grace late feeds at once: the marks already
+    /// act one grace after their time, and that is the bound FnGesture promises.
+    /// A re-armed timer stalled again waits again.
     static func deferral(due: HostTime, now: HostTime) -> HostTime? {
-        now.duration(since: due) > lateTimer ? now.advanced(by: FnGesture.lateKeyGrace) : nil
+        now.duration(since: due) > FnGesture.lateKeyGrace ? now.advanced(by: FnGesture.lateKeyGrace) : nil
     }
 
     /// fn delivery latency through the tap: the key event's own time to now.
