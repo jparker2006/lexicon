@@ -40,8 +40,8 @@ private func unreasoned(_ actions: [RecoveryPlan.Action]) -> [RecoveryPlan.Actio
     #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, nil)) == [.markInterrupted(id)])
     #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .closed)) == [.markInterrupted(id)])
     #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .unreadable)) == [.markInterrupted(id)])
-    // A file that can't be opened for now leaves it as it was, as every row: the next launch marks it.
-    #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .unavailable)) == [])
+    // Its mark needs no read, so a file that can't be opened for now does not hold it back a launch.
+    #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .unavailable)) == [.markInterrupted(id)])
     // An open file still gets its size written, but the row is not transcribed.
     #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .open)) == [.finalize(id), .markInterrupted(id)])
 }
@@ -509,6 +509,18 @@ private func anEmptyCAFShapeIsReadAsEmpty(shape: EmptyCAFShape) async throws {
     #expect(CAFFile.state(of: stub) == .unreadable)
 }
 
+@Test func finalizeSaysWhatItDid() async throws {
+    // The close path logs this, so "repaired" is said only when a size was written.
+    let folder = try scratchDirectory()
+    let open = folder.appending(path: "open.caf")
+    try await writeOpenCAF(syntheticSamples(count: 16_000), at: open)
+    #expect(try CAFFile.finalize(open) == .wroteSize)
+    #expect(try CAFFile.finalize(open) == .wasWhole)
+    let empty = folder.appending(path: "empty.caf")
+    try await writeEmptyCAF(.dataChunkWithNoSample, at: empty)
+    #expect(try CAFFile.finalize(empty) == .noSample)
+}
+
 @Test(arguments: EmptyCAFShape.allCases)
 private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFShape) async throws {
     let url = try scratchDirectory().appending(path: "\(shape).caf")
@@ -554,7 +566,7 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     #expect(CAFFile.state(of: url) == .unreadable)
 }
 
-@Test func aClosedCAFThatCannotBeOpenedIsUnavailableAndAMissingFileIsUnreadable() async throws {
+@Test func aCAFRefusedForGoodOrMissingIsUnreadable() async throws {
     let folder = try scratchDirectory()
     let url = folder.appending(path: "closed.caf")
     try await writeClosedCAF(syntheticSamples(count: 16_000), at: url)
@@ -562,12 +574,24 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     // Restored even when an expectation fails, so no test leaves an unreadable temp file behind.
     defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path) }
 
-    // Mode zero: open fails with a permission error, not "no such file", so a later look may read it.
+    // Mode zero: a permission error, which no later launch gets past by itself.
     try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: path)
-    #expect(CAFFile.state(of: url) == .unavailable)
-
-    // No file at all is a different failure: nothing will make it appear, so it stays unreadable.
+    #expect(CAFFile.state(of: url) == .unreadable)
     #expect(CAFFile.state(of: folder.appending(path: "missing.caf")) == .unreadable)
+}
+
+@Test func aCAFThatCannotBeOpenedForWantOfDescriptorsIsUnavailable() async throws {
+    let url = try scratchDirectory().appending(path: "closed.caf")
+    try await writeClosedCAF(syntheticSamples(count: 16_000), at: url)
+    // In a child process, so using up its descriptors touches no other test.
+    await #expect(processExitsWith: .success) { [path = url.path(percentEncoded: false) as String] in
+        var limit = rlimit()
+        getrlimit(RLIMIT_NOFILE, &limit)
+        limit.rlim_cur = 64
+        setrlimit(RLIMIT_NOFILE, &limit)
+        while open("/dev/null", O_RDONLY) >= 0 {}  // every descriptor taken: the next open fails with EMFILE
+        exit(CAFFile.state(of: URL(filePath: path)) == .unavailable ? 0 : 1)
+    }
 }
 
 @Test func anEmptyAudioFileFromAnEarlierRunIsDeletedDiscardedOrFailedAndRecoveryChangesNothingAfter() async throws {
@@ -607,36 +631,25 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     #expect(try await snapshot(relaunched) == once)
 }
 
-@Test func aWaitingDictationWhoseFileCannotBeOpenedStaysWaitingAndIsReturnedOnceItOpens() async throws {
+@Test func aWaitingDictationWhoseFileIsRefusedForGoodFailsAsUnreadable() async throws {
+    // A permission error does not pass by itself, so the Dictation is settled, not held in flight
+    // on every launch, where History would refuse to delete it.
     let id = DictationID()
-    let samples = syntheticSamples(count: 16_000)
     let paths = try await earlierRun { store in
         store.record(.began(id, origin: .live, purpose: .type, at: earlier(), app: app))
         store.record(.audioEnded(id, audio))
         store.record(.waiting(id, reason: "offline"))
-        try await writeClosedCAF(samples, at: store.audioURL(for: id))
+        try await writeClosedCAF(syntheticSamples(count: 16_000), at: store.audioURL(for: id))
     }
     let path = HistoryStore.audioURL(for: id, in: paths).path(percentEncoded: false)
     // Restored even when an expectation fails, so no test leaves an unreadable temp file behind.
     defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path) }
-
-    // Mode zero: open fails with a permission error. The audio itself is whole.
     try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: path)
-    do {
-        let locked = try await relaunch(paths)
-        #expect(await locked.recover().isEmpty)  // nothing is handed back while the file cannot be opened
-        #expect(await locked.dictation(id)?.status == .waiting)  // and the row is not failed for it
-        await locked.flush()
-    }
 
-    // Readable again: the next launch returns the Dictation to be transcribed as a waiting one.
-    try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
-    let readable = try await relaunch(paths)
-    let unfinished = await readable.recover()
-    #expect(unfinished.map(\.id) == [id])
-    let item = try #require(unfinished.first)
-    #expect(item.wasWaiting)
-    #expect(try CAFFile.read(item.audio).samples == samples)
+    let relaunched = try await relaunch(paths)
+    #expect(await relaunched.recover().isEmpty)
+    #expect(await relaunched.dictation(id)?.status == .failed)
+    #expect(try await statusReason(relaunched, id) == "audio unreadable")
 }
 
 // MARK: This run's Dictations, and one store per folder (#182)

@@ -18,6 +18,16 @@ public enum CAFFile {
         case unreadable
     }
 
+    /// What `finalize` did.
+    public enum Finalized: Sendable, Hashable {
+        /// The real size is in the header now.
+        case wroteSize
+        /// The header already held it.
+        case wasWhole
+        /// No sample to keep: the file was left as it was.
+        case noSample
+    }
+
     public enum Failure: Error, Sendable, Hashable {
         case unreadable(URL)
         /// Not 16 kHz mono 16-bit PCM.
@@ -48,17 +58,18 @@ public enum CAFFile {
     /// read-write and closing it leaves the size at -1 (measured, macOS 26).
     /// Idempotent: finalizing a closed file is a no-op. An empty file is left as
     /// it is: there is no sample to keep, and recovery deletes it.
-    public static func finalize(_ url: URL) throws(Failure) {
+    @discardableResult
+    public static func finalize(_ url: URL) throws(Failure) -> Finalized {
         let descriptor = open(url.path, O_RDWR | O_CLOEXEC)
         guard descriptor >= 0 else { throw .unreadable(url) }
         defer { close(descriptor) }
         let chunk: (offset: off_t, size: Int64)
         switch layout(descriptor) {
         case .unavailable, .notCAF: throw .unreadable(url)
-        case .noSample: return
+        case .noSample: return .wroteSize
         case .data(let offset, let size): chunk = (offset, size)
         }
-        guard chunk.size == -1 else { return }
+        guard chunk.size == -1 else { return .wroteSize }
         var info = stat()
         guard fstat(descriptor, &info) == 0 else { throw .unreadable(url) }
         let payload = info.st_size - chunk.offset - 12  // edit count (4 bytes) + audio
@@ -67,6 +78,7 @@ public enum CAFFile {
         let bigEndian = withUnsafeBytes(of: UInt64(size).bigEndian, Array.init)
         guard pwrite(descriptor, bigEndian, 8, chunk.offset + 4) == 8 else { throw .unreadable(url) }
         CAFWriter.fullSync(descriptor)
+        return .wroteSize
     }
 
     private enum Layout {
