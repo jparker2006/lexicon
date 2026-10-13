@@ -30,7 +30,7 @@ public final class Database {
     public init(at url: URL, mode: Mode, migrations: [String]) throws(DatabaseError) {
         self.url = url
         self.mode = mode
-        try open()
+        try open(creating: mode == .readWrite)
         guard mode == .readWrite else { return }
 
         // Read the version under the write lock, so two processes opening one file migrate once.
@@ -70,7 +70,7 @@ public final class Database {
         _ = try run(sql, bindings)
     }
 
-    /// Prepared statements are cached by SQL text for the life of the connection.
+    /// Prepared statements are cached by SQL text until the connection closes or reopens.
     public func query(_ sql: String, _ bindings: [SQLValue] = []) throws(DatabaseError) -> [Row] {
         try run(sql, bindings)
     }
@@ -141,12 +141,9 @@ public final class Database {
     }
 
     /// Opens `url` and sets the pragmas. Never migrates: a reopen keeps the schema it finds.
-    private func open() throws(DatabaseError) {
+    private func open(creating: Bool) throws(DatabaseError) {
         var handle: OpaquePointer?
-        let flags = switch mode {
-        case .readWrite: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
-        case .readOnly: SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX
-        }
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX | (creating ? SQLITE_OPEN_CREATE : 0)
         let opened = sqlite3_open_v2(url.path(percentEncoded: false), &handle, flags, nil)
         self.handle = handle
         guard opened == SQLITE_OK else { throw error(opened) }
@@ -161,11 +158,12 @@ public final class Database {
     }
 
     /// A fresh connection to the same file. On failure the handle stays nil, and the
-    /// next statement tries again.
+    /// next statement tries again. It never creates the file: an empty one in place of a
+    /// missing database would have no tables, and every write would fail until relaunch.
     private func reopen() throws(DatabaseError) {
         close()
         do throws(DatabaseError) {
-            try open()
+            try open(creating: false)
         } catch {
             close()
             throw error
