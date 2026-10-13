@@ -179,6 +179,12 @@ struct PasteboardContents: Sendable, Equatable {
 
     func isReleased(_ id: PasteID) -> Bool { current?.id != id || current?.lastRead != nil }
 
+    /// Quit: returns once no paste holds the pasteboard (its restore ran), or once
+    /// `cap` has passed on `clock`, and then Jake's clipboard is back either way.
+    func finishForQuit<C: Clock<Duration>>(within cap: Duration, clock: C) async {
+        // scaffold (#132): filled test-first
+    }
+
     private func didRead(_ id: PasteID) {
         guard current?.id == id else { return }  // withdrawn or superseded
         current?.lastRead = now()
