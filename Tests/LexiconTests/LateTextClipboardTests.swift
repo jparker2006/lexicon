@@ -54,6 +54,7 @@ import LexiconDomain
 /// The app's lane without the key: `paste` puts the text up through the keeper and
 /// counts the Cmd-V it would send. `idle` returns at once, as when nothing is unread.
 @MainActor private final class KeeperLane: PasteLane {
+    func keysReleased() {}
     private let keeper: ClipboardKeeper
     private(set) var cmdVs = 0
 

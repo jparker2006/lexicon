@@ -14,10 +14,6 @@ protocol PasteLane: Sendable {
     func keysReleased() async
 }
 
-extension PasteLane {
-    func keysReleased() async {}  // scaffold (#62): filled test-first
-}
-
 enum PasteAttempt: Equatable {
     case sent(ClipboardKeeper.PasteID)
     /// Another paste went first since `idle`: wait and check again.
@@ -45,6 +41,9 @@ enum PasteOrder {
                           check: () -> (InsertDecision, Seen)) async -> Result<Seen> {
         // Cmd-V of nothing still replaces whatever Jake has selected.
         guard !text.isBlank else { return .failed }
+        // ⌃⌘V: Jake's fingers are still on the keys he pressed. A Cmd-V posted while they
+        // are down never reaches the app as Cmd-V, so the paste waits for them first.
+        if kind == .pasteLast { await lane.keysReleased() }
         while true {
             await lane.idle()
             let checkedAt = ContinuousClock.now

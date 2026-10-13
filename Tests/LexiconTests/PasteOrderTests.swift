@@ -4,6 +4,7 @@ import LexiconDomain
 
 /// A lane whose earlier paste stays unread until the test says so.
 private actor SlowLane: PasteLane {
+    func keysReleased() {}
     private var unread = true
     private var waiting: [CheckedContinuation<Void, Never>] = []
     private(set) var pasted: [String] = []
@@ -64,6 +65,7 @@ private actor Desk {
 
 /// A lane on a Mac where Jake denied Lexicon "Paste from Other Apps".
 private struct DeniedLane: PasteLane {
+    func keysReleased() {}
     func idle() async {}
     func paste(_ text: String, as kind: PasteKind) -> PasteAttempt { .denied }
 }

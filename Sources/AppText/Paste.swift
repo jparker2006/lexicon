@@ -1,4 +1,6 @@
 import AppKit
+import os
+import KeyInput
 
 /// The one owner of the general pasteboard during a paste: puts the text up,
 /// sends Cmd-V, and runs the restore timer. Main actor, because pasteboard
@@ -37,6 +39,32 @@ import AppKit
     }
 
     func receipt(_ id: ClipboardKeeper.PasteID) async -> Bool { await keeper.receipt(id) }
+
+    /// The longest a ⌃⌘V paste waits for Jake to let go of the keys.
+    static let keysWait: Duration = .seconds(1)
+    private let log = Logger(subsystem: "Lexicon", category: "paste")
+
+    /// ⌃⌘V: returns once no modifier and neither the hotkey's key nor the layout's "v"
+    /// is down (polled every 10 ms), or after `keysWait`, and logs how long it took.
+    func keysReleased() async {
+        let start = ContinuousClock.now
+        while Self.keysDown(), ContinuousClock.now - start < Self.keysWait {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let waited = (ContinuousClock.now - start) / .milliseconds(1)
+        if Self.keysDown() {
+            log.notice("paste-last: keys still down after \(Int(waited), privacy: .public) ms; pasting anyway")
+        } else {
+            log.notice("paste-last: keys up after \(Int(waited), privacy: .public) ms")
+        }
+    }
+
+    private static func keysDown() -> Bool {
+        let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+        if !CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty { return true }
+        let keys = [CGKeyCode(KeyboardConfig().pasteLast.keyCode), PasteKey.current()].compactMap { $0 }
+        return keys.contains { CGEventSource.keyState(.hidSystemState, key: $0) }
+    }
 
     private func schedule() {
         timer?.cancel()
