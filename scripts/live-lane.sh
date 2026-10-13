@@ -28,8 +28,8 @@
 #   scripts/live-lane.sh daily quit|reopen  quit Jake's daily Lexicon from its menu in an open sitting, then reopen it
 #   scripts/live-lane.sh park | restore     move Lexicon Dev's data aside for a fresh start, and back
 #
-# The lock names the holder's session process: the nearest Claude Code process
-# above the caller, else the caller's shell. Not the shell alone, because each
+# The lock names the holder's session process: the nearest Claude Code or Codex
+# CLI process above the caller, else the caller's shell. Not the shell alone, because each
 # agent Bash call is a fresh shell that ends with the call. A command holds the
 # lane when that process is one of its ancestors. The process's start time is
 # kept too, so a lock whose process died, or whose PID now belongs to another
@@ -96,7 +96,7 @@ holds() {
 session() {
     p=$PPID
     while [ -n "$p" ] && [ "$p" -gt 1 ]; do
-        case "$(ps -o comm= -p "$p")" in claude | */claude) echo "$p"; return ;; esac
+        case "$(ps -o comm= -p "$p")" in claude | */claude | codex | */codex) echo "$p"; return ;; esac
         p=$(parent "$p")
     done
     echo "$PPID"

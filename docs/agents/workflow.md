@@ -49,7 +49,7 @@ Deliberately not used:
 
 ## Topology
 
-Separate Claude Code sessions, each in its own worktree on Jake's Mac, one per role or ticket ([worktrees](https://code.claude.com/docs/en/common-workflows)), with subagents and Workflows inside a session ([subagents](https://code.claude.com/docs/en/sub-agents)). No [agent teams](https://code.claude.com/docs/en/agent-teams): the Desktop app doesn't run them. No cloud builders. Everything runs on Jake's plan, so the levers that remain are the plan-covered ones: fan-out within the caps, Monitor waits on a script instead of polling (`scripts/watch-events.sh`, `scripts/wait-ci.mjs`), one model and effort per wave so sibling sessions share the prompt cache, and evals at fast pace (`scripts/eval-quick.sh`). Fast mode and usage credits are out (AGENTS.md, Ask Jake first).
+Separate Claude Code sessions, each in its own worktree on Jake's Mac, one per role or ticket ([worktrees](https://code.claude.com/docs/en/common-workflows)), with subagents and Workflows inside a session ([subagents](https://code.claude.com/docs/en/sub-agents)). No [agent teams](https://code.claude.com/docs/en/agent-teams): the Desktop app doesn't run them. No cloud builders. When Claude's plan runs out, the same roles run on Codex CLI sessions for a day or two, as [codex.md](codex.md) says. Everything runs on Jake's plan, so the levers that remain are the plan-covered ones: fan-out within the caps, Monitor waits on a script instead of polling (`scripts/watch-events.sh`, `scripts/wait-ci.mjs`), one model and effort per wave so sibling sessions share the prompt cache, and evals at fast pace (`scripts/eval-quick.sh`). Fast mode and usage credits are out (AGENTS.md, Ask Jake first).
 
 ## Concurrency
 

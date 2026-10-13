@@ -18,6 +18,10 @@
       "Read(~/Library/Application Support/Lexicon/**)",
       "Read(//**/.env)",
       "Read(//**/.env.*)",
+      "Edit(~/Library/Application Support/Lexicon)",
+      "Edit(~/Library/Application Support/Lexicon/**)",
+      "Edit(//**/.env)",
+      "Edit(//**/.env.*)",
       "Bash(*Application Support/Lexicon/*)",
       "Bash(*Application Support/Lexicon)",
       "Bash(*Application\\ Support/Lexicon/*)",
@@ -34,7 +38,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Read|Grep|Glob",
+        "matcher": "Bash|Read|Grep|Glob|Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
