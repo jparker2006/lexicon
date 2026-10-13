@@ -182,7 +182,7 @@ final class CaptureCore: @unchecked Sendable {
         timer = nil
         source.stop()  // whatever it writes after this is never read
         drain()
-        resampler.flush(emit: emit)
+        lostEarlier += resampler.flush(emit: emit)
         feedContinuation.finish()
         problems.finish()
         signals.first.settle(nil)
@@ -219,8 +219,7 @@ final class CaptureCore: @unchecked Sendable {
             // A valid hardware rate always has a converter; without one the new ring is never read.
             guard take == nil, let converter = Self.resampler(for: next.rate, policy: policy) else { return }
             drain()
-            resampler.flush(emit: emit)
-            lostEarlier += segment.droppedAudio
+            lostEarlier += resampler.flush(emit: emit) + segment.droppedAudio
             resampler = converter
             segment = next
             problems.yield(.deviceChanged)

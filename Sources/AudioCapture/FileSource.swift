@@ -74,7 +74,8 @@ final class FileSource: CaptureSource, @unchecked Sendable {
         while !stopping {
             guard (try? file.read(into: buffer, frameCount: Self.blockFrames)) != nil else {
                 // The input broke off: the capture ends here, and the rest is counted as lost.
-                unread.store(max(0, Int(file.length) - framesRead), ordering: .relaxed)
+                // A read that throws because a stop came mid-read is a stop, not a loss.
+                if !stopping { unread.store(max(0, Int(file.length) - framesRead), ordering: .relaxed) }
                 return nil
             }
             let count = Int(buffer.frameLength)

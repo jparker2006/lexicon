@@ -26,7 +26,12 @@ final class Resampler: @unchecked Sendable {
     private let converter: AVAudioConverter
     private let convertCall: Convert
     private let output: AVAudioPCMBuffer
+    private let ratio: Double
     private var supplied = false
+    /// Input frames converted, and 16 kHz frames emitted, since the converter
+    /// last started fresh: what it still holds is the difference.
+    private var consumed = 0
+    private var emitted = 0
 
     /// `maxFrames` is the largest block `convert` will be handed.
     init?(inputRate: Double, maxFrames: AVAudioFrameCount, convert: @escaping Convert = realConvert) {
@@ -41,6 +46,7 @@ final class Resampler: @unchecked Sendable {
         guard let output = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: AVAudioFrameCount((Double(maxFrames) * ratio).rounded(.up)) + 512)
         else { return nil }
         self.converter = converter
+        self.ratio = ratio
         convertCall = convert
         self.input = input
         self.output = output
@@ -48,25 +54,38 @@ final class Resampler: @unchecked Sendable {
 
     /// Converts the `input` buffer's frames. `emit` gets whatever 16 kHz samples
     /// came out (the converter may hold a few back until the next block).
-    /// Returns the audio lost: the whole block when the converter fails on it,
-    /// since its output is undefined and the next drain overwrites `input`.
+    /// Returns the audio lost: when the converter fails, the whole block (its
+    /// output is undefined, and the next drain overwrites `input`) plus what it held.
     @discardableResult
     func convert(emit: (UnsafeBufferPointer<Int16>) -> Void) -> Duration {
         supplied = false
         let frames = Int(input.frameLength)
-        return run(endOfStream: false, emit: emit) ? .zero : Duration(frames: frames, rate: input.format.sampleRate)
+        guard run(endOfStream: false, emit: emit) else {
+            return failed() + Duration(frames: frames, rate: input.format.sampleRate)
+        }
+        consumed += frames
+        return .zero
     }
 
-    /// End of the stream: emits the samples the converter still holds. A failure
-    /// here loses only those few ms, which nothing can count, so it is logged.
-    func flush(emit: (UnsafeBufferPointer<Int16>) -> Void) {
-        supplied = true
-        run(endOfStream: true, emit: emit)
-    }
-
-    /// False when the converter answered `.error`. Its output is not emitted, and
-    /// it is not reset: a reset would drop the samples it holds from earlier blocks.
+    /// End of the stream: emits the samples the converter still holds. Returns
+    /// those samples as lost when the converter fails on them.
     @discardableResult
+    func flush(emit: (UnsafeBufferPointer<Int16>) -> Void) -> Duration {
+        supplied = true
+        return run(endOfStream: true, emit: emit) ? .zero : failed()
+    }
+
+    /// After an error: what the converter held is gone. Reset, so a converter
+    /// left in its error state can't lose every later block too.
+    private func failed() -> Duration {
+        let held = max(0, Int((Double(consumed) * ratio).rounded()) - emitted)
+        converter.reset()
+        consumed = 0
+        emitted = 0
+        return Duration(frames: held, rate: Double(PCM16k.sampleRate))
+    }
+
+    /// False when the converter answered `.error`; its output is not emitted.
     private func run(endOfStream: Bool, emit: (UnsafeBufferPointer<Int16>) -> Void) -> Bool {
         while true {
             output.frameLength = 0
@@ -80,11 +99,15 @@ final class Resampler: @unchecked Sendable {
                 return self.input
             }
             if status == .error {
-                Self.log.error("converter failed\(endOfStream ? " at the end" : ""): \(error?.localizedDescription ?? "no error", privacy: .public)")
+                // The code only: the error's text stays out of the log (review.md, private data).
+                Self.log.error("converter failed\(endOfStream ? " at the end" : "", privacy: .public): \(error?.code ?? 0, privacy: .public)")
                 return false
             }
             let produced = Int(output.frameLength)
-            if produced > 0 { emit(UnsafeBufferPointer(start: output.int16ChannelData![0], count: produced)) }
+            if produced > 0 {
+                emitted += produced
+                emit(UnsafeBufferPointer(start: output.int16ChannelData![0], count: produced))
+            }
             // .haveData means the output filled up and more may be waiting.
             guard status == .haveData, produced > 0 else { return true }
         }

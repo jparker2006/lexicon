@@ -2,6 +2,13 @@ import AudioToolbox
 import Foundation
 import LexiconDomain
 
+/// The file calls whose results the capture acts on, so a test can make them fail.
+struct FileCalls: Sendable {
+    var close: @Sendable (AudioFileID) -> OSStatus = { AudioFileClose($0) }
+    /// F_FULLFSYNC, or fsync where unsupported: true when either worked.
+    var sync: @Sendable (Int32) -> Bool = { CAFWriter.fullSync($0) }
+}
+
 /// One open `audio/<id>.caf` of 16 kHz mono Int16, written with
 /// `AudioFileWritePackets` (synchronous: each call reaches the kernel, so an app
 /// crash keeps every packet written). The data chunk's size stays -1 until
@@ -11,13 +18,6 @@ import LexiconDomain
 /// recordings), FLAC through ExtAudioFile (unreadable after a crash), and WAV
 /// through AudioFile (reads back empty after a crash).
 ///
-/// The file calls whose results the capture acts on, so a test can make them fail.
-struct FileCalls: Sendable {
-    var close: @Sendable (AudioFileID) -> OSStatus = { AudioFileClose($0) }
-    /// F_FULLFSYNC, or fsync where unsupported: true when either worked.
-    var sync: @Sendable (Int32) -> Bool = { CAFWriter.fullSync($0) }
-}
-
 /// Confined to the writer queue.
 final class CAFWriter {
     struct Failure: Error {

@@ -134,6 +134,62 @@ private func framesAt16kHz(_ duration: Duration) -> Int {
     Int((duration / .seconds(1) * 16_000).rounded())
 }
 
+// The end-of-stream flush is a converter call too, and at 48 kHz the converter
+// holds a few ms back until it. (A CONFIRMED review finding on #179.)
+
+@Test(.timeLimit(.minutes(1))) func aConverterErrorOnTheFlushCountsTheAudioItHeldAsLost() async throws {
+    let dir = try scratchDirectory()
+    let source = syntheticSamples(count: 48_000)  // 1 s at 48 kHz: resampled, so the converter holds samples
+    let wav = try writeWAV(source, rate: 48_000, in: dir)
+    let fake = FlushFailure()
+
+    let recorder = Recorder(policy: fake.policy)
+    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible),
+                                           writingTo: dir.appending(path: "audio/flushed.caf"))
+    let ended = try #require(await capture.signals.inputEnded())
+    let take = await capture.stop(.released(at: ended))
+    await recorder.settle()
+
+    #expect(fake.failedAtTheEnd)
+    #expect(take.summary.lost > .zero)
+    // What came out plus what was counted is the whole second, give or take the converter's rounding.
+    #expect(abs(take.clip.samples.count + framesAt16kHz(take.summary.lost) - 16_000) <= 1)
+}
+
+/// Answers .error on the call whose input block says the stream has ended, as a converter does when it
+/// fails while flushing. Every other call is the real converter.
+private final class FlushFailure: Sendable {
+    private let endAsked = Mutex(false)
+    private let failed = Mutex(false)
+
+    var failedAtTheEnd: Bool { failed.withLock { $0 } }
+
+    var policy: FlushPolicy {
+        var policy = FlushPolicy()
+        policy.convert = { [self] converter, output, input in
+            self.convert(converter, output, input)
+        }
+        return policy
+    }
+
+    private func convert(_ converter: AVAudioConverter, _ output: AVAudioPCMBuffer,
+                         _ input: @escaping AVAudioConverterInputBlock) -> (AVAudioConverterOutputStatus, NSError?) {
+        let counting: AVAudioConverterInputBlock = { [self] packets, status in
+            let block = input(packets, status)
+            if status.pointee == .endOfStream { self.endAsked.withLock { $0 = true } }
+            return block
+        }
+        let answer = Resampler.realConvert(converter, output, counting)
+        let atEnd = endAsked.withLock { asked -> Bool in
+            defer { asked = false }
+            return asked
+        }
+        guard atEnd else { return answer }
+        failed.withLock { $0 = true }
+        return (.error, nil)
+    }
+}
+
 // #179, criteria 2 and 3: a file's failed sync or close is reported, not swallowed.
 // Driven through the real Recorder on file input, with the FileCalls seam forced
 // to fail. No mic, keys or network, and no clock: each test waits on a signal.
