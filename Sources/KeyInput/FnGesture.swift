@@ -49,8 +49,8 @@ enum KeyInput: Sendable, Hashable {
 /// as a hold even if the 0.30 s deadline has not been delivered yet. Keys and
 /// timers share the tap thread, so a key stamped before a mark can be handled
 /// after the mark's timer. Every mark (the double-tap window, the warning and
-/// the cap) acts `lateKeyGrace` after its time (5 ms more when its timer runs
-/// late, `EventTapThread.fired`), and the cap's stop is still
+/// the cap) acts `lateKeyGrace` after its time (`EventTapThread.queuedKeysWait`
+/// after a late timer fires, `EventTapThread.fired`), and the cap's stop is still
 /// stamped at the cap. A key is judged against a mark by its own stamp, so it
 /// gets one outcome whatever the handling order, unless it is handled more
 /// than `lateKeyGrace` after its stamp. Past that
@@ -101,9 +101,9 @@ struct FnGesture: Sendable {
     /// handled later than this, behind a stalled tap thread, comes after the mark.
     /// The cost: a dropped tap, the warning sound and the cap's stop each come 50 ms
     /// after their mark, and Quit waits at most this long past the cap for a lost
-    /// fn-up (Jake took that trade, DECISIONS.md item 79). After a tap-thread stall,
-    /// a late timer waits 5 ms more for the keys queued behind it (item 90,
-    /// `EventTapThread.fired`).
+    /// fn-up (Jake took that trade, DECISIONS.md item 79). A timer that fires late
+    /// waits `EventTapThread.queuedKeysWait` more for keys queued behind a stall
+    /// (item 90, `EventTapThread.fired`).
     static let lateKeyGrace: Duration = .milliseconds(50)
 
     init(_ config: KeyboardConfig) {

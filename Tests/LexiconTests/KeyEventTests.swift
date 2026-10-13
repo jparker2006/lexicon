@@ -377,11 +377,10 @@ private func stops(_ id: DictationID, in commands: [KeyCommand]) -> Bool {
     #expect(asked.withLock { $0 } == 0)
 }
 
-// When a deadline timer fires late, the tap thread was stalled, and keys queued behind the stall may
-// still be unhandled. A timer later than `EventTapThread.lateTimer` waits `queuedKeysWait` once, so
-// keys already queued are read first, before a window, a hold or a mark is judged on a late `now`.
-// The wait happens once per timer, so a handler that keeps freezing cannot hold a mark off past one
-// wait; a key still queued after it is judged late.
+// When a deadline timer fires late, the tap thread may have been stalled, with keys queued behind
+// it. A timer later than `EventTapThread.lateTimer` waits `queuedKeysWait` once, so keys already
+// queued are read first, before a window, a hold or a mark is judged on a late `now`. The wait
+// happens once per timer, so a handler that keeps freezing cannot hold a mark off past one wait.
 
 @Test func aTimerOnTimeIsNotLate() {
     let due = fixedNow
