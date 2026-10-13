@@ -1,6 +1,7 @@
 import CoreGraphics
 import Testing
 import LexiconDomain
+@testable import AppText
 @testable import KeyInput
 
 // ⌃⌘V on the tap thread's queue (#62). The tap is never started, so `perform`
@@ -16,8 +17,7 @@ private struct NeverStartedTap {
 
     init() {
         let (stream, continuation) = AsyncStream<KeyCommand>.makeStream()
-        tap = EventTapThread(gesture: FnGesture(holdThreshold: .milliseconds(300)), input: InputClock(),
-                             continuation: continuation)
+        tap = Keyboard.tap(KeyboardConfig(), input: InputClock(), continuation: continuation)
         keyboard = Keyboard(tap: tap, commands: stream)
         self.continuation = continuation
     }
@@ -73,4 +73,39 @@ func aControlCommandVKeyDownSeenByTheTapNeverPastes() async {
     rig.tap.perform(.otherKey(at(0)))
     let commands = await rig.commands()
     #expect(!commands.contains(.pasteLast), "the tap sees ⌃⌘V as an ordinary key; only the hotkey pastes")
+}
+
+/// A key-down from the keyboard (pid 0), as the tap's own handler sees it.
+private func keyDown(_ keyCode: CGKeyCode, _ flags: CGEventFlags) -> CGEvent {
+    let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true)!
+    event.flags = flags
+    event.timestamp = 0
+    event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+    return event
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aPasteLastPressNeverHoldsItsOwnPaste() {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    // The hotkey's command goes first and the paste takes its mark; only then does the
+    // tap's copy of the same ⌃⌘V key-down arrive. It is not typing since the press.
+    tap.send(.pasteLast)
+    let mark = input.mark()
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    let field = FocusSnapshot(pid: 42, fieldFingerprint: "field")
+    let decision = InsertGuard.decide(target: field, focusNow: field, inputSinceMark: input.hasInput(since: mark),
+                                      sinceCapture: .zero)
+    #expect(decision == .insert, "the press that asked for the paste is not typing since the press")
+}
+
+@Test(.timeLimit(.minutes(1)), arguments: [CGEventFlags(), [.maskCommand], [.maskControl, .maskCommand, .maskShift]])
+func everyOtherVKeyDownStillCountsAsTyping(_ flags: CGEventFlags) {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    let mark = input.mark()
+    _ = tap.handle(.keyDown, keyDown(9, flags))
+    #expect(input.hasInput(since: mark), "v, ⌘V and ⌃⇧⌘V are Jake typing; only ⌃⌘V itself is not")
 }

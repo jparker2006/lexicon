@@ -155,3 +155,17 @@ func newestTextSaysTheNewestIsOnItsWayWhileItIsWaitingOrTranscribing(newest: Dic
     await waitingOnly.flush()
     #expect(await waitingOnly.newestText() == nil)
 }
+
+// Paste-last skips a newest row whose text the paste path calls blank (`Character.isWhitespace`),
+// so Unicode whitespace never hides an older Dictation from ⌃⌘V.
+@Test(.timeLimit(.minutes(1)), arguments: ["\u{00A0}", "\u{2028}", "\u{3000}", "\u{0B}"])
+func newestTextSkipsANewerRowWhoseTextIsOnlyWhitespace(blank: String) async throws {
+    let store = try makeStore()
+    let older = try seed(store, at: 10, .notInserted, "Older text.")
+    try seed(store, at: 20, .notInserted, blank)
+    await store.flush()
+
+    let found = try #require(await store.newestText())
+    #expect(found.id == older)
+    #expect(found.text == "Older text.")
+}
