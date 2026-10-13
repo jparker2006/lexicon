@@ -65,7 +65,7 @@ enum Fillers {
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some", "many",
         "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice", "thrice", "double",
-        "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "teens", "lots", "more", "less",
+        "triple", "quarter", "quarters", "halves", "once", "teens", "lots", "more", "less",
         "between", "upwards", "somewhere",
     ]
 
@@ -260,9 +260,9 @@ enum Fillers {
     }
 
     /// Cardinals, ordinals and their plurals, fractions and multiples: "ten", "third",
-    /// "thirds", "twenties", "tenths", "hundredth", "twofold", "quadruple".
+    /// "thirds", "twenties", "tenths", "hundredth", "twofold", "quadruple", "dozens".
     static func isNumberWord(_ word: String) -> Bool {
-        if word.hasSuffix("uple") { return true }
+        if word.hasSuffix("uple") || word == "dozen" || word == "dozens" { return true }
         var stems = [word]
         if word.hasSuffix("fold") { stems.append(String(word.dropLast(4))) }
         if word.hasSuffix("ies") { stems.append(word.dropLast(3) + "y") }
@@ -328,7 +328,9 @@ enum Fillers {
         if let previous, token.isWord, !meantDoubles.contains(word),
            !previous.text.last!.isPunctuation, previous.word == word,
            previous.text == token.text || previous.opensSentence,
-           !token.isNumber, !token.isZero, !token.isEmphasis,
+           // A number word repeats on purpose ("a dozen dozen"); an ordinal ("first first") stutters.
+           !token.isNumber, !(isNumberWord(word) && StructuralCheck.ordinals[word] == nil),
+           !token.isZero, !token.isEmphasis,
            // "mm mm hmm": the second "mm" opens an interjection.
            !(token.trailing.isEmpty && next.map { interjections.contains(word + " " + $0.word) } == true) {
             return 1
