@@ -158,6 +158,60 @@ func aSecondDeviceChangeRightAfterARebuildStillKeepsRecording() async throws {
     #expect(take.summary.gaps.count == 1)
 }
 
+// MARK: Stuck starts
+
+@Test(.timeLimit(.minutes(1)))
+func aStuckStartReleasesTheLastEngineAndTheNextStartRecords() async throws {
+    // A capture still running (as in its tail) holds the mic when fn-down comes again. That
+    // start's device lookup sticks, so it times out and its lane is abandoned:
+    // only a release before the lookup stops the engine the held capture holds.
+    let clock = TestClock()
+    let mic = FakeMic(wedgesAtFind: [1], clock: clock)
+    defer { mic.unwedge() }  // never leave a thread blocked, even when an expectation fails
+    let recorder = Recorder(hardware: mic.hardware)
+    var engines = mic.made.makeAsyncIterator()
+    var wedgedLookups = mic.findWedged.makeAsyncIterator()
+
+    let held = try await recorder.start(.microphone(deviceUID: nil),
+                                        writingTo: try scratchDirectory().appending(path: "held.caf"))
+    let heldEngine = try #require(await engines.next())
+
+    let stuckFile = try scratchDirectory().appending(path: "stuck.caf")
+    // Its error, if it fails: the start's own answer, typed.
+    let stuck = Task { () async -> RecorderError? in
+        do throws(RecorderError) {
+            let capture = try await recorder.start(.microphone(deviceUID: nil), writingTo: stuckFile)
+            _ = await capture.stop(.immediately)
+            return nil
+        } catch {
+            return error
+        }
+    }
+    try #require(await wedgedLookups.next())
+    // The held engine is off the device before the lookup that sticks: nothing else can stop it.
+    #expect(!heldEngine.isRunning)
+
+    await clock.waitForSleepers(1)
+    await clock.advance(by: Microphone.startLimit)
+    guard case .startTimedOut? = await stuck.value else {
+        Issue.record("the stuck start should time out")
+        return
+    }
+
+    // The next fn-down gets a fresh lane and records, though the stuck lookup never returned.
+    let fresh = try await recorder.start(.microphone(deviceUID: nil),
+                                         writingTo: try scratchDirectory().appending(path: "fresh.caf"))
+    var feed = fresh.feed.makeAsyncIterator()
+    var heard = 0
+    while heard < FakeEngine.frames { heard += try #require(await feed.next()).samples.count }
+    let take = await fresh.stop(.immediately)
+    await recorder.settle()
+    #expect(take.clip.samples.count == FakeEngine.frames)
+
+    _ = await held.stop(.immediately)
+    #expect(!heldEngine.isRunning)
+}
+
 /// Mic hardware with no mic: every engine is a `FakeEngine` the test drives.
 final class FakeMic: Sendable {
     let made: AsyncStream<FakeEngine>
@@ -165,6 +219,8 @@ final class FakeMic: Sendable {
     private let count = Mutex(0)
     /// Engines, by the order they are made, that stop themselves the moment they start.
     private let diesAtStart: Set<Int>
+    /// Engines, by the order they are made, that run but deliver no frames, as a stalled device does.
+    private let mute: Set<Int>
     /// Starts, by the order they happen, that block their thread until `unwedge`.
     private let wedgesAtStart: Set<Int>
     /// Each engine whose start is blocked, as it blocks.
@@ -172,6 +228,13 @@ final class FakeMic: Sendable {
     private let wedging: AsyncStream<FakeEngine>.Continuation
     private let starts = Mutex(0)
     private let gate = DispatchSemaphore(value: 0)
+    /// Device lookups, by the order they happen, that block their thread until `unwedge`.
+    private let wedgesAtFind: Set<Int>
+    /// Each device lookup that is blocked, as it blocks.
+    let findWedged: AsyncStream<Void>
+    private let findWedging: AsyncStream<Void>.Continuation
+    private let finds = Mutex(0)
+    private let findGate = DispatchSemaphore(value: 0)
     private let unwedged = Atomic(false)
     private let clock: any Clock<Duration>
     /// macOS reports the permission undetermined, before and after the Allow prompt is answered.
@@ -180,23 +243,36 @@ final class FakeMic: Sendable {
         (false, 0, []))
 
     /// The default clock never moves: no start hits the limit because the machine is slow.
-    init(diesAtStart: Set<Int> = [], wedgesAtStart: Set<Int> = [], clock: any Clock<Duration> = TestClock(),
-         askingPermission: Bool = false) {
+    init(diesAtStart: Set<Int> = [], mute: Set<Int> = [], wedgesAtStart: Set<Int> = [], wedgesAtFind: Set<Int> = [],
+         clock: any Clock<Duration> = TestClock(), askingPermission: Bool = false) {
         (made, continuation) = AsyncStream.makeStream()
         (wedged, wedging) = AsyncStream.makeStream()
+        (findWedged, findWedging) = AsyncStream.makeStream()
         self.diesAtStart = diesAtStart
+        self.mute = mute
         self.wedgesAtStart = wedgesAtStart
+        self.wedgesAtFind = wedgesAtFind
         self.clock = clock
         undetermined = askingPermission
     }
 
     var hardware: MicHardware {
-        MicHardware(findDevice: { _ in 1 }, makeEngine: { [self] _ throws(RecorderError) in
+        MicHardware(findDevice: { [self] _ in
+            let index = finds.withLock { count in
+                defer { count += 1 }
+                return count
+            }
+            if wedgesAtFind.contains(index) {
+                findWedging.yield(())
+                findGate.wait()  // timing-ok: the stuck Core Audio call under test; the test releases it
+            }
+            return 1
+        }, makeEngine: { [self] _ throws(RecorderError) in
             let index = count.withLock { count in
                 defer { count += 1 }
                 return count
             }
-            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index), wedge: { [self] engine in
+            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index), mute: mute.contains(index), wedge: { [self] engine in
                 let index = starts.withLock { count in
                     defer { count += 1 }
                     return count
@@ -233,10 +309,11 @@ final class FakeMic: Sendable {
         for asked in waiting { asked.resume() }
     }
 
-    /// Lets every wedged start return, as a Core Audio call that was stuck finally does. Once.
+    /// Lets every wedged start and device lookup return, as a Core Audio call that was stuck finally does. Once.
     func unwedge() {
         guard !unwedged.exchange(true, ordering: .relaxed) else { return }
         for _ in wedgesAtStart { gate.signal() }
+        for _ in wedgesAtFind { findGate.signal() }
     }
 }
 
@@ -255,14 +332,17 @@ final class FakeEngine: InputEngine, Sendable {
     let stopped: AsyncStream<Void>
 
     private let diesAtStart: Bool
+    private let mute: Bool
     /// Asked at each start: a semaphore to block on, as a stuck Core Audio call does.
     private let wedge: @Sendable (FakeEngine) -> DispatchSemaphore?
     private let running = Atomic(false)
     private let stamp = Mutex<HostTime?>(nil)
     private let stops: AsyncStream<Void>.Continuation
 
-    init(diesAtStart: Bool, wedge: @escaping @Sendable (FakeEngine) -> DispatchSemaphore? = { _ in nil }) {
+    init(diesAtStart: Bool, mute: Bool = false,
+         wedge: @escaping @Sendable (FakeEngine) -> DispatchSemaphore? = { _ in nil }) {
         self.diesAtStart = diesAtStart
+        self.mute = mute
         self.wedge = wedge
         (stopped, stops) = AsyncStream.makeStream()
     }
@@ -271,6 +351,7 @@ final class FakeEngine: InputEngine, Sendable {
         wedge(self)?.wait()  // timing-ok: the stuck Core Audio call under test; the test releases it
         guard !diesAtStart else { return }
         running.store(true, ordering: .relaxed)
+        guard !mute else { return }
         let tone = (0..<Self.frames).map { Float(sin(2 * Double.pi * 440 * Double($0) / 16_000)) / 4 }
         _ = tone.withUnsafeBufferPointer { segment.ring.write($0) }
         stamp.withLock { $0 = .now() }

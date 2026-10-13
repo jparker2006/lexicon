@@ -560,21 +560,21 @@ test('refuses recursively deleting the guard hook itself', () => {
 });
 
 /** A throwaway home with empty stand-ins for the private folder and Lexicon Dev's, so no test touches Jake's real data. */
-function fakeHome(t, { sitting = false } = {}) {
+function fakeHome(t, { sitting = false, handsFree = false } = {}) {
   const home = mkdtempSync(path.join(tmpdir(), 'guard-home-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   mkdirSync(path.join(home, 'Library/Application Support/Lexicon'), { recursive: true });
   mkdirSync(path.join(home, 'Library/Application Support/Lexicon Dev'), { recursive: true });
-  if (sitting) writeSitting(home, process.pid);
+  if (sitting) writeSitting(home, process.pid, { handsFree });
   return home;
 }
 
-/** The sitting marker scripts/live-lane.sh writes, naming `pid` as the holder's session and its start time. */
-function writeSitting(home, pid) {
+/** The sitting marker scripts/live-lane.sh writes, naming `pid` as the holder's session and its start time. A hands-free sitting adds `hands-free=yes`. */
+function writeSitting(home, pid, { handsFree = false } = {}) {
   const started = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC' } }).stdout.trim();
   writeFileSync(
     path.join(home, 'Library/Application Support/Lexicon Dev/live-sitting.open'),
-    `opened=2026-10-11T22:54:00Z\nholder=Live checks\npid=${pid}\npid-started=${started || 'Thu Jan  1 00:00:00 1970'}\n`,
+    `opened=2026-10-11T22:54:00Z\nholder=Live checks\npid=${pid}\npid-started=${started || 'Thu Jan  1 00:00:00 1970'}\n${handsFree ? 'hands-free=yes\n' : ''}`,
   );
 }
 
@@ -834,6 +834,13 @@ test('refuses a reset of Lexicon Dev only outside a sitting, naming its cost', (
   const gone = spawnSync('sh', ['-c', 'echo $$'], { encoding: 'utf8' }).stdout.trim();
   writeSitting(crashed, Number(gone));
   assertRefused(command, /sitting/, { home: crashed });
+});
+
+test('refuses a reset of Lexicon Dev during a hands-free sitting, and allows it in a plain one', (t) => {
+  // A hands-free sitting has no checklist step to carry Jake's Allow click after the reset, so the reset waits for a sitting that does.
+  const command = 'tccutil reset Microphone dev.jparker.lexicon.dev';
+  assertRefused(command, /hands-free/, { home: fakeHome(t, { sitting: true, handsFree: true }) });
+  assertAllowed(command, { home: fakeHome(t, { sitting: true }) });
 });
 
 test('refuses a PR body with a closing keyword before an issue number, or an em dash', (t) => {

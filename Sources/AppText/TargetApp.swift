@@ -198,7 +198,7 @@ public actor TargetApp: TextDestination {
         fatalError("not implemented")
     }
 
-    /// Replaces a span of a recent Dictation's text (Re-speak fix, close calls).
+    /// Replaces a span of a recent Dictation's text (Re-speak fix).
     /// Picks the strategy for the target app; refuses (false) when it cannot be
     /// done safely (Claude Code collapsed paste, Ghostty after typing).
     public func replace(_ span: TextSpan, in id: DictationID, with text: String) async -> Bool {

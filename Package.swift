@@ -126,7 +126,7 @@ let package = Package(
             ]
         ),
 
-        // Hand fix detection, Re-speak fix, close calls, Rule proposals.
+        // Hand fix detection, Re-speak fix, Rule proposals.
         .target(
             name: "Fixes",
             dependencies: [
@@ -243,6 +243,7 @@ let package = Package(
                 "AppText",
                 "AudioCapture",
                 "Cleanup",
+                "Fixes",
                 "History",
                 "Jev",
                 "KeyInput",
@@ -256,13 +257,15 @@ let package = Package(
             ]
         ),
 
-        // lexicon-eval's own tests.
+        // lexicon-eval's own tests, and the local model's pure parts (LocalParakeet's window
+        // merge): lexicon-eval links FluidAudio already, so LexiconTests stays without it.
         .testTarget(
             name: "LexiconEvalTests",
             dependencies: [
                 "LexiconCore",
                 "LexiconDomain",
                 "LexiconEval",
+                "LocalParakeet",
                 "TestSupport",
                 "WordStore",
             ]
