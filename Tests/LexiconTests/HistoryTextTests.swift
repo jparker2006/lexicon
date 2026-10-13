@@ -80,13 +80,37 @@ func playAndRetryAreGreyedOutOnceTheAudioAgedOut(status: DictationStatus) {
                             error: nil)
     let lost = AttemptRecord(model: .cloud(.museVoice), result: .timedOut, text: nil, latency: nil, error: "no final")
     let detail = HistoryDetail(row: row, versions: TextVersions(model: "ship the use auth hook", cleaned: "Ship the use auth hook."),
-                               attempts: [won, lost])
+                               attempts: [won, lost], earlier: [])
 
     let sections = HistoryText.versions(detail)
     #expect(sections.map(\.label) == ["Model: Parakeet (on this Mac)", "Cleaned (cleanup rejected)", "Final",
                                       "Meta Muse Voice: timed out"])
     #expect(sections.map(\.text) == ["ship the use auth hook", "Ship the use auth hook.", "Ship the useAuth hook.", "no final"])
 
-    let failed = HistoryDetail(row: row, versions: nil, attempts: [])
+    let failed = HistoryDetail(row: row, versions: nil, attempts: [], earlier: [])
     #expect(HistoryText.versions(failed).isEmpty)
+}
+
+@Test func eachEarlierVersionSaysWhenItWasReplacedAndWhoHeardItThenWhatAFixWasMadeOn() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+    calendar.locale = Locale(identifier: "en_US")
+    let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 11, hour: 15)))
+    let row = HistoryRow(id: DictationID(), startedAt: now, finalText: "Third.", status: .inserted, cleanup: nil,
+                         model: parakeet, lag: nil, pinned: false, hasAudio: true)
+    let fixed = EarlierVersion(cleaned: "Ship it to super base.", final: "Ship it to Supabase.", model: .cloud(.museVoice),
+                               replacedAt: now.addingTimeInterval(-60))
+    let plain = EarlierVersion(cleaned: "First.", final: "First.", model: parakeet,
+                               replacedAt: now.addingTimeInterval(-86_400))
+    let detail = HistoryDetail(row: row, versions: TextVersions(model: "third", cleaned: "Third."), attempts: [],
+                               earlier: [fixed, plain])
+
+    let sections = Array(HistoryText.versions(detail, now: now, calendar: calendar).dropFirst(3))
+    #expect(sections.map(\.text) == ["Ship it to Supabase.", "Ship it to super base.", "First."])
+    let labels = sections.map(\.label)
+    try #require(labels.count == 3)
+    // The clock's spacing before AM/PM is the locale's, so only the parts Lexicon writes are pinned.
+    #expect(labels[0].hasPrefix("Replaced Today at 2:59") && labels[0].hasSuffix(" · Meta Muse Voice"))
+    #expect(labels[1].hasPrefix("Replaced Today at 2:59") && labels[1].hasSuffix(" · Meta Muse Voice, before Fixes"))
+    #expect(labels[2].hasPrefix("Replaced Yesterday at 3:00") && labels[2].hasSuffix(" · Parakeet (on this Mac)"))
 }

@@ -154,6 +154,159 @@ func onlyAccidentalRepeatsGo(_ c: Case) {
     #expect(clean(c.raw) == c.gold)
 }
 
+/// A repeated number word is a number, not a stutter: a year, a time, a digit run.
+let numberRepeatCases: [Case] = [
+    Case("We shipped it in twenty twenty six.", "We shipped it in twenty twenty six."),
+    Case("Twenty twenty six was the year.", "Twenty twenty six was the year."),
+    Case("Meet me at ten ten tomorrow.", "Meet me at ten ten tomorrow."),
+    Case("Call five five five, one two one two.", "Call five five five, one two one two."),
+    Case("Um, five five five is the number I need.", "Five five five is the number I need."),
+    Case("Use the PIN one one one one.", "Use the PIN one one one one."),
+    Case("Dial five oh oh oh now.", "Dial five oh oh oh now."),
+    Case("Dial 5 oh oh 7 now.", "Dial 5 oh oh 7 now."),
+    Case("Dial five, oh oh now.", "Dial five, oh oh now."),
+    Case("Oh oh seven, that's the one.", "Oh oh seven, that's the one."),
+    Case("The build is version two two and it's stable.", "The build is version two two and it's stable."),
+    Case("It's a hundred hundred pixels wide.", "It's a hundred hundred pixels wide."),
+    Case("It holds a trillion trillion bytes.", "It holds a trillion trillion bytes."),
+    Case("It holds a sextillion sextillion atoms.", "It holds a sextillion sextillion atoms."),
+    Case("We need a dozen dozen eggs.", "We need a dozen dozen eggs."),
+    Case("Fix the first first step.", "Fix the first step."),
+    Case("Wait a couple couple minutes.", "Wait a couple minutes."),
+    Case("Wait two seconds seconds now.", "Wait two seconds now."),
+    Case("We shipped in twenty uh twenty six.", "We shipped in twenty twenty six."),
+    Case("We're on twenty-two twenty-two now.", "We're on twenty-two twenty-two now."),
+    Case("Get me a double double with no sugar.", "Get me a double double with no sugar."),
+    // Real stutters still go, next to numbers too.
+    Case("I I think the the build is fine.", "I think the build is fine."),
+    Case("It takes the the twenty minutes we budgeted.", "It takes the twenty minutes we budgeted."),
+    Case("Meet me at at ten tomorrow.", "Meet me at ten tomorrow."),
+    Case("Our team won won the hackathon.", "Our team won the hackathon."),
+    Case("Ship it to to five users first.", "Ship it to five users first."),
+    Case("Ha ha, very funny.", "Ha ha, very funny."),
+    Case("Oh oh, five servers are down.", "Oh oh, five servers are down."),
+    // Three or more in a row is emphasis, not a stutter.
+    Case("Go go go, ship it.", "Go go go, ship it."),
+    Case("Go go, go, ship it.", "Go go, go, ship it."),
+    Case("It's a no no no from me.", "It's a no no no from me."),
+    // A function word said three times is still a stutter.
+    Case("The the the build failed.", "The build failed."),
+    Case("I I I think it works.", "I think it works."),
+]
+
+@Test(arguments: numberRepeatCases)
+func repeatedNumberWordsStay(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// "like" stays before an estimate or a name, whatever the number word or name.
+let likeKeptCases: [Case] = [
+    Case("It takes, like, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("We shipped in, like, seventeen days.", "We shipped in, like, seventeen days."),
+    Case("It's, like, twenty-five percent slower.", "It's, like, twenty-five percent slower."),
+    Case("It takes, um, like, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("It takes, like, um, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("It takes, like, you know, eighty minutes.", "It takes, like, eighty minutes."),
+    Case("It's, like, um, uh, Postgres.", "It's, like, Postgres."),
+    Case("It takes, like, between ten and twenty minutes.", "It takes, like, between ten and twenty minutes."),
+    Case("We finished, like, third in the race.", "We finished, like, third in the race."),
+    Case("It's off by, like, tenths of a second.", "It's off by, like, tenths of a second."),
+    Case("It's from, like, the twenties.", "It's from, like, the twenties."),
+    Case("It runs in, like, twenties of milliseconds.", "It runs in, like, twenties of milliseconds."),
+    Case("It's, like, a hundredth of the size.", "It's, like, a hundredth of the size."),
+    Case("It's, like, hundredth in line.", "It's, like, hundredth in line."),
+    Case("It's off by, like, quarters of an inch.", "It's off by, like, quarters of an inch."),
+    Case("We split it, like, halves and thirds.", "We split it, like, halves and thirds."),
+    Case("It's, like, trillionths of a cent.", "It's, like, trillionths of a cent."),
+    Case("It's, like, quadrillions of rows.", "It's, like, quadrillions of rows."),
+    Case("It's, like, quintillions of rows.", "It's, like, quintillions of rows."),
+    Case("It's, like, sextillions of atoms.", "It's, like, sextillions of atoms."),
+    Case("It's, like, twofold faster.", "It's, like, twofold faster."),
+    Case("It's, like, quadruple the size.", "It's, like, quadruple the size."),
+    Case("It, like, tripled overnight.", "It, like, tripled overnight."),
+    Case("The bill, like, halved.", "The bill, like, halved."),
+    Case("It failed, like, thrice today.", "It failed, like, thrice today."),
+    Case("Send them to, like, ER, then home.", "Send them to, like, ER, then home."),
+    Case("They're, like, teens.", "They're, like, teens."),
+    // A number in the next sentence does not make a filler "like" a hedge.
+    Case("It is, like, um. Postgres is fine.", "It is. Postgres is fine."),
+    Case("It holds, like, dozen jobs at most.", "It holds, like, dozen jobs at most."),
+    Case("We run, like, thirty-something servers.", "We run, like, thirty-something servers."),
+    Case("It took, like, two-ish hours.", "It took, like, two-ish hours."),
+    Case("It sends, like, thousands of requests.", "It sends, like, thousands of requests."),
+    Case("It's, like, more than we need.", "It's, like, more than we need."),
+    Case("It's, like, Postgres but faster.", "It's, like, Postgres but faster."),
+    Case("Our CI runs on, like, GitHub Actions now.", "Our CI runs on, like, GitHub Actions now."),
+    Case("The reply is, like, JSON with a nested array.", "The reply is, like, JSON with a nested array."),
+    Case("Call, like, useAuth in the hook.", "Call, like, useAuth in the hook."),
+    // "I" is capitalized but names nobody: the filler still goes.
+    Case("Like, I think it's done.", "I think it's done."),
+    Case("We could, like, I'd say, cache it.", "We could, I'd say, cache it."),
+    Case("It's, like, not eighty minutes.", "It's not eighty minutes."),
+]
+
+@Test(arguments: likeKeptCases)
+func likeStaysBeforeAnyNumberOrName(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+@Test func likeStaysBeforeALowercaseTerm() {
+    let rules = RuleSet([Rule(heard: "gee stack", written: "gstack")])
+    #expect(TextPass.run("We use, like, gstack for that.", rules: rules) == "We use, like, gstack for that.")
+}
+
+/// "uh huh" and "mm-hmm" are answers, not fillers.
+let interjectionCases: [Case] = [
+    Case("Uh huh, that's right.", "Uh huh, that's right."),
+    // Hyphenated forms are one word: guards for the two-word rule.
+    Case("Uh-huh, that's right.", "Uh-huh, that's right."),
+    Case("Mm-hmm, ship it.", "Mm-hmm, ship it."),
+    Case("Mm hmm, let's do that.", "Mm hmm, let's do that."),
+    Case("Mm mm hmm, that works.", "Mm mm hmm, that works."),
+    Case("Uh oh, the build failed again.", "Uh oh, the build failed again."),
+    Case("The leak was, ah ha, in the cache.", "The leak was, ah ha, in the cache."),
+    Case("Got it, uh huh.", "Got it, uh huh."),
+    Case("Mm hm, go on.", "Mm hm, go on."),
+    Case("Ah hah, found it.", "Ah hah, found it."),
+    Case("Uh huh, um, let's go.", "Uh huh, let's go."),
+    // With a comma between, the filler is a filler.
+    Case("Uh, huh? I missed that.", "Huh? I missed that."),
+    Case("Uh, oh no, the build broke.", "Oh no, the build broke."),
+    // An "oh" inside a number is a zero, so the "uh" before it is a filler.
+    Case("Call room five uh oh seven.", "Call room five oh seven."),
+    Case("Call room 5 uh oh 7.", "Call room 5 oh 7."),
+    Case("Call five, uh oh seven.", "Call five, oh seven."),
+    Case("Uh oh, five servers are down.", "Uh oh, five servers are down."),
+    Case("Uh oh five servers are down.", "Uh oh five servers are down."),
+]
+
+@Test(arguments: interjectionCases)
+func interjectionsAreWords(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// An abbreviation's period ends a sentence only when the speech model capitalized what follows.
+let abbreviationCases: [Case] = [
+    Case("Add docs, tests, etc. um, then ship it.", "Add docs, tests, etc. then ship it."),
+    Case("Add docs, tests, etc. Um, ship it.", "Add docs, tests, etc. Ship it."),
+    Case("It's due at 5 p.m. Um, ship it.", "It's due at 5 p.m. Ship it."),
+    Case("It's due at 5 p.m. The the plan is set.", "It's due at 5 p.m. The plan is set."),
+    Case("The paper by Chen et al. uh, is the one we want.", "The paper by Chen et al. is the one we want."),
+    Case("Wait ten min. um, then rerun the suite.", "Wait ten min. then rerun the suite."),
+    Case("The lag is around 20 ms. Um, it's fine.", "The lag is around 20 ms. It's fine."),
+    Case("Ask Dr. Smith about it.", "Ask Dr. Smith about it."),
+    Case("We pay Acme Corp. um, every month.", "We pay Acme Corp. every month."),
+    Case("It's on Main Ave. uh, by the park.", "It's on Main Ave. by the park."),
+    // The comma after an abbreviation's own period stays.
+    Case("We ship at five p.m., so we're late.", "We ship at five p.m., so we're late."),
+    Case("Add docs, tests, etc., um, and ship it.", "Add docs, tests, etc., and ship it."),
+]
+
+@Test(arguments: abbreviationCases)
+func abbreviationsEndASentenceOnlyBeforeACapital(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
 let hardFillerCases: [Case] = [
     Case("Um.", ""),
     Case("Add a test, um.", "Add a test."),

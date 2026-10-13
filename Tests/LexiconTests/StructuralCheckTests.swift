@@ -87,6 +87,11 @@ let neverAnswers: [Pair] = [
          "- Lexicon is a Mac dictation app.\n- It learns your words.\n- It is written in Swift."),
 ]
 
+@Test func trillionsAgreeWithTheirDigits() {
+    #expect(StructuralCheck.check("It costs 2,000,000,000,000.", ruled: "It costs two trillion.", terms: []) == nil)
+    #expect(StructuralCheck.check("It costs 2,000,000,000.", ruled: "It costs two trillion.", terms: []) == .numberMismatch)
+}
+
 @Test func spokenNumbersAndDigitsMustAgree() {
     #expect(check("Ship it on the 5th", ruled: "ship it on the fourth") == .numberMismatch)
     #expect(check("Ship it on the 4th", ruled: "ship it on the fourth") == nil)
