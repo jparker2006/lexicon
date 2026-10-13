@@ -40,6 +40,8 @@ private func unreasoned(_ actions: [RecoveryPlan.Action]) -> [RecoveryPlan.Actio
     #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, nil)) == [.markInterrupted(id)])
     #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .closed)) == [.markInterrupted(id)])
     #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .unreadable)) == [.markInterrupted(id)])
+    // Its mark needs no audio, so a file that can't be opened for now does not hold it back a launch.
+    #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .unavailable)) == [.markInterrupted(id)])
     // An open file still gets its size written, but the row is not transcribed.
     #expect(RecoveryPlan.plan(rows: [ready], files: fileMap(id, .open)) == [.finalize(id), .markInterrupted(id)])
 }

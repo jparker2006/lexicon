@@ -197,7 +197,7 @@ enum RecoveryPlan {
             }
             // An open that failed for now (EMFILE, EIO) says nothing about the audio:
             // the next launch looks again, rather than fail a Dictation that may be whole.
-            if file == .unavailable, !row.status.isTerminal { continue }
+            if file == .unavailable, [.recording, .transcribing, .waiting].contains(row.status) { continue }
             if row.audio == .expired, file != nil {
                 actions.append(.dropExpiredAudio(row.id))
             } else if file == .open {
