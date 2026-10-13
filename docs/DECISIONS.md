@@ -222,6 +222,11 @@ Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 14:54:52Z):
 
 Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 15:15:50Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127137470)). Decided: the 19-minute warning acts 50 ms after its mark too.
 
+**90. After a stall, a late fn timer waits 5 ms for the keys queued behind it.**
+> Jake: decide whether Lexicon should wait 5 ms before acting on a late fn timer, so keys that piled up while its fn handler was briefly frozen (a stall) are read first. I recommend yes. [...] The cost: after a stall, the double-tap drop, the 19-minute warning and the 20-minute stop come up to 5 ms later than item 79's 50 ms after their mark, on top of the stall itself. It waits at most once per timer, so a handler that keeps freezing can't hold off the 20-minute stop. ([#199](https://github.com/jparker2006/lexicon/issues/199#issuecomment-6144055463))
+
+Jake, asked by the orchestrator in its session, 2026-10-13 (recorded 13:21:05Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/199#issuecomment-6146509035)). Decided: an fn deadline timer that fires more than 1 ms late re-arms once, 5 ms out, and the re-armed timer always acts. Outside a stall timers fire on time and nothing waits. `EventTapThread.fired`.
+
 **80. Esc is taken from the confirmed Dictation, not from fn-down.**
 > Jake: decide whether Esc reaches your app during the first third of a second of holding fn (PR #262, DECISIONS item 75, Proposed). #58 says Lexicon takes Esc "at recording start", the moment fn goes down. The build takes it only once the hold is confirmed (0.3 s) or on the second tap of a double tap. [...] Keep the build (recommended): Esc pressed in that first 0.3 s, or between the two taps, does its normal job in the front app (closes a dialog, cancels in the terminal). The half-started take is dropped: nothing typed, nothing in History. A stray fn tap or the Globe key never eats your Esc. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6128270245))
 

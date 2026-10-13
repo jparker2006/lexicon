@@ -167,7 +167,7 @@ final class EventTapThread: @unchecked Sendable {
             continuation.yield(command)
             log.notice("fn gesture: \(String(describing: command), privacy: .public)")
         }
-        if let wakeAt = output.wakeAt { schedule(wakeAt) }
+        if let wakeAt = output.wakeAt { schedule(Deadline(due: wakeAt, rearmed: false)) }
         if gesture.takesEscape != tookEscape {
             tookEscape = gesture.takesEscape
             takeEscape(tookEscape)
@@ -176,34 +176,46 @@ final class EventTapThread: @unchecked Sendable {
 
     /// One timer slot: a new deadline replaces the old one, and a stale one that
     /// still fires is ignored by the recognizer (it judges by time).
-    private func schedule(_ wakeAt: HostTime) {
+    private func schedule(_ next: Deadline) {
         guard let runLoop else { return }  // a tap never started (tests): fn-up still judges the hold
         if let deadline { CFRunLoopTimerInvalidate(deadline) }
-        let (whole, atto) = wakeAt.duration(since: .now()).components
+        let (whole, atto) = next.due.duration(since: .now()).components
         let seconds = Double(whole) + Double(atto) / 1e18
         let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + max(seconds, 0), 0, 0, 0) {
-            [self] _ in deadlineFired(due: wakeAt, now: .now())
+            [self] _ in deadlineFired(next, now: .now())
         }
         deadline = timer
         CFRunLoopAddTimer(runLoop, timer, .commonModes)
     }
 
-    /// A deadline timer fired at `now`. Tap thread only; tests call it on a tap
-    /// never started. Feeds `.deadline(now)`, or re-arms when it fired late (`deferral`).
-    func deadlineFired(due: HostTime, now: HostTime) {
-        if let later = Self.deferral(due: due, now: now) { schedule(later) } else { feed(.deadline(now)) }
+    /// A pending deadline: when it is due, and whether it is already the one
+    /// re-arm a late timer gets.
+    struct Deadline: Equatable {
+        let due: HostTime
+        let rearmed: Bool
     }
 
-    /// When a deadline timer fires, nil means feed `.deadline(now)`. A time means it
-    /// fired more than `FnGesture.lateKeyGrace` late: the tap thread was stalled, and
-    /// the run loop may run the timer before keys queued in the stall, which are
-    /// judged by their own (older) stamps. Waiting one grace lets them go first, so
-    /// a double tap's second press or a short tap's fn-up is seen before the window
-    /// or the hold is judged. Up to one grace late feeds at once: the marks already
-    /// act one grace after their time, and that is the bound FnGesture promises.
-    /// A re-armed timer stalled again waits again.
-    static func deferral(due: HostTime, now: HostTime) -> HostTime? {
-        now.duration(since: due) > FnGesture.lateKeyGrace ? now.advanced(by: FnGesture.lateKeyGrace) : nil
+    /// A timer later than this was held up by a stall, and keys may be queued behind it.
+    static let lateTimer: Duration = .milliseconds(1)
+    /// How long a late timer waits for those keys (Jake, DECISIONS.md item 90).
+    static let queuedKeysWait: Duration = .milliseconds(5)
+
+    /// A deadline timer fired at `now`. Tap thread only; tests call it on a tap
+    /// never started, where a re-arm does nothing.
+    func deadlineFired(_ deadline: Deadline, now: HostTime) {
+        if let next = Self.fired(deadline, now: now) { schedule(next) } else { feed(.deadline(now)) }
+    }
+
+    /// nil means feed `.deadline(now)`; otherwise schedule the returned re-arm.
+    /// Fn edges keep their own stamps, so after a stall the run loop may run a
+    /// timer before the keys queued during it, and judge a hold or a window on a
+    /// late `now` before seeing a short tap's fn-up, a chord's key or a double tap's
+    /// second press. A timer over `lateTimer` late waits `queuedKeysWait` so those
+    /// go first. Only once: the re-arm always feeds, so a handler that keeps
+    /// freezing can't hold off the cap.
+    static func fired(_ deadline: Deadline, now: HostTime) -> Deadline? {
+        guard !deadline.rearmed, now.duration(since: deadline.due) > lateTimer else { return nil }
+        return Deadline(due: now.advanced(by: queuedKeysWait), rearmed: true)
     }
 
     /// fn delivery latency through the tap: the key event's own time to now.

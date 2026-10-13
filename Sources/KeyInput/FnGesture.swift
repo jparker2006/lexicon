@@ -101,8 +101,8 @@ struct FnGesture: Sendable {
     /// The cost: a dropped tap, the warning sound and the cap's stop each come 50 ms
     /// after their mark, and Quit waits at most this long past the cap for a lost
     /// fn-up (Jake took that trade, DECISIONS.md item 79). After a tap-thread stall,
-    /// a timer over this late waits one more grace for the keys queued behind it
-    /// (`EventTapThread.deferral`).
+    /// a late timer waits 5 ms more for the keys queued behind it (item 90,
+    /// `EventTapThread.fired`).
     static let lateKeyGrace: Duration = .milliseconds(50)
 
     init(_ config: KeyboardConfig) {
