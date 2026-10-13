@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import History
 import LexiconDomain
@@ -48,13 +47,16 @@ private func dictationRetriedTwice(fixed: Bool = false) async throws -> HistoryD
     return try #require(HistoryReader(paths: paths).detail(id))
 }
 
-/// Laid out and drawn with no window, as the sheet would be before it is shown.
+/// The versions view laid out and drawn with no window, as the sheet would be before
+/// it is shown: the size of what was drawn. AppKit stays out of the test target's
+/// imports, so the view is only reached through LexiconUI.
 @MainActor
-private func rendered(_ view: NSView) throws -> NSBitmapImageRep {
+private func drawnSize(_ sections: [(label: String, text: String)]) throws -> CGSize {
+    let view = VersionsView.make(sections)
     view.layoutSubtreeIfNeeded()
     let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
     view.cacheDisplay(in: view.bounds, to: rep)
-    return rep
+    return rep.size
 }
 
 @MainActor
@@ -91,8 +93,7 @@ private func rendered(_ view: NSView) throws -> NSBitmapImageRep {
 @MainActor
 @Test func showVersionsDrawsEachEarlierVersionUnderItsLabelInOrder() async throws {
     let sections = HistoryText.versions(try await dictationRetriedTwice())
-    let scroll = try #require(VersionsView.make(sections) as? NSScrollView)
-    let body = try #require(scroll.documentView as? NSTextView).string
+    let body = try #require(VersionsView.make(sections).value(forKeyPath: "documentView.string") as? String)
 
     let replaced = sections.filter { $0.label.contains("Replaced") }
     try #require(replaced.count == 2)
@@ -106,9 +107,9 @@ private func rendered(_ view: NSView) throws -> NSBitmapImageRep {
 @MainActor
 @Test func theEarlierVersionsTakeRoomInTheRenderedVersionsView() async throws {
     let sections = HistoryText.versions(try await dictationRetriedTwice())
-    let withEarlier = try rendered(VersionsView.make(sections))
-    let currentOnly = try rendered(VersionsView.make(Array(sections.prefix(3))))
+    let withEarlier = try drawnSize(sections)
+    let currentOnly = try drawnSize(Array(sections.prefix(3)))
 
-    #expect(withEarlier.size.width > 0 && withEarlier.size.height > 0)
-    #expect(withEarlier.size.height > currentOnly.size.height)
+    #expect(withEarlier.width > 0 && withEarlier.height > 0)
+    #expect(withEarlier.height > currentOnly.height)
 }
