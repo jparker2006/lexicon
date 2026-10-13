@@ -379,19 +379,21 @@ private func stops(_ id: DictationID, in commands: [KeyCommand]) -> Bool {
 
 // When a deadline timer fires late, the tap thread was stalled, and keys queued behind the
 // stall may still be unhandled. The deferral rule lets those keys go first, so the recognizer
-// never judges a window or a hold on a late `now` before it has seen them.
+// never judges a window or a hold on a late `now` before it has seen them. A timer up to one
+// grace late feeds at once: each mark acts one grace after its own time, so its timer is already
+// due one grace after the mark, and deferring it again would make the mark act two graces late.
 
 @Test func deferralIsNilForATimerOnTime() {
     let due = at(300)
     #expect(EventTapThread.deferral(due: due, now: due) == nil)
 }
 
-@Test func aTimerLateByLateTimerFeedsAndOneJustPastDefers() {
-    // lateTimer is how late a timer may fire and still be on time. Later than that, the tap thread
-    // was busy, and keys queued in that stall may be unhandled, so the timer waits one grace.
+@Test func aTimerUpToOneGraceLateFeedsAndOneJustPastDefers() {
+    // One grace is how late a key may be handled and still count against a mark, so a timer that
+    // fires that late feeds at once. Just past it, keys may be queued behind the stall: wait one grace.
     let due = at(300)
-    #expect(EventTapThread.deferral(due: due, now: due.advanced(by: EventTapThread.lateTimer)) == nil)
-    let now = due.advanced(by: EventTapThread.lateTimer + Duration.nanoseconds(1))
+    #expect(EventTapThread.deferral(due: due, now: due.advanced(by: FnGesture.lateKeyGrace)) == nil)
+    let now = due.advanced(by: FnGesture.lateKeyGrace + Duration.nanoseconds(1))
     #expect(EventTapThread.deferral(due: due, now: now) == now.advanced(by: FnGesture.lateKeyGrace))
 }
 
@@ -403,8 +405,8 @@ private func stops(_ id: DictationID, in commands: [KeyCommand]) -> Bool {
 }
 
 @Test func aStalledTimerDefersToOneGraceFromNow() throws {
-    // After a 2 s stall the timer waits one grace from now. Whether the re-armed timer feeds is the
-    // handler's rule (`deferrable: false`), tested in aRearmedTimerAlwaysFeeds.
+    // After a 2 s stall the timer waits one grace from now. Whether the re-armed timer defers again
+    // is tested in aTimerStalledAgainDefersAgain.
     let due = at(300)
     let stalledNow = due.advanced(by: .seconds(2))
     let rearmed = try #require(EventTapThread.deferral(due: due, now: stalledNow))
@@ -429,18 +431,21 @@ private func fnEvent(down: Bool, stamped stamp: HostTime) -> CGEvent {
 }
 
 @Test func aLateHoldDeadlineLetsAQueuedShortTapGoFirst() async throws {
-    // fn goes down at 0 and the 300 ms deadline fires 20 ms late, while fn-up (stamped 290 ms) still
-    // waits in the queue behind the stall. The late deadline waits one grace, so fn-up is judged first:
-    // the press was a tap, and a 20 ms late timer must not confirm a hold.
+    // fn goes down at 0 and the 300 ms deadline fires 100 ms late, while fn-up (stamped 290 ms) still
+    // waits in the queue behind the stall. Later than one grace, the deadline waits one grace, so fn-up
+    // is judged first: the press was a tap, and a late timer must not confirm a hold. The re-armed
+    // timer then fires on time.
     let base = recentBase()
+    let deadline = base.advanced(by: .milliseconds(300))
+    let firedAt = deadline.advanced(by: .milliseconds(100))
     let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
     let tap = EventTapThread(gesture: FnGesture(KeyboardConfig()), input: InputClock(), continuation: continuation,
                              secureInput: { false }, fnHeld: { true })
     _ = tap.handle(.flagsChanged, fnEvent(down: true, stamped: base))
-    tap.deadlineFired(due: base.advanced(by: .milliseconds(300)), now: base.advanced(by: .milliseconds(320)))
+    tap.deadlineFired(due: deadline, now: firedAt)
     _ = tap.handle(.flagsChanged, fnEvent(down: false, stamped: base.advanced(by: .milliseconds(290))))
-    tap.deadlineFired(due: base.advanced(by: .milliseconds(370)), now: base.advanced(by: .milliseconds(370)),
-                      deferrable: false)
+    let rearmed = firedAt.advanced(by: FnGesture.lateKeyGrace)
+    tap.deadlineFired(due: rearmed, now: rearmed)
     continuation.finish()
     var yielded: [KeyCommand] = []
     for await command in commands { yielded.append(command) }
@@ -449,22 +454,14 @@ private func fnEvent(down: Bool, stamped stamp: HostTime) -> CGEvent {
     #expect(!yielded.contains { if case .dictationStopped = $0 { true } else { false } })
 }
 
-@Test func aRearmedTimerAlwaysFeeds() async throws {
-    // A timer re-armed by a deferral can be late again if the stall is still going. It must feed
-    // however late it is: a second deferral would push the deadline back one grace at a time for as
-    // long as the stall lasted.
-    let base = recentBase()
-    let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
-    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig()), input: InputClock(), continuation: continuation,
-                             secureInput: { false }, fnHeld: { true })
-    _ = tap.handle(.flagsChanged, fnEvent(down: true, stamped: base))
-    let due = base.advanced(by: .milliseconds(300))
-    tap.deadlineFired(due: due, now: due.advanced(by: .seconds(2)), deferrable: false)
-    continuation.finish()
-    var yielded: [KeyCommand] = []
-    for await command in commands { yielded.append(command) }
-    let id = try #require(beganID(yielded))
-    #expect(yielded.contains(.dictationConfirmed(id, .hold)))
+@Test func aTimerStalledAgainDefersAgain() throws {
+    // A timer re-armed by a deferral is judged like any other: if the stall is still going when it
+    // fires, it waits one grace again. Only a re-armed timer that fires on time feeds.
+    let due = at(300)
+    let rearmed = try #require(EventTapThread.deferral(due: due, now: due.advanced(by: .milliseconds(100))))
+    let stalledAgain = rearmed.advanced(by: .milliseconds(100))
+    #expect(EventTapThread.deferral(due: rearmed, now: stalledAgain) == stalledAgain.advanced(by: FnGesture.lateKeyGrace))
+    #expect(EventTapThread.deferral(due: rearmed, now: rearmed) == nil)
 }
 
 @Test func aTimerOnTimeFeedsAtOnce() async throws {
@@ -482,6 +479,27 @@ private func fnEvent(down: Bool, stamped stamp: HostTime) -> CGEvent {
     for await command in commands { yielded.append(command) }
     let id = try #require(beganID(yielded))
     #expect(yielded.contains(.dictationConfirmed(id, .hold)))
+}
+
+@Test func aMarkTimerTwentyMillisecondsLateActsAtOnce() async throws {
+    // The double-tap window closes at fn-up plus the window, and its drop is due one grace after that.
+    // A timer 20 ms late is within one grace, so it drops the lone tap at once. Deferring it again
+    // would drop it 100 ms after the mark, against DECISIONS.md item 79's 50 ms.
+    let base = recentBase()
+    let config = KeyboardConfig()
+    let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(config), input: InputClock(), continuation: continuation,
+                             secureInput: { false }, fnHeld: { false })
+    _ = tap.handle(.flagsChanged, fnEvent(down: true, stamped: base))
+    let fnUp = base.advanced(by: .milliseconds(100))
+    _ = tap.handle(.flagsChanged, fnEvent(down: false, stamped: fnUp))
+    let drop = fnUp.advanced(by: config.doubleTapWindow + FnGesture.lateKeyGrace)
+    tap.deadlineFired(due: drop, now: drop.advanced(by: .milliseconds(20)))
+    continuation.finish()
+    var yielded: [KeyCommand] = []
+    for await command in commands { yielded.append(command) }
+    let id = try #require(beganID(yielded))
+    #expect(yielded.contains(.dictationDiscarded(id)))
 }
 
 @Test func aDoubleTapWhoseSecondFnDownWasQueuedBehindAStallBecomesHandsFree() throws {
