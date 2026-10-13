@@ -429,6 +429,7 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
     @Test func replacementKeepsAnEllipsis() {
         #expect(RespeakText.replacement("Wait...", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait...")
         #expect(RespeakText.replacement("Wait\u{2026}", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait\u{2026}")
+        #expect(RespeakText.replacement("Wait..", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait..")
     }
 }
 
