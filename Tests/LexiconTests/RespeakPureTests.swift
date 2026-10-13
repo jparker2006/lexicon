@@ -424,5 +424,11 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
     @Test func replacementDropsOnlyTheOneClosingStop() {
         #expect(RespeakText.replacement("Really?!", replacing: "rally", terms: [], isEnglish: { _ in true }) == "really?")
     }
+
+    /// An ellipsis is Jake's own mark, not Cleanup's stop: all its dots stay.
+    @Test func replacementKeepsAnEllipsis() {
+        #expect(RespeakText.replacement("Wait...", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait...")
+        #expect(RespeakText.replacement("Wait\u{2026}", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait\u{2026}")
+    }
 }
 
