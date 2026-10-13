@@ -190,6 +190,65 @@ private final class FlushFailure: Sendable {
     }
 }
 
+// At a resampled rate the converter holds a few ms between blocks. A failed block
+// costs only itself: what the converter held still comes out. (CONFIRMED review findings.)
+
+@Test(.timeLimit(.minutes(1))) func aConverterErrorAt48kCountsOnlyTheFailedBlockAsLost() async throws {
+    let dir = try scratchDirectory()
+    let source = syntheticSamples(count: 48_000)  // 1 s at 48 kHz
+    let wav = try writeWAV(source, rate: 48_000, in: dir)
+    let fake = FailingConvert(pulls: true)
+
+    let recorder = Recorder(policy: fake.policy)
+    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible),
+                                           writingTo: dir.appending(path: "audio/fail48k.caf"))
+    let ended = try #require(await capture.signals.inputEnded())
+    let take = await capture.stop(.released(at: ended))
+    await recorder.settle()
+
+    let seen = fake.trace
+    let failedAt = try #require(seen.failed)
+    #expect(framesAt16kHz(take.summary.lost) == Int((Double(seen.blocks[failedAt]) / 3).rounded()))
+}
+
+@Test(.timeLimit(.minutes(1))) func twoConverterErrorsAtAResampledRateLoseOnlyTheirBlocks() async throws {
+    let dir = try scratchDirectory()
+    let source = syntheticSamples(count: 48_000)
+    let wav = try writeWAV(source, rate: 48_000, in: dir)
+    let calls = ConverterCallCount()
+    var policy = FlushPolicy()
+    policy.convert = { [calls] converter, output, input in
+        let call = calls.next()
+        // Calls 3 and 7 answer .error without the real converter, which keeps what it held.
+        guard call != 3, call != 7 else { return (.error, nil) }
+        return Resampler.realConvert(converter, output, input)
+    }
+
+    let recorder = Recorder(policy: policy)
+    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible),
+                                           writingTo: dir.appending(path: "audio/twice.caf"))
+    let ended = try #require(await capture.signals.inputEnded())
+    let take = await capture.stop(.released(at: ended))
+    await recorder.settle()
+
+    #expect(calls.total > 7)  // both failures happened, so the check below is not vacuous
+    #expect(abs(take.clip.samples.count + framesAt16kHz(take.summary.lost) - 16_000) <= 4)
+}
+
+/// Counts converter calls. A class holds the Mutex so the escaping policy closure can capture it.
+private final class ConverterCallCount: Sendable {
+    private let count = Mutex(0)
+
+    func next() -> Int {
+        count.withLock { value -> Int in
+            value += 1
+            return value
+        }
+    }
+
+    var total: Int { count.withLock { $0 } }
+}
+
 // #179, criteria 2 and 3: a file's failed sync or close is reported, not swallowed.
 // Driven through the real Recorder on file input, with the FileCalls seam forced
 // to fail. No mic, keys or network, and no clock: each test waits on a signal.

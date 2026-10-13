@@ -28,8 +28,8 @@ final class Resampler: @unchecked Sendable {
     private let output: AVAudioPCMBuffer
     private let ratio: Double
     private var supplied = false
-    /// Input frames converted, and 16 kHz frames emitted, since the converter
-    /// last started fresh: what it still holds is the difference.
+    /// Input frames converted, and 16 kHz frames emitted: what the converter
+    /// still holds is the difference.
     private var consumed = 0
     private var emitted = 0
 
@@ -54,15 +54,14 @@ final class Resampler: @unchecked Sendable {
 
     /// Converts the `input` buffer's frames. `emit` gets whatever 16 kHz samples
     /// came out (the converter may hold a few back until the next block).
-    /// Returns the audio lost: when the converter fails, the whole block (its
-    /// output is undefined, and the next drain overwrites `input`) plus what it held.
+    /// Returns the audio lost: the whole block when the converter fails on it,
+    /// since its output is undefined and the next drain overwrites `input`. What
+    /// the converter held from earlier blocks still comes out after.
     @discardableResult
     func convert(emit: (UnsafeBufferPointer<Int16>) -> Void) -> Duration {
         supplied = false
         let frames = Int(input.frameLength)
-        guard run(endOfStream: false, emit: emit) else {
-            return failed() + Duration(frames: frames, rate: input.format.sampleRate)
-        }
+        guard run(endOfStream: false, emit: emit) else { return Duration(frames: frames, rate: input.format.sampleRate) }
         consumed += frames
         return .zero
     }
@@ -72,17 +71,10 @@ final class Resampler: @unchecked Sendable {
     @discardableResult
     func flush(emit: (UnsafeBufferPointer<Int16>) -> Void) -> Duration {
         supplied = true
-        return run(endOfStream: true, emit: emit) ? .zero : failed()
-    }
-
-    /// After an error: what the converter held is gone. Reset, so a converter
-    /// left in its error state can't lose every later block too.
-    private func failed() -> Duration {
-        let held = max(0, Int((Double(consumed) * ratio).rounded()) - emitted)
-        converter.reset()
-        consumed = 0
-        emitted = 0
-        return Duration(frames: held, rate: Double(PCM16k.sampleRate))
+        guard run(endOfStream: true, emit: emit) else {
+            return Duration(frames: max(0, Int((Double(consumed) * ratio).rounded()) - emitted), rate: Double(PCM16k.sampleRate))
+        }
+        return .zero
     }
 
     /// False when the converter answered `.error`; its output is not emitted.
