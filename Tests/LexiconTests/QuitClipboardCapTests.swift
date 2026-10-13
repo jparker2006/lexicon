@@ -129,8 +129,7 @@ import Testing
     await quitClock.advance(by: .seconds(1))
     _ = keeper.put("later dictation")  // nobody has read it yet: it is in its hold
     // Quit takes the later paste up a second in: its cap ends a hold's length after that.
-    while !finished, !Task.isCancelled,
-          quitClock.sleepers != 1 || quitClock.now.offset != .seconds(1) { await Task.yield() }
+    await quitClock.waitForSleep(endingAt: .seconds(3))
     #expect(!finished, "quit waits for the later paste too")
 
     await quitClock.advance(by: .seconds(1))

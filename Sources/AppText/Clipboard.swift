@@ -191,21 +191,20 @@ struct PasteboardContents: Sendable, Equatable {
 
     func isReleased(_ id: PasteID) -> Bool { current?.id != id || current?.lastRead != nil }
 
-    /// Quit: returns once no paste holds the pasteboard (its restore ran), or once
-    /// `cap` has passed on `clock`, and then Jake's clipboard is back either way
-    /// (unless he copied since). Waiting out the restore, not restoring at once,
-    /// keeps the post-miss hold: a Cmd-V still queued must not paste his clipboard.
-    ///
-    /// Waits on the paste up now only: a later one (a Dictation fn started meanwhile)
-    /// keeps its own 2 s hold, and the Conductor waits for that one in turn.
+    /// Quit: returns once no paste holds the pasteboard, and Jake's clipboard is back
+    /// (unless he copied since). Each paste gets its restore, or `cap` on `clock` from
+    /// when quit takes it up, whichever is first: waiting out the restore, not restoring
+    /// at once, keeps the post-miss hold, so a Cmd-V still queued never pastes his
+    /// clipboard. A paste put meanwhile (a Dictation fn started) is waited for in turn.
     func finishForQuit<C: Clock<Duration>>(within cap: Duration, clock: C) async {
-        guard let id = current?.id else { return }
-        let capped = Task { @MainActor [self] in
-            do { try await clock.sleep(for: cap) } catch { return }
-            if let current, current.id == id { finish(current) }
+        while let id = current?.id {
+            let capped = Task { @MainActor [self] in
+                do { try await clock.sleep(for: cap) } catch { return }
+                if let current, current.id == id { finish(current) }
+            }
+            while current?.id == id { await withCheckedContinuation { quitWaiters.append($0) } }
+            capped.cancel()
         }
-        while current?.id == id { await withCheckedContinuation { quitWaiters.append($0) } }
-        capped.cancel()
     }
 
     private func didRead(_ id: PasteID) {
