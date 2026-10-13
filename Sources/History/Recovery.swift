@@ -212,7 +212,7 @@ enum RecoveryPlan {
                 if row.audio != .expired, file == .open || file == .closed {
                     actions.append(.transcribe(row.id, wasWaiting: row.status == .waiting))
                 } else if file == .empty, row.status == .recording {
-                    // No sample reached the disk: no row, as for a stray tap (DECISIONS 87).
+                    // No sample reached the disk: no row, as for a stray tap (DECISIONS 89).
                     actions.append(.discard(row.id))
                 } else if file == .empty {
                     // Its words, if any, were only in RAM. Deleted first: a crash in between
