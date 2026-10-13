@@ -123,3 +123,33 @@ func aPasteLastPressStillCountsAsTypingForADictationInFlight(tapCopyFirst: Bool)
     if !tapCopyFirst { _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand])) }
     #expect(input.hasInput(since: fnUp), "⌃⌘V is typing since that fn-up")
 }
+
+@Test(.timeLimit(.minutes(1)))
+func aPasteLastPressCountsAsTypingAtItsFirstReport() {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    let fnUp = input.mark()
+    // The tap's copy can come before the hotkey's press: the press counts from then on.
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    #expect(input.hasInput(since: fnUp), "a Dictation checked between the two reports sees the press")
+    // The hotkey's report of the same press is not a second keystroke, and the paste
+    // it asks for marks after the press, so the press never holds it.
+    let beforeHotkey = input.mark()
+    tap.send(.pasteLast)
+    #expect(!input.hasInput(since: beforeHotkey), "one press is one keystroke")
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aControlCommandVTheHotkeyNeverSawStillCountsAsTyping() {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    // Another app holds ⌃⌘V, so the hotkey never registered: the key reaches the app.
+    let fnUp = input.mark()
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    #expect(input.hasInput(since: fnUp))
+    let afterFirst = input.mark()
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    #expect(input.hasInput(since: afterFirst), "each press the hotkey never reported is typing")
+}
