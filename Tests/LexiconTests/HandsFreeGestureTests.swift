@@ -403,3 +403,15 @@ func anEscStampedJustBeforeTheWarningMarkGetsNoWarningWhicheverIsHandledFirst(es
     #expect(gesture.handle(.escape(at(1_000))).commands.isEmpty)  // hands-free
     #expect(gesture.takesEscape)
 }
+
+@Test(arguments: [60, 100, 150, 200])
+func aDoubleTapAtRealTapLengthsStartsHandsFree(holdMilliseconds: Int) {
+    // Jake's real taps: each held 60 to 200 ms, the second about 100 ms after the first release.
+    var gesture = FnGesture(KeyboardConfig())
+    #expect(gesture.handle(.fnDown(at(0), secureInput: false, id: a)).commands == [.dictationBegan(a, at: at(0))])
+    #expect(gesture.handle(.fnUp(at(holdMilliseconds))).commands.isEmpty)
+    #expect(gesture.handle(.fnDown(at(holdMilliseconds + 100), secureInput: false, id: b)).commands
+        == [.dictationConfirmed(a, .handsFree)])
+    #expect(gesture.handle(.fnUp(at(2 * holdMilliseconds + 100))).commands.isEmpty)
+    #expect(gesture.takesEscape)
+}

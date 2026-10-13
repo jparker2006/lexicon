@@ -230,6 +230,34 @@ func aHandsFreeDictationWhoseMicNeverStartsGivesEscBack() async throws {
     #expect(await rig.history.dictation(next)?.status == .inserted)
 }
 
+@Test(.timeLimit(.minutes(1)))
+func aHoldAfterABurstOfDroppedTapsStillRecords() async throws {
+    // Jake's sitting: seven quick taps, each started and dropped, then a hold. Each tap starts and
+    // stops a capture within half a second; the hold after them must still get its mic and its
+    // text. (On the fake mic: this pins Lexicon's own start and stop order, not Core Audio's.)
+    let rig = try HandsFreeRig()
+    var events = await rig.conductor.events().makeAsyncIterator()
+    var time = 0
+    for _ in 0..<7 {
+        let tap = DictationID()
+        try #require(rig.feed(.fnDown(at(time), secureInput: false, id: tap)).commands == [.dictationBegan(tap, at: at(time))])
+        rig.feed(.fnUp(at(time + 100)))
+        try #require(rig.feed(.deadline(at(time + 400))).commands == [.dictationDiscarded(tap)])
+        time += 500
+    }
+    let hold = DictationID()
+    rig.feed(.fnDown(at(time), secureInput: false, id: hold))
+    try #require(rig.feed(.deadline(at(time + 300))).commands == [.dictationConfirmed(hold, .hold)])
+    try #require(rig.feed(.fnUp(at(time + 1_500))).commands == [.dictationStopped(hold, at: at(time + 1_500))])
+    _ = await readUntil(&events) { event in if case .finished(let who, _) = event { who == hold } else { false } }
+    await rig.settle()
+
+    let row = try #require(await rig.history.dictation(hold))
+    #expect(row.status == .inserted)
+    #expect(try CAFFile.read(rig.history.audioURL(for: hold)).samples.count > 0)
+    #expect(try cafFiles(in: rig.history).count == 1)  // the dropped taps left no audio behind
+}
+
 /// The real Conductor following an open stream of commands from one recognizer, which the
 /// test feeds one input at a time. Fake mic, scripted model, recording destination, and
 /// History under a throwaway folder.

@@ -254,22 +254,32 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     #expect(KeyInput(keyEvent(179), secureInput: { false }, now: at(0)) == nil)
 }
 
-@Test func aRealDoubleTapWithTheGlobeKeyDownStartsHandsFree() async {
-    // A real tap as the Live checks sitting saw it: fn down, fn up, then fn's own key-down,
-    // then the second fn-down inside the window. It confirms hands-free, not a dropped tap.
-    let (stream, continuation) = AsyncStream<KeyCommand>.makeStream()
-    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig()), input: InputClock(), continuation: continuation,
+@Test func aRealDoubleTapWithTheGlobeKeyDownStartsHandsFree() throws {
+    // A real tap as the Live checks sitting saw it: fn down, fn up, then fn's own key-down at the
+    // release, then the second fn-down inside the window. It confirms hands-free, not a dropped tap.
+    var gesture = FnGesture(KeyboardConfig())
+    var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
+    commands += feed(flagsChanged(63, []), at: at(100), into: &gesture)
+    commands += feed(keyEvent(179), at: at(100), into: &gesture)
+    commands += feed(flagsChanged(63, [.maskSecondaryFn]), at: at(200), into: &gesture)
+    let id = try #require(beganID(commands))
+    #expect(commands == [.dictationBegan(id, at: at(0)), .dictationConfirmed(id, .handsFree)])
+}
+
+@Test func theFnKeysOwnKeyDownIsNotTyping() {
+    // fn's own key-down is fn, not Jake typing: it must not make a hands-free stop look like
+    // he typed after it, which would hold the text for paste-last. A letter still counts.
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig()), input: input, continuation: continuation,
                              secureInput: { false })
     func fromKeyboard(_ event: CGEvent) -> CGEvent {
         event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
         return event
     }
-    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
-    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [])))
+    let mark = input.mark()
     _ = tap.handle(.keyDown, fromKeyboard(keyEvent(179)))
-    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
-    continuation.finish()
-    var kinds: [String] = []
-    for await command in stream { kinds.append(command.kind) }
-    #expect(kinds == ["began", "confirmed handsFree"])
+    #expect(!input.hasInput(since: mark))
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(0)))
+    #expect(input.hasInput(since: mark))
 }
