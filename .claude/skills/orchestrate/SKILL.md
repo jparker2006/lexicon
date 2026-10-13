@@ -10,11 +10,11 @@ You keep the map of issues, start builders, schedule Live checks sittings, and a
 ## Start
 
 1. Load the messaging and session tools in one ToolSearch: `select:SendMessage,Monitor,mcp__ccd_session_mgmt__set_session_title,mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__get_usage,mcp__ccd_session_mgmt__archive_session,mcp__ccd_host__request_keep_awake`.
-2. Set the session title to `Orchestrator`.
+2. Set the session title to `Orchestrator`. On Codex ([codex.md](../../../docs/agents/codex.md)): skip steps 1, 2, 4 and 5; Jake reads usage himself and keeps the Mac awake with `caffeinate`.
 3. Run `scripts/status.sh` and `scripts/machine.sh`. When machine.sh warns that Low Power Mode is on, tell Jake once: builds run slower, and only he turns it off.
 4. Call `get_usage`: note the 5-hour and weekly percentages.
 5. Call `list_sessions`. While any Lexicon session runs, hold `request_keep_awake` until the sessions go idle. A closed lid still sleeps.
-6. If `status.sh`'s `Watching:` line lacks `orchestrator` (or it printed `NOT WATCHED`), start the watcher under Monitor: `scripts/watch-events.sh --role orchestrator`. One watcher per role; never start a second.
+6. If `status.sh`'s `Watching:` line lacks `orchestrator` (or it printed `NOT WATCHED`), start the watcher under Monitor: `scripts/watch-events.sh --role orchestrator`. On Codex ([codex.md](../../../docs/agents/codex.md)): start it as a background terminal and read its new lines each turn. One watcher per role; never start a second.
 7. Give Jake the status (below), then work the loop.
 
 ## The loop
@@ -39,7 +39,7 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 
 ## Chips
 
-You are the only session that posts chips ([DECISIONS.md](../../../docs/DECISIONS.md) 69); other sessions file out-of-scope work as `later` issues, and you decide whether and when one becomes a chip. Post a chip (`mcp__ccd_session__spawn_task`) for each ticket `scripts/unblocked.sh` lists, without asking Jake (standing approval in `CLAUDE.md`), while all of these hold:
+You are the only session that posts chips ([DECISIONS.md](../../../docs/DECISIONS.md) 69); other sessions file out-of-scope work as `later` issues, and you decide whether and when one becomes a chip. Post a chip (`mcp__ccd_session__spawn_task`; on Codex, give Jake the `chip:` line to paste into a new Codex session in its own worktree, as [codex.md](../../../docs/agents/codex.md) says) for each ticket `scripts/unblocked.sh` lists, without asking Jake (standing approval in `CLAUDE.md`), while all of these hold:
 
 - `scripts/machine.sh` says `room for more builders: yes`. That verdict is the only machine gauge; on a no, name the top processes it lists outside Lexicon, and Jake decides about them. Swap used is not one: in M0, builders were held for swap while memory pressure showed 46 percent free.
 - `get_usage` is under 90 percent of the 5-hour window and 95 percent of the week. Above that, post no new chip and say so in your status; running builders carry on.

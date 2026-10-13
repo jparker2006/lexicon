@@ -20,7 +20,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 ## 2. Claim
 
 - `scripts/ticket.sh claim N` comments the claim and swaps the labels. It refuses another builder's claim (stop and say so), a blocker not merged, and a ticket that changes `.claude/settings.json` with no recorded Jake yes (ask him: Need Jake). Your own earlier claim, on a continuation, means go on.
-- When the ticket's Modules line names 3 or more modules under `Sources/`, run `/pstack:architect` (call the Skill tool with "pstack:architect") with Opus or Sonnet runners before any code. Post the sketch on the issue as one comment headed `Sketch:`; a `Sketch:` line in the PR's Summary links it, and `pr-body-check` refuses the body without one.
+- When the ticket's Modules line names 3 or more modules under `Sources/`, run `/pstack:architect` (call the Skill tool with "pstack:architect") with Opus or Sonnet runners before any code. On Codex ([codex.md](../../../docs/agents/codex.md)): pstack is Claude-only; sketch the types and signatures yourself, or with two `spawn_agent` helpers, and post the same `Sketch:`. Post the sketch on the issue as one comment headed `Sketch:`; a `Sketch:` line in the PR's Summary links it, and `pr-body-check` refuses the body without one.
 
 **Done:** the issue shows your claim and `building`, and a sketch when the ticket needed one.
 
@@ -28,6 +28,7 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 
 - `git fetch origin`, then branch from `origin/main` as `claude/issue-N` in your own worktree. A continuation fetches its branch and carries on from it.
 - **Tests first.** Before any code, start one `test-writer` per acceptance criterion of a code ticket. Run its tests red (`scripts/test.sh --filter <name>`) and commit them as your first commit: they are the starting point, and the red run goes in the PR's Before line. Then call the Skill tool with "mattpocock-skills:tdd" and build one vertical slice at a time, red before green, at the seam the issue names. Test through the highest public seam (the headless pipeline on a WAV, then the pure seams), never by reading source. A bug fix starts with a test that fails before the fix. Docs-only work needs no test.
+- On Codex ([codex.md](../../../docs/agents/codex.md)): a typed helper is `spawn_agent` with `agent_type` set to its name (`.codex/agents/<name>.toml`), at most 6 at once; a swarm is the same, in waves of 6.
 - **Helpers.** CLAUDE.md's sizing table says how many by ticket type, and its Swarms list says when to run `/pstack:swarm` (10 or more same-shape pieces, every flake or hang fix, any change to Cleanup, StructuralCheck, Terms or folding, Code Terms or the scorer). Go by the job type, not by how small the job feels.
   - Scouts (`Explore`) fetch only what you won't read yourself: other PRs and their overlap, upstream code and its license, platform facts, CI logs. Each brief lists the files you have already read as do-not-read. Write tests while scouts run; don't wait on them.
   - Editors (`editor`) take any part with a precise brief, tests or production, each in its own files. You review every editor's diff.
@@ -45,7 +46,7 @@ The checked-in review Workflow is the only code review: no critic briefs of your
 
 - Commit all your work (your own files, explicit paths), then save the diff: `git diff $(git merge-base HEAD origin/main) > <scratchpad>/review.diff`. The merge-base keeps the diff yours when another session's fetch moves `origin/main`.
 - Give `spec-checker` that diff, and the final diff again before Ready when commits came after. Fix each departure, or write it into `docs/DECISIONS.md` with a link to Jake's recorded decision. A default nobody asked Jake about never ships silently: ask him (Need Jake).
-- Run the `lexicon-review` Workflow with `{issue: N, sha: <HEAD>}`. It reviews a snapshot at that sha: a `critic` per review.md section the diff reaches, the acceptance criteria as a lens, and a `verifier` per finding. Write no critic briefs of your own; nothing stands in for a verifier's verdict.
+- Run the `lexicon-review` Workflow with `{issue: N, sha: <HEAD>}`. It reviews a snapshot at that sha: a `critic` per review.md section the diff reaches, the acceptance criteria as a lens, and a `verifier` per finding. Write no critic briefs of your own; nothing stands in for a verifier's verdict. On Codex ([codex.md](../../../docs/agents/codex.md)): run it as `node scripts/codex-review.mjs '{"issue":N,"sha":"<HEAD>"}'`, which prints the same markdown.
 - A CONFIRMED finding is fixed only through a test that fails first: the test in its verifier's reply or one a `test-writer` writes. Run it red, fix, run it green. For a skill's prose, that test is a replay: the past case run on the old text and the new, as skill-creator runs it. Only prose no test or replay can show (a doc sentence, a skill line with no past case) rests on its verifier's verdict, and the PR says so. REFUTED and UNSURE findings are dropped unless a test that fails first proves them. An INCOMPLETE run is run again.
 - **Every commit after the reviewed sha gets a delta pass before Ready**: run the Workflow again with `{issue: N, sha: <new HEAD>, reviewed: <the sha it last reviewed>}`. That covers your fixes, a late test and a merge of `main`. The table in the PR names the head you push.
 - Run `scripts/ticket-context.sh N --out <scratchpad>/ctx` again and read the new comments. Review items added while you worked are part of the job.
@@ -62,7 +63,7 @@ The checked-in review Workflow is the only code review: no critic briefs of your
 
 ## 6. Open the PR, then ask for Live checks
 
-- Push your branch (never `main`; the guard refuses it), then write the body with the `pr` skill (call the Skill tool with "pr"). `node scripts/pr-body-check.mjs <body file>` passes before `gh pr create`.
+- Push your branch (never `main`; the guard refuses it), then write the body with the `pr` skill (call the Skill tool with "pr"; on Codex, `$pr`). `node scripts/pr-body-check.mjs <body file>` passes before `gh pr create`.
 - When a criterion needs the live app, ask now, on this pushed, reviewed and checked head: write one item per behavior (the format is in the header of `scripts/live-request.sh`) and run `scripts/live-request.sh post N <items file>`. It refuses uncommitted or unpushed work. Live checks answers with a `Live checks: <branch> @ <sha7>` comment on your issue. A hook, the harness or a script can run most items; mark only real hands-on items `kind: jake`. A jake item waits for one of Jake's sittings and holds only its own criterion, never the rest of the ticket.
 - **The head stays frozen** until that result lands. A push would leave the request naming a head nobody reviews. On a FAIL, fix through a red test, take the fix through steps 4 and 5, and post a new request: it replaces the old one.
 
