@@ -342,10 +342,14 @@ extension HistoryStore {
 
         case .retried(_, let versions, let cleanup, let model, let version):
             guard let stored else { return nil }
+            // Its version saved means this Retry applied: a replay after a newer Retry must not bring its text back.
+            guard try db.query("SELECT 1 FROM earlier_version WHERE id = ?", [.text(version.uuidString)]).isEmpty else {
+                return nil
+            }
             // Before the text it replaces is overwritten, and only if the Retry's text lands.
             if Self.admits(Self.afterTextReady(typing: false, from: stored), from: stored.status) {
                 try db.execute("""
-                    INSERT OR IGNORE INTO earlier_version (id, dictation_id, model, cleaned_text, final_text, replaced_at)
+                    INSERT INTO earlier_version (id, dictation_id, model, cleaned_text, final_text, replaced_at)
                     SELECT ?, id, model, cleaned_text, coalesce(final_text, cleaned_text), ? FROM dictation
                     WHERE id = ? AND cleaned_text IS NOT NULL
                     """, [.text(version.uuidString), .int(Date().unixMs), key])

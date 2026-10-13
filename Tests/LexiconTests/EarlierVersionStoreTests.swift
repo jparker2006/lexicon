@@ -109,6 +109,22 @@ private func writeOldHistory(at paths: AppPaths, id: DictationID) async throws {
     #expect(detail.earlier.map(\.final) == ["First words."])
 }
 
+/// An older Retry's event applied again after a newer Retry landed changes nothing:
+/// the row keeps the newer text and both earlier versions stay as they were.
+@MainActor @Test func replayingAnOlderRetryAfterANewerOneChangesNothing() async throws {
+    let (store, paths) = try makeStore()
+    let id = dictate(store, "First words.")
+    let older = UUID()
+    retry(store, id, "Second words.", version: older)
+    retry(store, id, "Third words.")
+    retry(store, id, "Second words.", version: older)
+    await store.flush()
+
+    let detail = try #require(HistoryReader(paths: paths).detail(id))
+    #expect(detail.row.finalText == "Third words.")
+    #expect(detail.earlier.map(\.final) == ["Second words.", "First words."])
+}
+
 // MARK: - Older files
 
 @MainActor @Test func anOlderHistoryFileOpensUnchangedAndKeepsItsTextWhenRetried() async throws {
