@@ -728,6 +728,8 @@ test("refuses reading or writing Codex's login file, in every tool", (t) => {
     ['Bash', { command: 'cd ~/.codex && grep -rn token .' }],
     ['Grep', { pattern: 'token', path: path.join(home, '.codex') }],
     ['Edit', { file_path: auth, old_string: 'a', new_string: 'b' }],
+    ['Bash', { command: `python3 -c "print(open('/Users/someone/.codex/auth.json').read())"` }],
+    ['Bash', { command: `node -e "console.log(require('fs').readFileSync('${auth}', 'utf8'))"` }],
   ]) {
     const verdict = runTool(tool, input, options);
     assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
