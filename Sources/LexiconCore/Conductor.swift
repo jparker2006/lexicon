@@ -155,8 +155,9 @@ public actor Conductor<Destination: TextDestination> {
         if let id = capturingID { endCapture(id, .stop(at: .now())) }
     }
 
-    /// Quit: returns once no Dictation is recording or finishing, and History and
-    /// the audio files have everything. A recording Dictation ends the normal way,
+    /// Quit: returns once no Dictation is recording or finishing, History and the
+    /// audio files have everything, and the last paste gave Jake's clipboard back
+    /// (at most 2 s, `TargetApp.finishClipboard`). A recording Dictation ends the normal way,
     /// at its fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
     /// Dictations past fn-up get `limit` to land: one stuck in the model must not
     /// hold Quit forever, and its row stays for launch recovery. Launch recovery
@@ -183,6 +184,7 @@ public actor Conductor<Destination: TextDestination> {
             deadline.cancel()
             await history.flush()
             await recorder.settle()
+            await destination.finishClipboard()  // Jake's clipboard back from the last paste
             // Done unless fn went down meanwhile: that Dictation gets the same wait.
             let started = inFlight.keys.filter { !recovering.contains($0) && finishing[$0] == nil }
             if capturingID == nil, started.isEmpty { return }
