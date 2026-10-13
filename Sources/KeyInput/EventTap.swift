@@ -114,7 +114,7 @@ final class EventTapThread: @unchecked Sendable {
         onTapThread { [self] in
             let first = presses.isFirstReport(.hotkey, at: pressedAt)
             if first { input.tick() }
-            // With the tap copy's line, the gap between the two clocks for one press (Live checks reads it).
+            // This line and the tap copy's give both clocks' times for one press: Live checks reads the gap.
             log.notice("hotkey report: hotkey at \(pressedAt.nanoseconds, privacy: .public) ns, first \(first, privacy: .public)")
             continuation.yield(command)
             log.notice("key command: \(String(describing: command), privacy: .public)")
@@ -230,20 +230,24 @@ extension KeyInput {
 struct HotkeyPresses {
     enum Report { case tapCopy, hotkey }
     static let pairWindow: Duration = .milliseconds(250)
-    /// First reports still waiting for their partner, newer than `pairWindow`.
+    /// The last few first reports still waiting for their partner, oldest first. A partner
+    /// can arrive late (a busy tap), so they go by count, never by how old they are.
     private var unpaired: [(report: Report, at: HostTime)] = []
+    private static let kept = 8
 
     /// True for a press's first report (count it), false for its second, which pairs
-    /// with the nearest unpaired report of the other kind: two quick presses keep their own.
+    /// with the nearest unpaired report of the other kind within `pairWindow` of its own
+    /// press time: two quick presses keep their own.
     mutating func isFirstReport(_ report: Report, at: HostTime) -> Bool {
-        unpaired.removeAll { Self.gap($0.at, at) > Self.pairWindow }
-        let partner = unpaired.indices.filter { unpaired[$0].report != report }
+        let partner = unpaired.indices
+            .filter { unpaired[$0].report != report && Self.gap(unpaired[$0].at, at) <= Self.pairWindow }
             .min { Self.gap(unpaired[$0].at, at) < Self.gap(unpaired[$1].at, at) }
         if let partner {
             unpaired.remove(at: partner)
             return false
         }
         unpaired.append((report, at))
+        if unpaired.count > Self.kept { unpaired.removeFirst() }
         return true
     }
 
