@@ -31,7 +31,7 @@ Two things are always true. Judge every change against them:
 
 Command Line Tools 26.6 only (Swift 6.3, macOS 26 SDK), SwiftPM, no Xcode ([ADR 0003](docs/adr/0003-command-line-tools-only.md)).
 
-- The check script (`scripts/check.sh`) runs `swift build` with the import check, the import-check script, `swift test`, the scorer's tests, `lexicon-eval` on the public fixture manifest (the scorer needs `uv`) and every step in `scripts/checks/`. It runs in one of two build slots (`scripts/lib/heavy.sh`). Run it once on the finished change.
+- The check script (`scripts/check.sh`) runs `swift build` with the import check, the import-check script, `swift test`, the scorer's tests, `lexicon-eval` on the public fixture manifest (the scorer needs `uv`) and every step in `scripts/checks/`. It runs in a build slot (`scripts/lib/heavy.sh`): two, or three while the Mac has room, taken first come, first served. Run it once on the finished change.
 - CI runs the same check script on macOS for every push and reports one check, named `CI`. A newer push to a branch cancels that branch's older run. A red run means the change isn't done.
 - Worktrees share SwiftPM's one dependency cache (the default; never pass `--disable-dependency-cache`). Each worktree has its own `.build/`, removed with the worktree when its PR merges.
 

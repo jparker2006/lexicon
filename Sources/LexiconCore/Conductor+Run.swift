@@ -57,7 +57,8 @@ extension Conductor {
         let cleanupPlan = CleanupPlan.make(preferences: start.preferences, access: access, terms: words.terms,
                                            rules: words.rules, app: context)
         let cleaning = cleanup.begin(plan: cleanupPlan, segments: attempt.segments)
-        jev?.prewarm(access)
+        // Jev only answers fixes: plain dictation never opens a connection to it.
+        if case .respeak = start.purpose { jev?.prewarm(access) }
         await fixes?.dictationStarted()
         let signals = capture.signals
         Task { if await signals.firstAudio() != nil { self.emit(.listening(id)) } }

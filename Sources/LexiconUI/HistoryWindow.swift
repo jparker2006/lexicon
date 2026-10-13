@@ -54,6 +54,21 @@ public final class HistoryWindowPresenter: NSObject {
         log.notice("History window: first rows drawn \(Int(ms.rounded()), privacy: .public) ms after open")
     }
 
+    /// Builds the window once, unshown, and drops it. A process's first window pays
+    /// for AppKit's one-time setup (its classes, the theme's art, the table's
+    /// machinery), which made the first open the slowest of a launch. Paid shortly
+    /// after launch, the first open costs what every other open does. Returns the
+    /// window it built (nil while History is open), which the caller drops.
+    ///
+    /// Its reader looks in /var/empty, which macOS keeps empty and Lexicon cannot
+    /// write, so the warm-up reads nothing from History: it has no rows on screen to load.
+    @discardableResult
+    public func warmUp() -> NSWindowController? {
+        guard controller == nil else { return nil }
+        let nothing = HistoryReader(paths: AppPaths(root: URL(filePath: "/var/empty", directoryHint: .isDirectory)))
+        return HistoryWindowController(reader: nothing, system: system, pasteboard: .general) {}
+    }
+
     /// Never typed: the new text replaces the old in History, and a failed Dictation becomes not inserted.
     func retry(_ id: DictationID, with model: SpeechModel) {
         guard let system, retrying.insert(id).inserted else { return }
@@ -77,14 +92,13 @@ public final class HistoryWindowPresenter: NSObject {
 /// (Retry with a model picker, Show Versions, Delete). Clicking a row copies the
 /// final text and flashes "Copied". The search field filters with a plain-text match.
 @MainActor
-final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate,
-    NSToolbarDelegate {
+final class HistoryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
     let reader: HistoryReader
     let system: LexiconSystem?
     let pasteboard: NSPasteboard
     let onClose: @MainActor () -> Void
     let table = HistoryTable()
-    let search = NSSearchToolbarItem(itemIdentifier: NSToolbarItem.Identifier("search"))
+    let search = NSSearchField()
     let empty = NSTextField(labelWithString: "")
     /// The days on the table, newest first: a screenful at open, more as Jake scrolls.
     var sections: [DaySection] = []
@@ -135,15 +149,19 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         if !window.setFrameUsingName("History") { window.center() }
         window.setFrameAutosaveName("History")
 
-        let toolbar = NSToolbar(identifier: "History")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
-        search.searchField.placeholderString = "Search"
-        search.searchField.target = self
-        search.searchField.action = #selector(searched(_:))
-        search.searchField.setAccessibilityIdentifier(AccessibilityID.historySearch)
+        // A plain field at the title bar's end, not a toolbar: building an
+        // NSSearchToolbarItem and fitting the window to it cost a large share of every open.
+        search.placeholderString = "Search"
+        search.target = self
+        search.action = #selector(searched(_:))
+        search.setAccessibilityIdentifier(AccessibilityID.historySearch)
+        let titlebar = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 28))
+        search.frame = NSRect(x: 0, y: 3, width: 188, height: 22)
+        titlebar.addSubview(search)
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.view = titlebar
+        accessory.layoutAttribute = .trailing
+        window.addTitlebarAccessoryViewController(accessory)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("dictation"))
         column.resizingMask = .autoresizingMask
@@ -189,7 +207,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func reload() {
         // Version first: a commit landing between the two reads then costs one extra reload, never a missed one.
         version = reader.version
-        query = search.searchField.stringValue
+        query = search.stringValue
         sections = []
         headers = []
         rowCount = 0
@@ -314,19 +332,6 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     func windowWillClose(_ notification: Notification) {
         stopPlaying()
         onClose()
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, search.itemIdentifier]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar)
-    }
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        itemIdentifier == search.itemIdentifier ? search : nil
     }
 }
 
@@ -730,10 +735,17 @@ final class RowButtons: NSView, NSViewToolTipOwner {
 
     /// Each symbol in each color made once per appearance (made while drawing, so a
     /// system color resolves for Light or Dark): every row the table makes draws three.
-    private static var images: [String: NSImage] = [:]
+    /// Keyed by value, not a string: describing the color on each draw cost about as much as drawing.
+    private static var images: [ImageKey: NSImage] = [:]
+
+    private struct ImageKey: Hashable {
+        let symbol: String
+        let color: NSColor
+        let appearance: NSAppearance.Name
+    }
 
     private static func image(_ symbol: String, _ color: NSColor) -> NSImage? {
-        let key = "\(symbol) \(color) \(NSAppearance.currentDrawing().name.rawValue)"
+        let key = ImageKey(symbol: symbol, color: color, appearance: NSAppearance.currentDrawing().name)
         if let image = images[key] { return image }
         let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
             .applying(NSImage.SymbolConfiguration(paletteColors: [color]))

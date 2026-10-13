@@ -151,6 +151,18 @@ import LexiconDomain
     #expect(await model.transcribed == 0)
 }
 
+@Test(.timeLimit(.minutes(1))) func aWaitForQueuedJobsEndsWhenItsTestIsCancelled() async {
+    // A test that waits for a job that never queues must fail at its time limit, which
+    // cancels the test's work, not hang the whole run.
+    let queue = LocalJobQueue()
+    let waiter = Task { await queue.untilWaiting(atLeast: 1) }
+    // Parked first, so the cancel has to wake it, not just stop it before it starts.
+    // Nothing signals a park, so this polls; it returns on cancel like every wait here.
+    await until { await queue.watching > 0 }
+    waiter.cancel()
+    await waiter.value
+}
+
 @Test(.timeLimit(.minutes(1))) func liveWorkGoesAheadOfQueuedBackgroundWork() async throws {
     let queue = LocalJobQueue()
     let order = Order()
@@ -158,22 +170,22 @@ import LexiconDomain
     let (started, starting) = AsyncStream<Void>.makeStream()
 
     let first = Task {
-        await queue.run(.background) {
+        try await queue.run(.background) {
             starting.yield()
             for await _ in release { break }  // holds the Neural Engine until released
             await order.append("first")
         }
     }
     for await _ in started { break }
-    let background = Task { await queue.run(.background) { await order.append("background") } }
-    while await queue.waiting < 1 { await Task.yield() }
-    let live = Task { await queue.run(.live) { await order.append("live") } }
-    while await queue.waiting < 2 { await Task.yield() }
+    let background = Task { try await queue.run(.background) { await order.append("background") } }
+    await queue.untilWaiting(atLeast: 1)
+    let live = Task { try await queue.run(.live) { await order.append("live") } }
+    await queue.untilWaiting(atLeast: 2)
 
     releasing.yield()
-    await first.value
-    await background.value
-    await live.value
+    try await first.value
+    try await background.value
+    try await live.value
 
     #expect(await order.names == ["first", "live", "background"])
 }
@@ -290,6 +302,10 @@ private actor FakeModel: LocalTranscriber {
         unloadWaiters = []
     }
 
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in try await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
         if let failure { throw failure }
         transcribed += 1
@@ -326,6 +342,10 @@ private actor SlowModel: LocalTranscriber {
         isResident = false
         for waiter in unloadWaiters { waiter.resume() }
         unloadWaiters = []
+    }
+
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in await self.transcribe(clip, terms: terms, priority: priority) }
     }
 
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) -> String {
