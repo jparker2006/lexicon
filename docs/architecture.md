@@ -153,6 +153,7 @@ No test target depends on an executable target: every test target links into one
 ### Data
 
 - `history.sqlite`: `dictation` (status, origin, model, cleaned and final text, speech model, lag, Cleanup outcome, audio state, pin), `attempt` (every engine try), `fix`, `insertion` (receipts), `earlier_version` (the text each Retry replaced). Enum columns store Swift raw values; partial indexes are generated from `DictationStatus`.
+- `history.lock`: an exclusive `flock` the one `HistoryStore` on this folder holds for its life, so a second store (another copy of the app on the same data) fails to open instead of writing beside it. The kernel drops it with a crashed process.
 - `audio/<id>.caf`: 16 kHz mono 16-bit, kept a rolling 14 days or 1 GB (whichever first), never deleted while a Dictation needs it, pinned audio kept forever.
 - `lexicon.sqlite`: Terms and Rules (each Rule with a source field: added or learned), owned by WordStore. Code Terms are held in memory, not stored.
 - `models/`: Parakeet weights (about 614 MB), never in the bundle.

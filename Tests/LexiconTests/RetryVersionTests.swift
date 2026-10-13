@@ -234,10 +234,14 @@ private func detail(_ paths: AppPaths, _ id: DictationID) throws -> HistoryDetai
 @MainActor @Test(.timeLimit(.minutes(1))) func aRetryThatCleansToBlankAddsNoEngineAttemptToTheRow() async throws {
     let paths = AppPaths.temporary()
     let clip = try wav()
-    let dictating = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
-                                            local: ScriptedTranscriber(text: "kept text"), clock: TestClock())
-    let first = await dictating.conductor.dictate(file: clip, pace: .asFastAsPossible)
-    await dictating.history.flush()
+    let first: DictationResult
+    do {
+        // Released before the next system opens: one store per data folder.
+        let dictating = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
+                                                local: ScriptedTranscriber(text: "kept text"), clock: TestClock())
+        first = await dictating.conductor.dictate(file: clip, pace: .asFastAsPossible)
+        await dictating.history.flush()
+    }
     let before = try detail(paths, first.id)
 
     let retrying = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: withCloud,
