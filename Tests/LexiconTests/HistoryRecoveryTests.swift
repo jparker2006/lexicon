@@ -188,7 +188,7 @@ private func leftBehind(by actions: [RecoveryPlan.Action], rows: [RecoveryPlan.R
 }
 
 @Test func anUnavailableFileIsLeftAloneForEveryUnfinishedRowAndForAnOrphan() {
-    // An open that failed for a reason that may pass next launch (EMFILE, EIO, a permission): this
+    // An open that failed for a reason that may pass next launch (too many files open, an I/O error): this
     // launch plans nothing for the id, so it neither fails the row nor adopts the file.
     let id = DictationID()
     for status in [DictationStatus.recording, .transcribing, .waiting] {
