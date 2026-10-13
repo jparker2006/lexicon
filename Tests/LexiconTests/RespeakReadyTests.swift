@@ -51,6 +51,7 @@ private actor RespeakFieldDestination: TextDestination {
     private let history: HistoryStore
     private let refusal: ReplaceRefusal?
     private var pendingSelection: TextSpan?
+    private var fieldGone = false
     private(set) var fieldText = ""
     /// The status of the Re-speak's row at each `replace`, in the order they ran.
     private(set) var respeakStatusesAtReplace: [DictationStatus] = []
@@ -63,6 +64,9 @@ private actor RespeakFieldDestination: TextDestination {
     /// Tests: Jake selects `span` of the field before the next fn-down.
     func select(_ span: TextSpan) { pendingSelection = span }
 
+    /// Tests: from now on no field can take text, so every `target()` is nil.
+    func loseField() { fieldGone = true }
+
     func context() -> AppContext { .unknown }
 
     func appChanges() -> AsyncStream<AppContext> { AsyncStream { $0.yield(.unknown) } }
@@ -72,6 +76,7 @@ private actor RespeakFieldDestination: TextDestination {
             HeadlessDestination.text(in: fieldText, at: span).map { FieldSelection(span: span, text: $0) }
         }
         pendingSelection = nil
+        guard !fieldGone else { return nil }
         return Target(selection: selection)
     }
 
@@ -126,6 +131,21 @@ private func dictate(_ conductor: Conductor<RespeakFieldDestination>,
                      purpose: DictationPurpose = .type) async throws -> DictationResult {
     let wav = try writeWAV(syntheticSamples(count: 16_000), rate: 16_000, in: try scratchDirectory())
     return await conductor.dictate(file: wav, pace: .asFastAsPossible, purpose: purpose)
+}
+
+/// One second of audio, dictated live as a Re-speak of `fixing`. `dictate(file:)`
+/// is origin `.file`, and `handle(.dictationBegan)` only ever starts a `.type`
+/// Dictation, so this starts the Conductor's own run with origin `.live`, as
+/// `handle` does. The WAV stands in for the mic: its end is the fn-up, which is
+/// the one thing that ends this run, and it is where the target is captured.
+private func liveRespeak(_ conductor: Conductor<RespeakFieldDestination>, of fixing: DictationID,
+                         id: DictationID) async throws -> DictationResult {
+    let wav = try writeWAV(syntheticSamples(count: 16_000), rate: 16_000, in: try scratchDirectory())
+    let (ends, open) = AsyncStream<RunEnd>.makeStream()
+    defer { open.finish() }  // a finished stream reads as "stop now"
+    let start = RunStart(id: id, input: .file(wav, pace: .asFastAsPossible), preferences: .defaults,
+                         origin: .live, purpose: .respeak(of: fixing), began: .now())
+    return await conductor.run(start, ends: ends, hold: LatencyHold(reason: "Re-speak \(id)"))
 }
 
 /// The events of one Dictation, up to its `finished`. Subscribe before it runs:
@@ -193,4 +213,30 @@ func aRefusedLiveRespeakEndsNotInsertedLeavesTheFieldAndIsNeverOfferedToPasteLas
     #expect(notices(seen).contains(.fixNotLanded(.movedOn)))
     // A Re-speak's words are a correction, never offered to paste-last.
     #expect(!notices(seen).contains(.readyToPaste(respeak.id)))
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aLiveRespeakWithNoFieldAtFnUpSaysTheFixDidNotLandAndIsNeverOfferedToPasteLast() async throws {
+    let paths = AppPaths.temporary()
+    let history = try HistoryStore(paths: paths)
+    let destination = RespeakFieldDestination(history: history)
+    let conductor = try makeConductor(destination, history: history, paths: paths,
+                                      hearing: "the cat saw the cat", "dog")
+    let first = try await dictate(conductor)
+    await history.flush()
+    #expect(first.status == .inserted)
+    let before = await destination.fieldText
+
+    await destination.loseField()  // no field can take text at fn-up
+    let events = await conductor.events()
+    let respeak = DictationID()
+    _ = try await liveRespeak(conductor, of: first.id, id: respeak)
+    await history.flush()
+
+    #expect(await destination.fieldText == before)
+    let seen = await emitted(events, until: respeak)
+    // The fix that did not land is said, never silent: the indicator reads it as "No text field to fix".
+    #expect(notices(seen).contains(.fixNotLanded(.noField)))
+    // A Re-speak's words are a correction, never offered to paste-last.
+    #expect(!notices(seen).contains(.readyToPaste(respeak)))
 }
