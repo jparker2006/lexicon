@@ -16,6 +16,8 @@ public final class Database {
 
     let handle: OpaquePointer?
     private var statements: [String: OpaquePointer] = [:]
+    /// Internal so a test can make the rollback fail and leave the transaction open.
+    var rollbackStatement = "ROLLBACK"
 
     /// Opens (creating if needed), sets WAL, `synchronous=NORMAL` (survives app
     /// crashes, consistent after power loss: #4), `foreign_keys=ON`, a busy timeout,
@@ -66,7 +68,7 @@ public final class Database {
             try exec("COMMIT")
             return result
         } catch {
-            try? exec("ROLLBACK")
+            try? exec(rollbackStatement)
             throw error
         }
     }
