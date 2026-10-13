@@ -24,7 +24,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // review.js names Claude tiers and efforts. Jake's plan has one current Codex model, so the
 // tier sets the effort, as scripts/codex-agents.mjs does for the typed helpers.
-const MODEL = 'gpt-6-astra';
+export const MODEL = 'gpt-6-astra';
 export const EFFORTS = { haiku: 'medium', sonnet: 'high', opus: 'high' };
 const modelOf = (tier) => `${MODEL} ${EFFORTS[tier] ?? 'high'}`;
 

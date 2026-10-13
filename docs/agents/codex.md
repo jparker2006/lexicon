@@ -6,7 +6,7 @@ When Claude's plan runs out, builders, the Reviewer and Live checks run on OpenA
 
 ## Before the first Codex session (once)
 
-1. **Update Codex:** `codex update`. 0.139.0 can't run `gpt-6-astra` ("requires a newer version of Codex"), and `gpt-5.5`, the one model it runs on your plan, leaves ChatGPT sign-in on 2026-10-14.
+1. **Update Codex:** `codex update`. 0.139.0 can't run `gpt-6-astra` ("requires a newer version of Codex"), and `gpt-5.5`, the one model it ran on your plan on 2026-10-13, leaves ChatGPT sign-in on 2026-10-14 ([OpenAI's Codex models page](https://learn.chatgpt.com/docs/models)).
 2. **Pull main** in `~/code/lexicon`, so `.codex/` is there.
 3. **Run the gate:**
 
@@ -41,7 +41,7 @@ Each session starts the same way as on Claude, with its start prompt from [start
 
 4. **Every session's first command** is `git push --dry-run origin HEAD:main`. Codex must answer "Command blocked by PreToolUse hook: Refused: nobody pushes to main". If the push runs instead, the hook is not trusted: stop that session and trust the hook again ("Trust the project and its hook" above).
 
-Codex has no orchestrator role of its own here: you run `scripts/status.sh` and `scripts/unblocked.sh` yourself, or ask the Reviewer to.
+Codex has no orchestrator role of its own here ([DECISIONS.md](../DECISIONS.md) item 96): you run `scripts/status.sh` and `scripts/unblocked.sh` yourself, or ask the Reviewer to.
 
 ## What each Claude tool becomes
 
@@ -54,7 +54,7 @@ Codex has no orchestrator role of its own here: you run `scripts/status.sh` and 
 | A watcher under Monitor | a background terminal: `mkdir -p .build && nohup scripts/watch-events.sh --role <role> >> .build/watch-<role>.log 2>&1 &`, then `tail -n 20 .build/watch-<role>.log` at the start of each turn. To wait for the next event, run `tail -n 0 -F .build/watch-<role>.log \| head -n 1` |
 | `SendMessage` | nothing: the comment on GitHub is the message, and you tell the session to look |
 | Chips | you paste the `chip:` line into a new Codex session, as above |
-| Session titles, `get_usage`, `list_sessions`, keep awake | nothing; you watch usage yourself and run `caffeinate -dis` while sessions work |
+| Session titles, `get_usage`, `list_sessions`, keep awake | nothing; you watch usage yourself, and run `caffeinate -dis` in a terminal while sessions work and quit it (Ctrl-C) when they stop |
 
 `scripts/codex-agents.mjs` writes `.codex/agents/` from `.claude/agents/`; `45-codex.sh` fails when they drift. `scripts/live-lane.sh` takes the nearest `codex` process as the lane's holder, as it takes `claude` on Claude.
 

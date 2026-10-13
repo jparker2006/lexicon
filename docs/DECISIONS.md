@@ -141,6 +141,10 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 **64. The plan only: no fast mode, no usage credits.** The orchestrator proposed a one-ticket fast-mode trial with usage credits and a spending cap. Jake, 2026-10-11 09:42:07Z: "Ohh na no fast mode if its not on the subscription lol." `.claude/settings.json` turns fast mode off. Lives in AGENTS.md, Ask Jake first.
 
+### Codex when Claude's plan runs out (#88, 2026-10-13)
+
+**96. Builders, the Reviewer and Live checks run on Codex for a day or two when Claude's plan runs out, then go back to Claude.** Jake, 16:12Z, after the orchestrator flagged 93% weekly use: "Dont worry about my usage. We will burn claude, then switch to codex for a day or two before switching back to claude." Then 16:26Z, "yes, yes" to the orchestrator's Codex plan: a ticket "Workflow runs on Codex", built by a Claude session, guard first, with a few Codex refusal-check runs on his ChatGPT plan and no private data; and a ruleset on main allowing changes only by PR ([16:12Z](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6149921132), [16:26Z](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6150184150)). That ticket, #325, has Jake paste each `chip:` line into a new Codex session, since Codex has no chips, and names no Codex orchestrator. Departs from the spec's "builders run as local Claude Code only". Lives in [codex.md](agents/codex.md).
+
 ### Proposed (stands as built, for the next grill round)
 
 **62. The Reviewer uses Workflows and swarms, as a standing rule.** Proposed. Not asked: Jake raised it himself, 2026-10-12 06:29:41Z, after telling the Reviewer to use Workflows and swarms: "we should make that a rule in our workflow though". The rule and its details are the orchestrator's, written on [#162](https://github.com/jparker2006/lexicon/issues/162#issuecomment-6119007942): in parallel, not in a line; the full review Workflow on high-tier PRs and a light pass on low-tier ones; every blocker in the first verdict; the opt-in carried in the start prompt. Lives in review.md, The Reviewer's duties.

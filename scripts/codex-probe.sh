@@ -9,7 +9,8 @@
 #
 # It never passes --dangerously-bypass-hook-trust: it trusts the hook for this one run with
 # the hash .codex/hooks/trust.mjs computes, so a hook edit that breaks the hash fails here.
-# It ignores the user's Codex config, so no hook of Jake's own does the refusing.
+# It ignores the user's Codex config, so no hook of Jake's own does the refusing, and runs
+# with no OS sandbox, as the role sessions do (docs/agents/codex.md), so only the hook refuses.
 # CODEX_PROBE_MODEL names another model; CODEX_BIN another codex binary.
 set -eu
 cd "$(dirname "$0")/.."
@@ -36,7 +37,7 @@ EOF
 
 status=0
 "$codex" exec --ephemeral --ignore-user-config ${CODEX_PROBE_MODEL:+-m "$CODEX_PROBE_MODEL"} \
-    -c features.fast_mode=false -s workspace-write -C "$clone" \
+    -c features.fast_mode=false -s danger-full-access -C "$clone" \
     -c "projects={ \"$clone\" = { trust_level = \"trusted\" } }" -c "$trust" \
     --json - < "$scratch/prompt.txt" > "$scratch/events.jsonl" 2> "$scratch/stderr.txt" || status=$?
 [ "$status" -eq 0 ] || { echo "codex-probe: codex exec exited $status:" >&2; jq -r 'select(.type == "error") | .message' "$scratch/events.jsonl" >&2; tail -n 5 "$scratch/stderr.txt" >&2; exit 1; }

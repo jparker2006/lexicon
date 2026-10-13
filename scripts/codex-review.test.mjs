@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { strict } from './codex-review.mjs';
+import { MODEL, strict } from './codex-review.mjs';
 import { tierGate } from './merge-pr.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -83,7 +83,7 @@ test('a reviewer-mode run prints the Review table merge-pr.mjs accepts, with Cod
   assert.match(markdown, new RegExp(`^Reviewed sha: \`${f.sha.slice(0, 7)}\``, 'm'));
   assert.match(markdown, /^\| CONFIRMED \| `Sources\/History\/a\.swift:1` \| a dictation can be lost \|/m);
   assert.equal(result.reviewedSha, f.sha);
-  assert.match(markdown, /^Helpers: 1 snapshot \(script, no model\), .*critic-deep \(Codex gpt-6-astra high\)/m);
+  assert.match(markdown, new RegExp(`^Helpers: 1 snapshot \\(script, no model\\), .*critic-deep \\(Codex ${MODEL.replace(/\./g, '\\.')} high\\)`, 'm'));
   assert.doesNotMatch(markdown, /\((haiku|sonnet|opus) /);
   assert.ok(calls.length >= 3, 'critics, a verifier and blast radius ran through codex');
 });
@@ -98,7 +98,7 @@ test('each helper runs as codex exec with its role prompt, model, effort and a s
   for (const { args, prompt, schema } of critics) {
     assert.equal(args[0], 'exec');
     assert.ok(prompt.startsWith(role), 'the critic role prompt leads');
-    assert.equal(args[args.indexOf('-m') + 1], 'gpt-6-astra');
+    assert.equal(args[args.indexOf('-m') + 1], MODEL);
     assert.ok(args.includes('model_reasoning_effort="medium"'));
     assert.ok(args.includes('--ephemeral'));
     assert.ok(args.some((arg) => arg.startsWith('hooks.state={ ') && arg.includes(`${realpathSync(f.repo)}/.codex/hooks.json:pre_tool_use:0:0`)), 'the guard hook is trusted for the run');
@@ -109,7 +109,7 @@ test('each helper runs as codex exec with its role prompt, model, effort and a s
   const verifiers = calls.filter((c) => c.prompt.includes('Try to disprove'));
   assert.equal(verifiers.length, 1, "the one finding gets one verifier");
   assert.ok(verifiers[0].prompt.startsWith(verifier), 'the verifier role prompt leads');
-  assert.equal(verifiers[0].args[verifiers[0].args.indexOf('-m') + 1], 'gpt-6-astra');
+  assert.equal(verifiers[0].args[verifiers[0].args.indexOf('-m') + 1], MODEL);
 });
 
 test('strict closes every object and requires every property, nested ones too', () => {
