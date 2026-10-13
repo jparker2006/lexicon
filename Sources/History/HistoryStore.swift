@@ -175,9 +175,30 @@ public final class HistoryStore: @unchecked Sendable {
     /// Counts: purpose `.type` (a Re-speak's text fixes another Dictation, never
     /// pastes), any origin, a status that has text and is settled (inserted, not
     /// inserted, recovered; never `ready`, which is mid-paste), and a final text
-    /// that is not blank. nil: nothing to paste yet.
+    /// that is not blank. `newerOnItsWay`: a newer `.type` row is not settled
+    /// (recording, transcribing, waiting, ready); a newer failed row is skipped
+    /// silently, as nothing is coming from it. nil: nothing to paste yet.
+    ///
+    /// Both status lists are generated from `DictationStatus`, and both reads run
+    /// in one `read`, after every event recorded before it, so they agree.
     public func newestText() async -> NewestText? {
-        nil  // scaffold (#62): filled test-first
+        let settled = HistorySchema.sqlList({ $0.hasText && $0.isTerminal }, is: true)
+        let unsettled = HistorySchema.sqlList(\.isTerminal, is: false)
+        let type = SQLValue.text(DictationPurpose.type.column)
+        return try? await read { db in
+            guard let row = try db.query("""
+                SELECT id, final_text, started_at FROM dictation
+                WHERE status IN (\(settled)) AND purpose = ? AND trim(final_text, ' ' || char(9, 10, 13)) <> ''
+                ORDER BY started_at DESC, rowid DESC LIMIT 1
+                """, [type]).first,
+                  let id = row.text(0).flatMap(DictationID.init(column:)), let text = row.text(1),
+                  let startedAt = row.int(2)
+            else { return nil }
+            let newer = try db.query("""
+                SELECT EXISTS (SELECT 1 FROM dictation WHERE status IN (\(unsettled)) AND purpose = ? AND started_at > ?)
+                """, [type, .int(startedAt)]).first?.int(0) == 1
+            return NewestText(id: id, text: text, newerOnItsWay: newer)
+        }
     }
 
     public func dictation(_ id: DictationID) async -> DictationRecord? {
