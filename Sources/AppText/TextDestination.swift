@@ -22,8 +22,9 @@ public protocol TextDestination: Sendable {
     /// At stop: the focused field plus an input mark. nil when nothing can take text.
     func target() async -> Target?
 
-    /// Asks `InsertGuard.decide` first (#4 late-text rule: same app and field,
-    /// nothing typed since the mark; every insert, no grace window), then pastes.
+    /// Asks `InsertGuard.decide` first (#4 late-text rule: same app and field, or
+    /// same app under 5 s where no field shows; nothing typed since the mark;
+    /// every insert, no grace window), then pastes.
     /// Returns `.inserted(receipt)` or `.notInserted(reason)`; never `.historyOnly`.
     func insert(_ text: String, for id: DictationID, at target: Target) async -> Delivery
 
