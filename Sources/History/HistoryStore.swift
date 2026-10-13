@@ -85,7 +85,7 @@ public final class HistoryStore: @unchecked Sendable {
     public init(paths: AppPaths) throws {
         self.paths = paths
         try FileManager.default.createDirectory(at: Self.audioFolder(in: paths), withIntermediateDirectories: true)
-        // Before the database opens: a store refused here has touched nothing.
+        // Before the database opens: a store refused here has read or written no History.
         lock = try FolderLock(paths.root.appending(path: "history.lock"))
         db = try Database(at: paths.root.appending(path: "history.sqlite"), mode: .readWrite,
                           migrations: HistorySchema.migrations)
