@@ -36,11 +36,16 @@ public enum RespeakText {
 
     /// What Jake said without the stop Cleanup ends a sentence with: "C#." is
     /// "C#"; a mark that is part of his words (#, %, a leading dot), a comma or
-    /// colon he said, and a run of dots stay.
+    /// colon he said, a run of dots and an abbreviation's period stay.
     private static func sentence(_ spoken: String) -> String {
         var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A run of dots ("..", "...") is Jake's own mark, not a stop Cleanup added.
-        if let last = text.last, ".!?".contains(last), !text.hasSuffix("..") { text.removeLast() }
+        // A run of dots ("..", "...") is Jake's own mark, and an abbreviation's period
+        // ("etc.") is part of the word Cleanup kept: neither is a stop Cleanup added.
+        let lastWord = text.split(whereSeparator: \.isWhitespace).last.map { $0.dropLast().lowercased() } ?? ""
+        if let last = text.last, ".!?".contains(last), !text.hasSuffix(".."),
+           !(last == "." && Fillers.abbreviations.contains(lastWord)) {
+            text.removeLast()
+        }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
