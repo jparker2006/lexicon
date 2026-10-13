@@ -32,8 +32,8 @@ final class EventTapThread: @unchecked Sendable {
     private let ownPID = Int64(getpid())
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
-    /// Lexicon's own hotkeys (⌃⌘V): their key-down asks Lexicon for something, so it
-    /// is not Jake typing, and a paste it starts is never held as typed since.
+    /// Lexicon's own hotkeys (⌃⌘V): the tap's copy of their key-down is not ticked,
+    /// because `send` counts the press, ordered before its command.
     private let notTyping: [Hotkey]
     private let log = Logger(subsystem: "Lexicon", category: "fn")
 
@@ -104,11 +104,15 @@ final class EventTapThread: @unchecked Sendable {
         onTapThread { self.feed(input) }
     }
 
-    /// A command that is not a gesture (⌃⌘V's hotkey), yielded on the tap thread so
-    /// it queues behind every fn command already sent: `commands` keeps one producer.
-    /// A tap never started (tests) yields it at once, on the caller's thread.
+    /// A Lexicon hotkey's press (⌃⌘V), yielded on the tap thread so it queues behind
+    /// every fn command already sent: `commands` keeps one producer. The press is Jake
+    /// typing, counted here, once, before its command: a Dictation still on its way
+    /// is held, and the paste this press asks for takes its mark after the tick, so
+    /// its own key-down never holds it (the tap skips its copy, `notTyping`).
+    /// A tap never started (tests) runs it at once, on the caller's thread.
     func send(_ command: KeyCommand) {
         onTapThread { [self] in
+            input.tick()
             continuation.yield(command)
             log.notice("key command: \(String(describing: command), privacy: .public)")
         }
