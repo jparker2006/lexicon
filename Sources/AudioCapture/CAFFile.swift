@@ -12,9 +12,6 @@ public enum CAFFile {
         case closed
         /// No sample yet: zero bytes, a header with no data chunk, or a data chunk holding no sample.
         case empty
-        /// Closed by the writer with no sample: what it leaves when the disk fails at the first
-        /// write and the hold goes on in RAM, so the words may have existed.
-        case closedEmpty
         /// The open failed for a reason other than "no such file" (EMFILE, EIO, a permission):
         /// the audio may be fine, so a later look may read it.
         case unavailable
@@ -38,7 +35,7 @@ public enum CAFFile {
         case .unavailable: .unavailable
         case .notCAF: .unreadable
         case .noSample: .empty
-        case .data(_, let size): size == -1 ? .open : size - 4 < 2 ? .closedEmpty : .closed
+        case .data(_, let size): size == -1 ? .open : .closed
         }
     }
 
@@ -78,9 +75,9 @@ public enum CAFFile {
         /// Not a CAF, or a damaged chunk header.
         case notCAF
         /// Nothing past the header yet: zero bytes, no data chunk, or a data chunk
-        /// with no whole sample on disk. What a capture leaves when it dies before its
-        /// first write. Not a file the writer closed saying it holds no sample: that
-        /// is `.data`, read as `State.closedEmpty`.
+        /// with no whole sample on disk, whatever its size field says. What a capture
+        /// leaves when it dies before its first write; closing the writer then leaves
+        /// the same bytes (AudioFile keeps the size at -1 with no packet, measured).
         case noSample
         /// The data chunk: where its header starts, and its size field (-1 while open).
         case data(offset: off_t, size: Int64)
@@ -103,11 +100,8 @@ public enum CAFFile {
             let size = Int64(bitPattern: header[4..<12].reduce(UInt64(0)) { $0 << 8 | UInt64($1) })
             if header[0..<4].elementsEqual("data".utf8) {
                 guard size >= -1 else { return .notCAF }  // a damaged header
-                // Edit count (4 bytes), then 16-bit samples. A closed chunk that says it holds
-                // none is finished; one whose samples are not on disk was cut short.
-                let onDisk = length - offset - 12
-                let saysSamples = size == -1 || size - 4 >= 2
-                return saysSamples && onDisk - 4 < 2 ? .noSample : .data(offset: offset, size: size)
+                // Edit count (4 bytes), then 16-bit samples, read from what is on disk.
+                return length - offset - 12 - 4 < 2 ? .noSample : .data(offset: offset, size: size)
             }
             guard size >= 0, size <= Int64.max - 12 - offset else { return .notCAF }  // a damaged header
             offset += 12 + size

@@ -103,7 +103,6 @@ extension HistoryStore {
             case .open: .open
             case .closed: .closed
             case .empty: .empty
-            case .closedEmpty: .closedEmpty
             case .unavailable: .unavailable
             case .unreadable: .unreadable
             }
@@ -171,7 +170,7 @@ enum RecoveryPlan {
         let status: DictationStatus
         let audio: AudioStorage
     }
-    enum FileState: Sendable, Hashable { case open, closed, empty, closedEmpty, unavailable, unreadable }
+    enum FileState: Sendable, Hashable { case open, closed, empty, unavailable, unreadable }
 
     enum Action: Sendable, Hashable {
         case finalize(DictationID)                 // CAF still open: write its real size
@@ -214,7 +213,7 @@ enum RecoveryPlan {
                 } else if file == .empty, row.status == .recording {
                     // It never heard anything: no row, as for a stray tap.
                     actions.append(.discard(row.id))
-                } else if file == .empty || file == .closedEmpty {
+                } else if file == .empty {
                     // Its words, if any, were only in RAM. Deleted first: a crash in between
                     // leaves no file, which fails it the same way.
                     actions.append(.deleteEmptyFile(row.id))
@@ -230,7 +229,7 @@ enum RecoveryPlan {
         for (id, file) in files.sorted(by: { $0.key.description < $1.key.description }) where !known.contains(id) {
             switch file {
             case .unavailable: continue  // looked at again next launch
-            case .empty, .closedEmpty: actions.append(.deleteEmptyFile(id)); continue  // nothing to adopt
+            case .empty: actions.append(.deleteEmptyFile(id)); continue  // nothing to adopt
             case .open, .closed, .unreadable: break
             }
             if file == .open { actions.append(.finalize(id)) }

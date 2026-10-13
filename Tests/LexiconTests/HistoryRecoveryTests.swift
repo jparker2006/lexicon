@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 @testable import History
-import AudioCapture
+@testable import AudioCapture
 import LexiconDomain
 
 // Launch recovery on throwaway folders. The planner is tested without disk. The
@@ -472,16 +472,6 @@ private func writeEmptyCAF(_ shape: EmptyCAFShape, at url: URL) async throws {
     }
 }
 
-/// A closed CAF whose data chunk's 8-byte size is `size`, cut to its header and edit count:
-/// with a size of 4, a file the writer closed before any sample, as it does when the disk fails.
-private func writeClosedCAFHolding(size: UInt64, at url: URL) async throws {
-    try await writeEmptyCAF(.closedCutToNoSample, at: url)
-    var bytes = try Data(contentsOf: url)
-    let tag = try #require(bytes.firstRange(of: Data("data".utf8)))
-    bytes.replaceSubrange(tag.upperBound..<(tag.upperBound + 8), with: withUnsafeBytes(of: size.bigEndian, Array.init))
-    try bytes.write(to: url)
-}
-
 @Test(arguments: EmptyCAFShape.allCases)
 private func anEmptyCAFShapeIsReadAsEmpty(shape: EmptyCAFShape) async throws {
     let url = try scratchDirectory().appending(path: "\(shape).caf")
@@ -519,53 +509,16 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     #expect(try Data(contentsOf: url) == before, "\(shape): finalize changed the file")
 }
 
-@Test func aCAFTheWriterClosedWithNoSampleIsClosedEmptyAndFinalizeLeavesIt() async throws {
-    // The writer closes the file and goes on in RAM when the disk fails (CaptureCore), so a closed
-    // file with no sample is not proof that nothing was heard, as a file it never closed is.
-    let url = try scratchDirectory().appending(path: "closed-empty.caf")
-    try await writeClosedCAFHolding(size: 4, at: url)
-    #expect(CAFFile.state(of: url) == .closedEmpty)
-    let before = try Data(contentsOf: url)
-    try CAFFile.finalize(url)
-    #expect(try Data(contentsOf: url) == before)
-}
-
-@Test func aClosedEmptyFileFailsItsRowAsAudioMissingAndAnOrphanOneIsDeleted() {
-    // The words may have been in RAM when the crash came, so the row stays as failed, and the file
-    // goes: it holds nothing Retry could use.
-    for status in [DictationStatus.recording, .transcribing, .waiting] {
-        let id = DictationID()
-        let row = RecoveryPlan.RowState(id: id, status: status, audio: .onDisk)
-        let files: [DictationID: RecoveryPlan.FileState] = [id: .closedEmpty]
-        let actions = RecoveryPlan.plan(rows: [row], files: files)
-        #expect(actions == [.deleteEmptyFile(id), .markFailed(id, "audio missing")], "\(status)")
-        let after = leftBehind(by: actions, rows: [row], files: files)
-        #expect(RecoveryPlan.plan(rows: after.rows, files: after.files) == [], "\(status), planned again")
-    }
-    let orphan = DictationID()
-    #expect(RecoveryPlan.plan(rows: [], files: [orphan: .closedEmpty]) == [.deleteEmptyFile(orphan)])
-}
-
-@Test func aRecordingOrAWaitingDictationWhoseFileTheWriterClosedWithNoSampleFailsAsAudioMissing() async throws {
-    // Disk trouble at the first write: the file is closed with no sample while the hold goes on in
-    // RAM, and the crash takes the RAM copy. The failed row is how Jake learns it was lost.
-    let recording = DictationID()
-    let waiting = DictationID()
-    let paths = try await earlierRun { store in
-        store.record(.began(recording, origin: .live, purpose: .type, at: earlier(), app: app))
-        try await writeClosedCAFHolding(size: 4, at: store.audioURL(for: recording))
-        store.record(.began(waiting, origin: .live, purpose: .type, at: earlier(), app: app))
-        store.record(.audioEnded(waiting, audio))
-        store.record(.waiting(waiting, reason: "offline"))
-        try await writeClosedCAFHolding(size: 4, at: store.audioURL(for: waiting))
-    }
-    let relaunched = try await relaunch(paths)
-    #expect(await relaunched.recover().isEmpty)
-    for id in [recording, waiting] {
-        #expect(await relaunched.dictation(id)?.status == .failed)
-        #expect(try await statusReason(relaunched, id) == "audio missing")
-        #expect(!FileManager.default.fileExists(atPath: relaunched.audioURL(for: id).path(percentEncoded: false)))
-    }
+@Test func theWriterClosedBeforeAnySampleLeavesTheSameEmptyFileACrashDoes() throws {
+    // AudioFile keeps a CAF with no packet as it created it: closing the writer (what CaptureCore
+    // does when the first write fails) leaves the bytes a crash before the first write leaves.
+    let url = try scratchDirectory().appending(path: "never-written.caf")
+    let writer = try CAFWriter(creating: url)
+    #expect(CAFFile.state(of: url) == .empty)
+    let created = try Data(contentsOf: url)
+    writer.close()
+    #expect(CAFFile.state(of: url) == .empty)
+    #expect(try Data(contentsOf: url) == created)
 }
 
 @Test func aCAFWhoseChunkRunsPastItsEndIsUnreadableNotEmpty() async throws {
