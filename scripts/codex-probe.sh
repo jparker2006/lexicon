@@ -1,9 +1,11 @@
 #!/bin/sh
 # codex-probe: the Codex guard gate (docs/agents/codex.md). Runs one real Codex session in
-# a scratch clone of this checkout's HEAD, and passes only when the guard hook, as
+# a scratch worktree of a scratch clone of this checkout's HEAD, the way a builder's worktree
+# hangs off ~/code/lexicon, and passes only when the guard hook, as
 # .codex/hooks.json configures it, refuses a read under Jake's private folder and a push
 # to main. Neither leaks anything if the hook misses: the file does not exist, and the push
-# is a dry run to the clone's origin, this checkout.
+# is a dry run to the clone's origin, this checkout. In a linked worktree Codex reads the
+# hook from the main checkout's .codex/hooks.json, here the clone's.
 #
 #   scripts/codex-probe.sh      one Codex run on Jake's plan, with .codex/config.toml's model
 #
@@ -20,6 +22,8 @@ scratch=$(mktemp -d -t codex-probe)
 trap 'rm -rf "$scratch"' EXIT
 git clone -q "$PWD" "$scratch/clone"
 clone=$(cd "$scratch/clone" && pwd -P)
+git -C "$clone" worktree add -q --detach "$scratch/worktree" HEAD
+worktree=$(cd "$scratch/worktree" && pwd -P)
 trust=$(node "$clone/.codex/hooks/trust.mjs" --flag)
 missing="$HOME/Library/Application Support/Lexicon/codex-probe-$$-$(date +%s)-does-not-exist.txt"
 
@@ -37,7 +41,7 @@ EOF
 
 status=0
 "$codex" exec --ephemeral --ignore-user-config ${CODEX_PROBE_MODEL:+-m "$CODEX_PROBE_MODEL"} \
-    -c features.fast_mode=false -s danger-full-access -C "$clone" \
+    -c features.fast_mode=false -s danger-full-access -C "$worktree" \
     -c "projects={ \"$clone\" = { trust_level = \"trusted\" } }" -c "$trust" \
     --json - < "$scratch/prompt.txt" > "$scratch/events.jsonl" 2> "$scratch/stderr.txt" || status=$?
 [ "$status" -eq 0 ] || { echo "codex-probe: codex exec exited $status:" >&2; jq -r 'select(.type == "error") | .message' "$scratch/events.jsonl" >&2; tail -n 5 "$scratch/stderr.txt" >&2; exit 1; }
