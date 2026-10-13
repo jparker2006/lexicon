@@ -395,5 +395,14 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
         #expect(RespeakText.replacement("The.", replacing: " teh, ", terms: [], isEnglish: english) == " the, ")
         #expect(RespeakText.replacement("The.", replacing: "teh.\"", terms: [], isEnglish: english) == "the.\"")
     }
+
+    /// Only Cleanup's sentence marks leave what Jake said: marks that are part of his words stay.
+    @Test func replacementKeepsMarksThatArePartOfTheWords() {
+        let notEnglish: (String) -> Bool = { _ in false }
+        #expect(RespeakText.replacement("C#.", replacing: "c sharp", terms: [], isEnglish: notEnglish) == "C#")
+        #expect(RespeakText.replacement("50%.", replacing: "fifty percent", terms: [], isEnglish: notEnglish) == "50%")
+        #expect(RespeakText.replacement(".env.", replacing: "dot env", terms: [], isEnglish: notEnglish) == ".env")
+        #expect(RespeakText.replacement("@jake.", replacing: "at jake", terms: [], isEnglish: notEnglish) == "@jake")
+    }
 }
 
