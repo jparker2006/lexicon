@@ -38,8 +38,8 @@ import AppKit
 
     func receipt(_ id: ClipboardKeeper.PasteID) async -> Bool { await keeper.receipt(id) }
 
-    /// Quit: Jake's clipboard back before Lexicon exits. At most `missedHold`,
-    /// the longest a missed paste's text stays up.
+    /// Quit: Jake's clipboard back before Lexicon exits. At most `missedHold` per
+    /// paste, the longest a missed paste's text stays up.
     func finishForQuit() async {
         await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: ContinuousClock())
     }
