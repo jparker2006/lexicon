@@ -17,7 +17,7 @@ import LexiconDomain
 /// key-down / mouse-down, (4) feeds fn and every other key-down to `FnGesture`
 /// and yields its commands.
 ///
-/// `@unchecked Sendable` is safe because `gesture`, `deadline` and the hotkey counts are touched
+/// `@unchecked Sendable` is safe because `gesture`, `deadline` and `presses` are touched
 /// by one thread only: the tap thread (the callback, the timer and `perform`'s
 /// blocks all run on its run loop), or a test's thread for a tap never started.
 /// `tap` and `runLoop` are written once in `start()` before it returns, ordered
@@ -32,14 +32,9 @@ final class EventTapThread: @unchecked Sendable {
     private let ownPID = Int64(getpid())
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
-    /// Lexicon's own hotkeys (⌃⌘V). One press can reach this thread twice, as the
-    /// tap's copy of its key-down and as the hotkey's `send`, in either order (or
-    /// only once, if the hotkey never registered or the tap never saw the key). It is
-    /// one keystroke: the first report ticks, and the other report of it does not.
+    /// Lexicon's own hotkeys (⌃⌘V): their presses are paired in `presses`.
     private let hotkeys: [Hotkey]
-    /// A press one report counted while the other has not come in yet: at most one,
-    /// since a press's two reports come within moments of each other. Tap thread only.
-    private var tapCopyAhead = false, hotkeyPressAhead = false
+    private var presses = HotkeyPresses()
     private let log = Logger(subsystem: "Lexicon", category: "fn")
 
     init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
@@ -115,14 +110,9 @@ final class EventTapThread: @unchecked Sendable {
     /// (`hotkeys`): a Dictation still on its way is held, and the paste this press
     /// asks for marks after the press, so its own key-down never holds it.
     /// A tap never started (tests) runs it at once, on the caller's thread.
-    func send(_ command: KeyCommand) {
+    func send(_ command: KeyCommand, pressedAt: HostTime = .now()) {
         onTapThread { [self] in
-            if tapCopyAhead {
-                tapCopyAhead = false
-            } else {
-                input.tick()
-                hotkeyPressAhead = true
-            }
+            if presses.isFirstReport(.hotkey, at: pressedAt) { input.tick() }
             continuation.yield(command)
             log.notice("key command: \(String(describing: command), privacy: .public)")
         }
@@ -158,12 +148,7 @@ final class EventTapThread: @unchecked Sendable {
     private func countTyping(_ event: CGEvent) {
         guard hotkeys.contains(where: { $0.matches(event) }) else { return input.tick() }
         guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
-        if hotkeyPressAhead {
-            hotkeyPressAhead = false
-        } else {
-            input.tick()
-            tapCopyAhead = true
-        }
+        if presses.isFirstReport(.tapCopy, at: HostTime(eventTimestamp: event.timestamp, now: .now())) { input.tick() }
     }
 
     /// What counts as Jake typing or clicking for `InputClock`: key-downs and
@@ -225,6 +210,29 @@ extension KeyInput {
         default:
             return nil
         }
+    }
+}
+
+/// One hotkey press reaches the tap thread twice, as the tap's copy of its key-down
+/// and as the hotkey's report, in either order, or once (the hotkey never registered,
+/// or the tap never saw the key). It is one keystroke, so only its first report
+/// counts. Both carry the key-down's own time, and a press's two reports are the
+/// same moment, so reports pair only within `pairWindow`: a report whose partner
+/// was lost never swallows a later press's.
+struct HotkeyPresses {
+    enum Report { case tapCopy, hotkey }
+    static let pairWindow: Duration = .milliseconds(250)
+    private var unpaired: (report: Report, at: HostTime)?
+
+    /// True for a press's first report (count it), false for its second.
+    mutating func isFirstReport(_ report: Report, at: HostTime) -> Bool {
+        if let first = unpaired, first.report != report,
+           max(first.at, at).duration(since: min(first.at, at)) <= Self.pairWindow {
+            unpaired = nil
+            return false
+        }
+        unpaired = (report, at)
+        return true
     }
 }
 

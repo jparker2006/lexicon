@@ -94,7 +94,7 @@ public final class Keyboard: Sendable {
         let tap = Self.tap(config, input: input, continuation: continuation)
         try tap.start(listenAccess: listenAccess)
         // The tap may see this key-down too; only the hotkey says paste, so one press pastes once.
-        let pasteLast = RegisteredHotkey(config.pasteLast) { _ in tap.send(.pasteLast) }
+        let pasteLast = RegisteredHotkey(config.pasteLast) { at in tap.send(.pasteLast, pressedAt: at) }
         pasteLast.setRegistered(true)
         return Keyboard(tap: tap, commands: commands, pasteLastKey: pasteLast)
     }
