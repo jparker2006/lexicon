@@ -23,6 +23,8 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 const prompt = fs.readFileSync(0, 'utf8');
 const log = process.env.FAKE_CODEX_LOG;
+if (process.env.FAKE_CODEX_HANG && prompt.includes('one lens: ' + process.env.FAKE_CODEX_HANG)) setInterval(() => {}, 1000);
+else {
 const n = fs.readdirSync(log).length;
 fs.writeFileSync(path.join(log, n + '.json'), JSON.stringify({ args, prompt, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
 const finding = { path: 'Sources/History/a.swift', line: 1, claim: 'a dictation can be lost', scenario: 'X, so Y', severity: 'blocker', confidence: 'high', cite: { kind: 'rule', source: 'review.md', quote: 'q' } };
@@ -31,6 +33,7 @@ if (prompt.includes('Try to disprove')) reply = { verdict: 'CONFIRMED', citation
 else if (prompt.startsWith('Blast radius') || prompt.includes('---\\n\\nBlast radius')) reply = { safetyFact: 'fact', proofCommand: 'true', proofResult: 'ok', findings: [] };
 else reply = { findings: /one lens: Never lose/.test(prompt) ? [finding] : [], notes: [], checked: 'looked', incomplete: '' };
 fs.writeFileSync(args[args.indexOf('-o') + 1], JSON.stringify(reply));
+}
 `;
 
 function fixture(t) {
@@ -62,12 +65,13 @@ function fixture(t) {
   return { dir, repo, bin, log, sha: git(repo, 'rev-parse', 'HEAD') };
 }
 
-function review({ dir, repo, bin, log }, args) {
+function review({ dir, repo, bin, log }, args, env = {}) {
   const out = path.join(dir, 'result.json');
   const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/codex-review.mjs'), JSON.stringify(args), '--out', out], {
     cwd: repo,
     encoding: 'utf8',
-    env: { ...process.env, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir },
+    env: { ...process.env, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir, ...env },
+    timeout: 60_000,
   });
   assert.equal(run.status, 0, run.stderr);
   const calls = readdirSync(log).sort((a, b) => parseInt(a) - parseInt(b)).map((f) => JSON.parse(readFileSync(path.join(log, f), 'utf8')));
@@ -118,4 +122,12 @@ test('strict closes every object and requires every property, nested ones too', 
   assert.equal(s.additionalProperties, false);
   assert.deepEqual(s.properties.a.items.required, ['b', 'c']);
   assert.equal(s.properties.a.items.additionalProperties, false);
+});
+
+test('a helper that never answers is stopped at its deadline and leaves the run unstamped, never hung', (t) => {
+  const f = fixture(t);
+  // The deadline only bounds a hang: the hung helper never answers, whatever the machine's speed.
+  const { markdown, result } = review(f, { issue: 1, sha: f.sha }, { FAKE_CODEX_HANG: 'Never lose', CODEX_REVIEW_HELPER_TIMEOUT_MS: '3000' });
+  assert.match(markdown, /^Not stamped \(INCOMPLETE below\)/m);
+  assert.equal(result.reviewedSha, null);
 });
