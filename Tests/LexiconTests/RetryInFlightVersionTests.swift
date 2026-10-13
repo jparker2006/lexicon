@@ -53,6 +53,7 @@ private actor HangingTranscriber: LocalTranscriber {
                                                                   in: try scratchDirectory()),
                                                pace: .asFastAsPossible)
     await system.history.flush()
+    let before = try #require(await system.history.dictation(first.id))
 
     var hanging = model.hanging.makeAsyncIterator()
     let retrying = Task { await system.conductor.retry(first.id, with: nil) }
@@ -61,6 +62,7 @@ private actor HangingTranscriber: LocalTranscriber {
     await system.history.flush()
 
     #expect(refused.status == nil && refused.versions == nil)
+    #expect(await system.history.dictation(first.id) == before)  // the row as it was
     #expect(try #require(HistoryReader(paths: paths).detail(first.id)).earlier.isEmpty)
 
     // The Retry in flight still lands, and saves the one version.
