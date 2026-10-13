@@ -150,8 +150,8 @@ const DAILY_ID = 'dev.jparker.lexicon';
 const DEV_ID = 'dev.jparker.lexicon.dev';
 const DAILY_APP = /\bdev\.jparker\.lexicon\b(?![.\w-])|\b(?:application|app|process)\s+"Lexicon(?:\.app)?"|(?:^|[\s/"'])Lexicon\.app\b/i;
 // Jake's private folder, as any home writes it. "Lexicon Dev" never matches: a space follows.
-// Codex's login token, under any home.
-const CODEX_LOGIN = /(?:^|\/)\.codex\/auth\.json$/i;
+// Codex's login token, under any home, also inside a word such as an interpreter's script.
+const CODEX_LOGIN = /(?:^|\/)\.codex\/auth\.json(?![\w.-])/i;
 const PRIVATE_TEXT =/(?:^|\/)Library\/Application Support\/Lexicon(?:\/|$)/i;
 // Its models folder holds model weights, not private data, and Lexicon Dev's models folder links to it.
 const MODELS_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon\/models(?:\/|$)/i;
