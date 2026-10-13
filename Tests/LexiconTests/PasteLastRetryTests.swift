@@ -5,11 +5,11 @@ import AudioCapture
 import History
 import LexiconDomain
 
-// #62 AC 2, headless: a Retry of a recovered row that paste-last already inserted
-// must not say it wrote nothing, nor say "Retried" over a write History refuses.
-// The fix is the rule both History and the Conductor use, `DictationStatus.landed`:
-// a previous status that has text keeps its place, so History admits the Retry's
-// text and the report is true. Retry still types nothing.
+// A Retry after ⌃⌘V: what Retry reports is what History holds. A Retry of a
+// recovered row paste-last already inserted replaces its text and stays inserted
+// (DECISIONS item 57, built by #213), so "Retried" is true, never a write History
+// refused. The rule both use is `DictationStatus.landed`: a previous status that
+// has text keeps its place. Retry still types nothing.
 
 // MARK: The rule, without disk
 
