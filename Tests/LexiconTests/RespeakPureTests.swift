@@ -419,5 +419,10 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
         #expect(RespeakText.replacement("Note:", replacing: "not", terms: [], isEnglish: { _ in true }) == "note:")
         #expect(RespeakText.replacement("Well,", replacing: "will", terms: [], isEnglish: { _ in true }) == "well,")
     }
+
+    /// Cleanup ends a sentence with one stop: only that one goes, so a "?!" Jake said keeps its "?".
+    @Test func replacementDropsOnlyTheOneClosingStop() {
+        #expect(RespeakText.replacement("Really?!", replacing: "rally", terms: [], isEnglish: { _ in true }) == "really?")
+    }
 }
 
