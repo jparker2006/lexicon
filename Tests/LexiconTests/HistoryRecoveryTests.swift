@@ -18,7 +18,7 @@ private let parakeet = SpeechModel.local(.parakeetUnified)
 // MARK: The planner, without disk
 
 /// Every file state a row can have, and none at all.
-private let fileStates: [RecoveryPlan.FileState?] = [nil, .open, .closed, .unreadable]
+private let fileStates: [RecoveryPlan.FileState?] = [nil, .open, .closed, .empty, .unavailable, .unreadable]
 
 /// The files a planner call sees for one row: none when the row has no file.
 private func fileMap(_ id: DictationID, _ state: RecoveryPlan.FileState?) -> [DictationID: RecoveryPlan.FileState] {
