@@ -10,7 +10,9 @@ extension Conductor {
         guard let newest = await history.newestText() else { return emit(.notice(.nothingToPaste)) }
         guard let target = await destination.target() else { return emit(.notice(.noFieldToPaste)) }
         switch await destination.pasteLast(newest.text, for: newest.id, at: target) {
-        case .inserted(let receipt): history.record(.delivered(newest.id, receipt, lag: nil))
+        case .inserted(let receipt):
+            history.record(.delivered(newest.id, receipt, lag: nil))
+            emit(.pasted(newest.id, newerOnItsWay: newest.newerOnItsWay))
         case .notInserted, .historyOnly: break  // the row keeps its status; Jake can press it again
         }
     }
