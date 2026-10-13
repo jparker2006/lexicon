@@ -181,3 +181,27 @@ private func writeOldHistory(at paths: AppPaths, id: DictationID) async throws {
     let detail = try #require(HistoryReader(paths: paths).detail(id))
     #expect(detail.earlier.map(\.final) == ["Second.", "First."])
 }
+
+// MARK: - A recovered Dictation
+
+/// Recovered at launch, then pasted with paste-last: a Retry still replaces its text and
+/// keeps the old as an earlier version, and the row stays inserted.
+@MainActor @Test func aRetryOfARecoveredDictationJakePastedKeepsItsTextAsAnEarlierVersion() async throws {
+    let (store, paths) = try makeStore()
+    let id = DictationID()
+    store.record(.began(id, origin: .recovered, purpose: .type, at: start, app: .unknown))
+    store.record(.audioEnded(id, audio))
+    store.record(.textReady(id, TextVersions(model: "found words", cleaned: "Found words."), cleanup: .rulesOnly(.off),
+                            model: parakeet, typing: false))
+    store.record(.delivered(id, receipt, lag: nil))
+    await store.flush()
+    try #require(HistoryReader(paths: paths).detail(id)?.row.status == .inserted)
+
+    retry(store, id, "Better words.")
+    await store.flush()
+
+    let detail = try #require(HistoryReader(paths: paths).detail(id))
+    #expect(detail.row.status == .inserted)
+    #expect(detail.row.finalText == "Better words.")
+    #expect(detail.earlier.map(\.final) == ["Found words."])
+}
