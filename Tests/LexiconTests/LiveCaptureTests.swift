@@ -223,6 +223,10 @@ final class FakeMic: Sendable {
     private let mute: Set<Int>
     /// Engines, by the order they are made, that write past their ring, as a device outrunning the writer does.
     private let overflows: Set<Int>
+    /// Engine builds, by the order they are asked for, that throw, as a device mid-switch with no format does.
+    private let failsAtMake: Set<Int>
+    /// Every engine still matches its device, so a prepared one is used at fn-down.
+    private let current: Bool
     /// Starts, by the order they happen, that block their thread until `unwedge`.
     private let wedgesAtStart: Set<Int>
     /// Each engine whose start is blocked, as it blocks.
@@ -243,16 +247,23 @@ final class FakeMic: Sendable {
     private let undetermined: Bool
     private let prompt = Mutex<(answered: Bool, asked: Int, waiting: [CheckedContinuation<Void, Never>])>(
         (false, 0, []))
+    /// One element each time the Allow prompt is asked for, as it is asked.
+    let asked: AsyncStream<Void>
+    private let asking: AsyncStream<Void>.Continuation
 
     /// The default clock never moves: no start hits the limit because the machine is slow.
     init(diesAtStart: Set<Int> = [], mute: Set<Int> = [], wedgesAtStart: Set<Int> = [], wedgesAtFind: Set<Int> = [],
-         overflows: Set<Int> = [], clock: any Clock<Duration> = TestClock(), askingPermission: Bool = false) {
+         overflows: Set<Int> = [], failsAtMake: Set<Int> = [], current: Bool = false,
+         clock: any Clock<Duration> = TestClock(), askingPermission: Bool = false) {
         (made, continuation) = AsyncStream.makeStream()
+        (asked, asking) = AsyncStream.makeStream()
         (wedged, wedging) = AsyncStream.makeStream()
         (findWedged, findWedging) = AsyncStream.makeStream()
         self.diesAtStart = diesAtStart
         self.mute = mute
         self.overflows = overflows
+        self.failsAtMake = failsAtMake
+        self.current = current
         self.wedgesAtStart = wedgesAtStart
         self.wedgesAtFind = wedgesAtFind
         self.clock = clock
@@ -275,8 +286,9 @@ final class FakeMic: Sendable {
                 defer { count += 1 }
                 return count
             }
+            if failsAtMake.contains(index) { throw .engineFailed("fake device \(index) has no format yet") }
             let engine = FakeEngine(diesAtStart: diesAtStart.contains(index), mute: mute.contains(index),
-                                    overflows: overflows.contains(index), wedge: { [self] engine in
+                                    overflows: overflows.contains(index), current: current, wedge: { [self] engine in
                 let index = starts.withLock { count in
                     defer { count += 1 }
                     return count
@@ -294,6 +306,7 @@ final class FakeMic: Sendable {
                     if !prompt.answered { prompt.waiting.append(asked) }
                     return prompt.answered
                 }
+                asking.yield()
                 if answered { asked.resume() }
             }
             return true
@@ -302,6 +315,9 @@ final class FakeMic: Sendable {
 
     /// How many times the Allow prompt was asked for.
     var timesAsked: Int { prompt.withLock { $0.asked } }
+
+    /// How many engine builds were asked for, the failed ones included.
+    var timesMade: Int { count.withLock { $0 } }
 
     /// Jake clicks Allow.
     func answerPrompt() {
@@ -331,7 +347,7 @@ final class FakeEngine: InputEngine, Sendable {
     let device: AudioDeviceID = 1
     let segment = Segment(rate: Double(PCM16k.sampleRate))
     var changes: AnyObject { self }
-    var isCurrent: Bool { false }
+    var isCurrent: Bool { current }
     var isRunning: Bool { running.load(ordering: .relaxed) }
     var firstAudio: HostTime? { stamp.withLock { $0 } }
     /// One element per `stop`, so a test can wait on it.
@@ -340,22 +356,29 @@ final class FakeEngine: InputEngine, Sendable {
     private let diesAtStart: Bool
     private let mute: Bool
     private let overflows: Bool
+    private let current: Bool
+    private let startCount = Atomic(0)
     /// Asked at each start: a semaphore to block on, as a stuck Core Audio call does.
     private let wedge: @Sendable (FakeEngine) -> DispatchSemaphore?
     private let running = Atomic(false)
     private let stamp = Mutex<HostTime?>(nil)
     private let stops: AsyncStream<Void>.Continuation
 
-    init(diesAtStart: Bool, mute: Bool = false, overflows: Bool = false,
+    init(diesAtStart: Bool, mute: Bool = false, overflows: Bool = false, current: Bool = false,
          wedge: @escaping @Sendable (FakeEngine) -> DispatchSemaphore? = { _ in nil }) {
         self.diesAtStart = diesAtStart
         self.mute = mute
         self.overflows = overflows
+        self.current = current
         self.wedge = wedge
         (stopped, stops) = AsyncStream.makeStream()
     }
 
+    /// How many times `start` was called, a wedged start included.
+    var timesStarted: Int { startCount.load(ordering: .relaxed) }
+
     func start() throws(RecorderError) {
+        startCount.add(1, ordering: .relaxed)
         wedge(self)?.wait()  // timing-ok: the stuck Core Audio call under test; the test releases it
         guard !diesAtStart else { return }
         running.store(true, ordering: .relaxed)
