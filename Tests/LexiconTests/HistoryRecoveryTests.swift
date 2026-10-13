@@ -519,25 +519,53 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     #expect(try Data(contentsOf: url) == before, "\(shape): finalize changed the file")
 }
 
-@Test func aCAFTheWriterClosedWithNoSampleIsClosedNotEmpty() async throws {
+@Test func aCAFTheWriterClosedWithNoSampleIsClosedEmptyAndFinalizeLeavesIt() async throws {
     // The writer closes the file and goes on in RAM when the disk fails (CaptureCore), so a closed
-    // file proves nothing about what was heard. Only a file it never closed is empty.
+    // file with no sample is not proof that nothing was heard, as a file it never closed is.
     let url = try scratchDirectory().appending(path: "closed-empty.caf")
     try await writeClosedCAFHolding(size: 4, at: url)
-    #expect(CAFFile.state(of: url) == .closed)
+    #expect(CAFFile.state(of: url) == .closedEmpty)
+    let before = try Data(contentsOf: url)
+    try CAFFile.finalize(url)
+    #expect(try Data(contentsOf: url) == before)
 }
 
-@Test func aRecordingWhoseFileTheWriterClosedWithNoSampleKeepsItsRow() async throws {
+@Test func aClosedEmptyFileFailsItsRowAsAudioMissingAndAnOrphanOneIsDeleted() {
+    // The words may have been in RAM when the crash came, so the row stays as failed, and the file
+    // goes: it holds nothing Retry could use.
+    for status in [DictationStatus.recording, .transcribing, .waiting] {
+        let id = DictationID()
+        let row = RecoveryPlan.RowState(id: id, status: status, audio: .onDisk)
+        let files: [DictationID: RecoveryPlan.FileState] = [id: .closedEmpty]
+        let actions = RecoveryPlan.plan(rows: [row], files: files)
+        #expect(actions == [.deleteEmptyFile(id), .markFailed(id, "audio missing")], "\(status)")
+        let after = leftBehind(by: actions, rows: [row], files: files)
+        #expect(RecoveryPlan.plan(rows: after.rows, files: after.files) == [], "\(status), planned again")
+    }
+    let orphan = DictationID()
+    #expect(RecoveryPlan.plan(rows: [], files: [orphan: .closedEmpty]) == [.deleteEmptyFile(orphan)])
+}
+
+@Test func aRecordingOrAWaitingDictationWhoseFileTheWriterClosedWithNoSampleFailsAsAudioMissing() async throws {
     // Disk trouble at the first write: the file is closed with no sample while the hold goes on in
-    // RAM, and the crash takes the RAM copy. The row stays, so Jake sees the Dictation was lost.
-    let id = DictationID()
+    // RAM, and the crash takes the RAM copy. The failed row is how Jake learns it was lost.
+    let recording = DictationID()
+    let waiting = DictationID()
     let paths = try await earlierRun { store in
-        store.record(.began(id, origin: .live, purpose: .type, at: earlier(), app: app))
-        try await writeClosedCAFHolding(size: 4, at: store.audioURL(for: id))
+        store.record(.began(recording, origin: .live, purpose: .type, at: earlier(), app: app))
+        try await writeClosedCAFHolding(size: 4, at: store.audioURL(for: recording))
+        store.record(.began(waiting, origin: .live, purpose: .type, at: earlier(), app: app))
+        store.record(.audioEnded(waiting, audio))
+        store.record(.waiting(waiting, reason: "offline"))
+        try await writeClosedCAFHolding(size: 4, at: store.audioURL(for: waiting))
     }
     let relaunched = try await relaunch(paths)
-    #expect(await relaunched.recover().map(\.id) == [id])  // handed back to transcribe, as before
-    #expect(await relaunched.dictation(id)?.status == .recording)
+    #expect(await relaunched.recover().isEmpty)
+    for id in [recording, waiting] {
+        #expect(await relaunched.dictation(id)?.status == .failed)
+        #expect(try await statusReason(relaunched, id) == "audio missing")
+        #expect(!FileManager.default.fileExists(atPath: relaunched.audioURL(for: id).path(percentEncoded: false)))
+    }
 }
 
 @Test func aCAFWhoseChunkRunsPastItsEndIsUnreadableNotEmpty() async throws {

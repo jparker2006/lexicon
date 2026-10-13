@@ -103,6 +103,7 @@ extension HistoryStore {
             case .open: .open
             case .closed: .closed
             case .empty: .empty
+            case .closedEmpty: .closedEmpty
             case .unavailable: .unavailable
             case .unreadable: .unreadable
             }
@@ -170,7 +171,7 @@ enum RecoveryPlan {
         let status: DictationStatus
         let audio: AudioStorage
     }
-    enum FileState: Sendable, Hashable { case open, closed, empty, unavailable, unreadable }
+    enum FileState: Sendable, Hashable { case open, closed, empty, closedEmpty, unavailable, unreadable }
 
     enum Action: Sendable, Hashable {
         case finalize(DictationID)                 // CAF still open: write its real size
@@ -229,7 +230,7 @@ enum RecoveryPlan {
             switch file {
             case .unavailable: continue  // looked at again next launch
             case .empty: actions.append(.deleteEmptyFile(id)); continue  // nothing to adopt
-            case .open, .closed, .unreadable: break
+            case .open, .closed, .closedEmpty, .unreadable: break
             }
             if file == .open { actions.append(.finalize(id)) }
             actions.append(.adoptOrphan(id))

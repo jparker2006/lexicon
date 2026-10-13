@@ -12,6 +12,9 @@ public enum CAFFile {
         case closed
         /// No sample yet: zero bytes, a header with no data chunk, or a data chunk holding no sample.
         case empty
+        /// Closed by the writer with no sample: what it leaves when the disk fails at the first
+        /// write and the hold goes on in RAM, so the words may have existed.
+        case closedEmpty
         /// The open failed for a reason other than "no such file" (EMFILE, EIO, a permission):
         /// the audio may be fine, so a later look may read it.
         case unavailable
