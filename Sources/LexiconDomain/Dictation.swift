@@ -236,8 +236,10 @@ extension DictationStatus {
         case .inserted: return .inserted
         case .notInserted: return .notInserted
         case .historyOnly:
-            if origin == .recovered { return .recovered }
+            // A row that already has text keeps its status (a Retry): a recovered
+            // Dictation Jake pasted stays inserted.
             if let previous, previous.hasText { return previous }
+            if origin == .recovered { return .recovered }
             return .notInserted
         }
     }
