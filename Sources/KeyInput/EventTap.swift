@@ -35,6 +35,10 @@ final class EventTapThread: @unchecked Sendable {
     private let ownPID = Int64(getpid())
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
+    /// Whether fn is down right now, asked after the tap was off with a press in
+    /// progress. System-wide state; tests pass their own. Reading it needs listen
+    /// access, which the tap exists only with.
+    private let fnHeld: @Sendable () -> Bool
     private let log = Logger(subsystem: "Lexicon", category: "fn")
     /// Takes Esc from the app in front (true) or gives it back (false): the
     /// Esc hotkey once started, a test's recorder otherwise.
@@ -44,11 +48,15 @@ final class EventTapThread: @unchecked Sendable {
 
     init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
          secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() },
+         fnHeld: @escaping @Sendable () -> Bool = {
+             CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn)
+         },
          takeEscape: @escaping @Sendable (Bool) -> Void = { _ in }) {
         self.gesture = gesture
         self.input = input
         self.continuation = continuation
         self.secureInput = secureInput
+        self.fnHeld = fnHeld
         self.takeEscape = takeEscape
     }
 
@@ -91,6 +99,8 @@ final class EventTapThread: @unchecked Sendable {
     private func watchdog() -> CFRunLoopTimer {
         let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + 2, 2, 0, 0) { [self] _ in
             guard let tap, !CGEvent.tapIsEnabled(tap: tap) else { return }
+            // The cause is unknown (seen once); these name a lost permission if it happens again.
+            log.error("fn tap off with no notice: accessibility \(AXIsProcessTrusted(), privacy: .public), listen \(CGPreflightListenEventAccess(), privacy: .public)")
             reenable(because: "no notice")
         }!
         CFRunLoopTimerSetTolerance(timer, 0.5)
@@ -102,7 +112,7 @@ final class EventTapThread: @unchecked Sendable {
         log.error("fn tap was disabled (\(String(describing: reason), privacy: .public)); re-enabled")
         input.tick()  // Jake may have typed while it was off: late text must not assume he didn't
         // An fn-up lost while the tap was off would leave the mic recording until the next press.
-        if gesture.isRecording, !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
+        if gesture.isRecording, !fnHeld() {
             feed(.fnUp(.now()))
         }
     }
@@ -233,10 +243,11 @@ extension KeyInput {
 
 extension HostTime {
     /// A CGEvent's timestamp is nanoseconds on the HostTime clock. An event posted
-    /// without a time (stamp 0), or one that reads as not yet happened or over a
-    /// second old, is taken as `now`, so a bad stamp can't turn a tap into a hold.
+    /// without a time (stamp 0), or one that reads as not yet happened, is taken as
+    /// `now`. An old stamp is kept: when the tap thread stalls, both edges of a long
+    /// hold arrive late, and only their own times still read as a hold.
     init(eventTimestamp stamp: CGEventTimestamp, now: HostTime) {
         let at = HostTime(nanoseconds: stamp)
-        self = at <= now && now.duration(since: at) < .seconds(1) ? at : now
+        self = stamp != 0 && at <= now ? at : now
     }
 }
