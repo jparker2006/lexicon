@@ -197,8 +197,8 @@ enum RecoveryPlan {
             }
             // An open that failed for now (EMFILE, EIO) says nothing about the audio: the
             // Dictation stays as it was and the next launch looks again, rather than fail one
-            // that may be whole. A delete Jake made is still finished: it needs no read.
-            if file == .unavailable { continue }
+            // that may be whole. A delete Jake made, and a mid-paste mark, need no read.
+            if file == .unavailable, row.status != .ready { continue }
             if row.audio == .expired, file != nil {
                 actions.append(.dropExpiredAudio(row.id))
             } else if file == .open {

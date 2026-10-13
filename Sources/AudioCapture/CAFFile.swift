@@ -12,8 +12,8 @@ public enum CAFFile {
         case closed
         /// No sample yet: zero bytes, a header with no data chunk, or a data chunk holding no sample.
         case empty
-        /// The open failed for a reason other than "no such file" (EMFILE, EIO, a permission):
-        /// the audio may be fine, so a later look may read it.
+        /// The open failed for a reason that passes by itself (too many files open, an I/O
+        /// error, an interrupted call): the audio may be fine, so a later look may read it.
         case unavailable
         case unreadable
     }
@@ -37,9 +37,9 @@ public enum CAFFile {
     /// Reads the `data` chunk's size from the header. Never decodes audio.
     public static func state(of url: URL) -> State {
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
-        // Only a missing file is known to be gone. Any other failure (EMFILE, EIO, a
-        // permission) may pass, and the audio behind it may be whole.
-        guard descriptor >= 0 else { return errno == ENOENT ? .unreadable : .unavailable }
+        // Only a failure that passes by itself waits for a later look. One that stays (a
+        // permission, a missing file) would hold its Dictation in flight on every launch.
+        guard descriptor >= 0 else { return [EMFILE, ENFILE, EIO, EINTR, EAGAIN].contains(errno) ? .unavailable : .unreadable }
         defer { close(descriptor) }
         return switch layout(descriptor) {
         case .unavailable: .unavailable
@@ -66,10 +66,10 @@ public enum CAFFile {
         let chunk: (offset: off_t, size: Int64)
         switch layout(descriptor) {
         case .unavailable, .notCAF: throw .unreadable(url)
-        case .noSample: return .wroteSize
+        case .noSample: return .noSample
         case .data(let offset, let size): chunk = (offset, size)
         }
-        guard chunk.size == -1 else { return .wroteSize }
+        guard chunk.size == -1 else { return .wasWhole }
         var info = stat()
         guard fstat(descriptor, &info) == 0 else { throw .unreadable(url) }
         let payload = info.st_size - chunk.offset - 12  // edit count (4 bytes) + audio
