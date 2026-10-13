@@ -86,9 +86,9 @@ public final class Recorder: Sendable {
     public func start(_ input: AudioInput, writingTo file: URL,
                       since keyDown: HostTime = .now()) async throws(RecorderError) -> LiveCapture {
         #if DEBUG
-        // Spent by the next mic Dictation even when its start fails, as the hook says.
+        // Spent by the next Dictation (from the mic, for zeros) even when its start fails, as each hook says.
         let silenced = if case .microphone = input { silenceNext.exchange(false, ordering: .relaxed) } else { false }
-        let drops = if case .microphone = input { dropNext.exchange(false, ordering: .relaxed) } else { false }
+        let drops = dropNext.exchange(false, ordering: .relaxed)
         #endif
         let source: any CaptureSource
         var policy = policy
@@ -130,11 +130,11 @@ public final class Recorder: Sendable {
     /// that fails spends it too.
     public func silenceNextMicrophoneCapture() { silenceNext.store(true, ordering: .relaxed) }
 
-    /// The `mic drops` test hook: the next Dictation from the mic throws away
-    /// the first block it drains and counts it as lost, as a ring that overflowed
-    /// does, so the lost-audio notice can be seen in the live app. A start that
-    /// fails spends it too.
-    public func dropNextMicrophoneBlock() { dropNext.store(true, ordering: .relaxed) }
+    /// The `audio drops` test hook: the next capture, from the mic or a file,
+    /// throws away the first block it drains and counts it as lost, as a ring
+    /// that overflowed does, so the lost-audio notice can be seen in the live
+    /// app on a fixture as well as on fn. A start that fails spends it too.
+    public func dropNextCaptureBlock() { dropNext.store(true, ordering: .relaxed) }
     #endif
 }
 

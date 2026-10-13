@@ -56,7 +56,7 @@ final class CaptureCore: @unchecked Sendable {
     #if DEBUG
     /// Every frame read as zero (the `mic zeros` test hook). Set before `begin`.
     var silenced = false
-    /// The first block drained is thrown away and counted as lost (the `mic drops` test hook). Set before `begin`.
+    /// The first block drained is thrown away and counted as lost (the `audio drops` test hook). Set before `begin`.
     var dropsFirstBlock = false
     #endif
 

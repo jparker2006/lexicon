@@ -4,8 +4,12 @@ import Synchronization
 import Testing
 @testable import AudioCapture
 @testable import LexiconCore
+import Cleanup
+import History
 import LexiconDomain
 import LexiconUI
+import Transcription
+import WordStore
 
 // #179: capture errors and dropped audio are reported, not swallowed. Each part
 // below names its acceptance criterion.
@@ -451,14 +455,14 @@ private extension ConductorEvent {
     var isAudioLostNotice: Bool { if case .notice(.audioLost) = self { true } else { false } }
 }
 
-// MARK: The `mic drops` test hook (criterion 9 runs it live)
+// MARK: The `audio drops` test hook (criterion 9 runs it live)
 
 @Test(.timeLimit(.minutes(1)))
 func theMicDropsHookLosesAudioOnceAndTheDictationIsStillTyped() async throws {
     let rig = try HookRig()
     var events = await rig.conductor.events().makeAsyncIterator()
 
-    rig.recorder.dropNextMicrophoneBlock()
+    rig.recorder.dropNextCaptureBlock()
     let (lossy, lossyEvents) = try await holdOneFnPress(rig, &events)
     let (_, cleanEvents) = try await holdOneFnPress(rig, &events)
     await rig.settle()
@@ -468,5 +472,30 @@ func theMicDropsHookLosesAudioOnceAndTheDictationIsStillTyped() async throws {
     #expect(await rig.destination.delivered[lossy] != nil)
     #expect(!cleanEvents.contains { $0.isAudioLostNotice })
     #expect(cleanEvents.contains { $0.finishedStatus == .inserted })
+}
+
+@Test(.timeLimit(.minutes(1)))
+func theAudioDropsHookWorksOnAFileDictationToo() async throws {
+    // How Live checks runs criterion 9 hands-free: the hook, then a fixture dictated through the live path.
+    let wav = try writeWAV(syntheticSamples(count: 19_200), rate: 16_000, in: try scratchDirectory())
+    let paths = AppPaths.temporary()
+    let recorder = Recorder()
+    let conductor = Conductor(
+        recorder: recorder, speech: SpeechEngine(local: ScriptedTranscriber(text: "Ship it"), clock: TestClock()),
+        cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: try HistoryStore(paths: paths),
+        destination: HeadlessDestination(), preferences: PreferencesStore(fixed: .defaults),
+        secrets: Secrets(.environment), keyboard: nil, fixes: nil, jev: nil)
+    var events = await conductor.events().makeAsyncIterator()
+
+    recorder.dropNextCaptureBlock()
+    let result = await conductor.dictate(file: wav, pace: .asFastAsPossible)
+
+    #expect(result.status == .inserted)
+    var seen: [ConductorEvent] = []
+    while let event = await events.next() {
+        seen.append(event)
+        if event.isFinished { break }
+    }
+    #expect(seen.filter(\.isAudioLostNotice).count == 1)
 }
 #endif
