@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 @testable import LexiconCore
-import AppText
+@testable import AppText
 import LexiconDomain
 
 // Re-speak's pure seams (#83), no mic, keys, network or Accessibility:
@@ -16,8 +16,8 @@ private func receipt(caretAfter: Int?, contextBefore: String = "", fingerprint: 
                      contextBefore: contextBefore, contextAfter: "", insertedAt: Date(timeIntervalSince1970: 0))
 }
 
-private func field(_ text: String, fingerprint: String? = "field-1", bundleID: String? = editor) -> FieldText {
-    FieldText(text: text, selection: nil, bundleID: bundleID, fieldFingerprint: fingerprint)
+private func field(_ text: String, offset: Int = 0, fingerprint: String? = "field-1", bundleID: String? = editor) -> FieldText {
+    FieldText(text: text, offset: offset, selection: nil, bundleID: bundleID, fieldFingerprint: fingerprint)
 }
 
 @Suite struct RespeakPureTests {
@@ -99,6 +99,94 @@ private func field(_ text: String, fingerprint: String? = "field-1", bundleID: S
         #expect(DictationPlace.locate(text, receipt: r, in: field("Hey 🙂 I saw a cat.")) == TextSpan(location: 7, length: 12))
     }
 
+    /// The field is a window that starts at field offset 1_000, and "I saw a cat." sits at window
+    /// position 4 (after "Hey "). The span is the field's, so the caret route compares field offsets.
+    @Test func locateInAWindowReturnsFieldOffsets() {
+        let text = "I saw a cat."
+        let r = receipt(caretAfter: 1_000 + 4 + text.utf16.count)
+        #expect(DictationPlace.locate(text, receipt: r, in: field("Hey I saw a cat.", offset: 1_000))
+                == TextSpan(location: 1_004, length: 12))
+    }
+
+    /// Jake typed before the Dictation, so its caret is stale; the context "Note: " finds it in the
+    /// window, and the span it returns is the field's (1_000 + 6), not the window's (6).
+    @Test func locateInAWindowFollowsTheContextToAFieldOffset() {
+        let text = "I saw a cat."
+        let r = receipt(caretAfter: 1_030, contextBefore: "Note: ")
+        #expect(DictationPlace.locate(text, receipt: r, in: field("Note: I saw a cat.", offset: 1_000))
+                == TextSpan(location: 1_006, length: 12))
+    }
+
+    // MARK: FieldWindow and FieldText.reading (#83, a field too long to read whole)
+
+    /// A field no longer than the cap is read whole. Passes at the head, where the stub already
+    /// returns the whole field: a guard for the fix, not a red line.
+    @Test func windowSpanIsTheWholeFieldWhenItFits() {
+        #expect(FieldWindow.span(count: 150_000, around: 10, cap: 200_000) == TextSpan(location: 0, length: 150_000))
+        #expect(FieldWindow.span(count: 200_000, around: 150_000, cap: 200_000) == TextSpan(location: 0, length: 200_000))
+    }
+
+    /// Anchor 400_000 in a 500_000 field, cap 200_000: the window ends 2_000 past the anchor and is cap long.
+    /// Anchor near the start and anchor at the end clamp to the field's ends.
+    @Test func windowSpanIsCapUnitsAndHoldsTheAnchorWhenTheFieldIsLonger() {
+        #expect(FieldWindow.span(count: 500_000, around: 400_000, cap: 200_000) == TextSpan(location: 202_000, length: 200_000))
+        #expect(FieldWindow.span(count: 500_000, around: 1_000, cap: 200_000) == TextSpan(location: 0, length: 200_000))
+        #expect(FieldWindow.span(count: 500_000, around: 500_000, cap: 200_000) == TextSpan(location: 300_000, length: 200_000))
+    }
+
+    /// Whatever the anchor, the window is cap long, inside the field, and holds the anchor
+    /// (a caret at the very end of the field counts as held).
+    @Test func windowSpanAlwaysHoldsTheAnchorInsideTheField() {
+        for anchor in [0, 1, 1_000, 99_999, 100_000, 250_000, 499_999, 500_000] {
+            let span = FieldWindow.span(count: 500_000, around: anchor, cap: 200_000)
+            #expect(span.length == 200_000)
+            #expect(span.location >= 0 && span.location + span.length <= 500_000)
+            #expect(span.location <= anchor && anchor <= span.location + span.length)
+        }
+    }
+
+    /// Reads `window` as a field window at offset 1_000 in the editor, with a fixed fingerprint.
+    private func read(_ window: String, selection: TextSpan?) -> FieldText? {
+        FieldText.reading(window, offset: 1_000, selection: selection, bundleID: editor, fieldFingerprint: "field-1")
+    }
+
+    /// The selection's text comes from the window, so no second read can disagree with it.
+    @Test func readingTakesTheSelectionsTextFromTheWindow() {
+        let window = "the cat saw the cat"
+        let span = TextSpan(location: 1_016, length: 3)
+        #expect(read(window, selection: span)
+                == FieldText(text: window, offset: 1_000, selection: FieldSelection(span: span, text: "cat"),
+                             bundleID: editor, fieldFingerprint: "field-1"))
+    }
+
+    @Test func readingWithoutASelectionHasNone() {
+        let window = "the cat saw the cat"
+        #expect(read(window, selection: nil)
+                == FieldText(text: window, offset: 1_000, selection: nil, bundleID: editor, fieldFingerprint: "field-1"))
+    }
+
+    /// The inside selection is the positive line (red at the head). The two outside spans are
+    /// guards: one ends before the window, the other starts inside it and runs past its end.
+    @Test func readingIsNilWhenTheSelectionRunsOutsideTheWindow() {
+        let window = "the cat saw the cat"
+        #expect(read(window, selection: TextSpan(location: 1_016, length: 3))
+                == FieldText(text: window, offset: 1_000, selection: FieldSelection(span: TextSpan(location: 1_016, length: 3), text: "cat"),
+                             bundleID: editor, fieldFingerprint: "field-1"))
+        #expect(read(window, selection: TextSpan(location: 900, length: 3)) == nil)
+        #expect(read(window, selection: TextSpan(location: 1_017, length: 5)) == nil)
+    }
+
+    /// "🙂" is two UTF-16 units, so "cat" starts at 1_003 in the field, not at a Character's index.
+    @Test func readingCountsUTF16UnitsPastAnEmoji() {
+        let window = "🙂 cat"
+        #expect(read(window, selection: TextSpan(location: 1_003, length: 3))
+                == FieldText(text: window, offset: 1_000, selection: FieldSelection(span: TextSpan(location: 1_003, length: 3), text: "cat"),
+                             bundleID: editor, fieldFingerprint: "field-1"))
+        #expect(read(window, selection: TextSpan(location: 1_000, length: 2))
+                == FieldText(text: window, offset: 1_000, selection: FieldSelection(span: TextSpan(location: 1_000, length: 2), text: "🙂"),
+                             bundleID: editor, fieldFingerprint: "field-1"))
+    }
+
     // MARK: HeadlessDestination's one field
 
     @Test func headlessReplaceReplacesASpanThatReadsExpected() async throws {
@@ -161,9 +249,8 @@ private func field(_ text: String, fingerprint: String? = "field-1", bundleID: S
         #expect(RespeakText.replacement("Dog.", replacing: "Cat", terms: []) == "Dog")
     }
 
-    /// "dog?" over "cat?" keeps its "?" and passes at the head only because the stub returns its
-    /// input unchanged. The companion, "Dog?", is the line that is red there: it has to be lowercased
-    /// to match the lowercase text it replaces.
+    /// The "?" stays when the replaced words ended with one, and a plain English word is still
+    /// lowercased to match the lowercase text it replaces.
     @Test func replacementKeepsAQuestionMarkTheSelectionAlsoEndsWith() {
         #expect(RespeakText.replacement("dog?", replacing: "cat?", terms: []) == "dog?")
         #expect(RespeakText.replacement("Dog?", replacing: "cat?", terms: []) == "dog?")
@@ -213,5 +300,26 @@ private func field(_ text: String, fingerprint: String? = "field-1", bundleID: S
     /// uppercase, so the English word keeps its capital too. (The older test above pins the same line.)
     @Test func replacementKeepsTheCapitalOfAWordOverAnUppercaseSelection() {
         #expect(RespeakText.replacement("Dog.", replacing: "Cat", terms: [], isEnglish: { _ in true }) == "Dog")
+    }
+
+    // The selection's own whitespace is part of the words it replaces (#83 review): a replacement
+    // that drops it runs the words into their neighbours. The first-letter rule reads past it too.
+
+    @Test func replacementKeepsTheSpaceBeforeTheReplacedWord() {
+        #expect(RespeakText.replacement("Dog.", replacing: " cat", terms: []) == " dog")
+    }
+
+    @Test func replacementKeepsTheSpaceAfterTheReplacedWord() {
+        #expect(RespeakText.replacement("Dog.", replacing: "cat ", terms: []) == "dog ")
+    }
+
+    @Test func replacementKeepsTheNewlineAndSpaceAroundTheReplacedWord() {
+        #expect(RespeakText.replacement("Dog.", replacing: " cat\n", terms: []) == " dog\n")
+    }
+
+    /// The stop rule reads the selection's last non-whitespace character: "cat. " ends in a stop,
+    /// so Cleanup's "." stays, and the trailing space stays too.
+    @Test func replacementKeepsTheStopWhenTheSelectionEndsInAStopAndSpace() {
+        #expect(RespeakText.replacement("Dog.", replacing: "cat. ", terms: []) == "dog. ")
     }
 }
