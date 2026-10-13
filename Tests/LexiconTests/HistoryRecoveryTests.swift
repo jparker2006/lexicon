@@ -513,10 +513,14 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     // AudioFile keeps a CAF with no packet as it created it: closing the writer (what CaptureCore
     // does when the first write fails) leaves the bytes a crash before the first write leaves.
     let url = try scratchDirectory().appending(path: "never-written.caf")
-    let writer = try CAFWriter(creating: url)
-    #expect(CAFFile.state(of: url) == .empty)
-    let created = try Data(contentsOf: url)
-    writer.close()
+    let created: Data
+    do {
+        // Closed when it goes out of scope, by its deinit, as a dropped writer is.
+        let writer = try CAFWriter(creating: url)
+        #expect(CAFFile.state(of: url) == .empty)
+        created = try Data(contentsOf: url)
+        withExtendedLifetime(writer) {}
+    }
     #expect(CAFFile.state(of: url) == .empty)
     #expect(try Data(contentsOf: url) == created)
 }
