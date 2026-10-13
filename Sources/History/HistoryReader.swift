@@ -125,7 +125,7 @@ public final class HistoryReader {
         // Newest first by the order History wrote them (one writer queue), never by the wall clock.
         let replaced = (try? db.query("""
             SELECT cleaned_text, final_text, model, replaced_at FROM earlier_version
-            WHERE dictation_id = ? ORDER BY rowid DESC
+            WHERE dictation_id = ? AND cleaned_text IS NOT NULL ORDER BY rowid DESC
             """, [.text(id.description)])) ?? []
         let earlier = replaced.compactMap { version -> EarlierVersion? in
             guard let cleaned = version.text(0), let final = version.text(1) else { return nil }

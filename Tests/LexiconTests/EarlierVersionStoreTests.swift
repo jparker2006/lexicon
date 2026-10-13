@@ -125,6 +125,25 @@ private func writeOldHistory(at paths: AppPaths, id: DictationID) async throws {
     #expect(detail.earlier.map(\.final) == ["Second words.", "First words."])
 }
 
+/// The same for a Dictation that failed first: its first Retry replaced no text, and a
+/// replay of it after a second Retry still changes nothing.
+@MainActor @Test func replayingTheFirstRetryOfAFailedDictationAfterASecondChangesNothing() async throws {
+    let (store, paths) = try makeStore()
+    let id = DictationID()
+    store.record(.began(id, origin: .live, purpose: .type, at: start, app: app))
+    store.record(.audioEnded(id, audio))
+    store.record(.failed(id, reason: "silent"))
+    let first = UUID()
+    retry(store, id, "Found words.", version: first)
+    retry(store, id, "Better words.")
+    retry(store, id, "Found words.", version: first)
+    await store.flush()
+
+    let detail = try #require(HistoryReader(paths: paths).detail(id))
+    #expect(detail.row.finalText == "Better words.")
+    #expect(detail.earlier.map(\.final) == ["Found words."])
+}
+
 // MARK: - Older files
 
 @MainActor @Test func anOlderHistoryFileOpensUnchangedAndKeepsItsTextWhenRetried() async throws {

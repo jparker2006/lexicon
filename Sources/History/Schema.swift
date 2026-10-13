@@ -77,13 +77,15 @@ enum HistorySchema {
         CREATE INDEX dictation_by_time ON dictation(started_at DESC, status, audio_storage);
         """,
         """
-        -- What each Retry replaced (#213): the row's text before it, never audio.
+        -- What each Retry replaced (#213): the row's text before it, never audio. Every
+        -- Retry that lands has a row, so its replay is a no-op; texts NULL when it
+        -- replaced none (a failed Dictation's first Retry), and never listed.
         CREATE TABLE earlier_version (
           id            TEXT PRIMARY KEY,          -- minted once per Retry: a replay keeps one version
           dictation_id  TEXT NOT NULL REFERENCES dictation(id) ON DELETE CASCADE,
           model         TEXT,                      -- SpeechModel.id that heard the replaced text
-          cleaned_text  TEXT NOT NULL,
-          final_text    TEXT NOT NULL,             -- as it was, so the text a Fix was made on stays readable
+          cleaned_text  TEXT,
+          final_text    TEXT,                      -- as it was, so the text a Fix was made on stays readable
           replaced_at   INTEGER NOT NULL           -- unix ms
         );
         CREATE INDEX earlier_version_by_dictation ON earlier_version(dictation_id);
