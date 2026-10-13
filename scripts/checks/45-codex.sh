@@ -6,4 +6,4 @@ set -eu
 cd "$(dirname "$0")/../.."
 . scripts/lib/limits.sh
 trap limits_cleanup EXIT
-limited 120 node --test scripts/codex.test.mjs
+limited 120 node --test scripts/codex.test.mjs scripts/codex-review.test.mjs

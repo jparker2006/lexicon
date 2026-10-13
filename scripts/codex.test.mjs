@@ -2,6 +2,7 @@
 // (docs/agents/codex.md): the skills Codex loads, the helpers it runs and the page
 // Jake reads. Run by scripts/checks/45-codex.sh.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -31,4 +32,23 @@ test('docs/agents/codex.md holds every Codex session until the hook check and th
   const page = read('docs/agents/codex.md');
   assert.match(page, /scripts\/checks\/45-codex\.sh/, 'codex.md names the hook check');
   assert.match(page, /No Codex builder, Reviewer or Live checks session starts on the repo until/, 'codex.md says no Codex session starts before the gate');
+});
+
+test("each typed helper has a .codex/agents/<name>.toml with the same prompt, a Codex model and the helper's effort", () => {
+  const helpers = readdirSync(at('.claude/agents')).filter((f) => f.endsWith('.md'));
+  assert.ok(helpers.length > 0);
+  for (const md of helpers) {
+    const source = read(`.claude/agents/${md}`);
+    const prompt = source.replace(/^---\n[\s\S]*?\n---\n\n?/, '').replace(/\n+$/, '\n');
+    const effort = /^effort:\s*(\S+)$/m.exec(source)?.[1];
+    const rel = `.codex/agents/${md.replace(/\.md$/, '.toml')}`;
+    assert.ok(existsSync(at(rel)), `${rel} is missing; run node scripts/codex-agents.mjs`);
+    const codex = read(rel);
+    const instructions = /^developer_instructions = '''\n([\s\S]*?)'''$/m.exec(codex)?.[1];
+    assert.equal(instructions, prompt, `${rel}'s prompt differs from .claude/agents/${md}; run node scripts/codex-agents.mjs`);
+    assert.match(codex, /^model = "gpt-[\w.-]+"$/m, `${rel} names no Codex model`);
+    assert.match(codex, new RegExp(`^model_reasoning_effort = "${effort}"$`, 'm'), `${rel}'s effort is not ${effort}`);
+  }
+  const run = spawnSync(process.execPath, [at('scripts/codex-agents.mjs'), '--check'], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
 });
