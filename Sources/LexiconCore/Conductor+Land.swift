@@ -44,7 +44,8 @@ extension Conductor {
             for record in heard.attempts { history.record(.attempted(id, record)) }
             if blank { return failed(id, .silence) }
             // Queued for disk BEFORE it is typed. Fire-and-forget FIFO: still no wait on SQLite.
-            let typing = run.purpose == .type && run.target != nil
+            // Ready before anything is pasted: a Dictation's insert or a Re-speak's replace.
+            let typing = run.target != nil
             // A Retry keeps the text it replaces as an earlier version (#213).
             history.record(run.isRetry
                 ? .retried(id, cleaned.versions, cleanup: cleaned.outcome, model: heard.model, version: UUID())
@@ -53,7 +54,7 @@ extension Conductor {
             var delivery = Delivery.historyOnly
             var lag: Duration?
             var respeak: RespeakStep?
-            if typing, let target = run.target {
+            if run.purpose == .type, let target = run.target {
                 await insertTurn(id)  // Dictations insert in the order they were spoken (#18)
                 delivery = await destination.insert(cleaned.versions.cleaned, for: id, at: target)  // text at the cursor
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
@@ -63,9 +64,12 @@ extension Conductor {
                 await insertTurn(id)
                 respeak = await replaceSelection(cleaned.versions.cleaned, at: target)
                 // Its words landed in the field: the row reads inserted, with the lag to the fix.
-                if case .replaced(_, _, _, let receipt) = respeak {
+                switch respeak {
+                case .replaced(_, _, _, let receipt)?:
                     delivery = .inserted(receipt)
                     lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
+                case .notLanded(let problem)?: delivery = .notInserted(NotInsertedReason(problem))
+                case .noSelection?, nil: delivery = .notInserted(.pasteFailed)  // #85 finds the span by sound
                 }
             }
             releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
@@ -82,7 +86,8 @@ extension Conductor {
                 }
             case .notInserted(let reason):
                 history.record(.notInserted(id, reason))
-                emit(.notice(.readyToPaste(id)))
+                // A Re-speak's words are a correction, never offered to paste-last: its notice says why.
+                if run.purpose == .type { emit(.notice(.readyToPaste(id))) }
             case .historyOnly:
                 // Esc'd or late live Dictation: say it's waiting in paste-last (#18 indicator state).
                 // Not for a Retry of one already settled: Jake is looking at it in History.
