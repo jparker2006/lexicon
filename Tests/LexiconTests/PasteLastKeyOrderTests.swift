@@ -264,3 +264,22 @@ func aLateTapCopyStillPairsAfterALaterPressReported() {
     _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: at(1_300)), now: at(2_200))
     #expect(!input.hasInput(since: afterBothCommands), "each copy pairs with its own press's report")
 }
+
+@Test(.timeLimit(.minutes(1)), arguments: [CGKeyCode(63), CGKeyCode(179)])
+func fnsOwnKeyDownIsNotTypingWhileControlCommandVStillPairs(_ fnKey: CGKeyCode) {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    // A real-length fn tap: macOS sends fn's own key-down at its release. It is not typing (#58).
+    let beforeFn = input.mark()
+    let fnKeyDown = keyDown(fnKey, [], at: at(1_000))
+    fnKeyDown.type = .keyDown  // built for keycode 63, CGEvent makes a flag change
+    _ = tap.handle(.keyDown, fnKeyDown, now: at(1_000))
+    #expect(!input.hasInput(since: beforeFn), "fn's own key-down is not typing")
+    // A ⌃⌘V press after it still counts once, at its first report, and its paste never holds itself.
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: at(2_000)), now: at(2_000))
+    #expect(input.hasInput(since: beforeFn), "the ⌃⌘V press is typing")
+    tap.send(.pasteLast, pressedAt: at(2_000))
+    let mark = input.mark()
+    #expect(!input.hasInput(since: mark))
+}

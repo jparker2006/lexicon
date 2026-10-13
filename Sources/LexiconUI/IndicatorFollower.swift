@@ -95,6 +95,7 @@ public struct IndicatorFollower: Sendable {
         case .microphoneSilent: return fail("No sound from the microphone")
         case .microphoneMuted: return fail("Microphone is muted")
         case .diskTrouble: return fail("Can't save audio to disk")
+        case .audioLost: return fail("Part of the audio was lost")
         case .accessibilityNeeded: return fail("Allow Accessibility in the Lexicon menu")
         case .nothingToPaste: return fail("Nothing to paste yet")
         case .noFieldToPaste: return fail("Click a text field, then press \u{2303}\u{2318}V")

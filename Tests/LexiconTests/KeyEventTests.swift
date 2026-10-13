@@ -1,4 +1,5 @@
 import CoreGraphics
+import Synchronization
 import Testing
 import LexiconDomain
 @testable import KeyInput
@@ -123,7 +124,7 @@ private func isFnDown(_ key: KeyInput?, at: HostTime, secureInput: Bool) -> Bool
 }
 
 @Test func shiftWithFnNeverCancelsAHoldFromTheEvents() throws {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
     commands += feed(flagsChanged(56, [.maskShift, .maskSecondaryFn]), at: at(50), into: &gesture)
     commands += gesture.handle(.deadline(at(300))).commands
@@ -133,7 +134,7 @@ private func isFnDown(_ key: KeyInput?, at: HostTime, secureInput: Bool) -> Bool
 }
 
 @Test func shiftWithFnThenArrowWithinTheThresholdCancelsTheHold() throws {
-    var gesture = FnGesture(holdThreshold: .milliseconds(300))
+    var gesture = FnGesture(KeyboardConfig(holdThreshold: .milliseconds(300)))
     var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
     commands += feed(flagsChanged(56, [.maskShift, .maskSecondaryFn]), at: at(50), into: &gesture)
     commands += feed(keyEvent(124, flags: [.maskShift, .maskSecondaryFn]), at: at(200), into: &gesture)
@@ -197,4 +198,88 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     #expect(throws: KeyboardError.noListenAccess) {
         try Keyboard.start(KeyboardConfig(), input: InputClock(), listenAccess: false)
     }
+}
+
+@Test func plainEscIsEscapeAndEscWithAModifierIsAnotherKey() {
+    let now = at(0)
+    // fn may be down (a hold): still plain Esc. Cmd, Option, Control or Shift make it a shortcut.
+    #expect(KeyInput(keyEvent(53), secureInput: { false }, now: now) == .escape(now))
+    #expect(KeyInput(keyEvent(53, flags: [.maskSecondaryFn]), secureInput: { false }, now: now) == .escape(now))
+    for modifier: CGEventFlags in [.maskCommand, .maskAlternate, .maskControl, .maskShift] {
+        #expect(KeyInput(keyEvent(53, flags: modifier), secureInput: { false }, now: now) == .otherKey(now))
+    }
+}
+
+@Test func theTapAsksForEscExactlyWhileADictationIsConfirmed() {
+    // The Esc hotkey follows the recognizer: taken when the hold is confirmed, given back when
+    // it ends, and asked for only on a change.
+    let asked = Mutex<[Bool]>([])
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: InputClock(),
+                             continuation: continuation, secureInput: { false },
+                             takeEscape: { on in asked.withLock { $0.append(on) } })
+    /// As the keyboard sends it (pid 0): the tap drops events this process posted, its own Cmd-V.
+    func fromKeyboard(_ event: CGEvent) -> CGEvent {
+        event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+        return event
+    }
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(0)))  // a key after the (zero) threshold confirms the hold
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(1)))
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(53)))  // Esc cancels
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(53)))  // a second report of it changes nothing
+    #expect(asked.withLock { $0 } == [true, false])
+}
+
+@Test func aHotkeyPressIsStampedWithItsOwnEventTime() {
+    // Carbon's event time is seconds on the same uptime clock: the hotkey's Esc keeps the time it
+    // was pressed, not when thread hops later the recognizer gets it, however late that is, so a
+    // late copy of an Esc can never pass for a new one. An unset or future time is taken as now.
+    let now = at(0)
+    let seconds = Double(now.nanoseconds) / 1e9
+    #expect(HostTime(carbonEventTime: seconds - 0.005, now: now) == HostTime(nanoseconds: now.nanoseconds - 5_000_000))
+    #expect(HostTime(carbonEventTime: seconds - 2, now: now) == HostTime(nanoseconds: now.nanoseconds - 2_000_000_000))
+    #expect(HostTime(carbonEventTime: 0, now: now) == now)
+    #expect(HostTime(carbonEventTime: seconds + 1, now: now) == now)
+    #expect(HostTime(carbonEventTime: .infinity, now: now) == now)
+    #expect(HostTime(carbonEventTime: .nan, now: now) == now)
+}
+
+@Test func theFnKeysOwnKeyDownIsNotAnotherKey() {
+    // On a Mac with the Globe key, macOS can send a key-down for fn itself (keycode 63, or 179
+    // for Globe) when a short tap is released. It is fn, not a chord: it must not end the tap.
+    let fnKeyDown = keyEvent(63)
+    fnKeyDown.type = .keyDown  // built for keycode 63, CGEvent makes a flag change
+    #expect(KeyInput(fnKeyDown, secureInput: { false }, now: at(0)) == nil)
+    #expect(KeyInput(keyEvent(179), secureInput: { false }, now: at(0)) == nil)
+}
+
+@Test func aRealDoubleTapWithTheGlobeKeyDownStartsHandsFree() throws {
+    // A real tap as the Live checks sitting saw it: fn down, fn up, then fn's own key-down at the
+    // release, then the second fn-down inside the window. It confirms hands-free, not a dropped tap.
+    var gesture = FnGesture(KeyboardConfig())
+    var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
+    commands += feed(flagsChanged(63, []), at: at(100), into: &gesture)
+    commands += feed(keyEvent(179), at: at(100), into: &gesture)
+    commands += feed(flagsChanged(63, [.maskSecondaryFn]), at: at(200), into: &gesture)
+    let id = try #require(beganID(commands))
+    #expect(commands == [.dictationBegan(id, at: at(0)), .dictationConfirmed(id, .handsFree)])
+}
+
+@Test func theFnKeysOwnKeyDownIsNotTyping() {
+    // fn's own key-down is fn, not Jake typing: it must not make a hands-free stop look like
+    // he typed after it, which would hold the text for paste-last. A letter still counts.
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig()), input: input, continuation: continuation,
+                             secureInput: { false })
+    func fromKeyboard(_ event: CGEvent) -> CGEvent {
+        event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+        return event
+    }
+    let mark = input.mark()
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(179)))
+    #expect(!input.hasInput(since: mark))
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(0)))
+    #expect(input.hasInput(since: mark))
 }

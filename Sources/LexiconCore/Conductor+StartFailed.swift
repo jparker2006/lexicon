@@ -1,6 +1,7 @@
 import os
 import LexiconDomain
 import AudioCapture
+import KeyInput
 import History
 
 // fn-down when the mic does not start: the row and the notice, never a lost Dictation.
@@ -21,6 +22,7 @@ extension Conductor {
             // "recording", or it would never show the notice (a press it never confirmed, it
             // ignores). The press's own release, still to come, names this id and so ends nothing.
             endCapture(id, .stop(at: .now()))
+            keyboard?.dictationEnded(id)  // the recognizer still thinks it records, and would keep Esc
             discarded = false
         } else {
             // Released before the mic answered: its end is already in `ends`.

@@ -13,13 +13,15 @@ public enum KeyCommand: Sendable, Hashable {
     case dictationBegan(DictationID, at: HostTime)
     /// Held past the hold threshold, or second tap of a double tap.
     case dictationConfirmed(DictationID, DictationMode)
-    /// Released after a hold, the next fn-down in hands-free, or the Mac going to sleep.
+    /// Released after a hold, the next fn-down in hands-free, the Mac going to sleep, or the cap.
     case dictationStopped(DictationID, at: HostTime)
     /// Esc while recording (#18): nothing is typed, but the Dictation is still
     /// transcribed and saved to History, so paste-last gets it back.
     case dictationCancelled(DictationID)
     /// A stray tap that never became a Dictation. Its row and file are removed.
     case dictationDiscarded(DictationID)
+    /// One minute until the cap stops this Dictation (the 19-minute mark).
+    case oneMinuteLeft(DictationID)
     /// ⌃⌘V: paste the final text of the newest Dictation that has text.
     case pasteLast
     /// "I just fixed this" (#13 catch-all). Trigger key decided in #24.
@@ -28,14 +30,26 @@ public enum KeyCommand: Sendable, Hashable {
 
 /// Key bindings and gesture timing, fixed in code (#18), re-checked in M0.
 public struct KeyboardConfig: Sendable, Hashable {
-    public var holdThreshold: Duration = .milliseconds(300)
+    public var holdThreshold: Duration
     /// From the first fn-up to the second fn-down (#18; Jake's double-tap gap measured 31 to 93 ms).
-    public var doubleTapWindow: Duration = .milliseconds(250)
+    public var doubleTapWindow: Duration
+    /// Every Dictation stops here, in either mode, as if fn were released (#18), counted
+    /// from its first fn-down. A forgotten hands-free, or a lost fn-up, ends here.
+    public var cap: Duration
+    /// How long before the cap the warning sounds.
+    public var capWarning: Duration
     /// None in v0 (#18): fn only. Kept as a seam for a non-Apple keyboard later.
     public var fallbackHotkey: Hotkey? = nil
     public var pasteLast: Hotkey = Hotkey(keyCode: 9, modifiers: [.control, .command])
     public var justFixed: Hotkey? = nil
-    public init() {}
+
+    public init(holdThreshold: Duration = .milliseconds(300), doubleTapWindow: Duration = .milliseconds(250),
+                cap: Duration = .seconds(20 * 60), capWarning: Duration = .seconds(60)) {
+        self.holdThreshold = holdThreshold
+        self.doubleTapWindow = doubleTapWindow
+        self.cap = cap
+        self.capWarning = capWarning
+    }
 }
 
 public struct Hotkey: Sendable, Hashable, Codable {
@@ -66,8 +80,9 @@ public enum KeyboardError: Error, Sendable {
 /// The fn key and every other key Lexicon listens to.
 ///
 /// Hides: the listen-only session-level CGEventTap on its own thread (#6), the
-/// gesture state machine and its timer, passing every key on (Esc while
-/// recording is swallowed from M1), re-enabling the tap after the system disables it, ignoring events
+/// gesture state machine and its timer (the hold, the double tap and the cap),
+/// passing every key on except Esc while recording (a registered hotkey takes
+/// it), re-enabling the tap after the system disables it, ignoring events
 /// Lexicon itself posted (its own Cmd-V), and stamping `InputClock`.
 ///
 /// Gesture state has exactly one owner: the recognizer on the tap thread. Other
@@ -102,8 +117,8 @@ public final class Keyboard: Sendable {
     /// The tap as `start` makes it, not yet started: tests drive it inline.
     static func tap(_ config: KeyboardConfig, input: InputClock,
                     continuation: AsyncStream<KeyCommand>.Continuation) -> EventTapThread {
-        EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
-                       continuation: continuation, hotkeys: [config.pasteLast])
+        EventTapThread(gesture: FnGesture(config), input: input, continuation: continuation,
+                       hotkeys: [config.pasteLast])
     }
 
     init(tap: EventTapThread, commands: AsyncStream<KeyCommand>, pasteLastKey: RegisteredHotkey? = nil) {
@@ -123,4 +138,9 @@ public final class Keyboard: Sendable {
     /// Lid close or sleep is a normal stop (#4). It goes through the recognizer,
     /// so the stop joins `commands` behind every command already waiting there.
     public func systemWillSleep() { feed(.sleep(.now())) }
+
+    /// The Conductor ended this Dictation itself (its mic never started). The
+    /// recognizer forgets it, so Esc goes back to the apps and the next fn-down
+    /// starts a new press instead of stopping one that is already over.
+    public func dictationEnded(_ id: DictationID) { feed(.ended(id)) }
 }

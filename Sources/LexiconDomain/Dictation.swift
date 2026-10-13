@@ -186,12 +186,17 @@ public struct AudioSummary: Sendable, Hashable, Codable {
     public var storage: AudioStorage
     /// Device changes mid-Dictation: gap lengths, same file kept.
     public var gaps: [Duration]
-    public init(duration: Duration, startGap: Duration?, deviceName: String?, storage: AudioStorage, gaps: [Duration]) {
+    /// Audio the capture lost and the clip lacks: frames the ring refused, input
+    /// the converter failed on, the unread rest of a file that broke off.
+    public var lost: Duration
+    public init(duration: Duration, startGap: Duration?, deviceName: String?, storage: AudioStorage, gaps: [Duration],
+                lost: Duration = .zero) {
         self.duration = duration
         self.startGap = startGap
         self.deviceName = deviceName
         self.storage = storage
         self.gaps = gaps
+        self.lost = lost
     }
 }
 

@@ -29,6 +29,8 @@ public enum Notice: Sendable, Hashable {
     case microphoneSilent
     case microphoneMuted
     case diskTrouble
+    /// Part of the Dictation's audio never reached the clip; it was heard and typed from the rest.
+    case audioLost
     case accessibilityNeeded
     case nothingToPaste
     case noFieldToPaste
