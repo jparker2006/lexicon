@@ -250,3 +250,17 @@ func aLateTapCopyNeverHoldsItsOwnPaste() {
     _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: press), now: late)
     #expect(!input.hasInput(since: mark), "the copy pairs by its own key-down time, however late it is handled")
 }
+
+@Test(.timeLimit(.minutes(1)))
+func aLateTapCopyStillPairsAfterALaterPressReported() {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    // Two presses 300 ms apart; both hotkey reports come first, then the copies, the first one late.
+    tap.send(.pasteLast, pressedAt: at(1_000))
+    tap.send(.pasteLast, pressedAt: at(1_300))
+    let afterBothCommands = input.mark()
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: at(1_000)), now: at(2_200))
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: at(1_300)), now: at(2_200))
+    #expect(!input.hasInput(since: afterBothCommands), "each copy pairs with its own press's report")
+}
