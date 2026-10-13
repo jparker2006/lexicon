@@ -53,4 +53,6 @@ public enum FixProblem: Sendable, Hashable, CaseIterable {
     case historyUnreadable
     /// The Re-speak held no word to put in.
     case nothingHeard
+    /// Nothing was selected, and no words were found by sound (#85 adds that path).
+    case noSelection
 }

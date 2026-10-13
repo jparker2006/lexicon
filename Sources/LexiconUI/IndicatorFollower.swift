@@ -110,6 +110,7 @@ public struct IndicatorFollower: Sendable {
         case .unverified: "Check the fix: Lexicon couldn't see it land"
         case .historyUnreadable: "Fixed, but History couldn't be read to save it"
         case .nothingHeard: "Didn't catch a word, so nothing was fixed"
+        case .noSelection: "Select the words to fix, then try again"
         }
     }
 

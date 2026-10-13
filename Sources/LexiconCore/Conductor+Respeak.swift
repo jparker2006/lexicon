@@ -77,7 +77,8 @@ extension NotInsertedReason {
         case .movedOn: .focusMoved
         case .noField: .noField
         case .clipboardDenied: .clipboardDenied
-        case .textChanged, .cannotSelect, .terminal, .pasteFailed, .unverified, .historyUnreadable, .nothingHeard:
+        case .textChanged, .cannotSelect, .terminal, .pasteFailed, .unverified, .historyUnreadable, .nothingHeard,
+             .noSelection:
             .pasteFailed
         }
     }

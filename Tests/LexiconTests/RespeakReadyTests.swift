@@ -118,9 +118,10 @@ private actor RespeakFieldDestination: TextDestination {
 
 /// A Conductor over `destination` and `history`, hearing `texts` one per clip.
 private func makeConductor(_ destination: RespeakFieldDestination, history: HistoryStore, paths: AppPaths,
+                           recorder: Recorder = Recorder(),
                            hearing texts: String...) throws -> Conductor<RespeakFieldDestination> {
     Conductor(
-        recorder: Recorder(), speech: SpeechEngine(local: HearingInOrder(texts), clock: TestClock()),
+        recorder: recorder, speech: SpeechEngine(local: HearingInOrder(texts), clock: TestClock()),
         cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: history, destination: destination,
         preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
         keyboard: nil, fixes: nil, jev: nil)
@@ -237,6 +238,40 @@ func aLiveRespeakWithNoFieldAtFnUpSaysTheFixDidNotLandAndIsNeverOfferedToPasteLa
     let seen = await emitted(events, until: respeak)
     // The fix that did not land is said, never silent: the indicator reads it as "No text field to fix".
     #expect(notices(seen).contains(.fixNotLanded(.noField)))
+    // A Re-speak's words are a correction, never offered to paste-last.
+    #expect(!notices(seen).contains(.readyToPaste(respeak)))
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aLiveRespeakEndedByEscLeavesTheFieldAloneAndIsNotToldNoFieldWasThere() async throws {
+    let paths = AppPaths.temporary()
+    let history = try HistoryStore(paths: paths)
+    let destination = RespeakFieldDestination(history: history)
+    // A fake mic has no end of its own, so the one `.cancel` below is what ends this run.
+    let conductor = try makeConductor(destination, history: history, paths: paths,
+                                      recorder: Recorder(hardware: FakeMic().hardware),
+                                      hearing: "the cat saw the cat", "dog")
+    let first = try await dictate(conductor)
+    await history.flush()
+    #expect(first.status == .inserted)
+    let before = await destination.fieldText
+
+    // Esc before any fn-up: the run captures no target, so there is no field to fix and nothing to say.
+    let (ends, open) = AsyncStream<RunEnd>.makeStream()
+    defer { open.finish() }
+    open.yield(.cancel)
+    let events = await conductor.events()
+    let respeak = DictationID()
+    let start = RunStart(id: respeak, input: .microphone(deviceUID: nil), preferences: .defaults,
+                         origin: .live, purpose: .respeak(of: first.id), began: .now())
+    _ = await conductor.run(start, ends: ends, hold: LatencyHold(reason: "Re-speak \(respeak)"))
+    await history.flush()
+
+    let seen = await emitted(events, until: respeak)
+    // Esc still transcribes and saves the words; only a fn-up with no field says the fix did not land.
+    #expect(await history.dictation(respeak)?.finalText == "dog")
+    #expect(await destination.fieldText == before)
+    #expect(!notices(seen).contains(.fixNotLanded(.noField)), "an Esc'd Re-speak said \(notices(seen))")
     // A Re-speak's words are a correction, never offered to paste-last.
     #expect(!notices(seen).contains(.readyToPaste(respeak)))
 }
