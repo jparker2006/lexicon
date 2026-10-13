@@ -111,6 +111,7 @@ public struct IndicatorFollower: Sendable {
         case .historyUnreadable: "Fixed, but History couldn't be read to save it"
         case .nothingHeard: "Didn't catch a word, so nothing was fixed"
         case .noSelection: "Select the words to fix, then try again"
+        case .tooLate: "The words came too late, so nothing was fixed"
         }
     }
 

@@ -19,7 +19,8 @@ public enum RespeakText {
         let stop = selected.last.map { ".!?".contains($0) ? String($0) : "" } ?? ""
         // Mid-sentence, a plain English word loses the sentence's capital. "I", a
         // name, a Term, or a word like GitHub keeps its form (DECISIONS.md item 85).
-        let word = String(text.prefix { !$0.isWhitespace })
+        // The first word without the mark after it: "Dog," is the word "Dog".
+        let word = String(text.prefix { !$0.isWhitespace }.reversed().drop { $0.isPunctuation }.reversed())
         if let first = text.first, selected.first?.isLowercase == true, word != "I", !word.hasPrefix("I'"),
            !terms.contains(where: { $0.prefix { !$0.isWhitespace } == word }),
            !word.dropFirst().contains(where: \.isUppercase), isEnglish(word.lowercased()) {

@@ -55,4 +55,6 @@ public enum FixProblem: Sendable, Hashable, CaseIterable {
     case nothingHeard
     /// Nothing was selected, and no words were found by sound (#85 adds that path).
     case noSelection
+    /// The words came after a wait for the model: a fix is never made late.
+    case tooLate
 }

@@ -80,7 +80,7 @@ extension NotInsertedReason {
         case .noField: .noField
         case .clipboardDenied: .clipboardDenied
         case .textChanged, .cannotSelect, .terminal, .pasteFailed, .unverified, .historyUnreadable, .nothingHeard,
-             .noSelection:
+             .noSelection, .tooLate:
             .pasteFailed
         }
     }
