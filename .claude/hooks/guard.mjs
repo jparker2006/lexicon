@@ -934,18 +934,22 @@ function inModels(file, dir) {
   return file.split('/').filter(Boolean)[at]?.toLowerCase() === 'models' && reach(file, dir) === 'inside';
 }
 
-/** Why the absolute path `resolved` is refused, or null: in the private folder, above it for a recursive read, or a .env file. A link is followed. */
-function pathRefusal(resolved, recursiveRead) {
+/**
+ * Why the absolute path `resolved` is refused, or null: in the private folder, above it for a recursive read, or a .env
+ * file. A link is followed. The private models folder may be read but never written: only scripts install models.
+ */
+function pathRefusal(resolved, recursiveRead, write = false) {
   if (resolved === null) return null;
-  for (const file of unique([resolved, realOrSelf(resolved)])) {
-    if (namesPrivate(file)) return REASONS.private;
+  const files = unique([resolved, realOrSelf(resolved)]);
+  for (const file of files) {
+    if (namesPrivate(file) || (write && PRIVATE_TEXT.test(file))) return REASONS.private;
     for (const dir of privateDirs()) {
       const reached = reach(file, dir);
-      if (inModels(file, dir)) continue;
+      if (!write && inModels(file, dir)) continue;
       if (reached === 'inside' || (recursiveRead && reached === 'above')) return REASONS.private;
     }
   }
-  return envName(path.basename(resolved)) ? REASONS.env : null;
+  return files.some((file) => envName(path.basename(file))) ? REASONS.env : null;
 }
 
 /** The words of a command that may be paths it opens, each as written after a flag's = or a redirection. A grep's pattern is text, not a path. */
@@ -1173,7 +1177,7 @@ const WRITE_TOOLS = { Edit: 'file_path', Write: 'file_path', MultiEdit: 'file_pa
 function toolRefusal(tool, toolInput, cwd) {
   const at = (file) => (typeof file === 'string' && file ? path.resolve(cwd, expandHome(file)) : null);
   if (tool === 'Read') return pathRefusal(at(toolInput.file_path), false);
-  if (tool in WRITE_TOOLS) return pathRefusal(at(toolInput[WRITE_TOOLS[tool]]), false);
+  if (tool in WRITE_TOOLS) return pathRefusal(at(toolInput[WRITE_TOOLS[tool]]), false, true);
   if (tool === 'Grep') {
     const reason = pathRefusal(at(toolInput.path) ?? cwd, true);
     if (reason) return reason;
