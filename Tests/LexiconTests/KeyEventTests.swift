@@ -376,3 +376,51 @@ private func stops(_ id: DictationID, in commands: [KeyCommand]) -> Bool {
     #expect(yielded.isEmpty)
     #expect(asked.withLock { $0 } == 0)
 }
+
+// When a deadline timer fires late, the tap thread was stalled, and keys queued behind the
+// stall may still be unhandled. The deferral rule lets those keys go first, so the recognizer
+// never judges a window or a hold on a late `now` before it has seen them.
+
+@Test func aTimerThatFiresOnTimeFeedsTheDeadline() {
+    let due = at(300)
+    #expect(EventTapThread.deferral(due: due, now: due) == nil)
+}
+
+@Test func aTimerThatFiresOneGraceLateStillFeedsTheDeadline() {
+    // The grace marks already tolerate this much lateness, so the recognizer judges it as it is.
+    let due = at(300)
+    #expect(EventTapThread.deferral(due: due, now: due.advanced(by: FnGesture.lateKeyGrace)) == nil)
+}
+
+@Test func aTimerPastOneGraceLateDefersToOneGraceFromNow() {
+    // Past the grace, keys may still be queued behind the stall: wait one grace, so they are handled first.
+    let due = at(300)
+    let now = due.advanced(by: FnGesture.lateKeyGrace + Duration.milliseconds(1))
+    #expect(EventTapThread.deferral(due: due, now: now) == now.advanced(by: FnGesture.lateKeyGrace))
+}
+
+@Test func aStalledTimerDefersOnceAndItsRearmedTimerFeeds() throws {
+    // After a 2 s stall the timer waits one grace from now. The re-armed timer fires then and must
+    // feed; if it deferred again, one stall would push the deadline back every grace.
+    let due = at(300)
+    let stalledNow = due.advanced(by: .seconds(2))
+    let rearmed = try #require(EventTapThread.deferral(due: due, now: stalledNow))
+    #expect(rearmed == stalledNow.advanced(by: FnGesture.lateKeyGrace))
+    #expect(EventTapThread.deferral(due: rearmed, now: rearmed) == nil)
+}
+
+@Test func aDoubleTapWhoseSecondFnDownWasQueuedBehindAStallBecomesHandsFree() throws {
+    // The second fn-down is stamped 250 ms but read after a stall, when the window's deadline has
+    // come late. Handled before that deadline, the press is still inside the window: hands-free,
+    // not a lone tap discarded.
+    var gesture = FnGesture(KeyboardConfig())
+    var commands = feed(flagsChanged(63, [.maskSecondaryFn]), at: at(0), into: &gesture)
+    commands += feed(flagsChanged(63, []), at: at(100), into: &gesture)
+    let queuedDown = flagsChanged(63, [.maskSecondaryFn])
+    queuedDown.timestamp = at(250).nanoseconds
+    commands += feed(queuedDown, at: at(2000), into: &gesture)
+    commands += gesture.handle(.deadline(at(2000))).commands
+    let id = try #require(beganID(commands))
+    #expect(commands.contains(.dictationConfirmed(id, .handsFree)))
+    #expect(!commands.contains(.dictationDiscarded(id)))
+}
