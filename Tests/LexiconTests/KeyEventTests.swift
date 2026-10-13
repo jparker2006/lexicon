@@ -244,3 +244,30 @@ private func beganID(_ commands: [KeyCommand]) -> DictationID? {
     #expect(HostTime(carbonEventTime: .infinity, now: now) == now)
     #expect(HostTime(carbonEventTime: .nan, now: now) == now)
 }
+
+@Test func theFnKeysOwnKeyDownIsNotAnotherKey() {
+    // On a Mac with the Globe key, macOS can send a key-down for fn itself (keycode 63, or 179
+    // for Globe) when a short tap is released. It is fn, not a chord: it must not end the tap.
+    #expect(KeyInput(keyEvent(63), secureInput: { false }, now: at(0)) == nil)
+    #expect(KeyInput(keyEvent(179), secureInput: { false }, now: at(0)) == nil)
+}
+
+@Test func aRealDoubleTapWithTheGlobeKeyDownStartsHandsFree() async {
+    // A real tap as the Live checks sitting saw it: fn down, fn up, then fn's own key-down,
+    // then the second fn-down inside the window. It confirms hands-free, not a dropped tap.
+    let (stream, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig()), input: InputClock(), continuation: continuation,
+                             secureInput: { false })
+    func fromKeyboard(_ event: CGEvent) -> CGEvent {
+        event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+        return event
+    }
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [])))
+    _ = tap.handle(.keyDown, fromKeyboard(keyEvent(179)))
+    _ = tap.handle(.flagsChanged, fromKeyboard(flagsChanged(63, [.maskSecondaryFn])))
+    continuation.finish()
+    var kinds: [String] = []
+    for await command in stream { kinds.append(command.kind) }
+    #expect(kinds == ["began", "confirmed handsFree"])
+}
