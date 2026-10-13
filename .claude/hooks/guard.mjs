@@ -69,6 +69,8 @@
 //     search with no path from a folder above the private one, and anything a script opens itself are
 //     not seen. gh, echo, printf and git commit, tag and notes only name paths, so only gh's body files are judged;
 //   - a SecItem reader is seen only in the source swift, swiftc, python or osascript is given;
+//   - Codex's login file is seen in an interpreter's inline script only where it names auth.json with .codex, or
+//     from ~/.codex; a script file that opens it is not read;
 //   - a recursive search is judged by its roots and one folder below them, and by the main checkout's .env;
 //   - deliberate hiding: a word built by a substitution (`$(echo icon)`), git and gh aliases, `security -i` on
 //     stdin, and a path inside a script or a heredoc body the guard doesn't parse. It is a seatbelt against honest
@@ -1064,6 +1066,21 @@ function envSearchRefusal(name, args, cwd) {
   return null;
 }
 
+// Interpreters whose inline script (-c, -e) may open Codex's login file by a path it builds from parts.
+const LOGIN_READERS = new Set([...SCRIPT_RUNNERS, 'node', 'ruby', 'perl', 'bun', 'deno']);
+
+/**
+ * Why an interpreter is refused for opening Codex's login file, or null: its inline script names auth.json with .codex,
+ * or names auth.json while the shell sits in ~/.codex. Script files are not read: the guard and its tests name the file.
+ */
+function codexLoginScriptRefusal(name, command, cwd) {
+  if (!LOGIN_READERS.has(name)) return null;
+  const source = text(command);
+  if (!/auth\.json/i.test(source)) return null;
+  const inCodexHome = typeof cwd === 'string' && reach(cwd, path.join(homedir(), '.codex')) === 'inside';
+  return inCodexHome || /\.codex\b/i.test(source) ? REASONS.codexLogin : null;
+}
+
 /**
  * Why a command is refused for reading a Keychain secret, or null: security's secret reads, gh's token, git's credential
  * helpers, or a script that calls SecItem's reader or shells out to security.
@@ -1129,6 +1146,7 @@ function check(command, cwd) {
     dataRefusal(name, args, gh, cwd) ??
     envSearchRefusal(name, args, cwd) ??
     keychainRefusal(name, args, gh, command, cwd) ??
+    codexLoginScriptRefusal(name, command, cwd) ??
     dailyRefusal(name, args, command, cwd) ??
     buildRefusal(name, args);
   if (ruled) return ruled;
