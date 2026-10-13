@@ -1,4 +1,5 @@
 import AVFAudio
+import os
 import LexiconDomain
 
 /// Mono Float32 at the input rate to 16 kHz mono Int16, streamed block by block.
@@ -47,21 +48,29 @@ final class Resampler: @unchecked Sendable {
 
     /// Converts the `input` buffer's frames. `emit` gets whatever 16 kHz samples
     /// came out (the converter may hold a few back until the next block).
-    func convert(emit: (UnsafeBufferPointer<Int16>) -> Void) {
+    /// Returns the audio lost: the whole block when the converter fails on it,
+    /// since its output is undefined and the next drain overwrites `input`.
+    @discardableResult
+    func convert(emit: (UnsafeBufferPointer<Int16>) -> Void) -> Duration {
         supplied = false
-        run(endOfStream: false, emit: emit)
+        let frames = Int(input.frameLength)
+        return run(endOfStream: false, emit: emit) ? .zero : Duration(frames: frames, rate: input.format.sampleRate)
     }
 
-    /// End of the stream: emits the samples the converter still holds.
+    /// End of the stream: emits the samples the converter still holds. A failure
+    /// here loses only those few ms, which nothing can count, so it is logged.
     func flush(emit: (UnsafeBufferPointer<Int16>) -> Void) {
         supplied = true
         run(endOfStream: true, emit: emit)
     }
 
-    private func run(endOfStream: Bool, emit: (UnsafeBufferPointer<Int16>) -> Void) {
+    /// False when the converter answered `.error`. Its output is not emitted, and
+    /// it is not reset: a reset would drop the samples it holds from earlier blocks.
+    @discardableResult
+    private func run(endOfStream: Bool, emit: (UnsafeBufferPointer<Int16>) -> Void) -> Bool {
         while true {
             output.frameLength = 0
-            let (status, _) = convertCall(converter, output) { _, inputStatus in
+            let (status, error) = convertCall(converter, output) { _, inputStatus in
                 if self.supplied {
                     inputStatus.pointee = endOfStream ? .endOfStream : .noDataNow
                     return nil
@@ -70,10 +79,16 @@ final class Resampler: @unchecked Sendable {
                 inputStatus.pointee = .haveData
                 return self.input
             }
+            if status == .error {
+                Self.log.error("converter failed\(endOfStream ? " at the end" : ""): \(error?.localizedDescription ?? "no error", privacy: .public)")
+                return false
+            }
             let produced = Int(output.frameLength)
             if produced > 0 { emit(UnsafeBufferPointer(start: output.int16ChannelData![0], count: produced)) }
             // .haveData means the output filled up and more may be waiting.
-            guard status == .haveData, produced > 0 else { return }
+            guard status == .haveData, produced > 0 else { return true }
         }
     }
+
+    private static let log = Logger(subsystem: "Lexicon", category: "audio")
 }

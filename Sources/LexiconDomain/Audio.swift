@@ -29,9 +29,11 @@ public struct PCMChunk: Sendable {
     }
 }
 
-/// The chunks of one Dictation as they are written to disk. Finishes when the
-/// LiveCapture stops. A chunk is yielded only after it was handed to `write()`, so
-/// anything a consumer sees is already in the page cache (survives an app crash).
+/// The chunks of one Dictation, in capture order. Finishes when the LiveCapture
+/// stops. While the audio is on disk, a chunk is yielded only after it was handed
+/// to `write()`, so anything a consumer sees is already in the page cache
+/// (survives an app crash). After disk trouble (`AudioStorage.ramOnly`), chunks
+/// are yielded unwritten: RAM is the primary copy.
 public typealias AudioFeed = AsyncStream<PCMChunk>
 
 /// A whole Dictation's audio in RAM (1.92 MB per minute). RAM is the primary copy

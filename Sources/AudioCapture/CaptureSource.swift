@@ -32,7 +32,14 @@ struct Segment: Sendable {
         ring = SPSCRing(capacityFrames: Int(rate * 2))
     }
 
-    var droppedAudio: Duration { .seconds(Double(ring.dropped) / rate) }
+    var droppedAudio: Duration { Duration(frames: ring.dropped, rate: rate) }
+}
+
+extension Duration {
+    /// To the nanosecond, so 1,600 frames at 16 kHz is exactly 100 ms.
+    init(frames: Int, rate: Double) {
+        self = .nanoseconds(Int64((Double(frames) * 1e9 / rate).rounded()))
+    }
 }
 
 /// What a source reports to its capture. Each runs off the real-time thread.

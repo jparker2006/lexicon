@@ -228,6 +228,10 @@ Jake, 2026-10-12 15:52:33Z: "yes". Recorded on [#82](https://github.com/jparker2
 
 Jake, 2026-10-12 14:22Z (asked by the orchestrator in its session): "yes". Recorded on [#144](https://github.com/jparker2006/lexicon/issues/144#issuecomment-6126205597); the question is [#144](https://github.com/jparker2006/lexicon/issues/144#issuecomment-6126174486).
 
+**84. Lost audio is said: "Part of the audio was lost".** Neither the spec nor this file had the rule; frames the ring refused were only logged. Built (#179): when a Dictation's audio lost part of itself (frames the 2 s ring refused, input the converter failed on, or the unread rest of a file that broke off), the Dictation is still heard and typed from what was captured, and the pill shows "Part of the audio was lost" with the error sound, until the Dictation lands. Asked by the orchestrator on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6137742157) as question 11: "Jake: decide whether Lexicon tells you when the mic drops part of a recording. Recommended: yes, show "Part of the audio was lost" after that Dictation (with the error sound; the line shows until the Dictation lands)."
+
+Jake, 2026-10-13T04:29Z, in the orchestrator session: "11 yes". Recorded on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6138248868).
+
 ### Proposed: built on an agent's default, never asked
 
 These stand as built until Jake confirms them as a batch or names items to change, in the next grill round.
