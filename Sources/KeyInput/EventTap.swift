@@ -32,14 +32,18 @@ final class EventTapThread: @unchecked Sendable {
     private let ownPID = Int64(getpid())
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
+    /// Lexicon's own hotkeys (⌃⌘V): their key-down asks Lexicon for something, so it
+    /// is not Jake typing, and a paste it starts is never held as typed since.
+    private let notTyping: [Hotkey]
     private let log = Logger(subsystem: "Lexicon", category: "fn")
 
     init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
-         secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() }) {
+         secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() }, notTyping: [Hotkey] = []) {
         self.gesture = gesture
         self.input = input
         self.continuation = continuation
         self.secureInput = secureInput
+        self.notTyping = notTyping
     }
 
     /// Creates the tap (session level, listen-only, mask: flagsChanged, keyDown
@@ -124,7 +128,7 @@ final class EventTapThread: @unchecked Sendable {
             return pass
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
-        if Self.isTypingOrClicking(type) { input.tick() }
+        if Self.isTypingOrClicking(type), !notTyping.contains(where: { $0.matches(event) }) { input.tick() }
         guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
         feed(key)
         switch key {
@@ -194,6 +198,18 @@ extension KeyInput {
         default:
             return nil
         }
+    }
+}
+
+extension Hotkey {
+    /// This key-down, with exactly these modifiers among Command, Option, Control and Shift.
+    func matches(_ event: CGEvent) -> Bool {
+        guard event.type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == Int64(keyCode) else {
+            return false
+        }
+        let flags: [(Modifiers, CGEventFlags)] = [(.command, .maskCommand), (.option, .maskAlternate),
+                                                  (.control, .maskControl), (.shift, .maskShift)]
+        return flags.allSatisfy { modifiers.contains($0.0) == event.flags.contains($0.1) }
     }
 }
 

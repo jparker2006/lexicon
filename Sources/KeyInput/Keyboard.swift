@@ -103,7 +103,7 @@ public final class Keyboard: Sendable {
     static func tap(_ config: KeyboardConfig, input: InputClock,
                     continuation: AsyncStream<KeyCommand>.Continuation) -> EventTapThread {
         EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
-                       continuation: continuation)
+                       continuation: continuation, notTyping: [config.pasteLast])
     }
 
     init(tap: EventTapThread, commands: AsyncStream<KeyCommand>, pasteLastKey: RegisteredHotkey? = nil) {
