@@ -7,6 +7,7 @@
 //     and .env files, in Bash, in Read, Grep and Glob, and in the edit and write tools; a recursive search of a folder
 //     above the private one counts too. The permissions.deny rules come first; this is the
 //     backstop for the forms they miss;
+//   - Codex's login file (~/.codex/auth.json), a key like the .env files;
 //   - Keychain secret reads (`security find-generic-password` and kin) and scratch scripts
 //     that call SecItem's reader: a step that needs a key goes on the Live checks checklist;
 //   - osascript, open or kill aimed at Jake's daily Lexicon; scripts/install.sh and
@@ -100,6 +101,7 @@ const REASONS = {
   handsFree: "Refused: a hands-free sitting has no step for Jake's Allow click after a reset of Lexicon Dev's permissions; put the reset on the next sitting's checklist.",
   private: "Refused: ~/Library/Application Support/Lexicon/ holds Jake's private data; agents never open it or search a folder above it (AGENTS.md). Lexicon Dev's folder is fine.",
   env: "Refused: .env files hold Jake's keys; agents never read or write them (AGENTS.md).",
+  codexLogin: "Refused: ~/.codex/auth.json holds Codex's login to Jake's ChatGPT plan, a key; agents never read or write it (AGENTS.md).",
   keychain: 'Refused: agents never read Keychain items (AGENTS.md); put the step that needs a key on the Live checks checklist.',
   daily: "Refused: Jake's daily Lexicon is his; only scripts/install.sh and scripts/live-lane.sh daily quit, open or kill it.",
   mergeScript: 'Refused: only the Reviewer merges, and only with scripts/merge-pr.mjs from the main checkout.',
@@ -148,7 +150,9 @@ const DAILY_ID = 'dev.jparker.lexicon';
 const DEV_ID = 'dev.jparker.lexicon.dev';
 const DAILY_APP = /\bdev\.jparker\.lexicon\b(?![.\w-])|\b(?:application|app|process)\s+"Lexicon(?:\.app)?"|(?:^|[\s/"'])Lexicon\.app\b/i;
 // Jake's private folder, as any home writes it. "Lexicon Dev" never matches: a space follows.
-const PRIVATE_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon(?:\/|$)/i;
+// Codex's login token, under any home.
+const CODEX_LOGIN = /(?:^|\/)\.codex\/auth\.json$/;
+const PRIVATE_TEXT =/(?:^|\/)Library\/Application Support\/Lexicon(?:\/|$)/i;
 // Its models folder holds model weights, not private data, and Lexicon Dev's models folder links to it.
 const MODELS_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon\/models(?:\/|$)/i;
 // A .env file, but not the templates that hold no keys.
@@ -941,6 +945,7 @@ function inModels(file, dir) {
 function pathRefusal(resolved, recursiveRead, write = false) {
   if (resolved === null) return null;
   const files = unique([resolved, realOrSelf(resolved)]);
+  if (files.some((file) => CODEX_LOGIN.test(file))) return REASONS.codexLogin;
   for (const file of files) {
     if (namesPrivate(file) || (write && PRIVATE_TEXT.test(file))) return REASONS.private;
     for (const dir of privateDirs()) {
