@@ -736,6 +736,10 @@ test("refuses reading or writing Codex's login file, in every tool", (t) => {
     ['Bash', { command: `python3.13 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
     ['Bash', { command: `uv run python -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
     ['Bash', { command: `ruby -e "puts File.read(File.join(Dir.home, '.codex', 'auth.json'))"` }],
+    ['Bash', { command: `python3.13t -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `arch -arm64 python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `echo x | xargs python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `lua -e "print(io.open(os.getenv('HOME') .. '/.codex/' .. 'auth.json'):read('a'))"` }],
   ]) {
     const verdict = runTool(tool, input, options);
     assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
@@ -748,6 +752,9 @@ test("refuses reading or writing Codex's login file, in every tool", (t) => {
     ['Bash', { command: `python3 -c "import json; print(json.load(open('package.json')))"` }],
     ['Bash', { command: `cd ~/.codex && python3 -c "print(open('config.toml').read())"` }],
     ['Bash', { command: 'git log --grep "auth.json" -- .codex' }],
+    ['Bash', { command: 'git commit -m "guard: refuse ~/.codex/auth.json"' }],
+    ['Bash', { command: 'echo "Codex keeps its login in ~/.codex/auth.json"' }],
+    ['Bash', { command: 'gh issue comment 1 --body "the guard refuses .codex/auth.json"' }],
     ['Glob', { pattern: '*', path: path.join(home, '.codex') }],
   ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
 });
