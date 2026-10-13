@@ -27,6 +27,10 @@ public enum RespeakText {
         return lead + text + trail
     }
 
+    /// The words, lowercased, whose plainness `replacement` may ask about: the first
+    /// word, and the last when a period follows it. Look them up before calling it.
+    public static func plainnessQuestions(_ spoken: String) -> Set<String> { [] }
+
     /// The first word of what Jake said, without the marks around it: the word
     /// whose plainness `isEnglish` is asked about. "Dog, then." -> "Dog".
     public static func firstWord(_ spoken: String) -> String {

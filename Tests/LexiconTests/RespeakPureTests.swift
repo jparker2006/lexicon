@@ -432,10 +432,22 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
         #expect(RespeakText.replacement("Wait..", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait..")
     }
 
-    /// An abbreviation's period is part of the word Cleanup kept, not its stop (DECISIONS item 82).
+    /// A true abbreviation's period is part of the word, not Cleanup's stop. A listed abbreviation that is
+    /// also a plain word ("no", "min") is Jake's word, and its period is Cleanup's stop.
     @Test func replacementKeepsAnAbbreviationsPeriod() {
-        #expect(RespeakText.replacement("Etc.", replacing: "et cetera", terms: [], isEnglish: { _ in true }) == "etc.")
+        #expect(RespeakText.replacement("Etc.", replacing: "et cetera", terms: [], isEnglish: { $0 != "etc" }) == "Etc.")
         #expect(RespeakText.replacement("Inc.", replacing: "ink", terms: [], isEnglish: { _ in false }) == "Inc.")
+        #expect(RespeakText.replacement("E.g.", replacing: "eg", terms: [], isEnglish: { _ in true }) == "e.g.")
+        #expect(RespeakText.replacement("No.", replacing: "know", terms: [], isEnglish: { _ in true }) == "no")
+        #expect(RespeakText.replacement("Wait a min.", replacing: "weight a men", terms: [], isEnglish: { _ in true })
+                == "wait a min")
+    }
+
+    /// The words whose plainness the Conductor looks up before the insert turn: the first, and the last when a period follows it.
+    @Test func plainnessIsAskedOfTheFirstAndAPeriodClosedLastWord() {
+        #expect(RespeakText.plainnessQuestions("No.") == ["no"])
+        #expect(RespeakText.plainnessQuestions("Wait a min.") == ["wait", "min"])
+        #expect(RespeakText.plainnessQuestions("Dog, then") == ["dog"])
     }
 }
 
