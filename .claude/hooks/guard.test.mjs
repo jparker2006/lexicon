@@ -691,6 +691,19 @@ test("refuses Edit, Write, MultiEdit and NotebookEdit in Jake's private folder o
     assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
     assert.match(verdict.reason, why);
   }
+  // A link named innocently that points at a .env file, and a write into the private models folder,
+  // which reads may open but no agent writes.
+  const link = path.join(home, 'notes.txt');
+  writeFileSync(path.join(home, '.env'), 'KEY=x\n');
+  symlinkSync(path.join(home, '.env'), link);
+  for (const [tool, input, why] of [
+    ['Write', { file_path: link, content: 'x' }, /\.env/],
+    ['Write', { file_path: path.join(priv, 'models/parakeet/new.bin'), content: 'x' }, /private data/],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, why);
+  }
   for (const [tool, input] of [
     ['Edit', { file_path: path.join(REPO, 'AGENTS.md'), old_string: 'a', new_string: 'b' }],
     ['Write', { file_path: path.join(dev, 'notes.txt'), content: 'x' }],
