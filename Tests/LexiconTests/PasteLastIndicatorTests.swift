@@ -37,8 +37,7 @@ private func run(_ events: [ConductorEvent]) -> (state: IndicatorState, sound: S
 }
 
 @Test func aPasteLastWhileRecordingLeavesTheRecordingShowing() {
-    // Guard: passes at this head because the stub ignores `.pasted`. It keeps the rule from
-    // regressing when `.pasted` is filled in: a paste never covers the recording Jake is making.
+    // A paste never covers the recording Jake is making.
     let step = run([.confirmed(live, .hold), .pasted(other, newerOnItsWay: false)])
     #expect(step.state == .recording(.hold, minuteLeft: false))
     #expect(step.sound == nil)
