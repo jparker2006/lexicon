@@ -34,14 +34,15 @@ extension Conductor {
             return failed(id, reason)
 
         case .text(let heard):
-            for record in heard.attempts { history.record(.attempted(id, record)) }
             let cleaned = await run.cleaning.finish(modelText: heard.text, deadline: run.cleanupDeadline)
             // A filler-only answer ("Um.") gets past the engine's silence check and Cleanup strips
             // it to nothing: that is silence too. Typed, the empty Cmd-V would replace Jake's selection.
-            // A Retry of a settled row leaves it as it was, as Retry does when the engine hears silence.
-            guard cleaned.versions.cleaned.contains(where: { !$0.isWhitespace }) else {
-                return run.isRetry ? .nothing(id) : failed(id, .silence)
-            }
+            // A Retry of a settled row leaves it as it was, engine runs included, as Retry does when
+            // the engine hears silence.
+            let blank = !cleaned.versions.cleaned.contains(where: { !$0.isWhitespace })
+            if blank, run.isRetry { return .nothing(id) }
+            for record in heard.attempts { history.record(.attempted(id, record)) }
+            if blank { return failed(id, .silence) }
             // Queued for disk BEFORE it is typed. Fire-and-forget FIFO: still no wait on SQLite.
             let typing = run.purpose == .type && run.target != nil
             // A Retry keeps the text it replaces as an earlier version (#213).

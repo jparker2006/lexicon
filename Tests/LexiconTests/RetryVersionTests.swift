@@ -228,3 +228,27 @@ private func detail(_ paths: AppPaths, _ id: DictationID) throws -> HistoryDetai
     #expect(now.row.finalText == retried.versions?.cleaned)
     #expect(now.earlier.isEmpty)
 }
+
+// The row as it was includes the engines Show Versions lists: a Retry that cleans to
+// blank adds none. The cloud is on with the network down, so its try is a losing "failed".
+@MainActor @Test(.timeLimit(.minutes(1))) func aRetryThatCleansToBlankAddsNoEngineAttemptToTheRow() async throws {
+    let paths = AppPaths.temporary()
+    let clip = try wav()
+    let dictating = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
+                                            local: ScriptedTranscriber(text: "kept text"), clock: TestClock())
+    let first = await dictating.conductor.dictate(file: clip, pace: .asFastAsPossible)
+    await dictating.history.flush()
+    let before = try detail(paths, first.id)
+
+    let retrying = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: withCloud,
+                                           local: ScriptedTranscriber(text: "Um."),
+                                           cloud: ScriptedCloud(clock: TestClock(), script: [], networkUp: false).link,
+                                           clock: TestClock())
+    let retried = await retrying.conductor.retry(first.id, with: nil)
+    await retrying.history.flush()
+
+    #expect(retried.versions == nil)
+    let now = try detail(paths, first.id)
+    #expect(now.earlier.isEmpty)
+    #expect(now.attempts == before.attempts)
+}
