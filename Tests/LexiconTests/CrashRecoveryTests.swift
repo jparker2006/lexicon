@@ -255,9 +255,11 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
     let paths = AppPaths.temporary()
     let wav = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: try scratchDirectory())
     let id: DictationID
+    weak var released: HistoryStore?
     do {
         let first = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
                                             local: InstallableModel(), clock: TestClock())
+        released = first.history
         id = await first.conductor.dictate(file: wav, pace: .asFastAsPossible).id
         // Quit: its retry holds the Conductor and its History until a tick this clock never gives,
         // so it is stopped first, and the store released, so the relaunch can take the folder's lock.
@@ -266,6 +268,7 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
         await retry.value
         await first.history.flush()
     }
+    await until { released == nil }  // its deinit frees the folder's lock: the signal, not a clock
 
     // Relaunch, model still missing: recovery tries it, and it goes on waiting.
     let clock = TestClock()

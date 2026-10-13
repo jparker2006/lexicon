@@ -206,13 +206,18 @@ private func makeStore() throws -> (HistoryStore, AppPaths) {
 }
 
 /// What an earlier run left: `body` writes it through a store on a fresh folder, which is then
-/// released as a quit releases it (every event applied, then the store dropped), so a relaunch can
-/// take the folder's lock. `body` must not keep the store.
+/// released as a quit releases it (every event applied, then the store dropped, and its deinit
+/// seen), so a relaunch can take the folder's lock. `body` must not keep the store.
 private func earlierRun(_ body: (HistoryStore) async throws -> Void) async throws -> AppPaths {
     let paths = AppPaths.temporary()
-    let store = try HistoryStore(paths: paths)
-    try await body(store)
-    await store.flush()
+    weak var released: HistoryStore?
+    do {
+        let store = try HistoryStore(paths: paths)
+        released = store
+        try await body(store)
+        await store.flush()
+    }
+    await until { released == nil }  // its deinit frees the folder's lock: the signal, not a clock
     return paths
 }
 
@@ -323,8 +328,10 @@ func statusReason(_ store: HistoryStore, _ id: DictationID) async throws -> Stri
 
     let first: [UnfinishedDictation]
     let once: [String]
+    weak var released: HistoryStore?
     do {
         let relaunched = try await relaunch(paths)
+        released = relaunched
         first = await relaunched.recover()
         #expect(Set(first.map(\.id)) == [waiting, cut, orphan])
         once = try await snapshot(relaunched)
@@ -337,6 +344,7 @@ func statusReason(_ store: HistoryStore, _ id: DictationID) async throws -> Stri
 
         await relaunched.flush()
     }
+    await until { released == nil }  // its deinit frees the folder's lock: the signal, not a clock
 
     // And on the next launch.
     let next = try await relaunch(paths)
@@ -622,12 +630,15 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
 
     // Mode zero: open fails with a permission error. The audio itself is whole.
     try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: path)
+    weak var released: HistoryStore?
     do {
         let locked = try await relaunch(paths)
+        released = locked
         #expect(await locked.recover().isEmpty)  // nothing is handed back while the file cannot be opened
         #expect(await locked.dictation(id)?.status == .waiting)  // and the row is not failed for it
         await locked.flush()
     }
+    await until { released == nil }  // its deinit frees the folder's lock: the signal, not a clock
 
     // Readable again: the next launch returns the Dictation to be transcribed as a waiting one.
     try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
@@ -648,8 +659,10 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     // an earlier run's, as a clock stepped back at launch does.
     let anHourAgo = Date().addingTimeInterval(-3_600)
     let paths = AppPaths.temporary()
+    weak var released: HistoryStore?
     do {
         let store = try HistoryStore(paths: paths)
+        released = store
         #expect(anHourAgo < store.openedAt)
         store.record(.began(inRun, origin: .live, purpose: .type, at: anHourAgo, app: app))
         try await writeOpenCAF(syntheticSamples(count: 16_000), at: store.audioURL(for: inRun))
@@ -666,6 +679,7 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
         #expect(await store.dictation(noFile)?.status == .recording)
         await store.flush()
     }
+    await until { released == nil }  // its deinit frees the folder's lock: the signal, not a clock
 
     // The same row and file, now an earlier run's: recovery hands the first back and finishes its file.
     let relaunched = try await relaunch(paths)
@@ -679,9 +693,11 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     let id = DictationID()
     let paths = AppPaths.temporary()
     let before: [String]
+    weak var released: HistoryStore?
     do {
         // A finished recording: a row and its audio file, both on disk before the attempt.
         let first = try HistoryStore(paths: paths)
+        released = first
         first.record(.began(id, origin: .live, purpose: .type, at: earlier(), app: app))
         first.record(.audioEnded(id, audio))
         try await writeClosedCAF(syntheticSamples(count: 16_000), at: first.audioURL(for: id))
@@ -695,6 +711,7 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
         #expect(try await snapshot(first) == before)
         await first.flush()
     }
+    await until { released == nil }  // its deinit frees the folder's lock: the signal, not a clock
 
     // Released: a new store opens on the same folder and reads what the first one left.
     let second = try HistoryStore(paths: paths)

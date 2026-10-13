@@ -254,9 +254,11 @@ func deleteIsRefusedWhileInFlight(stored: DictationStatus) async throws {
 
 @Test func derivedIndexesAreRebuiltWhenTheirSQLChanges() async throws {
     let paths: AppPaths
+    weak var released: HistoryStore?
     do {
         let (store, folder) = try makeStore()
         paths = folder
+        released = store
         #expect(try await indexSQL(store) == HistorySchema.derivedIndexes)
 
         // An index an older build generated from a different status list.
@@ -268,6 +270,7 @@ func deleteIsRefusedWhileInFlight(stored: DictationStatus) async throws {
         await store.flush()
     }
     // Released as a quit does, so the reopen can take the folder's lock.
+    await until { released == nil }  // its deinit frees the folder's lock: the signal, not a clock
     let reopened = try HistoryStore(paths: paths)
     #expect(try await indexSQL(reopened) == HistorySchema.derivedIndexes)
 }
