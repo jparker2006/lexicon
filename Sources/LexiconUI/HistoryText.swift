@@ -27,8 +27,10 @@ enum HistoryText {
     }
 
     /// Show Versions: what the model heard, what Cleanup made of it, and the final
-    /// text after Fixes, then any engine that lost or failed. Empty with no text yet.
-    static func versions(_ detail: HistoryDetail) -> [(label: String, text: String)] {
+    /// text after Fixes; then what each Retry replaced, newest first; then any engine
+    /// that lost or failed. Empty with no text yet.
+    static func versions(_ detail: HistoryDetail, now: Date = Date(),
+                         calendar: Calendar = .current) -> [(label: String, text: String)] {
         var sections: [(label: String, text: String)] = []
         if let versions = detail.versions {
             let cleanup = detail.row.cleanup.flatMap(label(for:)).map { " (\($0))" } ?? ""
@@ -37,6 +39,17 @@ enum HistoryText {
                 ("Cleaned" + cleanup, versions.cleaned),
                 ("Final", detail.row.finalText ?? versions.cleaned),
             ]
+        }
+        let time = Date.FormatStyle(locale: calendar.locale ?? .autoupdatingCurrent, calendar: calendar,
+                                    timeZone: calendar.timeZone).hour().minute()
+        for earlier in detail.earlier {
+            let day = title(for: calendar.dateComponents([.year, .month, .day], from: earlier.replacedAt), now: now,
+                            calendar: calendar)
+            let heard = earlier.model.map { " · \($0.displayName)" } ?? ""
+            let replaced = "Replaced \(day) at \(earlier.replacedAt.formatted(time))\(heard)"
+            sections.append((replaced, earlier.final))
+            // The text a Fix was made on, when one changed it.
+            if earlier.cleaned != earlier.final { sections.append(("\(replaced), before Fixes", earlier.cleaned)) }
         }
         for attempt in detail.attempts where attempt.result != .won {
             sections.append(("\(attempt.model.displayName): \(label(for: attempt.result))", attempt.text ?? attempt.error ?? ""))
