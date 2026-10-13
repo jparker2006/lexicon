@@ -13,13 +13,15 @@
 # the hash .codex/hooks/trust.mjs computes, so a hook edit that breaks the hash fails here.
 # It ignores the user's Codex config, so no hook of Jake's own does the refusing, and runs
 # with no OS sandbox, as the role sessions do (docs/agents/codex.md), so only the hook refuses.
-# CODEX_PROBE_MODEL names another model; CODEX_BIN another codex binary.
+# CODEX_PROBE_MODEL names another model; CODEX_BIN another codex binary. The run has
+# CODEX_PROBE_TIMEOUT seconds (default 900), a deadline that only bounds a hang.
 set -eu
 cd "$(dirname "$0")/.."
 
+. scripts/lib/limits.sh
 codex=${CODEX_BIN:-codex}
 scratch=$(mktemp -d -t codex-probe)
-trap 'rm -rf "$scratch"' EXIT
+trap 'rm -rf "$scratch"; limits_cleanup' EXIT
 git clone -q "$PWD" "$scratch/clone"
 clone=$(cd "$scratch/clone" && pwd -P)
 git -C "$clone" worktree add -q --detach "$scratch/worktree" HEAD
@@ -40,10 +42,14 @@ Then reply with one line per step: its number, whether it ran or was blocked, an
 EOF
 
 status=0
-"$codex" exec --ephemeral --ignore-user-config ${CODEX_PROBE_MODEL:+-m "$CODEX_PROBE_MODEL"} \
+limited "${CODEX_PROBE_TIMEOUT:-900}" "$codex" exec --ephemeral --ignore-user-config ${CODEX_PROBE_MODEL:+-m "$CODEX_PROBE_MODEL"} \
     -c features.fast_mode=false -s danger-full-access -C "$worktree" \
     -c "projects={ \"$clone\" = { trust_level = \"trusted\" } }" -c "$trust" \
-    --json - < "$scratch/prompt.txt" > "$scratch/events.jsonl" 2> "$scratch/stderr.txt" || status=$?
+    --json "$(cat "$scratch/prompt.txt")" > "$scratch/events.jsonl" 2> "$scratch/stderr.txt" || status=$?
+if grep -q '^limits: stopped after' "$scratch/stderr.txt"; then
+    echo "codex-probe: codex exec $(grep -o '^limits: stopped after [0-9]* s' "$scratch/stderr.txt" | sed 's/^limits: //') with no answer" >&2
+    exit 1
+fi
 [ "$status" -eq 0 ] || { echo "codex-probe: codex exec exited $status:" >&2; jq -r 'select(.type == "error") | .message' "$scratch/events.jsonl" >&2; tail -n 5 "$scratch/stderr.txt" >&2; exit 1; }
 
 fail=0
