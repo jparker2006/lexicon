@@ -213,10 +213,10 @@ struct Tail: Sendable {
 
 /// Whether a folder's volume has room, asked on fn-down's path, so cheaply
 /// first: `statfs` is one syscall, while the "important usage" figure (which
-/// counts space macOS can purge) took up to 62 ms on its first call after an
-/// idle gap (#311). Only a disk `statfs` puts under the floor pays for that
-/// read, so purgeable space still counts. Unknown counts as room: a failed
-/// write still falls back.
+/// counts space macOS can purge) can take tens of ms on a first call (#311).
+/// Only a disk `statfs` puts under the floor, or a `statfs` that fails, pays
+/// for that read, so purgeable space still counts. Unknown counts as room: a
+/// failed write still falls back.
 enum FreeSpace {
     struct Readers: Sendable {
         var quick: @Sendable (URL) -> Int64? = { folder in

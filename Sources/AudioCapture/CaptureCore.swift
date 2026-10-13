@@ -81,8 +81,7 @@ final class CaptureCore: @unchecked Sendable {
         // returns: the shared writer queue may still be closing the last Dictation,
         // and a kill before its turn would leave no trace (recovery adopts a file
         // with no row). One file open, no sync, and a free-space read that is one
-        // syscall unless the disk is nearly full (`FreeSpace`); the ring holds the
-        // first audio meanwhile.
+        // syscall on a disk with room (`FreeSpace`); the ring holds the first audio meanwhile.
         if hasRoom() { writer = try? CAFWriter(creating: file, calls: policy.files) }
     }
 
