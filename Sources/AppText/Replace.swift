@@ -42,9 +42,18 @@ public struct FieldText: Sendable, Hashable {
     /// From a read window and the selection's span: the selection's text comes
     /// from the window, so no second read can disagree with it. nil when the
     /// selection runs outside the window.
-    static func reading(_ window: String, offset: Int, selection: TextSpan?, bundleID: String?,
-                        fieldFingerprint: String?) -> FieldText? {
-        nil
+    public static func reading(_ window: String, offset: Int, selection: TextSpan?, bundleID: String?,
+                               fieldFingerprint: String?) -> FieldText? {
+        var selected: FieldSelection?
+        if let selection {
+            let utf16 = window.utf16, start = selection.location - offset
+            guard start >= 0, start + selection.length <= utf16.count else { return nil }
+            let from = utf16.index(utf16.startIndex, offsetBy: start)
+            guard let text = String(utf16[from..<utf16.index(from, offsetBy: selection.length)]) else { return nil }
+            selected = FieldSelection(span: selection, text: text)
+        }
+        return FieldText(text: window, offset: offset, selection: selected, bundleID: bundleID,
+                         fieldFingerprint: fieldFingerprint)
     }
 }
 
@@ -53,7 +62,10 @@ enum FieldWindow {
     /// At most `cap` UTF-16 units of a field `count` long, holding `anchor`
     /// (the selection or the caret) and as much before it as fits.
     static func span(count: Int, around anchor: Int, cap: Int) -> TextSpan {
-        TextSpan(location: 0, length: count)
+        guard count > cap else { return TextSpan(location: 0, length: count) }
+        // A little past the anchor, for the words after the caret; the rest before it.
+        let start = max(0, min(count, anchor + 2_000) - cap)
+        return TextSpan(location: start, length: min(cap, count - start))
     }
 }
 
@@ -95,14 +107,15 @@ public enum DictationPlace {
         let starts = haystack.count < needle.count ? [] : (0...(haystack.count - needle.count)).filter { start in
             haystack[start..<(start + needle.count)].elementsEqual(needle)
         }
-        if let caret = receipt.caretAfter, starts.contains(caret - needle.count) {
-            return TextSpan(location: caret - needle.count, length: needle.count)
+        let caret = receipt.caretAfter.map { $0 - field.offset }
+        if let caret, starts.contains(caret - needle.count) {
+            return TextSpan(location: field.offset + caret - needle.count, length: needle.count)
         }
         let followsContext = starts.filter { start in
             start >= context.count && haystack[(start - context.count)..<start].elementsEqual(context)
         }
-        let caret = receipt.caretAfter ?? 0
-        return followsContext.min { abs($0 + needle.count - caret) < abs($1 + needle.count - caret) }
-            .map { TextSpan(location: $0, length: needle.count) }
+        let end = caret ?? 0
+        return followsContext.min { abs($0 + needle.count - end) < abs($1 + needle.count - end) }
+            .map { TextSpan(location: field.offset + $0, length: needle.count) }
     }
 }

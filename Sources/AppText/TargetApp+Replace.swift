@@ -9,7 +9,8 @@ import LexiconDomain
 extension TargetApp {
     /// Terminals keep no selectable text field; #84 gives each its own path.
     static let terminals: Set<String> = ["com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty"]
-    /// A field longer than this (a log, a whole document) is not read whole.
+    /// A field longer than this (a log, a whole document) is read as a window
+    /// this long around the selection or the caret.
     static let readCap = 200_000
     /// Where an app shows an embedded object (an image, a paste chip) in its text.
     static let embeddedObject: Character = "\u{FFFC}"
@@ -18,14 +19,15 @@ extension TargetApp {
         guard let field = target.field?.element else { return nil }
         // Electron builds its accessibility tree late: a first read can fail where a
         // second one 20 ms later answers. Up to 100 ms, and only after a failure.
-        var text = Self.value(of: field)
-        for _ in 0..<5 where text == nil {
+        let anchor = target.selection?.location ?? target.pasteStart
+        var window = Self.window(of: field, around: anchor)
+        for _ in 0..<5 where window == nil {
             try? await Task.sleep(for: .milliseconds(20))
-            text = Self.value(of: field)
+            window = Self.window(of: field, around: anchor)
         }
-        guard let text else { return nil }
-        return FieldText(text: text, selection: target.selection, bundleID: target.bundleID,
-                         fieldFingerprint: target.fingerprint)
+        guard let (text, offset) = window else { return nil }
+        return FieldText.reading(text, offset: offset, selection: target.selection, bundleID: target.bundleID,
+                                 fieldFingerprint: target.fingerprint)
     }
 
     public func replace(_ span: TextSpan, expected: String, with text: String, at target: Target) async -> ReplaceOutcome {
@@ -78,18 +80,21 @@ extension TargetApp {
             .receipt(inserted: text, bundleID: target.bundleID, fingerprint: target.fingerprint)
         // A fix found by sound: put the caret back where Jake left it, past the
         // fixed words, once, and never while he is typing again.
-        if target.selection?.span != span, let caret = target.pasteStart, caret >= span.location + span.length,
+        if target.selection != span, let caret = target.pasteStart, caret >= span.location + span.length,
            !input.hasInput(since: sentMark) {
             _ = AX.select(TextSpan(location: caret + text.utf16.count - span.length, length: 0), in: field)
         }
         return .replaced(receipt)
     }
 
-    /// The whole value, or nil past `readCap` or when the app doesn't answer.
-    private static func value(of field: AXUIElement) -> String? {
-        if let count = AX.int(field, kAXNumberOfCharactersAttribute), count > readCap { return nil }
-        guard let value = AX.string(field, kAXValueAttribute), value.utf16.count <= readCap else { return nil }
-        return value
+    /// The whole value, or past `readCap` a window of it with where it starts;
+    /// nil when the app doesn't answer.
+    private static func window(of field: AXUIElement, around anchor: Int?) -> (String, Int)? {
+        guard let count = AX.int(field, kAXNumberOfCharactersAttribute), count > readCap else {
+            return AX.string(field, kAXValueAttribute).map { ($0, 0) }
+        }
+        let span = FieldWindow.span(count: count, around: anchor ?? count, cap: readCap)
+        return AX.string(field, in: span.cfRange).map { ($0, span.location) }
     }
 
     private static func selection(of field: AXUIElement, is span: TextSpan, reading expected: String) -> Bool {

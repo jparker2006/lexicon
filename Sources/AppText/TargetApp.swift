@@ -78,8 +78,8 @@ public actor TargetApp: TextDestination {
         let fingerprint: String?
         /// Where the paste will start: the caret, or the selection it replaces.
         let pasteStart: Int?
-        /// What Jake had selected, for a Re-speak's precise path. nil when nothing was.
-        let selection: FieldSelection?
+        /// Where Jake had text selected, for a Re-speak's precise path. nil when nothing was.
+        let selection: TextSpan?
     }
 
     public func context() -> AppContext {
@@ -125,14 +125,8 @@ public actor TargetApp: TextDestination {
         let fingerprint = focus.durableFingerprint(bundleID: bundleID)
         await Paster.shared.prefetch()  // Jake's clipboard, read now, off the text-ready-to-Cmd-V path
         let range = focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute) }
-        // The selected text is read only when there is a selection: most fn-ups have none.
-        let selection = focus.field.flatMap { field in
-            range.flatMap { range in
-                range.length > 0 ? AX.string(field, kAXSelectedTextAttribute).map {
-                    FieldSelection(span: TextSpan(location: range.location, length: range.length), text: $0)
-                } : nil
-            }
-        }
+        // Its text is read with the field at Re-speak time (`read(at:)`), which retries.
+        let selection = range.flatMap { $0.length > 0 ? TextSpan(location: $0.location, length: $0.length) : nil }
         return Target(focus: focus.snapshot(durable: fingerprint), bundleID: bundleID, mark: mark,
                       capturedAt: capturedAt, field: focus.field.map(FieldRef.init), fingerprint: fingerprint,
                       pasteStart: range?.location, selection: selection)

@@ -13,7 +13,7 @@ public actor HeadlessDestination: TextDestination {
     public struct Target: Sendable {
         let serial: Int
         let focus: FocusSnapshot
-        let selection: FieldSelection?
+        let selection: TextSpan?
     }
 
     private var current: AppContext
@@ -52,7 +52,7 @@ public actor HeadlessDestination: TextDestination {
     public func select(_ span: TextSpan) { pendingSelection = span }
 
     public func target() -> Target? {
-        let selection = pendingSelection.flatMap { span in Self.text(in: fieldText, at: span).map { FieldSelection(span: span, text: $0) } }
+        let selection = pendingSelection
         pendingSelection = nil
         return Target(serial: delivered.count, focus: FocusSnapshot(pid: 0, fieldFingerprint: "headless"), selection: selection)
     }
@@ -60,7 +60,8 @@ public actor HeadlessDestination: TextDestination {
     // `async` like the requirement: a sync method beside the protocol's async
     // default would lose to it in a caller's `await`.
     public func read(at target: Target) async -> FieldText? {
-        FieldText(text: fieldText, selection: target.selection, bundleID: current.bundleID, fieldFingerprint: "headless")
+        FieldText.reading(fieldText, offset: 0, selection: target.selection, bundleID: current.bundleID,
+                          fieldFingerprint: "headless")
     }
 
     /// Like `TargetApp.replace` with no app to ask: only while the span still reads `expected`.
