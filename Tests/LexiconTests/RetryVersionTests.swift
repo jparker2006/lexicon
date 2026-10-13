@@ -235,22 +235,21 @@ private func detail(_ paths: AppPaths, _ id: DictationID) throws -> HistoryDetai
     let paths = AppPaths.temporary()
     let clip = try wav()
     let first: DictationResult
-    weak var released: HistoryStore?
     do {
         // Released before the next system opens: one store per data folder.
         let dictating = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
                                                 local: ScriptedTranscriber(text: "kept text"), clock: TestClock())
-        released = dictating.history
         first = await dictating.conductor.dictate(file: clip, pace: .asFastAsPossible)
         await dictating.history.flush()
     }
-    while released != nil { await Task.yield() }  // its deinit frees the folder's lock: the signal, not a clock
     let before = try detail(paths, first.id)
 
-    let retrying = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: withCloud,
-                                           local: ScriptedTranscriber(text: "Um."),
-                                           cloud: ScriptedCloud(clock: TestClock(), script: [], networkUp: false).link,
-                                           clock: TestClock())
+    let retrying = try await onceFolderIsFree {
+        try HeadlessSystem.make(paths: paths, context: .unknown, preferences: withCloud,
+                                local: ScriptedTranscriber(text: "Um."),
+                                cloud: ScriptedCloud(clock: TestClock(), script: [], networkUp: false).link,
+                                clock: TestClock())
+    }
     let retried = await retrying.conductor.retry(first.id, with: nil)
     await retrying.history.flush()
 
