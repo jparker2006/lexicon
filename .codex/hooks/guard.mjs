@@ -12,6 +12,8 @@
 // It refuses with the guard's own JSON on stdout, which Codex takes as a deny. Codex lets
 // a call through when a hook fails in any other way, so every error here exits 2, which
 // Codex takes as a refusal, and hooks.json turns a missing node or checkout into exit 2.
+// hooks.json runs this file from the call's own checkout: in a linked worktree Codex reads
+// hooks.json from the main checkout, but only when the worktree has a .codex/ folder too.
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

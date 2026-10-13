@@ -1,0 +1,14 @@
+{
+  "session_id": "01a1362a-890b-7550-9df9-27c6fcea16b4",
+  "turn_id": "01a1362a-89c3-7d50-aed8-1309aeceafc4",
+  "transcript_path": null,
+  "cwd": "<scratch clone>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "p=$PPID; while [ \"$p\" -gt 1 ]; do ps -o pid=,ppid=,comm= -p \"$p\"; p=$(ps -o ppid= -p \"$p\" | tr -d \" \"); done"
+  },
+  "tool_use_id": "call_7XizfWzuV8gCgutK9v89bvmH"
+}

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "root=$(git rev-parse --path-format=absolute --git-common-dir) && node \"${root%/.git}/.codex/hooks/guard.mjs\" || { echo 'guard: failed, refusing' >&2; exit 2; }",
+            "command": "root=$(git rev-parse --show-toplevel) && node \"$root/.codex/hooks/guard.mjs\" || { echo 'guard: failed, refusing' >&2; exit 2; }",
             "timeout": 60,
             "statusMessage": "Lexicon guard"
           }
