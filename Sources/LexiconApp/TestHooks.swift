@@ -96,6 +96,8 @@ enum AppTestHooks {
             if let system { await sleep(system) } else { closed }
         case .silenceMic:
             if let system { silenceMic(system) } else { closed }
+        case .dropAudio:
+            if let system { dropAudio(system) } else { closed }
         case .indicator(let state):
             showing(state, on: indicator)
         case .sound(let cue):
@@ -164,6 +166,11 @@ enum AppTestHooks {
 
     private static func silenceMic(_ system: LexiconSystem) -> TestHookReply {
         system.recorder.silenceNextMicrophoneCapture()
+        return .done
+    }
+
+    private static func dropAudio(_ system: LexiconSystem) -> TestHookReply {
+        system.recorder.dropNextCaptureBlock()
         return .done
     }
 

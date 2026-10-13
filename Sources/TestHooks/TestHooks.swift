@@ -28,6 +28,8 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     case sleep
     /// The next Dictation's mic delivers only zeros.
     case silenceMic
+    /// The next Dictation, from the mic or a file, loses its first block, counted as lost audio.
+    case dropAudio
     /// Show one indicator state on the pill and the menu bar icon.
     case indicator(IndicatorState)
     /// Play one sound and report how long it took to reach the speaker.
