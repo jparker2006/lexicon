@@ -36,6 +36,6 @@ import LexiconCore
 }
 
 @Test func structuralCheckRejectsChangedNumbers() {
-    let failure = StructuralCheck.check("Ship it on the 5th", ruled: "ship it on the fourth", terms: [], rules: .empty)
+    let failure = StructuralCheck.check("Ship it on the 5th", ruled: "ship it on the fourth", terms: [])
     #expect(failure == .numberMismatch)
 }

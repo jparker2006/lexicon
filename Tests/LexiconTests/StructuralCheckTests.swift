@@ -35,10 +35,8 @@ struct Pair: Sendable, CustomTestStringConvertible {
 }
 
 private func check(_ output: String, ruled: String) -> CheckFailure? {
-    StructuralCheck.check(output, ruled: ruled, terms: benchLexicon, rules: benchRules)
+    StructuralCheck.check(output, ruled: ruled, terms: benchLexicon)
 }
-
-private let benchRules = RuleSet(rules: [], terms: benchLexicon, english: [])
 
 /// The bench's first 20 cases are the rules cases; their gold is the rules-only text.
 let rulesCases = (researchCases + heldOutCases).map { Accepted($0.raw, $0.raw, [$0.gold]) }
@@ -117,8 +115,8 @@ let neverAnswers: [Pair] = [
 @Test func lexiconTermsMayBeAddedOtherWordsMayNot() {
     let ruled = "Point the callback at the database, not the cache."
     let output = "Point the callback at the Supabase database, not the cache."
-    #expect(StructuralCheck.check(output, ruled: ruled, terms: [Term(text: "Supabase")], rules: .empty) == nil)
-    #expect(StructuralCheck.check(output, ruled: ruled, terms: [], rules: .empty) == .addedWord)
+    #expect(StructuralCheck.check(output, ruled: ruled, terms: [Term(text: "Supabase")]) == nil)
+    #expect(StructuralCheck.check(output, ruled: ruled, terms: []) == .addedWord)
 }
 
 @Test func negationsAndHedgesSurvive() {
@@ -247,7 +245,7 @@ let newCases: [Accepted] = [
              [
               "Keep the last 14 days of logs, and archive anything older than 1 year.",
              ]),
-    // ramble (r01's gold here keeps "like, 10", unlike the bench's: a hedge before a number)
+    // ramble
     Accepted("r01",
              "Okay so, um, here's the migration plan. First we freeze writes for, like, ten minutes, "
              + "and then we run the backfill, which takes about an hour. After that we switch the reads "
@@ -256,7 +254,7 @@ let newCases: [Accepted] = [
              + "metrics job, it's fine. And then the last thing is, uh, the on-call doc needs an update "
              + "with the new runbook.",
              [
-              "Here's the migration plan. First we freeze writes for, like, 10 minutes, and then we run the "
+              "Here's the migration plan. First we freeze writes for 10 minutes, and then we run the "
                 + "backfill, which takes about an hour. After that we switch the reads over to the new "
                 + "table, and we keep the old one around for a week in case we need to roll "
                 + "back.\n\nSeparately, the dashboard is still showing the old numbers. Please don't touch the "
@@ -285,11 +283,10 @@ let newCases: [Accepted] = [
              [
               "Delete all the snapshot tests, and then run the suite.",
              ]),
-    // q05's gold here keeps "like, in", unlike the bench's: the rules keep it, so the guard does.
     Accepted("q05",
              "Explain to me how garbage collection works in Go, like, in simple terms.",
              [
-              "Explain to me how garbage collection works in Go, like, in simple terms.",
+              "Explain to me how garbage collection works in Go, in simple terms.",
              ]),
     Accepted("q06",
              "Translate this to Spanish: the build is green and the tests pass.",
@@ -360,8 +357,8 @@ let handWrittenGood: [Pair] = [
          "1. Pull main.\n2. Run the tests."),
     Pair("self-correction resolved", ruled: "Delete them, actually no, move them.",
          "Move them."),
-    Pair("comma-bounded like dropped, content kept", ruled: "Here's the plan, like, ship it today.",
-         "Here's the plan, ship it today."),
+    Pair("comma-bounded like dropped, content kept", ruled: "Here's the plan, like, to ship it.",
+         "Here's the plan to ship it."),
 ]
 
 let handWrittenBad: [Pair] = [
@@ -627,53 +624,3 @@ let rejectedModelOutputs: [Pair] = [
          ruled: "The button should say save, not submit. Make it blue, like the primary color in the theme.",
          "The button should say save, not submit. Make it blue, the primary color in the theme."),
 ]
-
-/// A filler the rules keep as meaning may not go in AI cleanup either.
-@Test func aFillerTheRulesKeepMustSurvive() {
-    func guarded(_ output: String, _ ruled: String, rules: RuleSet = .empty) -> CheckFailure? {
-        StructuralCheck.check(output, ruled: ruled, terms: [], rules: rules)
-    }
-    #expect(guarded("Huh, that's right.", "Uh huh, that's right.") == .droppedContentWord)
-    #expect(guarded("Huh, that's right.", "Uh-huh, that's right.") == .droppedContentWord)
-    #expect(guarded("Oh, the build failed again.", "Uh oh, the build failed again.") == .droppedContentWord)
-    #expect(guarded("It takes eighty minutes.", "It takes, like, eighty minutes.") == .droppedContentWord)
-    #expect(guarded("It takes eighty minutes.", "It takes, like, you know, eighty minutes.") == .droppedContentWord)
-    #expect(guarded("It's Postgres but faster.", "It's, like, Postgres but faster.") == .droppedContentWord)
-    #expect(guarded("Can you explain this regex?", "Can you, like, explain this regex?") == nil)
-    // Any "like" the rules keep, even a cautious one, stays.
-    #expect(guarded("Make it the primary color.", "Make it, like, the primary color.") == .droppedContentWord)
-    // A Term or a Rule's written side counts as the rules count it.
-    let gstack = RuleSet(rules: [], terms: [Term(text: "gstack")], english: [])
-    #expect(guarded("We use gstack for that.", "We use, like, gstack for that.", rules: gstack) == .droppedContentWord)
-    let kubectl = RuleSet([Rule(heard: "cube cuddle", written: "kubectl")])
-    #expect(guarded("Use kubectl for that.", "Use, like, kubectl for that.", rules: kubectl) == .droppedContentWord)
-    let preCommit = RuleSet([Rule(heard: "pre commit", written: "pre-commit")])
-    #expect(TextPass.run("Run, like, pre commit first.", rules: preCommit) == "Run, like, pre-commit first.")
-    #expect(guarded("Run pre-commit first.", "Run, like, pre-commit first.", rules: preCommit) == .droppedContentWord)
-    // A retracted filler does not excuse dropping one the rules kept elsewhere.
-    #expect(guarded("Keep the file. Huh, that's right.",
-                    "Delete the uh file, actually no, keep the file. Uh huh, that's right.") == .droppedContentWord)
-    // A hedge inside a retraction may go with it; the one after it may not.
-    #expect(guarded("Use, like, SQLite.", "Use, like, Postgres, actually no, use, like, SQLite.") == nil)
-    #expect(guarded("Use SQLite.", "Use, like, Postgres, actually no, use, like, SQLite.") == .droppedContentWord)
-    // Another "like" kept elsewhere does not excuse dropping the hedge.
-    #expect(guarded("Like, it takes eighty minutes.", "Like, it takes, like, eighty minutes.") == .droppedContentWord)
-    // Only a set-off "like" hedges the word after it; a verb or a comparison may be reworded around.
-    #expect(guarded("I like this idea.", "I like the idea.") == nil)
-    #expect(guarded("It looks like a cache is stale.", "It looks like the cache is stale.") == nil)
-    // A comparison before a name or a number holds too, whatever its commas.
-    #expect(guarded("It's Postgres but faster. I like it.", "It's like Postgres but faster. I like it.")
-        == .droppedContentWord)
-    #expect(guarded("It takes eighty. I like eighty.", "It takes, like, eighty. I like eighty.") == .droppedContentWord)
-    #expect(guarded("It's $5 more. I like it.", "It's like $5 more. I like it.") == .droppedContentWord)
-    #expect(guarded("It's S3 but cheaper. I like it.", "It's like S3 but cheaper. I like it.") == .droppedContentWord)
-    #expect(guarded("It's gstack, really. I like it.", "It's like gstack, really. I like it.", rules: gstack)
-        == .droppedContentWord)
-    #expect(guarded("It's one hundred and twenty. I like it.", "It's like one hundred and twenty. I like it.")
-        == .droppedContentWord)
-    #expect(guarded("Huh, that's right.", "UH huh, that's right.") == .droppedContentWord)
-    // The rules drop an "uh" inside a spoken number, so the AI may too.
-    #expect(guarded("Call five oh oh seven.", "Call five uh oh oh seven.") == nil)
-    // A "like" that ends its sentence hedges nothing in the next one.
-    #expect(guarded("It is. Ten people came.", "It is, like. Ten people came.") == nil)
-}

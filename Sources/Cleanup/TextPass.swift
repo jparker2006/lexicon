@@ -17,7 +17,15 @@ public import LexiconDomain
 /// hedge, negation or constraint (`Fillers.protected`).
 public enum TextPass {
     public static func run(_ modelText: String, rules: RuleSet) -> String {
-        Fillers.pass(rules.isEmpty ? modelText : rules.apply(to: modelText), rules: rules)
+        let ruled = rules.isEmpty ? modelText : rules.apply(to: modelText)
+        var dictationStart = true
+        return ruled.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .map { line in
+                let cleaned = Fillers.clean(line, dictationStart: dictationStart, rules: rules)
+                if !cleaned.isEmpty { dictationStart = false }
+                return cleaned
+            }
+            .joined(separator: "\n")
     }
 }
 
@@ -55,10 +63,10 @@ enum Fillers {
     /// digit ("like, 5 MB", "like, $5"), a name or a Term.
     static let likeKeepers: Set<String> = [
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
-        "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some",
-        "many", "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice", "thrice",
-        "double", "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "teens", "lots", "more",
-        "less", "between", "upwards", "somewhere",
+        "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some", "many",
+        "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice", "thrice", "double",
+        "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "teens", "trillion", "trillions", "lots",
+        "more", "less", "between", "upwards", "somewhere",
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
@@ -106,40 +114,6 @@ enum Fillers {
         "sep", "sept", "oct", "nov", "dec",
     ])
 
-    /// The filler pass over Rules-applied text, line by line. `StructuralCheck` runs it too,
-    /// to hold AI cleanup to the fillers it keeps.
-    static func pass(_ ruled: String, rules: RuleSet) -> String {
-        var dictationStart = true
-        return ruled.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-            .map { line in
-                let cleaned = clean(line, dictationStart: dictationStart, rules: rules)
-                if !cleaned.isEmpty { dictationStart = false }
-                return cleaned
-            }
-            .joined(separator: "\n")
-    }
-
-    /// Which "like"s in the rules-only text the rules keep as meaning, counted from 0 the way
-    /// `StructuralCheck.tokens` splits words: a hedge (set off by a comma) or one before a
-    /// number, a name or a Term. AI cleanup may not drop these. `rulesOnly` is `pass`'s
-    /// output; `rules`, the RuleSet it used.
-    static func heldLikes(in rulesOnly: String, rules: RuleSet) -> Set<Int> {
-        var held = Set<Int>()
-        var seen = 0
-        for line in rulesOnly.split(whereSeparator: \.isNewline) {
-            let tokens = line.split(whereSeparator: \.isWhitespace).map(Token.init)
-            for (i, token) in tokens.enumerated() {
-                if token.word == "like", let j = likeIndex(tokens, at: i),
-                   token.trailing == "," || isEstimate(tokens[j].word) || tokens[j].isName
-                    || rules.isWritten(tokens[j].text) {
-                    held.insert(seen)
-                }
-                seen += StructuralCheck.tokens(String(token.text)).filter { $0.word == "like" }.count
-            }
-        }
-        return held
-    }
-
     /// The filler pass over one line. A line always starts a sentence;
     /// `dictationStart`: no earlier line kept anything.
     static func clean(_ line: Substring, dictationStart: Bool, rules: RuleSet) -> String {
@@ -169,10 +143,7 @@ enum Fillers {
             tokens[k].isZero = zeroRun(tokens, around: k)
         }
         for k in tokens.indices where tokens[k].isHardFiller {
-            tokens[k].isInNumber = soundInNumber(count: tokens.count, at: k, word: { tokens[$0].word },
-                                                 marked: { !tokens[$0].trailing.isEmpty },
-                                                 comma: { tokens[$0].trailing == "," },
-                                                 isNumber: { tokens[$0].isNumber })
+            tokens[k].isInNumber = soundInNumber(tokens, at: k)
         }
         var kept: [String] = []
         var keptWords: [String] = []
@@ -251,59 +222,36 @@ enum Fillers {
     }
 
     /// A filler sound at `k` inside a spoken number, before a zero "oh": "five uh oh seven",
-    /// "five, uh oh oh seven" (a comma may follow the number, as in `zeroRun`). Shared with
-    /// `StructuralCheck`, which reads its own tokens.
-    static func soundInNumber(count: Int, at k: Int, word: (Int) -> String, marked: (Int) -> Bool,
-                              comma: (Int) -> Bool, isNumber: (Int) -> Bool) -> Bool {
-        guard k > 0, !marked(k - 1) || comma(k - 1), isNumber(k - 1), !marked(k) else { return false }
+    /// "five, uh oh oh seven" (a comma may follow the number, as in `zeroRun`).
+    private static func soundInNumber(_ tokens: [Token], at k: Int) -> Bool {
+        guard k > 0, tokens[k - 1].trailing.isEmpty || tokens[k - 1].trailing == ",", tokens[k - 1].isNumber,
+              tokens[k].trailing.isEmpty else { return false }
         var j = k + 1
-        while j < count, word(j) == "oh" {
-            if marked(j) { return false }
+        while j < tokens.count, tokens[j].word == "oh" {
+            if !tokens[j].trailing.isEmpty { return false }
             j += 1
         }
-        return j > k + 1 && j < count && isNumber(j)
+        return j > k + 1 && j < tokens.count && tokens[j].isNumber
     }
 
-    /// Where the word a "like" at `k` hedges is: the next word past filler sounds and a
-    /// set-off "you know", within its sentence. "like, um, you know, eighty" hedges "eighty";
-    /// "like. Ten came" and "like, um. Ten failed" hedge nothing. Shared with
-    /// `StructuralCheck`, which reads its own tokens: `youKnow` is how many tokens a
-    /// set-off "you know" starting there takes (0 for none).
-    static func likeObject(count: Int, at k: Int, isFiller: (Int) -> Bool, endsSentence: (Int) -> Bool,
-                           youKnow: (Int) -> Int) -> Int? {
-        guard !endsSentence(k) else { return nil }
-        var j = k + 1
-        while j < count {
-            if isFiller(j) {
-                if endsSentence(j) { return nil }
+    /// The word a "like" at `i` hedges: the next word past filler sounds and a set-off
+    /// "you know", within its sentence. "like, um, you know, eighty" hedges "eighty";
+    /// "like. Ten came" and "like, um. Ten failed" hedge nothing.
+    private static func likeObject(_ tokens: [Token], at i: Int) -> Token? {
+        guard !tokens[i].endsSentence else { return nil }
+        var j = i + 1
+        while j < tokens.count {
+            if tokens[j].isHardFiller {
+                if tokens[j].endsSentence { return nil }
                 j += 1
-            } else if youKnow(j) > 0 {
-                j += youKnow(j)
+            } else if tokens[j].word == "you", j + 1 < tokens.count, tokens[j + 1].word == "know",
+                      tokens[j + 1].trailing.hasPrefix(",") {
+                j += 2
             } else {
-                return j
+                return tokens[j]
             }
         }
         return nil
-    }
-
-    private static func likeIndex(_ tokens: [Token], at i: Int) -> Int? {
-        likeObject(count: tokens.count, at: i, isFiller: { tokens[$0].isHardFiller },
-                   endsSentence: { tokens[$0].endsSentence },
-                   youKnow: { j in
-                       tokens[j].word == "you" && j + 1 < tokens.count && tokens[j + 1].word == "know"
-                           && tokens[j + 1].trailing.hasPrefix(",") ? 2 : 0
-                   })
-    }
-
-    private static func likeObject(_ tokens: [Token], at i: Int) -> Token? {
-        likeIndex(tokens, at: i).map { tokens[$0] }
-    }
-
-    /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written, the
-    /// test both `Fillers` and `StructuralCheck` use for a digit run ("five oh oh seven").
-    static func isNumeral(_ word: String) -> Bool {
-        word.first?.isNumber == true
-            || word.split(separator: "-").first.map { StructuralCheck.isCardinal(String($0)) } ?? false
     }
 
     /// "5 MB", "$5", "eighty", "twenty-something", "tenths": a number or an estimate of one.
@@ -457,7 +405,11 @@ private struct Token {
     var isHardFiller: Bool {
         Fillers.hard.contains(word) && !(text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase })
     }
-    var isNumber: Bool { Fillers.isNumeral(word) }
+    /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written.
+    var isNumber: Bool {
+        word.first?.isNumber == true
+            || word.split(separator: "-").first.map { StructuralCheck.isCardinal(String($0)) } ?? false
+    }
     /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.
     var isName: Bool { text.contains(where: \.isUppercase) && !Fillers.firstPerson.contains(word) }
     /// The speech model started a sentence here: "Um", "Then". Not "I", which is always capitalized.

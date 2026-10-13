@@ -211,7 +211,7 @@ let likeKeptCases: [Case] = [
     Case("It's, like, hundredth in line.", "It's, like, hundredth in line."),
     Case("It's off by, like, quarters of an inch.", "It's off by, like, quarters of an inch."),
     Case("We split it, like, halves and thirds.", "We split it, like, halves and thirds."),
-    Case("It's, like, trillionths of a cent.", "It's, like, trillionths of a cent."),
+    Case("It's, like, trillions of rows.", "It's, like, trillions of rows."),
     Case("It's, like, twofold faster.", "It's, like, twofold faster."),
     Case("It's, like, quadruple the size.", "It's, like, quadruple the size."),
     Case("It failed, like, thrice today.", "It failed, like, thrice today."),

@@ -47,8 +47,7 @@ enum StructuralCheck {
     static let lengthSlack = 4
 
     /// nil = accept. Otherwise the first failing check, in the order listed above.
-    /// `rules`: the RuleSet the rules pass used, so the fillers it keeps are held here the same way.
-    static func check(_ candidate: String, ruled: String, terms: [Term], rules: RuleSet) -> CheckFailure? {
+    static func check(_ candidate: String, ruled: String, terms: [Term]) -> CheckFailure? {
         if hasUnspokenCode(candidate, ruled: ruled) { return .unspokenCode }
         let (outText, markers) = stripListMarkers(candidate)
         let (refText, _) = stripListMarkers(ruled)
@@ -62,9 +61,8 @@ enum StructuralCheck {
         let openers = openerRun(ref)
         for (k, token) in ref.enumerated() where !retracted.contains(k) && !kept.contains(token.word) {
             let word = token.word
-            if Fillers.hard.contains(word) {
-                continue
-            } else if softFillers.contains(word) {
+            if Fillers.hard.contains(word) { continue }
+            if softFillers.contains(word) {
                 if !softFillerMayGo(ref, k, inOpener: openers[k]) { failures.insert(.droppedContentWord) }
             } else if mustKeep.contains(word) {
                 failures.insert(.droppedContentWord)
@@ -75,31 +73,6 @@ enum StructuralCheck {
             } else {
                 failures.insert(isNumber(word) ? .numberMismatch : .droppedContentWord)
             }
-        }
-
-        // A filler the rules keep survives, unless retracted: the rules own that call. Each
-        // sound of "uh huh" and each "like" with the word it hedges ("like 80") in the
-        // rules-only text appears as often in the candidate, so another "like" is no excuse.
-        // A pair the rules kept counts at most as often as it stands outside a retraction.
-        let rulesOnlyText = Fillers.pass(refText, rules: rules)
-        let rulesOnly = canonical(tokens(rulesOnlyText))
-        let heldLikes = Fillers.heldLikes(in: rulesOnlyText, rules: rules)
-        var rulesKept: [String: Int] = [:]
-        var likesSeen = 0
-        for k in rulesOnly.indices {
-            let isLike = rulesOnly[k].word == "like"
-            if let key = meaningKey(rulesOnly, k), !isLike || heldLikes.contains(likesSeen) {
-                rulesKept[key, default: 0] += 1
-            }
-            if isLike { likesSeen += 1 }
-        }
-        var standing: [String: Int] = [:]
-        for k in ref.indices where !retracted.contains(k) {
-            if let key = meaningKey(ref, k) { standing[key, default: 0] += 1 }
-        }
-        for (key, count) in rulesKept
-        where out.indices.filter({ meaningKey(out, $0) == key }).count < min(count, standing[key] ?? 0) {
-            failures.insert(.droppedContentWord)
         }
 
         let spokenWords = Set(ref.map(\.word))
@@ -250,10 +223,7 @@ enum StructuralCheck {
         "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
         "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
     ]
-    static let scales: [String: Int] = [
-        "thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000, "trillion": 1_000_000_000_000,
-        "quadrillion": 1_000_000_000_000_000,
-    ]
+    static let scales: [String: Int] = ["thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000]
     static let ordinals: [String: Int] = [
         "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
         "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14,
@@ -464,34 +434,6 @@ enum StructuralCheck {
             open = endsSentence(token) || (open && (Fillers.hard.contains(token.word) || softFillers.contains(token.word)))
         }
         return result
-    }
-
-    /// A filler and what makes it meaning, to find again in another text: "uh huh" for a sound
-    /// of an interjection, "like 80" for a "like" and the word after it. nil for any other
-    /// word, and for "uh" before an "oh" that is a zero inside a number ("5 uh oh 7").
-    static func meaningKey(_ t: [Token], _ k: Int) -> String? {
-        let word = t[k].word
-        if word == "like" { return likeObject(t, k).map { "like " + $0.word } }
-        guard Fillers.hard.contains(word) else { return nil }
-        if t[k].mark == nil, k + 1 < t.count, Fillers.interjections.contains(word + " " + t[k + 1].word) {
-            let inNumber = Fillers.soundInNumber(count: t.count, at: k, word: { t[$0].word },
-                                                 marked: { t[$0].mark != nil }, comma: { t[$0].mark == "," },
-                                                 isNumber: { Fillers.isNumeral(t[$0].word) })
-            return inNumber ? nil : word + " " + t[k + 1].word
-        }
-        if k > 0, t[k - 1].mark == nil, Fillers.interjections.contains(t[k - 1].word + " " + word) {
-            return t[k - 1].word + " " + word
-        }
-        return nil
-    }
-
-    /// The word a "like" hedges (`Fillers.likeObject`), on canonical tokens, where
-    /// "you know" is one token.
-    static func likeObject(_ t: [Token], _ k: Int) -> Token? {
-        Fillers.likeObject(count: t.count, at: k, isFiller: { Fillers.hard.contains(t[$0].word) },
-                           endsSentence: { endsSentence(t[$0]) },
-                           youKnow: { t[$0].word == "you_know" && t[$0].mark == "," ? 1 : 0 })
-            .map { t[$0] }
     }
 
     /// Where the rules would also drop it: "like" before a comma or a sentence
