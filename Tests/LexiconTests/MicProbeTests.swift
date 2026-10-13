@@ -4,9 +4,8 @@ import Testing
 #if DEBUG
 // #186 criterion 7: the debug probe refuses the values the harness let through.
 // MicProbe.measure starts the real mic for `seconds`, so the bounds live in a pure
-// `MicProbe.check` that measure calls before it makes a Recorder. Every test here
-// calls only the check, except the last one, which is safe only because the check
-// throws first.
+// `MicProbe.check` that measure calls before it makes a Recorder. Only the check is
+// called here: a test that called measure would open the mic if the check ever moved.
 
 /// Whether a probe refusal is the one the criterion names. RecorderError is not
 /// Equatable, so the case is matched here rather than compared with #expect(throws: value).
@@ -47,18 +46,4 @@ func aProbeWithAPreparedIdleOver30SecondsIsRefused() {
     #expect(isEngineFailed(idle))
 }
 
-// This runs the real measure, so it is only safe once `MicProbe.check` exists: the
-// fixed measure throws before it makes a Recorder. Until then this file does not
-// compile, so nothing here can open the real mic on today's code. If the check ever
-// moved after the Recorder, this test would open the real mic and sleep for days
-// (the time limit fails the test but cannot stop the mic).
-@Test(.timeLimit(.minutes(1)))
-func aProbeAskedForMillionsOfSecondsIsRefusedBeforeTheMicStarts() async throws {
-    let folder = try scratchDirectory()
-    let refused = await #expect(throws: RecorderError.self) {
-        _ = try await MicProbe.measure(seconds: 1_000_000, preparedIdle: nil, deviceChange: false,
-                                       deviceUID: nil, folder: folder)
-    }
-    #expect(isEngineFailed(refused))
-}
 #endif
