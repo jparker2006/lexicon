@@ -2,6 +2,7 @@ import Foundation
 import os
 import LexiconDomain
 import AppText
+import Cleanup
 import WordStore
 
 // A Re-speak with words selected (#83): the selection is replaced by what Jake
@@ -27,7 +28,7 @@ extension Conductor {
         let terms = Set(await lexicon.terms.map(\.text))
         let replacement = RespeakText.replacement(spoken, replacing: selection.text, terms: terms,
                                                   isEnglish: PlainEnglish.contains)
-        guard !replacement.isEmpty else { return .notLanded(.nothingHeard) }
+        guard replacement.contains(where: { !$0.isWhitespace }) else { return .notLanded(.nothingHeard) }
         return switch await destination.replace(selection.span, expected: selection.text, with: replacement, at: target) {
         case .replaced(let receipt): .replaced(field: field, selection: selection, with: replacement, receipt: receipt)
         case .unverified: .notLanded(.unverified)
@@ -69,6 +70,19 @@ extension Conductor {
     }
 }
 
+extension NotInsertedReason {
+    /// The row's reason when a Re-speak's words didn't land.
+    init(_ problem: FixProblem) {
+        self = switch problem {
+        case .movedOn: .focusMoved
+        case .noField: .noField
+        case .clipboardDenied: .clipboardDenied
+        case .textChanged, .cannotSelect, .terminal, .pasteFailed, .unverified, .historyUnreadable, .nothingHeard:
+            .pasteFailed
+        }
+    }
+}
+
 extension FixProblem {
     init(_ refusal: ReplaceRefusal) {
         self = switch refusal {
@@ -80,24 +94,5 @@ extension FixProblem {
         case .clipboardDenied: .clipboardDenied
         case .pasteFailed: .pasteFailed
         }
-    }
-}
-
-/// The text a Re-speak puts over the words it fixes. Pure.
-enum RespeakText {
-    /// `spoken`: the Re-speak's cleaned text, which Cleanup wrote as a sentence.
-    /// `before`: the words it replaces. `terms`: the Lexicon's written forms.
-    static func replacement(_ spoken: String, replacing before: String, terms: Set<String>,
-                            isEnglish: (String) -> Bool = { _ in true }) -> String {
-        var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Cleanup ends a sentence with a stop; the words it replaces may not.
-        if let last = text.last, ".!?".contains(last), before.last != last { text.removeLast() }
-        // Cleanup capitalizes a sentence's first word; mid-sentence, a plain English
-        // word goes back to lowercase. "I", a name, a Term, or a word like GitHub keeps its form.
-        let word = String(text.prefix { !$0.isWhitespace })
-        guard let first = text.first, before.first?.isLowercase == true, word != "I", !word.hasPrefix("I'"),
-              !terms.contains(where: { $0.prefix { !$0.isWhitespace } == word }),
-              !word.dropFirst().contains(where: \.isUppercase), isEnglish(word.lowercased()) else { return text }
-        return first.lowercased() + text.dropFirst()
     }
 }

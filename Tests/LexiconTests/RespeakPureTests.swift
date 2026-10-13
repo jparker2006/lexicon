@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import LexiconCore
 @testable import AppText
+import Cleanup
 import LexiconDomain
 
 // Re-speak's pure seams (#83), no mic, keys, network or Accessibility:
