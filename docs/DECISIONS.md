@@ -127,6 +127,11 @@ Jake, 04:31:43Z: "publish, yes to all three". The second question was about the 
 
 Jake, 2026-10-12 10:36Z: "yes to the chips rule" ([record](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6122562855)). He had raised the problem at 09:49:04Z ("sometimes builders give me chips to spin up..."). Decided: only the orchestrator posts chips; a builder, the Reviewer or Live checks files out-of-scope work with `scripts/ticket.sh later` and names it in its Ready line, verdict or `Live checks:` result, and the orchestrator decides whether and when it becomes a chip. Lives in AGENTS.md, Doing the work, workflow.md, Roles, the orchestrate, review-merge and live-checks skills, and the orchestrator's start prompt.
 
+**77. Build slots wait in line, with a third slot while the Mac has room.**
+> **Decision:** should I file an M1 ticket to fix the slots? It would do two things: 1. Make the wait first-come-first-served. 2. Allow a third slot only while `machine.sh` shows headroom. Builders would wait far less, and M1 finishes sooner. M1's gate isn't frozen yet, since its last planned ticket hasn't started, so it can join M1. A builder takes it when a lane frees. My recommendation is yes. Reply yes to take that, or "just FIFO" if you'd rather keep two slots and only fix the order.
+
+Asked by the orchestrator in its session, with the evidence: 8 builders on 2 slots, #60's test waited 45 min while newer jobs got in, at a load of 0.8 per core. Jake, 2026-10-12, about 13:19Z: "yes" ([record](https://github.com/jparker2006/lexicon/issues/238#issuecomment-6125100225)). It joins M1 because M1's gate list had not frozen yet (Q14), as the question said. Decided: a job that can't take a slot waits in one line shared by every worktree, and only the job at its head takes a free slot; a waiter whose process is gone drops out at once. Slot 3 is taken only when slots 1 and 2 are held and the machine verdict (`scripts/lib/verdict.sh`, the rule `scripts/machine.sh` prints) says yes at that moment; a reading it can't take counts as a no. A quiet timing run waits in the same line, then takes all three slots, slot 1 first: it is one job keeping the Mac quiet, not a third build. A build splits the cores by the slots held. Built in [#238](https://github.com/jparker2006/lexicon/issues/238). Lives in `scripts/lib/heavy.sh`, AGENTS.md, Commands, and workflow.md, Concurrency.
+
 ### Earlier, while M0 was built (2026-10-11)
 
 **63. Builder sessions: up to 8.**
@@ -142,7 +147,7 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 **65. The merge rule.** The Reviewer runs `gh pr update-branch` only on the PR it is about to merge, then waits for CI on that exact head; builders bring `main` in only to resolve a conflict. The orchestrator's call, shown to Jake at 2026-10-12 04:21:18Z under "Calls I made for you (say if you disagree)"; he raised none, which is not a yes. Built in `scripts/merge-pr.mjs` (#159).
 
-**66. Two build slots, and builders added while the Mac has room.** Heavy jobs take turns in two slots, and builder sessions start at about 4 to 6 and step up while `scripts/machine.sh` says there is room. The orchestrator's call, shown to Jake in the same message as 65.
+**66. Builders added while the Mac has room.** Builder sessions start at about 4 to 6 and step up while `scripts/machine.sh` says there is room. The orchestrator's call, shown to Jake in the same message as 65. Its first half, two build slots, is replaced by item 77.
 
 **67. What a `// timing-ok:` line covers.** Besides a real-time deadline that only bounds a hang, the timing lint (`scripts/checks/20-test-timing.sh`) accepts a `// timing-ok:` disclosure on the line for: a poll interval, a kill moment that is the test's own input, a semaphore the test itself releases, and a cancellation-only stand-in. The Reviewer's ruling in its verdict on PR #211 (#160).
 
@@ -209,6 +214,11 @@ Jake: as item 57. Decided: a package, import or file name in his repos keeps the
 
 Jake: as item 57. #58 spikes the registered hotkey and falls back to (b) only if it fails; #62 uses the same approach. [ADR 0004](adr/0004-listen-only-fn-tap.md).
 
+**78. In Private mode, a Re-speak with no close match changes nothing.** Spec: Private mode "picks by sound alone". Built (#82): by sound alone, the span that sounds most alike is replaced only when its distance from what Jake said (0 the same, 1 nothing alike; mostly sound, partly spelling) is 0.5 or less; otherwise nothing changes and the pill says "no match", as when Jev says none.
+> Jake: decide what a Re-speak does in Private mode when nothing in your last Dictation sounds like the word you said again. I recommend it changes nothing and the pill says "no match", the same as when Jev says none. [...] Reply "yes" to take that.
+
+Jake, 2026-10-12 15:52:33Z: "yes". Recorded on [#82](https://github.com/jparker2006/lexicon/issues/82#issuecomment-6127755452). Asked as item 76; numbered 78 because open PRs took 76 and 77 first. The 0.5 limit and Jev's 0.75 are starting values, tuned on the Test set once Jake says yes to the paid Jev calls. Proposed, from #82's builder and not asked: the same sound-only rule when Jev can't answer outside Private mode (offline, no key, past its 250 ms budget, an error); Jev's top answer "none", at any probability, changes nothing; choices come only when Jev's top answer is a span under 0.75, up to 3 of the spans Jev ranked, never "none"; Jev is shown the 4 spans that sound most alike (#81's limit); the finder ranks by sound and spelling only, with no weight for Lexicon Terms, since the re-spoken text has already been through Cleanup with them.
+
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
 ### Proposed: built on an agent's default, never asked
@@ -220,6 +230,8 @@ These stand as built until Jake confirms them as a batch or names items to chang
 **35. Sounds are warm on demand.** Spec: an always-warm audio engine. Built: the output engine starts with the Dictation and stops 3 s after its last use (never with Sounds off), because a running output engine stops the Mac from idle-sleeping. Start, stop and warning sounds take 7.7 to 10 ms; a cold cue takes 28 to 35 ms against a 20 ms target. #55's builder; written as "Jake's call" in the Later list without asking him (PR #110).
 
 **36. The local model loads at launch, and fn-up waits at most 2 s for it.** Spec: load on fn-down if not resident. Built: also at launch; a load still running 2 s into fn-up sends the Dictation to waiting (`localModelLoading`) and retries it, because the first load of each new build compiles for about 25 s. #56's builder (PR #129).
+
+**81. The local model gets 30 s plus a quarter of the clip to answer.** Spec (Local residency): "The local model transcribes the clip on fn-up." Built (#201): once fn-down's load is done, the local side has 30 s plus a quarter of the clip's length to answer (a 20-minute clip gets 330 s); past it the Dictation waits for a working model (`localModelFailed`), with its audio kept, and a Retry stuck on "Retrying..." comes back. A hung CoreML call can't be aborted, so until Lexicon is relaunched every later Dictation waits behind it and goes waiting: after up to its own limit (at least 30 s, whatever its length) while the model stays loaded, or after item 36's 2 s once the idle unload has queued behind the hung call. Also built: when fn-down's load fails, fn-up answers with that failure at once and does not load again (that could be a 25 s compile at the cursor); the waiting loop tries the model again every 30 s (item 40). Proposed by #201's builder and its ticket's verifier, never asked: the limit holds fn-up far longer than item 36's 2 s, but only when the model has hung.
 
 **37. The pill and start sound wait for the 0.30 s hold.** Spec: "listening" shows when the first buffer arrives. Built: recording starts at fn-down, but nothing shows or sounds until the hold is confirmed, so fn+arrow chords and stray taps stay silent. #55's builder (PR #110).
 
@@ -239,7 +251,7 @@ These stand as built until Jake confirms them as a batch or names items to chang
 
 ### Moved to a later milestone
 
-- **45.** Long hands-free Dictations: a 20-minute Dictation waits 25 to 41 s at fn-up (#47); the switch to Parakeet's streaming mode is #117 (M1).
+- **45.** Long Dictations: a 20-minute Dictation waited 25 to 41 s at fn-up (#47). #117 decodes Parakeet's own 15 s windows while Jake talks, instead of switching to its streaming mode (the ticket allowed either): the streaming encoder is a second download of about 565 MB and scores worse in FluidAudio's benchmark, and the windows are the one-shot path's, so the words are too. It applies to every Dictation longer than one window (14.96 s), push-to-talk as well as hands-free; one that fits in one window is decoded at fn-up, as before. On a synthetic 20-minute WAV fed at real time (release builds, one run a side, provisional) fn-up to text was 388 ms against main's 8,964 ms, the pair Jake kept when he stopped the timed runs; after the per-window decode moved into Lexicon, the PR #242 review asked for numbers at that code, and one more run in one build slot gave 197 ms, with main's text. The p95 verdict is a Live checks run on a quiet Mac. Proposed: Jake was not asked about windows over streaming mode, or about push-to-talk.
 - **46.** Quit and the clipboard restore: quitting right after a paste, or during item 26's 2 s hold, can leave Dictation text on the clipboard. #132 (M1).
 - **47.** The "same app and under 5 s" late-text fallback for apps whose field can't be detected: not built. #60 (M1).
 - **48.** The audio retention sweep runs at launch only, not on a rolling schedule. No ticket yet.
@@ -252,9 +264,10 @@ These stand as built until Jake confirms them as a batch or names items to chang
 - **52.** Launch to fn working, 150 ms: met on warm relaunches (35 to 137 ms), missed on the first launch after an install. Proposed reading, used in architecture.md Budgets and `scripts/bench.sh`: p95 of warm relaunches, with the first launch after an install reported on its own.
 - **53.** History open, 100 ms at p95: the quiet-Mac rerun gave p95 127 and 139 ms over 20 opens, a fail; #150 fixes it. Proposed reading, used the same way: p95 over every open, with the first open after launch also reported on its own.
 - **54.** Lexicon's own work, fn-up to Cmd-V, 10 ms: cold first pastes measured 7.1 to 14.0 ms (#54), under load. A quiet-Mac recheck is still owed.
-- **55.** Memory while dictating, about 160 MB: peak 66 to 68 MB on a 6 s clip, 258 MB on a 20-minute clip (#47). Proposed: keep 160 MB for normal Dictations and measure the 20-minute peak again with #117.
+- **55.** Memory while dictating, about 160 MB: peak 66 to 68 MB on a 6 s clip, 258 MB on a 20-minute clip (#47). With #117 the 20-minute peak was 108 MB, and 112 MB after the per-window decode moved into Lexicon (synthetic WAV, release, one run each), against 250 MB for main on the same WAV: a long Dictation no longer converts the whole clip at fn-up. Proposed: 160 MB holds for every Dictation.
 
 - **68.** The spec lists "`CloudAccess` is the only door to the network" among the compiler-enforced invariants. Only the key is: every cloud key comes through a `CloudAccess`, but the sockets and HTTP calls are plain `URLSession` that would take any request. architecture.md says so; keeping the network behind `CloudAccess` is a review rule (review.md).
+- **76.** Zero retention, which the spec requires before any eval sends Test set audio to a provider (spec "Privacy for eval"), is not on by default for the bake-off's speech providers. Meta's is for organization accounts only ([#111](https://github.com/jparker2006/lexicon/issues/111)); Cartesia Ink and ElevenLabs offer it on Enterprise plans only. [#166](https://github.com/jparker2006/lexicon/issues/166) enforces the spec's rule in code; whichever of these [#77](https://github.com/jparker2006/lexicon/issues/77) adds as a `CloudModel` states its status there.
 
 Settled since M0, no change: #81's quiet-Mac rerun (2026-10-12) kept Jev's 250 ms budget (warm p50 145 ms, p95 174 ms, 0 of 20 calls over 250 ms).
 
@@ -297,9 +310,11 @@ The spec's own supersessions, written when it was published; each names the plan
 - **"Never put text on the clipboard behind Jake's back", restored within 8 s** (spec story 26), by item 26's 2 s hold, its one exception.
 - **One active fn tap** (the spec), by item 34 and ADR 0004.
 - **The local model loads on fn-down only** (the spec, ADR 0001), by item 36.
+- **Long Dictations switch to Parakeet's streaming mode** (the spec, Local residency), by item 45's windows decoded while Jake talks (Proposed).
 - **60 ms to first audio, cold or prepared** (the spec), by item 30: the budget is the prepared path.
 - **Tickets Jake can feel stay open until he closes them** (workflow.md, M0), by Q11.
 - **Jake promotes Later items himself** (review.md, M0), by Q13.
+- **Two build slots** (item 66's first half), by item 77: first come, first served, with a third slot while the Mac has room.
 - **Every live item gates the merge** (workflow.md, M0), by Q6.
 - **Only Jake quits his daily copy** (workflow.md, M0), by Q8.
 - **A builder grills its own issue and waits for Jake's OK** (workflow.md, M0), by Q5.

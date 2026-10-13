@@ -404,6 +404,10 @@ private actor HeldFirstTranscriber: LocalTranscriber {
     func load() {}
     func unload() {}
 
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async -> String {
         calls += 1
         guard calls == 1 else { return "Second." }

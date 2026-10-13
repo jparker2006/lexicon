@@ -1,5 +1,6 @@
 public import Foundation
 public import LexiconDomain
+import Synchronization
 
 /// Jev decisions: TypeSafe direct `POST https://api.typesafe.ai/v1/systemone`,
 /// model pinned `jev-1.13.0`, plain URLSession, one request per state with all
@@ -39,15 +40,15 @@ public struct JevClient: Sendable {
         self.requestTimeout = requestTimeout
     }
 
-    /// fn-down: open the TLS connection so a later decision skips the cold start
-    /// (measured 359 ms cold vs 150 ms warm). A HEAD with no text and no key: the
+    /// A Re-speak's fn-down (and, from M5, a Hand fix watch): open the TLS
+    /// connection so the decision skips the cold start (measured 359 ms cold vs
+    /// 150 ms warm). Never for plain dictation, which sends Jev nothing. A HEAD with no text and no key: the
     /// rejection still leaves URLSession a warm connection for the next request,
     /// and keys are never read at fn-down (a first Keychain read can wait on a prompt).
     public func prewarm(_ access: CloudAccess?) {
         guard let access, access.revoked == nil else { return }
-        let session = session
-        let request = request("HEAD", key: nil, body: nil)
-        Task { _ = try? await session.data(for: request) }
+        // Started before this returns, so nothing about it is left to a later task.
+        session.dataTask(with: request("HEAD", key: nil, body: nil)).resume()
     }
 
     public func decide<Answer: Sendable>(
@@ -60,46 +61,60 @@ public struct JevClient: Sendable {
             Decision(answer: fallback, source: .fallback($0))
         }
         guard let access else { return fallingBack(.privateMode) }
-        guard let key = access.key(.jev, sending: question.sent) else {
-            return fallingBack(access.revoked.map(Decision<Answer>.Reason.init) ?? .noKey)
-        }
 
-        let request = request("POST", key: key, body: question.body)
-        let session = session
         let clock = clock
-
-        // First to finish wins; the others are cancelled, which cancels the request.
-        return await withTaskGroup(of: Decision<Answer>.self) { group in
-            group.addTask {
-                guard access.revoked == nil else { return fallingBack(.privateMode) }
-                let data: Data, response: URLResponse
-                do {
-                    (data, response) = try await session.data(for: request)
-                } catch let error as URLError where error.code == .timedOut {
-                    // URLSession's own limit: the answer came too late, as past the
-                    // budget. A budget timer starved that long must not make it an error.
-                    return fallingBack(.timeout)
-                } catch {
-                    return fallingBack(.error)
-                }
-                guard (response as? HTTPURLResponse)?.statusCode == 200,
-                      let (answer, probability) = question.decode(data)
-                else { return fallingBack(.error) }
-                return Decision(answer: answer, source: .jev(probability: probability))
-            }
-            group.addTask {
-                try? await clock.sleep(for: budget)
-                return fallingBack(.timeout)
-            }
-            group.addTask {
-                // Private mode turned on mid-call: drop the answer at once.
-                guard let reason = await access.whenRevoked() else { return fallingBack(.timeout) }
-                return fallingBack(.init(reason))
-            }
-            let first = await group.next()!
-            group.cancelAll()
-            return first
+        let race = FirstAnswer<Decision<Answer>>()
+        return await withTaskCancellationHandler {
+            await race.run { answer in [
+                Task {
+                    guard let key = await Self.key(access, sending: question.sent) else {
+                        return answer(fallingBack(access.revoked.map(Decision<Answer>.Reason.init) ?? .noKey))
+                    }
+                    // Checked again after the read: Private mode may have come on, or the race
+                    // been answered, while it waited. Either way nothing is sent.
+                    guard access.revoked == nil, !Task.isCancelled else { return }
+                    answer(await self.ask(question, key: key, fallingBack: fallingBack))
+                },
+                Task {
+                    guard (try? await clock.sleep(for: budget)) != nil else { return }
+                    answer(fallingBack(.timeout))
+                },
+                Task {
+                    // Private mode turned on mid-call: drop the answer at once.
+                    if let reason = await access.whenRevoked() { answer(fallingBack(.init(reason))) }
+                },
+            ] }
+        } onCancel: {
+            race.answer(fallingBack(.cancelled))
         }
+    }
+
+    /// The key, read inside the budget and off the cooperative pool: the first
+    /// read can wait on a Keychain prompt, and a parked pool thread could keep
+    /// the budget's own timer from running.
+    private static func key(_ access: CloudAccess, sending text: String) async -> String? {
+        await withCheckedContinuation { read in
+            DispatchQueue.global(qos: .userInitiated).async { read.resume(returning: access.key(.jev, sending: text)) }
+        }
+    }
+
+    private func ask<Answer: Sendable>(
+        _ question: JevQuestion<Answer>, key: String,
+        fallingBack: (Decision<Answer>.Reason) -> Decision<Answer>
+    ) async -> Decision<Answer> {
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request("POST", key: key, body: question.body))
+        } catch let error as URLError where error.code == .timedOut {
+            // URLSession's own limit: the answer came too late, as past the
+            // budget. A budget timer starved that long must not make it an error.
+            return fallingBack(.timeout)
+        } catch {
+            return fallingBack(.error)
+        }
+        guard (response as? HTTPURLResponse)?.statusCode == 200, let (answer, probability) = question.decode(data)
+        else { return fallingBack(.error) }
+        return Decision(answer: answer, source: .jev(probability: probability))
     }
 
     private func request(_ method: String, key: String?, body: Data?) -> URLRequest {
@@ -111,6 +126,48 @@ public struct JevClient: Sendable {
             request.httpBody = body
         }
         return request
+    }
+}
+
+/// The first of a few racing tasks to answer wins; the others are cancelled.
+/// Unlike a task group it never waits for the losers, so one stuck where
+/// cancelling can't reach (a Keychain read) can't hold the caller.
+private final class FirstAnswer<Value: Sendable>: Sendable {
+    private struct State {
+        var answer: Value?
+        var waiter: CheckedContinuation<Value, Never>?
+        var racers: [Task<Void, Never>] = []
+    }
+    private let state = Mutex(State())
+
+    /// Starts the racers, each handed `answer`, and returns the first answer.
+    /// Starts none when an answer came first (a caller that already gave up).
+    func run(_ racers: (@escaping @Sendable (Value) -> Void) -> [Task<Void, Never>]) async -> Value {
+        await withCheckedContinuation { waiter in
+            let early = state.withLock { state -> Value? in
+                if state.answer == nil { state.waiter = waiter }
+                return state.answer
+            }
+            if let early { return waiter.resume(returning: early) }
+            let started = racers { self.answer($0) }
+            let late = state.withLock { state -> Bool in
+                if state.answer == nil { state.racers = started }
+                return state.answer != nil
+            }
+            if late { started.forEach { $0.cancel() } }
+        }
+    }
+
+    /// The first call wins; later ones are ignored.
+    func answer(_ value: Value) {
+        let (waiter, losers) = state.withLock { state -> (CheckedContinuation<Value, Never>?, [Task<Void, Never>]) in
+            guard state.answer == nil else { return (nil, []) }
+            state.answer = value
+            defer { (state.waiter, state.racers) = (nil, []) }
+            return (state.waiter, state.racers)
+        }
+        losers.forEach { $0.cancel() }
+        waiter?.resume(returning: value)
     }
 }
 
@@ -239,10 +296,13 @@ public struct Decision<Answer: Sendable>: Sendable {
         case noKey
         case timeout
         case error
+        /// The caller gave up, so nobody waits for the answer.
+        case cancelled
 
         init(_ revoked: AccessRevoked) {
             switch revoked {
-            case .privateModeOn, .alwaysPrivateApp: self = .privateMode
+            // Jev never runs under eval access, the only use denied for retention.
+            case .privateModeOn, .alwaysPrivateApp, .retentionUnconfirmed: self = .privateMode
             case .secretFound: self = .secretFound
             }
         }

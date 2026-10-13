@@ -35,8 +35,8 @@ public enum RespeakOutcome: Sendable, Hashable {
 /// non-empty value, diff when focus leaves / field clears / next Dictation /
 /// 60 s), matching a Claude Code or Codex hook prompt to the Dictation it
 /// contains, the "I just fixed this" read, diffing, size filters, the Jev
-/// recognition-error check with a local fallback, close-call checks after
-/// insert, Re-speak span resolution (Lexicon phonetics + Jev) and replacement.
+/// recognition-error check with a local fallback, and Re-speak replacement
+/// (`RespeakResolver` finds the span).
 ///
 /// Writes Fixes only through `HistoryStore.record(.fixRecorded)` and Rules only
 /// through `Lexicon.add`. Owns nothing durable itself; its only state is the
@@ -47,7 +47,7 @@ public actor FixEngine {
     }
 
     /// Called by the Conductor after a live insert. Returns at once; the watch
-    /// window and the close-call check (#10) run in their own tasks. `receipt` is
+    /// window runs in its own task. `receipt` is
     /// what History keeps; later matching (hook prompts, Re-speak after a restart)
     /// starts from `history.receipt(for:)` and `TargetApp.reattach`.
     public func didInsert(_ id: DictationID, text: String, app: AppContext, receipt: InsertionReceipt,
