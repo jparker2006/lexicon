@@ -233,6 +233,9 @@ struct HotkeyPresses {
     /// The last few first reports still waiting for their partner, oldest first. A partner
     /// can arrive late (a busy tap), so they go by count, never by how old they are.
     private var unpaired: [(report: Report, at: HostTime)] = []
+    /// Far more presses than can be waiting at once: a report is dropped before its partner
+    /// only if the tap stalls through nine ⌃⌘V presses, and then one extra tick only holds
+    /// that paste for ⌃⌘V, never types anything.
     private static let kept = 8
 
     /// True for a press's first report (count it), false for its second, which pairs
