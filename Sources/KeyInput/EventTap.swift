@@ -104,7 +104,10 @@ final class EventTapThread: @unchecked Sendable {
     /// it queues behind every fn command already sent: `commands` keeps one producer.
     /// A tap never started (tests) yields it at once, on the caller's thread.
     func send(_ command: KeyCommand) {
-        // scaffold (#62): filled test-first
+        onTapThread { [self] in
+            continuation.yield(command)
+            log.notice("key command: \(String(describing: command), privacy: .public)")
+        }
     }
 
     func onTapThread(_ work: @escaping @Sendable () -> Void) {

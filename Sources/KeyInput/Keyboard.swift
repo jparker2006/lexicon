@@ -68,7 +68,8 @@ public enum KeyboardError: Error, Sendable {
 /// Hides: the listen-only session-level CGEventTap on its own thread (#6), the
 /// gesture state machine and its timer, passing every key on (Esc while
 /// recording is swallowed from M1), re-enabling the tap after the system disables it, ignoring events
-/// Lexicon itself posted (its own Cmd-V), and stamping `InputClock`.
+/// Lexicon itself posted (its own Cmd-V), stamping `InputClock`, and ⌃⌘V's
+/// registered hotkey, whose press joins `commands` on the tap thread.
 ///
 /// Gesture state has exactly one owner: the recognizer on the tap thread. Other
 /// code asks it to change state (`systemWillSleep()`); nothing else writes it.
@@ -79,6 +80,10 @@ public final class Keyboard: Sendable {
     let feed: @Sendable (KeyInput) -> Void
     /// The tap behind `feed`; nil for a test's scripted keyboard.
     let tap: EventTapThread?
+    /// ⌃⌘V, registered for as long as the app runs (decision 59): taken from every
+    /// app with no event tap, so no key waits on Lexicon. Held here only to keep it
+    /// alive; nil for a test's keyboard, so a test run never takes ⌃⌘V from the Mac.
+    let pasteLastKey: RegisteredHotkey?
 
     /// Creates the tap thread and starts listening. Throws if Accessibility is missing.
     public static func start(_ config: KeyboardConfig, input: InputClock) throws(KeyboardError) -> Keyboard {
@@ -90,19 +95,24 @@ public final class Keyboard: Sendable {
         let tap = EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
                                  continuation: continuation)
         try tap.start(listenAccess: listenAccess)
-        return Keyboard(tap: tap, commands: commands)
+        // The tap sees this key-down too, as any other key; only the hotkey says paste, so one press pastes once.
+        let pasteLast = RegisteredHotkey(config.pasteLast) { _ in tap.send(.pasteLast) }
+        pasteLast.setRegistered(true)
+        return Keyboard(tap: tap, commands: commands, pasteLastKey: pasteLast)
     }
 
-    init(tap: EventTapThread, commands: AsyncStream<KeyCommand>) {
+    init(tap: EventTapThread, commands: AsyncStream<KeyCommand>, pasteLastKey: RegisteredHotkey? = nil) {
         self.commands = commands
         feed = { tap.perform($0) }
         self.tap = tap
+        self.pasteLastKey = pasteLastKey
     }
 
     init(commands: AsyncStream<KeyCommand>, feed: @escaping @Sendable (KeyInput) -> Void) {
         self.commands = commands
         self.feed = feed
         tap = nil
+        pasteLastKey = nil
     }
 
     /// Lid close or sleep is a normal stop (#4). It goes through the recognizer,
