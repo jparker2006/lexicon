@@ -142,6 +142,8 @@ enum StructuralCheck {
     /// "sorry", "scratch" and "actually" are here because they only ever cue a self-correction.
     /// Words that flip a meaning when swapped for their opposite ("under", "off", "all", "even")
     /// are content words, so "under 5 MB" cannot become "over 5 MB".
+    /// Rules-only Cleanup drops a doubled stop word as a stutter unless `Fillers.meantDoubles`
+    /// or `Fillers.protected` keeps it, so a word added here changes what it types.
     static let stop: Set<String> = [
         "a", "an", "the", "and", "or", "but", "yet", "if", "then", "than", "that", "this", "these", "those",
         "there", "here", "of", "to", "in", "on", "at", "by", "for", "with", "from", "into", "onto", "about", "as",

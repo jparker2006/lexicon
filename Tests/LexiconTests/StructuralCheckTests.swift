@@ -124,7 +124,7 @@ let neverAnswers: [Pair] = [
     #expect(StructuralCheck.check(output, ruled: ruled, terms: []) == .addedWord)
 }
 
-/// From #302, rules-only Cleanup keeps a doubled content word, so from M3 the AI cleanup
+/// Rules-only Cleanup keeps a doubled content word, so from M3 the AI cleanup
 /// decides on it. The guard compares by membership, so dropping one copy passes.
 @Test func droppingOneCopyOfADoubledWordPasses() {
     #expect(StructuralCheck.check("testing one two three", ruled: "testing testing one two three", terms: []) == nil)

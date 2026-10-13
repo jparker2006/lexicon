@@ -139,8 +139,6 @@ let repeatCases: [Case] = [
     Case("It's not not working.", "It's not not working."),
     Case("I know that that is wrong.", "I know that that is wrong."),
     Case("What it had had was a bug.", "What it had had was a bug."),
-    Case("What it was was a bug.", "What it was was a bug."),
-    Case("There there, it'll be okay.", "There there, it'll be okay."),
     Case("Ask Will will he review it.", "Ask Will will he review it."),
     Case("Run it 10 10 times.", "Run it 10 10 times."),
     Case("No, no, keep it.", "No, no, keep it."),
@@ -171,6 +169,7 @@ let contentDoubleCases: [Case] = [
     // Soft fillers that are not function words stay too: often meant.
     Case("I like like her idea.", "I like like her idea."),
     Case("Okay okay, I get it.", "Okay okay, I get it."),
+    Case("Basically basically, it works.", "Basically basically, it works."),
     // The structural check may drop these, but they are not function words.
     Case("I'm sorry sorry about that.", "I'm sorry sorry about that."),
     Case("It's still still working.", "It's still still working."),
@@ -191,6 +190,7 @@ let functionStutterCases: [Case] = [
     Case("I I I think it works.", "I think it works."),
     Case("We we should ship.", "We should ship."),
     Case("It is in in the cache.", "It is in the cache."),
+    Case("The build was was broken.", "The build was broken."),
 ]
 
 @Test(arguments: functionStutterCases)
@@ -198,7 +198,8 @@ func functionWordStuttersGo(_ c: Case) {
     #expect(clean(c.raw) == c.gold)
 }
 
-/// A repeated number word is a number, not a stutter: a year, a time, a digit run.
+/// A repeated number word is a number, not a stutter: a year, a time, a digit run. Real stutters
+/// and meant doubles next to numbers keep the repeat rule's answer.
 let numberRepeatCases: [Case] = [
     Case("We shipped it in twenty twenty six.", "We shipped it in twenty twenty six."),
     Case("Twenty twenty six was the year.", "Twenty twenty six was the year."),
@@ -225,7 +226,7 @@ let numberRepeatCases: [Case] = [
     Case("Ship it to to five users first.", "Ship it to five users first."),
     Case("Ha ha, very funny.", "Ha ha, very funny."),
     Case("Oh oh, five servers are down.", "Oh oh, five servers are down."),
-    // Three or more in a row is emphasis, not a stutter.
+    // Three or more of a word that is not a function word stay as spoken.
     Case("Go go go, ship it.", "Go go go, ship it."),
     Case("Go go, go, ship it.", "Go go, go, ship it."),
     Case("It's a no no no from me.", "It's a no no no from me."),

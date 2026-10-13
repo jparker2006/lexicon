@@ -88,12 +88,12 @@ enum Fillers {
     ]
 
     /// Doubles the rules keep though the word is in `StructuralCheck.stop`, on top of
-    /// `protected`. Grammar allows them ("I know that that is wrong", "what it was was",
-    /// "there there"), or the word is a cue or an adverb the check may drop, not a
-    /// function word ("sorry sorry", "still still").
+    /// `protected`. Grammar allows them ("I know that that is wrong", "what it had had"),
+    /// or the word is a cue or an adverb the check may drop, not a function word
+    /// ("sorry sorry", "still still").
     static let meantDoubles: Set<String> = [
-        "that", "had", "is", "was", "do", "very", "too", "there", "sorry", "scratch", "still", "already", "again",
-        "also", "once", "own",
+        "that", "had", "is", "do", "very", "too", "sorry", "scratch", "still", "already", "again", "also", "once",
+        "own",
     ]
 
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".
