@@ -37,13 +37,14 @@ public final class LexiconSystem: Sendable {
     /// Not wired before their tickets: Fixes and Jev (M4, M5: Jev never runs
     /// during plain dictation), the inbox (no hooks before the after-M1 grill)
     /// and code Terms (no model takes Terms before M2).
-    public static func live(paths: AppPaths, bundleID: String, local: (any LocalTranscriber)?) throws -> LexiconSystem {
+    public static func live(paths: AppPaths, bundleID: String, local: (any LocalTranscriber)?,
+                            keys: KeyboardConfig) throws -> LexiconSystem {
         // One clock for the tap and AppText, or the late-text rule never sees typing.
         let input = InputClock()
         let keyboard: Keyboard?
         let fnOff: KeyboardError?
         do {
-            keyboard = try Keyboard.start(KeyboardConfig(), input: input)
+            keyboard = try Keyboard.start(keys, input: input)
             fnOff = nil
         } catch {
             keyboard = nil

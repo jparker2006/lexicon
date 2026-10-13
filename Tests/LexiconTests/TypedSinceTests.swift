@@ -43,7 +43,7 @@ private func dictation(between events: [CGEvent]) async -> InsertDecision {
     let input = InputClock()
     let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
     // A zero threshold makes every press a hold, whatever the machine's speed.
-    let tap = EventTapThread(gesture: FnGesture(holdThreshold: .zero), input: input, continuation: continuation,
+    let tap = EventTapThread(gesture: FnGesture(KeyboardConfig(holdThreshold: .zero)), input: input, continuation: continuation,
                              secureInput: { false })
     _ = tap.handle(.flagsChanged, modifier(63, .maskSecondaryFn, from: keyboard))
     // Stricter than the app, which marks once the stop comes out after fn-up.

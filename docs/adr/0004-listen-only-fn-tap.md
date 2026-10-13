@@ -17,4 +17,4 @@ The numbers are thin: five presses were timed, and the baseline taken with the a
 - `scripts/checks/21-source-lints.sh` fails on `.defaultTap` anywhere outside `Sources/KeyInput/EventTap.swift`, and its error names this ADR.
 - If an active tap ever comes back, it lives in `EventTap.swift`, it is on only between fn-down and the end of the Dictation, and the token that turns it on is made inside `KeyInput`, which sits below `LexiconCore`, so no other module can leave it on.
 - Any change to `EventTap.swift` gets a standing Live checks item: typing delay with Lexicon idle stays at the listen-only 2 to 12 ms.
-- Esc during a recording and ⌃⌘V also reach the app in front until #58 and #62 land a way to take them.
+- Esc during a confirmed hold or hands-free Dictation is taken by a registered hotkey (`Sources/KeyInput/RegisteredHotkey.swift`, #58), registered when the recognizer confirms the Dictation and removed when it ends; the tap still sees Esc and cancels on whichever report comes first. Live checks confirms the hotkey takes Esc; if it doesn't, the scoped active tap above replaces it. ⌃⌘V still reaches the app in front until #62.
