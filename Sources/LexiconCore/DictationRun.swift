@@ -32,6 +32,9 @@ extension Conductor {
         /// nil when nobody waits for the text (recovery).
         let hold: LatencyHold?
 
+        /// History's Retry: the only run that lands on a settled row.
+        var isRetry: Bool { previous?.isTerminal == true }
+
         /// Jake waits at the cursor only when the text may still be typed.
         var localPriority: LocalPriority { target == nil ? .background : .live }
     }

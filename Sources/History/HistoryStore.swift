@@ -27,6 +27,10 @@ public enum DictationEvent: Sendable {
     /// reset, so a replay cannot erase a Fix). Status: `afterTextReady(typing:...)`
     /// from the stored status and origin: `.ready` when the text is about to be typed.
     case textReady(DictationID, TextVersions, cleanup: CleanupOutcome, model: SpeechModel, typing: Bool)
+    /// History's Retry got text. Keeps the row's cleaned and final text (if it has any)
+    /// as an earlier version keyed by `version`, minted once per Retry, then applies
+    /// as `.textReady` with `typing: false`, in one transaction.
+    case retried(DictationID, TextVersions, cleanup: CleanupOutcome, model: SpeechModel, version: UUID)
     /// The text was typed (live insert, late insert, or paste-last). Writes the
     /// `insertion` row (latest insertion wins) and moves the status to `.inserted`.
     /// `lag`: fn-up -> Cmd-V posted; nil for paste-last.
@@ -253,7 +257,8 @@ extension HistoryStore {
     ///     guard Self.admits(next, from: stored) else { return }   // replay or race: no-op
     ///
     /// Targets: began -> .recording (INSERT OR IGNORE); audioEnded -> .transcribing;
-    /// textReady -> afterTextReady(typing:, origin: stored origin, previous: stored);
+    /// textReady -> afterTextReady(typing:, origin: stored origin, previous: stored); retried -> as
+    /// textReady(typing: false), keeping the replaced text first;
     /// delivered -> .inserted; notInserted -> .notInserted; waiting -> .waiting;
     /// failed -> .failed. Not status-moving: attempted,
     /// fixRecorded, fixVerdict, pinned (true only with the audio on disk); deleted is refused while `isInFlight`;
@@ -281,6 +286,20 @@ extension HistoryStore {
             try db.execute("UPDATE dictation SET \(assignments.map { "\($0.0) = ?" }.joined(separator: ", ")) WHERE id = ?",
                            assignments.map(\.1) + [key])
             return true
+        }
+
+        /// The text and status move `.textReady` makes, and `.retried` after keeping what it replaces.
+        func setText(_ versions: TextVersions, cleanup: CleanupOutcome, model: SpeechModel, typing: Bool,
+                     from stored: Stored) throws {
+            if try move(to: Self.afterTextReady(typing: typing, from: stored), setting: [
+                ("model_text", .text(versions.model)),
+                ("cleaned_text", .text(versions.cleaned)),
+                ("cleanup", .text(try cleanup.column())),
+                ("model", .text(model.id)),
+            ]) {
+                // Recomputed from cleaned text plus Fix rows, never reset: a replay cannot erase a Fix.
+                try Self.materializeFinalText(id, in: db)
+            }
         }
 
         switch event {
@@ -319,18 +338,20 @@ extension HistoryStore {
 
         case .textReady(_, let versions, let cleanup, let model, let typing):
             guard let stored else { return nil }
-            // Recovered audio is never typed, whatever the caller says (#4).
-            let next = DictationStatus.afterTextReady(typing: typing && stored.origin != .recovered,
-                                                      origin: stored.origin, previous: stored.status)
-            if try move(to: next, setting: [
-                ("model_text", .text(versions.model)),
-                ("cleaned_text", .text(versions.cleaned)),
-                ("cleanup", .text(try cleanup.column())),
-                ("model", .text(model.id)),
-            ]) {
-                // Recomputed from cleaned text plus Fix rows, never reset: a replay cannot erase a Fix.
-                try Self.materializeFinalText(id, in: db)
+            try setText(versions, cleanup: cleanup, model: model, typing: typing, from: stored)
+
+        case .retried(_, let versions, let cleanup, let model, let version):
+            guard let stored else { return nil }
+            // Before the text it replaces is overwritten, and only if the Retry's text lands.
+            if Self.admits(Self.afterTextReady(typing: false, from: stored), from: stored.status) {
+                try db.execute("""
+                    INSERT OR IGNORE INTO earlier_version (id, dictation_id, model, cleaned_text, final_text, replaced_at)
+                    SELECT ?, id, model, cleaned_text, coalesce(final_text, cleaned_text), ? FROM dictation
+                    WHERE id = ? AND cleaned_text IS NOT NULL
+                    """, [.text(version.uuidString), .int(Date().unixMs), key])
+                wroteChild = db.changes > 0
             }
+            try setText(versions, cleanup: cleanup, model: model, typing: false, from: stored)
 
         case .delivered(_, let receipt, let lag):
             // Latest insertion wins; paste-last (lag nil) keeps the live insert's lag.
@@ -393,6 +414,12 @@ extension HistoryStore {
         return Applied(id: id, changed: wroteChild || after != before, dropAudio: dropAudio)
     }
 
+    /// Where text moves a row. Recovered audio is never typed, whatever the caller says (#4).
+    private static func afterTextReady(typing: Bool, from stored: Stored) -> DictationStatus {
+        DictationStatus.afterTextReady(typing: typing && stored.origin != .recovered, origin: stored.origin,
+                                       previous: stored.status)
+    }
+
     /// The gate every status-moving event passes. No stored row: only `began` may create one.
     static func admits(_ next: DictationStatus, from stored: DictationStatus?) -> Bool {
         guard let stored else { return next == .recording }
@@ -403,6 +430,7 @@ extension HistoryStore {
     private static func subject(of event: DictationEvent, in db: Database) throws -> DictationID? {
         switch event {
         case .began(let id, _, _, _, _), .audioEnded(let id, _), .attempted(let id, _), .textReady(let id, _, _, _, _),
+             .retried(let id, _, _, _, _),
              .delivered(let id, _, _), .notInserted(let id, _), .waiting(let id, _), .failed(let id, _),
              .discarded(let id), .pinned(let id, _), .deleted(let id):
             return id
@@ -436,8 +464,8 @@ extension HistoryStore {
         try db.execute("""
             UPDATE dictation SET audio_storage = ?, model_text = NULL, cleaned_text = NULL, final_text = NULL WHERE id = ?
             """, [.text(AudioStorage.deleted.rawValue), key])
-        // The rows that hold its text too (engine attempts, Fixes, the words around the paste).
-        for table in ["attempt", "fix", "insertion"] {
+        // The rows that hold its text too (engine attempts, Fixes, the words around the paste, what Retries replaced).
+        for table in ["attempt", "fix", "insertion", "earlier_version"] {
             try db.execute("DELETE FROM \(table) WHERE dictation_id = ?", [key])
         }
         return true

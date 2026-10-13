@@ -1,3 +1,4 @@
+import Foundation
 import os
 import LexiconDomain
 import Transcription
@@ -39,12 +40,14 @@ extension Conductor {
             // it to nothing: that is silence too. Typed, the empty Cmd-V would replace Jake's selection.
             // A Retry of a settled row leaves it as it was, as Retry does when the engine hears silence.
             guard cleaned.versions.cleaned.contains(where: { !$0.isWhitespace }) else {
-                return run.previous?.isTerminal == true ? .nothing(id) : failed(id, .silence)
+                return run.isRetry ? .nothing(id) : failed(id, .silence)
             }
             // Queued for disk BEFORE it is typed. Fire-and-forget FIFO: still no wait on SQLite.
             let typing = run.purpose == .type && run.target != nil
-            history.record(.textReady(id, cleaned.versions, cleanup: cleaned.outcome, model: heard.model,
-                                      typing: typing))
+            // A Retry keeps the text it replaces as an earlier version (#213).
+            history.record(run.isRetry
+                ? .retried(id, cleaned.versions, cleanup: cleaned.outcome, model: heard.model, version: UUID())
+                : .textReady(id, cleaned.versions, cleanup: cleaned.outcome, model: heard.model, typing: typing))
 
             var delivery = Delivery.historyOnly
             var lag: Duration?
@@ -68,7 +71,7 @@ extension Conductor {
             case .historyOnly:
                 // Esc'd or late live Dictation: say it's waiting in paste-last (#18 indicator state).
                 // Not for a Retry of one already settled: Jake is looking at it in History.
-                if run.origin == .live, run.purpose == .type, run.previous?.isTerminal != true {
+                if run.origin == .live, run.purpose == .type, !run.isRetry {
                     emit(.notice(.readyToPaste(id)))
                 }
             }

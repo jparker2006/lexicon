@@ -99,7 +99,7 @@ public final class HistoryReader {
         return rows.compactMap(HistoryRow.init(row:))
     }
 
-    /// "Show versions": model, cleaned, final, plus every engine's run.
+    /// "Show versions": model, cleaned, final, what each Retry replaced, plus every engine's run.
     public func detail(_ id: DictationID) -> HistoryDetail? {
         guard let db else { return nil }
         // The list's rule: a row mid-delete, or a status this build cannot draw, is not shown.
@@ -118,7 +118,16 @@ public final class HistoryReader {
             return AttemptRecord(model: model, result: result, text: run.text(2),
                                  latency: run.int(3).map { .milliseconds($0) }, error: run.text(4))
         }
-        return HistoryDetail(row: shown, versions: versions, attempts: attempts)
+        let replaced = (try? db.query("""
+            SELECT cleaned_text, final_text, model, replaced_at FROM earlier_version
+            WHERE dictation_id = ? ORDER BY replaced_at DESC, rowid DESC
+            """, [.text(id.description)])) ?? []
+        let earlier = replaced.compactMap { version -> EarlierVersion? in
+            guard let cleaned = version.text(0), let final = version.text(1) else { return nil }
+            return EarlierVersion(cleaned: cleaned, final: final, model: version.text(2).flatMap(SpeechModel.init(id:)),
+                                  replacedAt: Date(unixMs: version.int(3) ?? 0))
+        }
+        return HistoryDetail(row: shown, versions: versions, attempts: attempts, earlier: earlier)
     }
 
     /// For the play button (AVAudioPlayer). nil once the audio aged out or was deleted.
@@ -202,4 +211,15 @@ public struct HistoryDetail: Sendable {
     public let versions: TextVersions?
     /// Every engine's run, oldest first: the winner and the losers.
     public let attempts: [AttemptRecord]
+    /// What each Retry replaced, newest first.
+    public let earlier: [EarlierVersion]
+}
+
+/// The text a Retry replaced, as it was then: Fixes made on it show in `final`.
+public struct EarlierVersion: Sendable, Hashable {
+    public let cleaned: String
+    public let final: String
+    /// The engine that heard it. nil for one this build does not know.
+    public let model: SpeechModel?
+    public let replacedAt: Date
 }
