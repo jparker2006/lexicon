@@ -1,3 +1,4 @@
+import AVFAudio
 import AudioToolbox
 import Foundation
 import Synchronization
@@ -77,6 +78,20 @@ private final class WriterQueueHold: Sendable {
             gate.wait()  // timing-ok: the test opens the gate, so the queue holds exactly as long as the test needs
         }
         return AudioFileClose(file)
+    }
+
+    /// The same hold inside the first converter call, which the drain makes on the writer queue.
+    func convert(_ converter: AVAudioConverter, _ output: AVAudioPCMBuffer,
+                 _ input: @escaping AVAudioConverterInputBlock) -> (AVAudioConverterOutputStatus, NSError?) {
+        let first = calls.withLock { count -> Bool in
+            count += 1
+            return count == 1
+        }
+        if first {
+            entered.yield(())
+            gate.wait()  // timing-ok: the test opens the gate, so the queue holds exactly as long as the test needs
+        }
+        return Resampler.realConvert(converter, output, input)
     }
 
     /// Safe to call twice: the second signal only leaves the semaphore at one.
@@ -178,6 +193,33 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
 }
 
 // MARK: The free-space read is cheap on fn-down's path
+
+// Under the free-space floor no file is made at all, so nothing is made and then removed
+// on the writer queue, behind the last Dictation's stop. The queue is held inside the
+// first capture's converter, so anything the second start queued could not have run yet.
+@Test(.timeLimit(.minutes(1))) func underTheFloorStartMakesNoFileEvenWhileTheWriterQueueIsBusy() async throws {
+    let wav = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: try scratchDirectory())
+    let dir = try scratchDirectory()
+    let (convertEntered, entered) = AsyncStream<Void>.makeStream()
+    let hold = WriterQueueHold(entered: entered)
+    defer { hold.open() }  // never leave the writer queue blocked, even when an expectation fails
+    var policy = FlushPolicy.diskFull
+    policy.convert = { converter, output, input in hold.convert(converter, output, input) }
+    let recorder = Recorder(policy: policy)
+
+    let a = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: dir.appending(path: "audio/a.caf"))
+    _ = await convertEntered.first { _ in true }
+    let bURL = dir.appending(path: "audio/b.caf")
+    let b = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: bURL)
+    #expect(!FileManager.default.fileExists(atPath: bURL.path))
+
+    hold.open()
+    _ = await a.stop(.immediately)
+    let take = await b.stop(.immediately)
+    await recorder.settle()
+    #expect(take.summary.storage == .ramOnly)
+    #expect(!FileManager.default.fileExists(atPath: bURL.path))
+}
 
 // `Recorder.start` is what fn-down's `.started` and the speech stream wait on, and the
 // "important usage" free-space figure can take tens of ms on a first call. It is read
