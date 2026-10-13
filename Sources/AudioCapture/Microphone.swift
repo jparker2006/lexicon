@@ -82,7 +82,8 @@ final class Microphone: Sendable {
     }
 
     /// Throws `.startTimedOut` when the engine hasn't started within
-    /// `startLimit`, or the Allow prompt is still up after `promptLimit`.
+    /// `startLimit`, when the Allow prompt is still up after `promptLimit`, or
+    /// at once when an earlier fn-down's prompt request is still out.
     func start(deviceUID: String?, keyDown: HostTime) async throws(RecorderError) -> MicSource {
         if permission.current == .undetermined {
             // The prompt is already up for an earlier fn-down: asking again would
@@ -170,9 +171,8 @@ final class Microphone: Sendable {
 /// every engine cold and every start asking again.
 final class MicPermission: Sendable {
     private let reported: @Sendable () -> AVAudioApplication.recordPermission
-    private let answer = Mutex<Bool?>(nil)
-    /// A request for the Allow prompt is out: one at a time.
-    private let asking = Atomic(false)
+    /// Jake's answer in this process, and whether a request for the prompt is out: one at a time.
+    private let state = Mutex<(answer: Bool?, asking: Bool)>((nil, false))
 
     init(reported: @escaping @Sendable () -> AVAudioApplication.recordPermission) {
         self.reported = reported
@@ -180,21 +180,23 @@ final class MicPermission: Sendable {
 
     var current: AVAudioApplication.recordPermission {
         let reported = reported()
-        guard reported == .undetermined, let allowed = answer.withLock({ $0 }) else { return reported }
+        guard reported == .undetermined, let allowed = state.withLock({ $0.answer }) else { return reported }
         return allowed ? .granted : .denied
     }
 
-    func answered(_ allowed: Bool) {
-        answer.withLock { $0 = allowed }
-        stopAsking()
-    }
+    /// Also ends a newer request's turn when an older one answers late: with an
+    /// answer, `current` is no longer undetermined, so nothing asks again.
+    func answered(_ allowed: Bool) { state.withLock { $0 = (allowed, false) } }
 
     /// False while an earlier request is still out.
     func startAsking() -> Bool {
-        asking.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing).exchanged
+        state.withLock { state in
+            defer { state.asking = true }
+            return !state.asking
+        }
     }
 
-    func stopAsking() { asking.store(false, ordering: .releasing) }
+    func stopAsking() { state.withLock { $0.asking = false } }
 }
 
 /// One serial queue and the engines built on it: prepares, starts and drops
@@ -371,8 +373,8 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     /// the engine stopped itself. A fresh engine is the only reliable fix (#4);
     /// the capture keeps writing the same file from its new ring.
     private func rebuild(lostAt: HostTime, attempt: Int) {
-        // A change that left the engine running needs nothing. Within one retry
-        // chain the engine is nil, so a second chain can't tear down a working one.
+        // A change that left the engine running needs nothing, so a second retry
+        // chain can't tear down an engine the first one got working.
         guard !stopped, engine?.isRunning != true else { return }
         unwatch()
         engine?.stop()
@@ -407,7 +409,8 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     }
 
     /// The next rebuild try, 100 ms on: a device that keeps stopping its engines
-    /// would otherwise keep this queue spinning until fn-up.
+    /// would otherwise keep this queue spinning until fn-up. Timed by the
+    /// hardware clock, as the start limits are, so a test can drive it.
     private func retry(lostAt: HostTime, attempt: Int) {
         Task { [self, clock = lane.hardware.clock] in
             try? await clock.sleep(for: .milliseconds(100))  // never cancelled

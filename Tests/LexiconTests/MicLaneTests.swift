@@ -48,13 +48,13 @@ func aLateLookupNeverStartsThePreparedEngineOnItsAbandonedLane() async throws {
     // The lookup returns now, on the abandoned lane. Drain that lane so everything queued on it has run.
     mic.unwedge()
     await withCheckedContinuation { done in stuckQueue.async { done.resume() } }
-    // Fails today at this line with timesStarted 1: the late lookup started the prepared engine.
+    // A start here would hold the device a fresh lane may own by now.
     #expect(prepared.timesStarted == 0)
 }
 
 @Test(.timeLimit(.minutes(1)))
 func aLookupReleasedBeforeTheDeadlineStartsThePreparedEngineOnceAndRecords() async throws {
-    // Passes today. The same stuck lookup, released inside the limit, is not abandoned: the
+    // The same stuck lookup, released inside the limit, is not abandoned: the
     // prepared engine starts once, and the start builds no second engine.
     let clock = TestClock()
     let mic = FakeMic(wedgesAtFind: [1], current: true, clock: clock)
@@ -268,7 +268,7 @@ func theDeviceRebuildWaitsOnTheClockBetweenTries() async throws {
 
     // Try 1 built engine 1, which is not running, so the next try waits 100 ms on the clock.
     await drain()
-    try #require(mic.timesMade == 2)  // the not-running case re-dispatched at once: 3 here
+    try #require(mic.timesMade == 2)  // no second try before the clock moves
     let rebuilt = try #require(await engines.next())
     #expect(!rebuilt.isRunning)
     await clock.waitForSleep(endingAt: .milliseconds(100))
@@ -297,4 +297,33 @@ func theDeviceRebuildWaitsOnTheClockBetweenTries() async throws {
 
     // Everything captured before the stop: engine 0's frames, then engine 3's.
     #expect(take.clip.samples.count == 2 * FakeEngine.frames)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func fnUpWhileARebuildWaitsKeepsWhatWasCapturedAndBuildsNothingMore() async throws {
+    // The device keeps failing until Jake lets go: the stop must end the capture
+    // with what came before, and the try still waiting must not build an engine after it.
+    let clock = TestClock()
+    let mic = FakeMic(diesAtStart: [1], clock: clock)
+    let recorder = Recorder(hardware: mic.hardware)
+    let capture = try await recorder.start(.microphone(deviceUID: nil),
+                                           writingTo: try scratchDirectory().appending(path: "stopped.caf"))
+    var engines = mic.made.makeAsyncIterator()
+    var feed = capture.feed.makeAsyncIterator()
+
+    var heard = 0
+    while heard < FakeEngine.frames { heard += try #require(await feed.next()).samples.count }
+    try #require(await engines.next()).hardwareChanged()
+    await clock.waitForSleep(endingAt: .milliseconds(100))
+
+    let take = await capture.stop(.immediately)
+    await recorder.settle()
+    // The stop prepares the next Dictation's engine: that build is not a rebuild try.
+    await withCheckedContinuation { done in recorder.microphone.queue.async { done.resume() } }
+    let made = mic.timesMade
+    await clock.advance(by: .milliseconds(100))
+    await withCheckedContinuation { done in recorder.microphone.queue.async { done.resume() } }
+
+    #expect(take.clip.samples.count == FakeEngine.frames)
+    #expect(mic.timesMade == made)
 }
