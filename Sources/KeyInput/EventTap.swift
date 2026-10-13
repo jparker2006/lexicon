@@ -17,7 +17,7 @@ import LexiconDomain
 /// key-down / mouse-down, (4) feeds fn and every other key-down to `FnGesture`
 /// and yields its commands.
 ///
-/// `@unchecked Sendable` is safe because `gesture` and `deadline` are touched
+/// `@unchecked Sendable` is safe because `gesture`, `deadline` and the hotkey counts are touched
 /// by one thread only: the tap thread (the callback, the timer and `perform`'s
 /// blocks all run on its run loop), or a test's thread for a tap never started.
 /// `tap` and `runLoop` are written once in `start()` before it returns, ordered
@@ -32,18 +32,22 @@ final class EventTapThread: @unchecked Sendable {
     private let ownPID = Int64(getpid())
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
-    /// Lexicon's own hotkeys (⌃⌘V): the tap's copy of their key-down is not ticked,
-    /// because `send` counts the press, ordered before its command.
-    private let notTyping: [Hotkey]
+    /// Lexicon's own hotkeys (⌃⌘V). One press can reach this thread twice, as the
+    /// tap's copy of its key-down and as the hotkey's `send`, in either order (or
+    /// only once, if the hotkey never registered or the tap never saw the key). It is
+    /// one keystroke: the first report ticks, and the other report of it does not.
+    private let hotkeys: [Hotkey]
+    /// Presses one report counted and the other has not come in yet. Tap thread only.
+    private var tapCopiesAhead = 0, hotkeyPressesAhead = 0
     private let log = Logger(subsystem: "Lexicon", category: "fn")
 
     init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
-         secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() }, notTyping: [Hotkey] = []) {
+         secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() }, hotkeys: [Hotkey] = []) {
         self.gesture = gesture
         self.input = input
         self.continuation = continuation
         self.secureInput = secureInput
-        self.notTyping = notTyping
+        self.hotkeys = hotkeys
     }
 
     /// Creates the tap (session level, listen-only, mask: flagsChanged, keyDown
@@ -106,13 +110,18 @@ final class EventTapThread: @unchecked Sendable {
 
     /// A Lexicon hotkey's press (⌃⌘V), yielded on the tap thread so it queues behind
     /// every fn command already sent: `commands` keeps one producer. The press is Jake
-    /// typing, counted here, once, before its command: a Dictation still on its way
-    /// is held, and the paste this press asks for takes its mark after the tick, so
-    /// its own key-down never holds it (the tap skips its copy, `notTyping`).
+    /// typing, counted before its command unless the tap's copy already counted it
+    /// (`hotkeys`): a Dictation still on its way is held, and the paste this press
+    /// asks for marks after the press, so its own key-down never holds it.
     /// A tap never started (tests) runs it at once, on the caller's thread.
     func send(_ command: KeyCommand) {
         onTapThread { [self] in
-            input.tick()
+            if tapCopiesAhead > 0 {
+                tapCopiesAhead -= 1
+            } else {
+                input.tick()
+                hotkeyPressesAhead += 1
+            }
             continuation.yield(command)
             log.notice("key command: \(String(describing: command), privacy: .public)")
         }
@@ -132,7 +141,7 @@ final class EventTapThread: @unchecked Sendable {
             return pass
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
-        if Self.isTypingOrClicking(type), !notTyping.contains(where: { $0.matches(event) }) { input.tick() }
+        if Self.isTypingOrClicking(type) { countTyping(event) }
         guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
         feed(key)
         switch key {
@@ -141,6 +150,17 @@ final class EventTapThread: @unchecked Sendable {
         default: break
         }
         return pass
+    }
+
+    /// One tick per keystroke; a hotkey press the hotkey's `send` already counted is not another.
+    private func countTyping(_ event: CGEvent) {
+        guard hotkeys.contains(where: { $0.matches(event) }) else { return input.tick() }
+        if hotkeyPressesAhead > 0 {
+            hotkeyPressesAhead -= 1
+        } else {
+            input.tick()
+            tapCopiesAhead += 1
+        }
     }
 
     /// What counts as Jake typing or clicking for `InputClock`: key-downs and
