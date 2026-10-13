@@ -139,6 +139,8 @@ let repeatCases: [Case] = [
     Case("It's not not working.", "It's not not working."),
     Case("I know that that is wrong.", "I know that that is wrong."),
     Case("What it had had was a bug.", "What it had had was a bug."),
+    Case("What it was was a bug.", "What it was was a bug."),
+    Case("There there, it'll be okay.", "There there, it'll be okay."),
     Case("Ask Will will he review it.", "Ask Will will he review it."),
     Case("Run it 10 10 times.", "Run it 10 10 times."),
     Case("No, no, keep it.", "No, no, keep it."),
@@ -169,6 +171,10 @@ let contentDoubleCases: [Case] = [
     // Soft fillers that are not function words stay too: often meant.
     Case("I like like her idea.", "I like like her idea."),
     Case("Okay okay, I get it.", "Okay okay, I get it."),
+    // The structural check may drop these, but they are not function words.
+    Case("I'm sorry sorry about that.", "I'm sorry sorry about that."),
+    Case("It's still still working.", "It's still still working."),
+    Case("I already already sent it.", "I already already sent it."),
 ]
 
 @Test(arguments: contentDoubleCases)
