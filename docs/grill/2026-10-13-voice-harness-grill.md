@@ -116,7 +116,7 @@ Outcome: timing goes to the orchestrator; maybe part of M4; maybe a wayfinder pa
 **Q21. What may the brain read?** Options: agent sessions only, all of History, all of History with only agent text leaving the Mac. Rec: agent sessions only.
 > "Yeah, I guess it can only read the things you can prompt for agents. That means we're super strong when it comes to prompting agents, but also keep privacy. So we are still a reliable voice to text app for other things." (17:40:07)
 
-Outcome: the brain reads only his Claude Code and Codex sessions and the Dictations into them. The Secret guard checks everything it sends.
+Outcome: the brain reads only his Claude Code and Codex sessions and the Dictations into them. The Secret guard keeps keys out of everything it sends; it does not keep session or Dictation text private.
 
 **Q22. Which subscription runs the brain?** Options: Codex for everything, each session to its own provider, Codex with Claude sessions summarized on the Mac first. Rec: Codex for everything, after a one-hour test of startup and usage.
 > "lets just do codex for everything. since these are longer, smarter background calls lets use Sol 6.1" (17:47:18)
