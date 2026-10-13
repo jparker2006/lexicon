@@ -139,7 +139,8 @@ func silence(_ count: Int) -> [Int16] { Array(repeating: 0, count: count) }
 func aSecondDeviceChangeRightAfterARebuildStillKeepsRecording() async throws {
     // The rebuilt engine stops itself again before it is watched, as a
     // Bluetooth switch that posts several changes can make it.
-    let mic = FakeMic(diesAtStart: [1])
+    let clock = TestClock()
+    let mic = FakeMic(diesAtStart: [1], clock: clock)
     let recorder = Recorder(hardware: mic.hardware)
     let capture = try await recorder.start(.microphone(deviceUID: nil),
                                            writingTo: try scratchDirectory().appending(path: "change.caf"))
@@ -149,7 +150,9 @@ func aSecondDeviceChangeRightAfterARebuildStillKeepsRecording() async throws {
     var heard = 0
     while heard < FakeEngine.frames { heard += try #require(await feed.next()).samples.count }
     try #require(await engines.next()).hardwareChanged()
-    // Only an engine built after the second change can bring the rest.
+    // The next try waits 100 ms. Only an engine built after the second change can bring the rest.
+    await clock.waitForSleep(endingAt: .milliseconds(100))
+    await clock.advance(by: .milliseconds(100))
     while heard < 2 * FakeEngine.frames { heard += try #require(await feed.next()).samples.count }
     let take = await capture.stop(.immediately)
     await recorder.settle()

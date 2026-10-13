@@ -85,6 +85,9 @@ final class Microphone: Sendable {
     /// `startLimit`, or the Allow prompt is still up after `promptLimit`.
     func start(deviceUID: String?, keyDown: HostTime) async throws(RecorderError) -> MicSource {
         if permission.current == .undetermined {
+            // The prompt is already up for an earlier fn-down: asking again would
+            // only hold this one for another minute (DECISIONS item 87).
+            guard permission.startAsking() else { throw .startTimedOut }
             let allowed = await within(Self.promptLimit) { deliver in
                 Task { [hardware, permission] in
                     let allowed = await hardware.requestPermission()
@@ -92,7 +95,11 @@ final class Microphone: Sendable {
                     _ = deliver(allowed)
                 }
             }
-            guard let allowed else { throw .startTimedOut }
+            guard let allowed else {
+                // A request that never returns must not refuse every fn-down until relaunch.
+                permission.stopAsking()
+                throw .startTimedOut
+            }
             guard allowed else { throw .micPermissionDenied }
         }
         let lane = lane.withLock { $0 }
@@ -160,6 +167,8 @@ final class Microphone: Sendable {
 final class MicPermission: Sendable {
     private let reported: @Sendable () -> AVAudioApplication.recordPermission
     private let answer = Mutex<Bool?>(nil)
+    /// A request for the Allow prompt is out: one at a time.
+    private let asking = Atomic(false)
 
     init(reported: @escaping @Sendable () -> AVAudioApplication.recordPermission) {
         self.reported = reported
@@ -171,7 +180,17 @@ final class MicPermission: Sendable {
         return allowed ? .granted : .denied
     }
 
-    func answered(_ allowed: Bool) { answer.withLock { $0 = allowed } }
+    func answered(_ allowed: Bool) {
+        answer.withLock { $0 = allowed }
+        stopAsking()
+    }
+
+    /// False while an earlier request is still out.
+    func startAsking() -> Bool {
+        asking.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing).exchanged
+    }
+
+    func stopAsking() { asking.store(false, ordering: .releasing) }
 }
 
 /// One serial queue and the engines built on it: prepares, starts and drops
@@ -217,6 +236,7 @@ final class MicLane: @unchecked Sendable {
         // the tail's own stop could never run and its engine would hold the mic.
         active?.cutOff()
         // Queued behind the call that got stuck, and already answered by the deadline.
+        // Checked again before every start below.
         guard !isAbandoned else { throw .startTimedOut }
         guard let device = hardware.findDevice(deviceUID) else { throw .noInputDevice }
         // Without permission the mic gives silence, not an error (#4).
@@ -224,6 +244,9 @@ final class MicLane: @unchecked Sendable {
 
         let ready = prepared.flatMap { $0.device == device && $0.isCurrent ? $0 : nil }
         prepared = nil
+        // The lookup and the format read above can be what got stuck: when one
+        // returns after the deadline, a fresh lane may own the device by now.
+        guard !isAbandoned else { throw .startTimedOut }
         let engine: any InputEngine
         let warm: Bool
         if let ready, (try? ready.start()) != nil {
@@ -359,9 +382,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
             watch(next)
             // Another change between the start and the watch went unseen (Bluetooth
             // switches post several): the engine stopped itself, so go again.
-            guard next.isRunning else {
-                return lane.queue.async { self.rebuild(lostAt: lostAt, attempt: attempt + 1) }
-            }
+            guard next.isRunning else { return retry(lostAt: lostAt, attempt: attempt + 1) }
             events?.switched(next.segment)
             info.withLock { $0.name = InputDevices.name(device) }
             let events = events
@@ -377,9 +398,16 @@ final class MicSource: CaptureSource, @unchecked Sendable {
             // device at all is possible: keep trying until fn-up stops the
             // Dictation, which keeps everything captured so far.
             if attempt == 5 { Self.log.error("device change: still no engine after \(attempt, privacy: .public) tries") }
-            lane.queue.asyncAfter(deadline: .now() + .milliseconds(100)) {
-                self.rebuild(lostAt: lostAt, attempt: attempt + 1)
-            }
+            retry(lostAt: lostAt, attempt: attempt + 1)
+        }
+    }
+
+    /// The next rebuild try, 100 ms on: a device that keeps stopping its engines
+    /// would otherwise keep this queue spinning until fn-up.
+    private func retry(lostAt: HostTime, attempt: Int) {
+        Task { [self, clock = lane.hardware.clock] in
+            try? await clock.sleep(for: .milliseconds(100))  // never cancelled
+            lane.queue.async { self.rebuild(lostAt: lostAt, attempt: attempt) }
         }
     }
 

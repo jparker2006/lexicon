@@ -13,6 +13,7 @@ public enum MicProbe {
     /// configuration change, as when hardware changes.
     public static func measure(seconds: Double, preparedIdle: Double?, deviceChange: Bool, deviceUID: String?,
                                folder: URL) async throws(RecorderError) -> MicMeasurement {
+        try check(seconds: seconds, preparedIdle: preparedIdle)
         let recorder = Recorder()
         let input = AudioInput.microphone(deviceUID: deviceUID)
         if let preparedIdle {
@@ -57,6 +58,15 @@ public enum MicProbe {
             deviceChangeGapsMs: take.summary.gaps.map(\.ms),
             micInUseWhileRecording: inUseWhileRecording, micInUseAfterStop: inUseAfterStop,
             inputs: InputDevices.all().map { "\(InputDevices.name($0) ?? "?") [\(InputDevices.uid($0) ?? "?")]" })
+    }
+
+    /// A probe holds the real mic for its whole length, so a typo can't keep it for days.
+    /// The closed ranges also refuse NaN, which `Duration.seconds` would trap on.
+    static func check(seconds: Double, preparedIdle: Double?) throws(RecorderError) {
+        guard seconds > 0, seconds <= 120 else { throw .engineFailed("probe seconds \(seconds) not in (0, 120]") }
+        guard (0...30).contains(preparedIdle ?? 0) else {
+            throw .engineFailed("probe prepared idle \(preparedIdle ?? 0) not in [0, 30]")
+        }
     }
 
     private static func dBFS(_ samples: ArraySlice<Int16>) -> Double {
