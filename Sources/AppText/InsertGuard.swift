@@ -20,20 +20,30 @@ public enum InsertDecision: Sendable, Hashable {
 }
 
 /// The late-text rule (#4), the single home of it: insert only if Jake is still
-/// in the same app and field he was in at fn-up and has not typed or clicked
-/// since the mark. Applied to EVERY insert, fast or late: there is no grace
-/// window, so a quick cloud final after an app switch can never land in the
-/// wrong app. Every `TextDestination.insert` calls this first.
+/// in the same app and field he was in when the target was taken (fn-up, or
+/// the ⌃⌘V press; in an app that exposes no field: the same app, under 5 s)
+/// and has not typed or clicked since the mark. Applied to EVERY insert, fast
+/// or late: there is no grace window, so a quick cloud final after an app switch
+/// can never land in the wrong app. Every `TextDestination.insert` calls this first.
 ///
 /// Pure: unit-tested from values, no Accessibility.
 public enum InsertGuard {
-    /// - target: the focus captured at fn-up (inside the destination's `Target`).
+    /// An app that exposes no focused field can't show that Jake is still in the
+    /// same place, only the same app, so that counts only this long after the
+    /// target was taken.
+    /// A ceiling, not a grace window: it only ever holds text back.
+    public static let fieldlessWindow: Duration = .seconds(5)
+
+    /// - target: the focus captured at fn-up, or at the ⌃⌘V press (inside the destination's `Target`).
     /// - focusNow: the focus right before the paste; nil when nothing can take text.
     /// - inputSinceMark: `InputClock.hasInput(since: target's mark)`.
-    public static func decide(target: FocusSnapshot, focusNow: FocusSnapshot?, inputSinceMark: Bool) -> InsertDecision {
+    /// - sinceCapture: from the target's capture to this check. No default, so no destination skips it.
+    public static func decide(target: FocusSnapshot, focusNow: FocusSnapshot?, inputSinceMark: Bool,
+                              sinceCapture: Duration) -> InsertDecision {
         guard let focusNow else { return .hold(.noField) }
         if focusNow != target { return .hold(.focusMoved) }
         if inputSinceMark { return .hold(.typedSince) }
+        if target.fieldFingerprint == nil, sinceCapture >= fieldlessWindow { return .hold(.tooLate) }
         return .insert
     }
 }

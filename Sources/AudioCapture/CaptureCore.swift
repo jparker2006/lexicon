@@ -42,6 +42,8 @@ final class CaptureCore: @unchecked Sendable {
     /// Samples captured before fn-up, once it came.
     private var heardBeforeRelease: Int?
     private var take: Take?
+    /// `.noFrames` until frames come, `.zeros` while every one is 0, then `.real` for good.
+    private var sound: InputSound = .noFrames
     /// Audio refused by rings already left behind by a device change.
     private var droppedEarlier: Duration = .zero
     /// Audio kept after fn-up. Set by `finish` on the writer queue; read only
@@ -175,7 +177,7 @@ final class CaptureCore: @unchecked Sendable {
         problems.finish()
         signals.first.settle(nil)
         signals.end.settle(nil)
-        let take = Take(clip: AudioClip(samples: samples), summary: summary())
+        let take = Take(clip: AudioClip(samples: samples), summary: summary(), sound: sound)
         self.take = take
         tailLength = heardBeforeRelease.map { .milliseconds((samples.count - $0) * 1_000 / PCM16k.sampleRate) }
         log(take.summary)
@@ -193,7 +195,8 @@ final class CaptureCore: @unchecked Sendable {
         Self.log.notice("""
             captured \(summary.duration.ms, privacy: .public) ms, start gap \(summary.startGap?.ms ?? -1, privacy: .public) ms, \
             tail \(self.tailLength?.ms ?? -1, privacy: .public) ms, \(summary.gaps.count, privacy: .public) device changes, \
-            \(summary.storage.rawValue, privacy: .public), \((self.droppedEarlier + self.segment.droppedAudio).ms, privacy: .public) ms dropped
+            \(summary.storage.rawValue, privacy: .public), \((self.droppedEarlier + self.segment.droppedAudio).ms, privacy: .public) ms dropped, \
+            sound \(String(describing: self.sound), privacy: .public)
             """)
     }
 
@@ -227,6 +230,13 @@ final class CaptureCore: @unchecked Sendable {
             #if DEBUG
             if silenced { input.floatChannelData![0].update(repeating: 0, count: count) }
             #endif
+            // The first non-zero frame settles it as `.real`, then this is one compare per read.
+            // Until then (a dead mic, or one that starts with zeros) each read is scanned, here on
+            // the writer queue.
+            if sound != .real {
+                let frames = UnsafeBufferPointer(start: input.floatChannelData![0], count: count)
+                sound = frames.contains { $0 != 0 } ? .real : .zeros
+            }
             input.frameLength = AVAudioFrameCount(count)
             resampler.convert(emit: emit)
         }
