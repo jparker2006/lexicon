@@ -164,6 +164,12 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// A Dictation's final text. Throws when History can't be read: that is not
+    /// "no such Dictation".
+    public func finalText(of id: DictationID) async throws -> String? {
+        await dictation(id)?.finalText
+    }
+
     /// Recently inserted Dictations, newest first, for matching a hook prompt to its Dictation.
     public func recentInserted(within: Duration) async -> [DictationRecord] { fatalError("not implemented") }
 

@@ -86,7 +86,8 @@ extension FixProblem {
 enum RespeakText {
     /// `spoken`: the Re-speak's cleaned text, which Cleanup wrote as a sentence.
     /// `before`: the words it replaces. `terms`: the Lexicon's written forms.
-    static func replacement(_ spoken: String, replacing before: String, terms: Set<String>) -> String {
+    static func replacement(_ spoken: String, replacing before: String, terms: Set<String>,
+                            isEnglish: (String) -> Bool = { _ in true }) -> String {
         var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
         // Cleanup ends a sentence with a stop; the words it replaces may not.
         if let last = text.last, ".!?".contains(last), before.last != last { text.removeLast() }
