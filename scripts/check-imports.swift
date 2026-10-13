@@ -22,7 +22,7 @@ let soleOwners: [String: Set<String>] = [
     "Cocoa": ["AppText", "LexiconUI", "LexiconApp", "LexiconHarness"],  // re-exports AppKit
     "ApplicationServices": ["AppText"],
     "Carbon": ["KeyInput", "AppText"],  // the fn tap's IsSecureEventInputEnabled; the Cmd-V key's layout lookup
-    "FoundationModels": ["Cleanup"],
+    "FoundationModels": [],  // out for now: Private mode and offline are rules only
     "Security": ["LexiconCore"],  // keys live only in the Keychain code
     "SwiftUI": [],  // AppKit only (Jake's decision)
     "Combine": [],
