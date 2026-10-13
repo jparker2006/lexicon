@@ -68,8 +68,7 @@ public enum KeyboardError: Error, Sendable {
 /// Hides: the listen-only session-level CGEventTap on its own thread (#6), the
 /// gesture state machine and its timer, passing every key on (Esc while
 /// recording is swallowed from M1), re-enabling the tap after the system disables it, ignoring events
-/// Lexicon itself posted (its own Cmd-V), stamping `InputClock`, and ⌃⌘V's
-/// registered hotkey, whose press joins `commands` on the tap thread.
+/// Lexicon itself posted (its own Cmd-V), and stamping `InputClock`.
 ///
 /// Gesture state has exactly one owner: the recognizer on the tap thread. Other
 /// code asks it to change state (`systemWillSleep()`); nothing else writes it.

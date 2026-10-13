@@ -79,7 +79,7 @@ final class RegisteredHotkey: @unchecked Sendable {
         }
         let now = HostTime.now()
         let at = HostTime(carbonEventTime: GetEventTime(event), now: now)
-        // The event's age shows live that Carbon's clock is HostTime's: a few ms, never exactly 0.
+        // The event's age shows live that Carbon's clock is HostTime's: small, and never exactly 0.
         let micros = Int(now.duration(since: at) / .microseconds(1))
         log.notice("hotkey \(self.hotkey.keyCode, privacy: .public) pressed \(micros, privacy: .public) µs after the key")
         onPress(at)
