@@ -279,7 +279,7 @@ func fnsOwnKeyDownIsNotTypingWhileControlCommandVStillPairs(_ fnKey: CGKeyCode) 
     // A ⌃⌘V press after it still counts once, at its first report, and its paste never holds itself.
     _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: at(2_000)), now: at(2_000))
     #expect(input.hasInput(since: beforeFn), "the ⌃⌘V press is typing")
+    let beforeHotkey = input.mark()
     tap.send(.pasteLast, pressedAt: at(2_000))
-    let mark = input.mark()
-    #expect(!input.hasInput(since: mark))
+    #expect(!input.hasInput(since: beforeHotkey), "the hotkey's report pairs with the copy: one keystroke")
 }
