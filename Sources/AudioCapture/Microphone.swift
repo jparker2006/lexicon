@@ -93,7 +93,7 @@ final class Microphone: Sendable {
         if permission.current == .undetermined {
             // The prompt is already up for an earlier fn-down: asking again would
             // only hold this one for another minute (DECISIONS item 87).
-            guard permission.startAsking() else {
+            guard permission.startAsking(at: elapsed(), for: Self.promptLimit) else {
                 Self.log.notice("mic start refused: the Allow prompt is already up")
                 throw .startTimedOut
             }
@@ -105,11 +105,7 @@ final class Microphone: Sendable {
                     _ = deliver(allowed)
                 }
             }
-            guard let allowed else {
-                // A request that never returns must not refuse every fn-down until relaunch.
-                permission.stopAsking()
-                throw .startTimedOut
-            }
+            guard let allowed else { throw .startTimedOut }
             guard allowed else { throw .micPermissionDenied }
         }
         let lane = lane.withLock { $0 }
@@ -188,8 +184,9 @@ final class Microphone: Sendable {
 /// every engine cold and every start asking again.
 final class MicPermission: Sendable {
     private let reported: @Sendable () -> AVAudioApplication.recordPermission
-    /// Jake's answer in this process, and whether a request for the prompt is out: one at a time.
-    private let state = Mutex<(answer: Bool?, asking: Bool)>((nil, false))
+    /// Jake's answer in this process, and until when (on the microphone's
+    /// `elapsed`) the request for the prompt that is out blocks another.
+    private let state = Mutex<(answer: Bool?, blocksUntil: Duration?)>((nil, nil))
 
     init(reported: @escaping @Sendable () -> AVAudioApplication.recordPermission) {
         self.reported = reported
@@ -201,19 +198,20 @@ final class MicPermission: Sendable {
         return allowed ? .granted : .denied
     }
 
-    /// Also ends a newer request's turn when an older one answers late: with an
+    /// Also ends a newer request's block when an older one answers late: with an
     /// answer, `current` is no longer undetermined, so nothing asks again.
-    func answered(_ allowed: Bool) { state.withLock { $0 = (allowed, false) } }
+    func answered(_ allowed: Bool) { state.withLock { $0 = (allowed, nil) } }
 
-    /// False while an earlier request is still out.
-    func startAsking() -> Bool {
+    /// False while an earlier request is out and less than `limit` old. A
+    /// request that never returns blocks for `limit` only, ending at that
+    /// instant rather than when the start that asked gets round to failing.
+    func startAsking(at now: Duration, for limit: Duration) -> Bool {
         state.withLock { state in
-            defer { state.asking = true }
-            return !state.asking
+            if let until = state.blocksUntil, now < until { return false }
+            state.blocksUntil = now + limit
+            return true
         }
     }
-
-    func stopAsking() { state.withLock { $0.asking = false } }
 }
 
 /// One serial queue and the engines built on it: prepares, starts and drops
@@ -412,8 +410,9 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     /// the capture keeps writing the same file from its new ring.
     private func rebuild(lostAt: HostTime, attempt: Int) {
         // A change that left the engine running needs nothing, so a second retry
-        // chain can't tear down an engine the first one got working.
-        guard !stopped, engine?.isRunning != true else { return }
+        // chain can't tear down an engine the first one got working. While a try
+        // waits its 100 ms, that try covers any change a dead engine posts.
+        guard !stopped, engine?.isRunning != true, retrying == nil else { return }
         unwatch()
         engine?.stop()
         engine = nil
@@ -447,14 +446,17 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     }
 
     /// The next rebuild try, 100 ms on: a device that keeps stopping its engines
-    /// would otherwise keep this queue spinning until fn-up. Timed by the
+    /// would otherwise keep this queue spinning until the stop. Timed by the
     /// hardware clock, as the start limits are, so a test can drive it.
+    /// Only `rebuild` calls it, and only while no try is waiting.
     private func retry(lostAt: HostTime, attempt: Int) {
-        retrying?.cancel()
         retrying = Task { [self, clock = lane.hardware.clock] in
-            // Cancelled by fn-up, which keeps everything captured and ends the loop.
+            // Cancelled by the stop (fn-up, Esc or the cap), which keeps everything captured.
             guard (try? await clock.sleep(for: .milliseconds(100))) != nil else { return }
-            lane.run { self.rebuild(lostAt: lostAt, attempt: attempt) }
+            lane.run {
+                self.retrying = nil
+                self.rebuild(lostAt: lostAt, attempt: attempt)
+            }
         }
     }
 
