@@ -92,6 +92,8 @@ struct PasteboardContents: Sendable, Equatable {
     private var waiters: [PasteID: [CheckedContinuation<Bool, Never>]] = [:]
     private var receipts: [PasteID: Bool] = [:]
     private var releases: [PasteID: [CheckedContinuation<Void, Never>]] = [:]
+    /// Quit, waiting for the pasteboard to be Jake's again.
+    private var quitWaiters: [CheckedContinuation<Void, Never>] = []
     /// After each read of the current paste: the deadline may have moved.
     var onRead: (@MainActor () -> Void)?
 
@@ -158,9 +160,13 @@ struct PasteboardContents: Sendable, Equatable {
             resolve(current.id, false)
             return .missed(current.id)
         }
+        finish(current)
+        return .settled(current.id)
+    }
+
+    private func finish(_ current: Current) {
         restore(current)
         settle(current.id, receipt: current.lastRead != nil)
-        return .settled(current.id)
     }
 
     /// True once the target read the text, false once it missed; waits until one happens.
@@ -180,9 +186,17 @@ struct PasteboardContents: Sendable, Equatable {
     func isReleased(_ id: PasteID) -> Bool { current?.id != id || current?.lastRead != nil }
 
     /// Quit: returns once no paste holds the pasteboard (its restore ran), or once
-    /// `cap` has passed on `clock`, and then Jake's clipboard is back either way.
+    /// `cap` has passed on `clock`, and then Jake's clipboard is back either way
+    /// (unless he copied since). Waiting out the restore, not restoring at once,
+    /// keeps the post-miss hold: a Cmd-V still queued must not paste his clipboard.
     func finishForQuit<C: Clock<Duration>>(within cap: Duration, clock: C) async {
-        // scaffold (#132): filled test-first
+        guard current != nil else { return }
+        let capped = Task { @MainActor [self] in
+            do { try await clock.sleep(for: cap) } catch { return }
+            if let current { finish(current) }
+        }
+        if current != nil { await withCheckedContinuation { quitWaiters.append($0) } }
+        capped.cancel()
     }
 
     private func didRead(_ id: PasteID) {
@@ -195,7 +209,11 @@ struct PasteboardContents: Sendable, Equatable {
 
     private func restore(_ current: Current) {
         self.current = nil
-        defer { saved = nil }
+        defer {
+            saved = nil
+            for waiter in quitWaiters { waiter.resume() }
+            quitWaiters = []
+        }
         guard current.restores, pasteboard.changeCount == current.changeCount, let saved else { return }
         pasteboard.write(saved.contents)
     }
