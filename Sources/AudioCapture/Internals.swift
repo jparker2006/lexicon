@@ -219,10 +219,11 @@ struct Tail: Sendable {
 /// failed write still falls back.
 enum FreeSpace {
     struct Readers: Sendable {
-        var quick: @Sendable (URL) -> Int64? = { folder in
+        /// The volume's free blocks and block size, as `statfs` reports them.
+        var blocks: @Sendable (URL) -> (available: UInt64, size: UInt32)? = { folder in
             var info = statfs()
             guard statfs(folder.path, &info) == 0 else { return nil }
-            return FreeSpace.bytes(availableBlocks: info.f_bavail, blockSize: info.f_bsize)
+            return (info.f_bavail, info.f_bsize)
         }
         var thorough: @Sendable (URL) -> Int64? = { folder in
             try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
@@ -230,16 +231,16 @@ enum FreeSpace {
         }
     }
 
-    /// Never traps: a volume that reports "unlimited" (UInt64.max blocks, from
-    /// some network and FUSE filesystems) reads as `.max`, which is room.
-    static func bytes(availableBlocks: UInt64, blockSize: UInt32) -> Int64 {
-        let (product, overflow) = Int64(clamping: availableBlocks).multipliedReportingOverflow(by: Int64(blockSize))
-        return overflow ? .max : product
+    static func hasRoom(at folder: URL, minimum: Int64, readers: Readers = Readers()) -> Bool {
+        if let blocks = readers.blocks(folder), bytes(blocks.available, blocks.size) >= minimum { return true }
+        return (readers.thorough(folder) ?? .max) >= minimum
     }
 
-    static func hasRoom(at folder: URL, minimum: Int64, readers: Readers = Readers()) -> Bool {
-        if let quick = readers.quick(folder), quick >= minimum { return true }
-        return (readers.thorough(folder) ?? .max) >= minimum
+    /// Never traps: a volume that reports "unlimited" (UInt64.max blocks, from
+    /// some network and FUSE filesystems) reads as `.max`, which is room.
+    private static func bytes(_ available: UInt64, _ size: UInt32) -> Int64 {
+        let (product, overflow) = Int64(clamping: available).multipliedReportingOverflow(by: Int64(size))
+        return overflow ? .max : product
     }
 }
 

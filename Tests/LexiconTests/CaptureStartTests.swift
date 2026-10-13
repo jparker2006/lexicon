@@ -227,7 +227,7 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
 @Test func theSlowFreeSpaceReadRunsOnlyWhenTheQuickOneIsUnderTheFloor() {
     let thoroughReads = Mutex(0)
     func readers(quick: Int64?, thorough: Int64?) -> FreeSpace.Readers {
-        FreeSpace.Readers(quick: { _ in quick }, thorough: { _ in
+        FreeSpace.Readers(blocks: { _ in quick.map { (UInt64($0), 1) } }, thorough: { _ in
             thoroughReads.withLock { $0 += 1 }
             return thorough
         })
@@ -247,8 +247,18 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
 
 // A volume that reports "unlimited" (some network and FUSE filesystems give UInt64.max
 // blocks) must read as room, not trap inside fn-down's `Recorder.start`.
-@Test func freeBlocksPastInt64ReadAsRoomInsteadOfTrapping() {
-    #expect(FreeSpace.bytes(availableBlocks: 1_000, blockSize: 4_096) == 4_096_000)
-    #expect(FreeSpace.bytes(availableBlocks: .max, blockSize: 4_096) == .max)
-    #expect(FreeSpace.bytes(availableBlocks: UInt64(Int64.max / 2), blockSize: 4) == .max)
+@Test func aVolumeReportingUnlimitedBlocksHasRoomInsteadOfTrapping() {
+    let thoroughReads = Mutex(0)
+    func readers(blocks: UInt64, size: UInt32) -> FreeSpace.Readers {
+        FreeSpace.Readers(blocks: { _ in (blocks, size) }, thorough: { _ in
+            thoroughReads.withLock { $0 += 1 }
+            return 0
+        })
+    }
+    let folder = URL(filePath: "/")
+
+    #expect(FreeSpace.hasRoom(at: folder, minimum: 1_000_000_000, readers: readers(blocks: .max, size: 4_096)))
+    #expect(FreeSpace.hasRoom(at: folder, minimum: 1_000_000_000, readers: readers(blocks: UInt64(Int64.max / 2), size: 4)))
+    #expect(thoroughReads.withLock { $0 } == 0)  // decided by the quick read, as a disk with room is
+    #expect(!FreeSpace.hasRoom(at: folder, minimum: 1_000_000_000, readers: readers(blocks: 1_000, size: 4_096)))
 }
