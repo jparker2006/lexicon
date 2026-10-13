@@ -35,6 +35,10 @@ final class EventTapThread: @unchecked Sendable {
     private let ownPID = Int64(getpid())
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
+    /// Whether fn is down right now, asked after the tap was off with a press in
+    /// progress. System-wide state; tests pass their own. Reading it needs listen
+    /// access, which the tap is created only with.
+    private let fnHeld: @Sendable () -> Bool
     private let log = Logger(subsystem: "Lexicon", category: "fn")
     /// Takes Esc from the app in front (true) or gives it back (false): the
     /// Esc hotkey once started, a test's recorder otherwise.
@@ -44,11 +48,15 @@ final class EventTapThread: @unchecked Sendable {
 
     init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
          secureInput: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() },
+         fnHeld: @escaping @Sendable () -> Bool = {
+             CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn)
+         },
          takeEscape: @escaping @Sendable (Bool) -> Void = { _ in }) {
         self.gesture = gesture
         self.input = input
         self.continuation = continuation
         self.secureInput = secureInput
+        self.fnHeld = fnHeld
         self.takeEscape = takeEscape
     }
 
@@ -91,18 +99,19 @@ final class EventTapThread: @unchecked Sendable {
     private func watchdog() -> CFRunLoopTimer {
         let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + 2, 2, 0, 0) { [self] _ in
             guard let tap, !CGEvent.tapIsEnabled(tap: tap) else { return }
-            reenable(because: "no notice")
+            // The cause is unknown; the grants name a lost permission if it happens again.
+            reenable(because: "no notice", grants: "; accessibility \(AXIsProcessTrusted()), listen \(CGPreflightListenEventAccess())")
         }!
         CFRunLoopTimerSetTolerance(timer, 0.5)
         return timer
     }
 
-    private func reenable(because reason: StaticString) {
+    private func reenable(because reason: StaticString, grants: String = "") {
         if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-        log.error("fn tap was disabled (\(String(describing: reason), privacy: .public)); re-enabled")
+        log.error("fn tap was disabled (\(String(describing: reason), privacy: .public)\(grants, privacy: .public)); re-enabled")
         input.tick()  // Jake may have typed while it was off: late text must not assume he didn't
         // An fn-up lost while the tap was off would leave the mic recording until the next press.
-        if gesture.isRecording, !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
+        if gesture.isRecording, !fnHeld() {
             feed(.fnUp(.now()))
         }
     }
@@ -158,7 +167,7 @@ final class EventTapThread: @unchecked Sendable {
             continuation.yield(command)
             log.notice("fn gesture: \(String(describing: command), privacy: .public)")
         }
-        if let wakeAt = output.wakeAt { schedule(wakeAt) }
+        if let wakeAt = output.wakeAt { schedule(Deadline(due: wakeAt, rearmed: false)) }
         if gesture.takesEscape != tookEscape {
             tookEscape = gesture.takesEscape
             takeEscape(tookEscape)
@@ -167,16 +176,46 @@ final class EventTapThread: @unchecked Sendable {
 
     /// One timer slot: a new deadline replaces the old one, and a stale one that
     /// still fires is ignored by the recognizer (it judges by time).
-    private func schedule(_ wakeAt: HostTime) {
+    private func schedule(_ next: Deadline) {
         guard let runLoop else { return }  // a tap never started (tests): fn-up still judges the hold
         if let deadline { CFRunLoopTimerInvalidate(deadline) }
-        let (whole, atto) = wakeAt.duration(since: .now()).components
+        let (whole, atto) = next.due.duration(since: .now()).components
         let seconds = Double(whole) + Double(atto) / 1e18
         let timer = CFRunLoopTimerCreateWithHandler(nil, CFAbsoluteTimeGetCurrent() + max(seconds, 0), 0, 0, 0) {
-            [self] _ in feed(.deadline(.now()))
+            [self] _ in deadlineFired(next, now: .now())
         }
         deadline = timer
         CFRunLoopAddTimer(runLoop, timer, .commonModes)
+    }
+
+    /// A pending deadline: when it is due, and whether it is already the one
+    /// re-arm a late timer gets.
+    struct Deadline: Equatable {
+        let due: HostTime
+        let rearmed: Bool
+    }
+
+    /// A timer later than this may have been held up by a stall, with keys queued behind it.
+    static let lateTimer: Duration = .milliseconds(1)
+    /// How long a late timer waits for those keys (Jake, DECISIONS.md item 93).
+    static let queuedKeysWait: Duration = .milliseconds(5)
+
+    /// A deadline timer fired at `now`. Tap thread only; tests call it on a tap
+    /// never started, where a re-arm does nothing.
+    func deadlineFired(_ pending: Deadline, now: HostTime) {
+        if let next = Self.fired(pending, now: now) { schedule(next) } else { feed(.deadline(now)) }
+    }
+
+    /// nil means feed `.deadline(now)`; otherwise schedule the returned re-arm.
+    /// Fn edges keep their own stamps, so after a stall the run loop may run a
+    /// timer before the keys queued during it, and judge a hold or a window on a
+    /// late `now` before seeing a short tap's fn-up, a chord's key or a double tap's
+    /// second press. A timer over `lateTimer` late waits `queuedKeysWait` so those
+    /// go first. Only once: the re-arm always feeds, so a handler that keeps
+    /// freezing can't hold off the cap.
+    static func fired(_ pending: Deadline, now: HostTime) -> Deadline? {
+        guard !pending.rearmed, now.duration(since: pending.due) > lateTimer else { return nil }
+        return Deadline(due: now.advanced(by: queuedKeysWait), rearmed: true)
     }
 
     /// fn delivery latency through the tap: the key event's own time to now.
@@ -233,10 +272,11 @@ extension KeyInput {
 
 extension HostTime {
     /// A CGEvent's timestamp is nanoseconds on the HostTime clock. An event posted
-    /// without a time (stamp 0), or one that reads as not yet happened or over a
-    /// second old, is taken as `now`, so a bad stamp can't turn a tap into a hold.
+    /// without a time (stamp 0), or one that reads as not yet happened, is taken as
+    /// `now`. An old stamp is kept: when the tap thread stalls, both edges of a long
+    /// hold arrive late, and only their own times still read as a hold.
     init(eventTimestamp stamp: CGEventTimestamp, now: HostTime) {
         let at = HostTime(nanoseconds: stamp)
-        self = at <= now && now.duration(since: at) < .seconds(1) ? at : now
+        self = stamp != 0 && at <= now ? at : now
     }
 }
