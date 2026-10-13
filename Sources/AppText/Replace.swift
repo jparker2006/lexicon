@@ -60,10 +60,27 @@ public enum ReplaceRefusal: String, Sendable, Hashable, CaseIterable {
     case pasteFailed
 }
 
-/// Where a Dictation's text sits in a field now. Pure.
+/// Where a Dictation's text sits in a field now. Pure; offsets are UTF-16.
 public enum DictationPlace {
-    /// nil unless the field is the one the receipt names.
+    /// nil unless the field is the one the receipt names: the same words in
+    /// another field are not that Dictation. Where it was pasted, if it is still
+    /// there; else, if Jake typed before it, the copy that follows the words the
+    /// receipt saw before it, nearest the old caret.
     public static func locate(_ text: String, receipt: InsertionReceipt, in field: FieldText) -> TextSpan? {
-        nil
+        guard let fingerprint = receipt.fieldFingerprint, fingerprint == field.fieldFingerprint,
+              receipt.appBundleID == field.bundleID, !text.isEmpty else { return nil }
+        let haystack = Array(field.text.utf16), needle = Array(text.utf16), context = Array(receipt.contextBefore.utf16)
+        let starts = haystack.count < needle.count ? [] : (0...(haystack.count - needle.count)).filter { start in
+            haystack[start..<(start + needle.count)].elementsEqual(needle)
+        }
+        if let caret = receipt.caretAfter, starts.contains(caret - needle.count) {
+            return TextSpan(location: caret - needle.count, length: needle.count)
+        }
+        let followsContext = starts.filter { start in
+            start >= context.count && haystack[(start - context.count)..<start].elementsEqual(context)
+        }
+        let caret = receipt.caretAfter ?? 0
+        return followsContext.min { abs($0 + needle.count - caret) < abs($1 + needle.count - caret) }
+            .map { TextSpan(location: $0, length: needle.count) }
     }
 }

@@ -78,6 +78,8 @@ public actor TargetApp: TextDestination {
         let fingerprint: String?
         /// Where the paste will start: the caret, or the selection it replaces.
         let pasteStart: Int?
+        /// What Jake had selected, for a Re-speak's precise path. nil when nothing was.
+        let selection: FieldSelection?
     }
 
     public func context() -> AppContext {
@@ -122,9 +124,18 @@ public actor TargetApp: TextDestination {
         let bundleID = NSRunningApplication(processIdentifier: focus.pid)?.bundleIdentifier
         let fingerprint = focus.durableFingerprint(bundleID: bundleID)
         await Paster.shared.prefetch()  // Jake's clipboard, read now, off the text-ready-to-Cmd-V path
+        let range = focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute) }
+        // The selected text is read only when there is a selection: most fn-ups have none.
+        let selection = focus.field.flatMap { field in
+            range.flatMap { range in
+                range.length > 0 ? AX.string(field, kAXSelectedTextAttribute).map {
+                    FieldSelection(span: TextSpan(location: range.location, length: range.length), text: $0)
+                } : nil
+            }
+        }
         return Target(focus: focus.snapshot(durable: fingerprint), bundleID: bundleID, mark: mark,
                       capturedAt: capturedAt, field: focus.field.map(FieldRef.init), fingerprint: fingerprint,
-                      pasteStart: focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute)?.location })
+                      pasteStart: range?.location, selection: selection)
     }
 
     public func insert(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
@@ -136,17 +147,7 @@ public actor TargetApp: TextDestination {
     }
 
     private func paste(_ text: String, as kind: PasteKind, at target: Target) async -> Delivery {
-        let order = await PasteOrder.run(text, as: kind, lane: Paster.shared) {
-            let now = Focus.now()
-            // The same element as at fn-up keeps fn-up's snapshot; anything else differs from it.
-            let focusNow = now.map { now in
-                now.pid == target.focus.pid && Self.same(now.field, target.field?.element) ? target.focus
-                    : now.snapshot(durable: nil)
-            }
-            return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
-                                       inputSinceMark: input.hasInput(since: target.mark),
-                                       sinceCapture: ContinuousClock.now - target.capturedAt), now)
-        }
+        let order = await PasteOrder.run(text, as: kind, lane: Paster.shared) { check(target) }
         let paste: ClipboardKeeper.PasteID, now: Focus?
         switch order {
         case .held(let reason): return .notInserted(reason)
@@ -161,10 +162,23 @@ public actor TargetApp: TextDestination {
         return .inserted(now.receipt(inserted: text, bundleID: target.bundleID, fingerprint: target.fingerprint))
     }
 
+    /// The late-text guard for a paste at `target` now, and the focus it saw.
+    func check(_ target: Target) -> (InsertDecision, Focus?) {
+        let now = Focus.now()
+        // The same element as at fn-up keeps fn-up's snapshot; anything else differs from it.
+        let focusNow = now.map { now in
+            now.pid == target.focus.pid && Self.same(now.field, target.field?.element) ? target.focus
+                : now.snapshot(durable: nil)
+        }
+        return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
+                                   inputSinceMark: input.hasInput(since: target.mark),
+                                   sinceCapture: ContinuousClock.now - target.capturedAt), now)
+    }
+
     /// Electron apps update the field a frame or more after they read the
     /// pasteboard, so a caret read at once is from before the paste. Waits, up
     /// to 100 ms, for the caret to reach the end of the new text.
-    private func caretPassed(_ end: Int?, in field: AXUIElement?) async {
+    func caretPassed(_ end: Int?, in field: AXUIElement?) async {
         guard let end, let field else { return }
         let deadline = ContinuousClock.now + .milliseconds(100)
         while let caret = AX.range(field, kAXSelectedTextRangeAttribute)?.location, caret < end,

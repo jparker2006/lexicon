@@ -46,6 +46,13 @@ enum AX {
         return range
     }
 
+    /// Sets the selection (a caret when `span` is empty). True when the app took the call.
+    static func select(_ span: TextSpan, in element: AXUIElement) -> Bool {
+        var range = CFRange(location: span.location, length: span.length)
+        guard let value = AXValueCreate(.cfRange, &range) else { return false }
+        return AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value) == .success
+    }
+
     /// Text in `range` without reading the whole value (a terminal's is its scrollback).
     static func string(_ element: AXUIElement, in range: CFRange) -> String? {
         var range = range
