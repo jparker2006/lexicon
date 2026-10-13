@@ -63,8 +63,9 @@ private func tempMarkerExists(_ db: Database) throws -> Bool {
 @Test func aReopenKeepsCommittedRowsAndPragmasWithoutMigratingAgain() throws {
     let folder = try scratchDirectory()
     defer { try? FileManager.default.removeItem(at: folder) }
-    // The last migration throws if it runs twice (no IF NOT EXISTS) and counts its runs.
-    let migrations = schema + ["CREATE TABLE runs(n INTEGER)", "CREATE TABLE once(x); INSERT INTO runs(n) VALUES (1)"]
+    // The last migration throws if it runs twice (no IF NOT EXISTS): a reopen that migrated
+    // again would fail, and every read below would throw with it.
+    let migrations = schema + ["CREATE TABLE once(x)"]
     let db = try openDatabase(in: folder, migrations: migrations)
     try db.transaction { try insertRow($0, "kept") }
     try db.execute("CREATE TEMP TABLE marker(x)")
@@ -77,7 +78,6 @@ private func tempMarkerExists(_ db: Database) throws -> Bool {
     #expect(try db.query("PRAGMA foreign_keys").first?.int(0) == 1)
     #expect(try db.query("PRAGMA journal_mode").first?.text(0) == "wal")
     #expect(try tempMarkerExists(db) == false)
-    #expect(try db.query("SELECT n FROM runs").compactMap { $0.int(0) } == [1])
 }
 
 @Test func aReopenThatFailsRethrowsTheBodyErrorAndTheNextTransactionRetries() throws {
@@ -97,6 +97,35 @@ private func tempMarkerExists(_ db: Database) throws -> Bool {
     #expect(throws: (any Error).self) { try db.transaction { try insertRow($0, "during") } }
 
     try FileManager.default.moveItem(at: parked, to: folder)
+    try db.transaction { try insertRow($0, "after") }
+    #expect(try storedValues(db) == ["kept", "after"])
+}
+
+@Test func aReopenNeverCreatesAMissingFileAndRetriesOnceItIsBack() throws {
+    let folder = try scratchDirectory()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appending(path: "lexicon.sqlite")
+    let away = folder.appending(path: "lexicon.sqlite.away")
+    let db = try openDatabase(in: folder)
+    try db.transaction { try insertRow($0, "kept") }
+    db.rollbackStatement = "ROLLBACK TO nosuchsavepoint"
+
+    // Only the main file leaves the folder: the -wal and -shm stay where they are. It leaves
+    // inside the transaction, after its write: a connection whose file is gone fails BEGIN
+    // with an I/O error before the body runs, which is not the path under test.
+    let boom = Boom(tag: "body")
+    #expect(throws: boom) {
+        try db.transaction { db in
+            try insertRow(db, "lost")
+            try FileManager.default.moveItem(at: file, to: away)
+            throw boom
+        }
+    }
+    // A reopen that finds no file must fail, not create an empty, unmigrated one in its place.
+    #expect(FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) == false)
+    #expect(throws: (any Error).self) { try db.transaction { try insertRow($0, "during") } }
+
+    try FileManager.default.moveItem(at: away, to: file)
     try db.transaction { try insertRow($0, "after") }
     #expect(try storedValues(db) == ["kept", "after"])
 }

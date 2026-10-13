@@ -16,7 +16,7 @@ import LexiconDomain
     let app = AppContext(bundleID: "com.example.editor", appName: "Editor", windowTitle: nil, workingDirectory: nil)
     let audio = AudioSummary(duration: .milliseconds(1_200), startGap: .milliseconds(40), deviceName: "Mic",
                              storage: .onDisk, gaps: [])
-    // The events path(to: .ready) drives a fresh row through.
+    // The events HistoryStoreTests' path(to: .ready) sends, written out here.
     store.record(.began(id, origin: .live, purpose: .type, at: Date(timeIntervalSince1970: 1_800_000_000), app: app))
     store.record(.audioEnded(id, audio))
     store.record(.textReady(id, TextVersions(model: value, cleaned: value), cleanup: .rulesOnly(.off),
