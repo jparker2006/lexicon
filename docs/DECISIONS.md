@@ -159,7 +159,7 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 **94. Codex sessions run with no OS sandbox, fenced by the guard hook.** Proposed. On a Codex day ([codex.md](agents/codex.md)) the Reviewer, Live checks and builders start with `codex --sandbox danger-full-access`, as Claude sessions here run with no OS sandbox. Codex's sandbox blocks `ps`, which `scripts/live-lane.sh` needs to find its holder (the #325 probe got `operation not permitted: ps`), and builds, `gh` and the harness reach outside the checkout. The guard hook (`.codex/hooks.json`) is the fence. #325's builder.
 
-**95. Codex models: `gpt-6-astra` for every role, effort by tier.** Proposed. Jake's ChatGPT plan offers Codex one current model: on 2026-10-13 Codex refused `gpt-5.4`, `gpt-6-luna`, `gpt-6-sol` and `gpt-6.1-sol` on it, and 0.139.0 needs an update for `gpt-6-astra`. Sessions and the Sonnet-tier `critic-deep` run at high effort, every Haiku-tier helper at medium (`.codex/config.toml`, `scripts/codex-agents.mjs`, `scripts/codex-review.mjs`). #325's builder.
+**95. Codex models: `gpt-6-astra` for every role, effort by tier.** Proposed. Jake's ChatGPT plan offers Codex one current model: on 2026-10-13 Codex refused `gpt-5.4`, `gpt-6-luna`, `gpt-6-sol` and `gpt-6.1-sol` on it, and 0.139.0 needs an update for `gpt-6-astra`. Sessions run it at high effort (`.codex/config.toml`); the Sonnet-tier `critic-deep` will run at high and every Haiku-tier helper at medium once #325's second PR brings the helper roles. #325's builder.
 
 ## Current: the product (spec part 3)
 
