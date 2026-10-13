@@ -19,15 +19,33 @@ extension Conductor {
         case notLanded(FixProblem)
     }
 
-    /// Under the insert turn, so it waits for earlier Dictations' pastes. Reads
-    /// no SQLite: the next Dictation may be waiting for this turn.
-    func replaceSelection(_ spoken: String, at target: Destination.Target) async -> RespeakStep {
-        guard let field = await destination.read(at: target) else { return .notLanded(.noField) }
-        guard let selection = field.selection else { return .noSelection }
+    /// What fitting the spoken words needs that takes time: the Lexicon's Terms
+    /// and the system word list (about 10 ms). Read before the insert turn, so a
+    /// Dictation spoken after the Re-speak never waits on it.
+    struct RespeakWords: Sendable {
+        let terms: Set<String>
+        let firstIsEnglish: Bool
+    }
+
+    func respeakWords(_ spoken: String) async -> RespeakWords {
         // Every Term, not the fn-down selection: a Term's spelling is right wherever it is used.
         let terms = Set(await lexicon.terms.map(\.text))
-        let replacement = RespeakText.replacement(spoken, replacing: selection.text, terms: terms,
-                                                  isEnglish: PlainEnglish.contains)
+        let first = RespeakText.firstWord(spoken)
+        let english = await Task.detached { PlainEnglish.contains(first) }.value  // off the Conductor
+        return RespeakWords(terms: terms, firstIsEnglish: english)
+    }
+
+    /// Under the insert turn, so it waits for earlier Dictations' pastes. Reads
+    /// no SQLite and no word list: the next Dictation may be waiting for this turn.
+    /// Worst case, an app that answers slowly at every step: the read's 100 ms of
+    /// retries, 250 ms to show the selection, 100 ms for the caret and 250 ms to
+    /// show the fix, plus Accessibility's own timeouts; a field that answers takes milliseconds.
+    func replaceSelection(_ spoken: String, at target: Destination.Target, words: RespeakWords) async -> RespeakStep {
+        guard let field = await destination.read(at: target) else { return .notLanded(.noField) }
+        guard let selection = field.selection else { return .noSelection }
+        // Only the first word is ever asked about, and it was looked up before the turn.
+        let replacement = RespeakText.replacement(spoken, replacing: selection.text, terms: words.terms,
+                                                  isEnglish: { _ in words.firstIsEnglish })
         guard replacement.contains(where: { !$0.isWhitespace }) else { return .notLanded(.nothingHeard) }
         return switch await destination.replace(selection.span, expected: selection.text, with: replacement, at: target) {
         case .replaced(let receipt): .replaced(field: field, selection: selection, with: replacement, receipt: receipt)
@@ -59,11 +77,15 @@ extension Conductor {
                 log.error("Re-speak \(run.id, privacy: .public): History unreadable, the Fix is not saved")
                 return emit(.notice(.fixNotLanded(.historyUnreadable)))
             }
-            // Jake can select any words; only those inside the fixed Dictation's text are a Fix on it.
-            guard let receipt, let final, let place = DictationPlace.locate(final, receipt: receipt, in: field),
-                  selection.span.location >= place.location,
-                  selection.span.location + selection.span.length <= place.location + place.length
-            else { return }
+            // Jake can select any words; only those inside the fixed Dictation's text,
+            // still found unchanged in the field, are a Fix on it.
+            guard let receipt, let final, let place = DictationPlace.locate(final, receipt: receipt, in: field) else {
+                return log.notice("Re-speak \(run.id, privacy: .public): no Fix row, the fixed Dictation's text isn't found unchanged in the field")
+            }
+            guard selection.span.location >= place.location,
+                  selection.span.location + selection.span.length <= place.location + place.length else {
+                return log.notice("Re-speak \(run.id, privacy: .public): no Fix row, the selection is outside the fixed Dictation's text")
+            }
             history.record(.fixRecorded(Fix(dictation: fixing, kind: .respeak, source: .respeak,
                                             before: selection.text, after: replacement,
                                             location: selection.span.location - place.location,

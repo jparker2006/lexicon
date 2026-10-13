@@ -60,9 +60,10 @@ extension Conductor {
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
             } else if case .respeak = run.purpose, let target = run.target {
                 // Only a live target may change another app: a recovered or retried Re-speak has none (#4).
-                // In turn, so it fixes text an earlier Dictation is still pasting.
+                // In turn, so it fixes text an earlier Dictation is still pasting; the slow lookups come first.
+                let words = await respeakWords(cleaned.versions.cleaned)
                 await insertTurn(id)
-                respeak = await replaceSelection(cleaned.versions.cleaned, at: target)
+                respeak = await replaceSelection(cleaned.versions.cleaned, at: target, words: words)
                 // Its words landed in the field: the row reads inserted, with the lag to the fix.
                 switch respeak {
                 case .replaced(_, _, _, let receipt)?:
