@@ -73,13 +73,16 @@ extension TargetApp {
         guard AX.string(field, in: CFRange(location: span.location, length: text.utf16.count)) == text else {
             return .unverified
         }
+        // Read before the caret goes back: the receipt's caret is the end of the new words.
+        let receipt = Focus(pid: target.focus.pid, app: AX.app(target.focus.pid), field: field)
+            .receipt(inserted: text, bundleID: target.bundleID, fingerprint: target.fingerprint)
         // A fix found by sound: put the caret back where Jake left it, past the
         // fixed words, once, and never while he is typing again.
         if target.selection?.span != span, let caret = target.pasteStart, caret >= span.location + span.length,
            !input.hasInput(since: sentMark) {
             _ = AX.select(TextSpan(location: caret + text.utf16.count - span.length, length: 0), in: field)
         }
-        return .replaced
+        return .replaced(receipt)
     }
 
     /// The whole value, or nil past `readCap` or when the app doesn't answer.

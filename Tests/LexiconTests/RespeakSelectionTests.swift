@@ -178,8 +178,8 @@ func aRespeakKeepsATermsWrittenFormOverALowercaseSelection() async throws {
 }
 
 @Test(.timeLimit(.minutes(1)))
-func aRespeakLowercasesAWordThatIsNotATermToMatchTheSelection() async throws {
-    // The same Re-speak with no Term: the capital the recognizer wrote is not kept.
+func aRespeakKeepsTheCapitalOfAWordThatIsNotPlainEnglish() async throws {
+    // The same Re-speak with no Term: a name the system word list doesn't hold keeps its capital.
     let system = try system(hearing: "wire the auth callback into super base now", "Supabase.")
     let first = try await dictate(system)
     await system.history.flush()
@@ -190,7 +190,20 @@ func aRespeakLowercasesAWordThatIsNotATermToMatchTheSelection() async throws {
     await system.history.flush()
 
     let field = await system.destination.fieldText
-    #expect(field == "wire the auth callback into supabase now")
+    #expect(field == "wire the auth callback into Supabase now")
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aRespeakLowercasesAPlainEnglishWordToMatchTheSelection() async throws {
+    let system = try system(hearing: "the cat saw the cat", "Dog.")
+    let first = try await dictate(system)
+    await system.history.flush()
+
+    await system.destination.select(TextSpan(location: 16, length: 3))
+    _ = try await dictate(system, purpose: .respeak(of: first.id))
+    await system.history.flush()
+
+    #expect(await system.destination.fieldText == "the cat saw the dog")
 }
 
 @Test(.timeLimit(.minutes(1)))

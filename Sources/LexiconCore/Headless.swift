@@ -68,8 +68,11 @@ public actor HeadlessDestination: TextDestination {
         guard Self.text(in: fieldText, at: span) == expected else { return .refused(.textChanged) }
         let utf16 = fieldText.utf16
         let start = utf16.index(utf16.startIndex, offsetBy: span.location)
+        let before = String(String(utf16[..<start])?.suffix(40) ?? "")
         fieldText.replaceSubrange(start..<utf16.index(start, offsetBy: span.length), with: text)
-        return .replaced
+        return .replaced(InsertionReceipt(appBundleID: current.bundleID, fieldFingerprint: "headless",
+                                          caretAfter: span.location + text.utf16.count, contextBefore: before,
+                                          contextAfter: "", insertedAt: Date()))
     }
 
     /// The text at `span` of `text`, in UTF-16 offsets; nil when the span runs past it.

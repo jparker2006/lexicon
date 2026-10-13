@@ -38,7 +38,8 @@ public struct FieldText: Sendable, Hashable {
 
 /// What a replace did. Only `replaced` changed the field where it was asked to.
 public enum ReplaceOutcome: Sendable, Hashable {
-    case replaced
+    /// Where the new words landed, as an insert's receipt says it.
+    case replaced(InsertionReceipt)
     /// Cmd-V went out and was read, but the field doesn't show the new text at the span.
     case unverified
     case refused(ReplaceRefusal)

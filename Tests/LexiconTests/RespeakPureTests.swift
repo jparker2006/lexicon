@@ -109,7 +109,9 @@ private func field(_ text: String, fingerprint: String? = "field-1", bundleID: S
         #expect(before == "I saw a cat.")
 
         let outcome = await destination.replace(TextSpan(location: 8, length: 3), expected: "cat", with: "dog", at: target)
-        #expect(outcome == .replaced)
+        guard case .replaced(let receipt) = outcome else { Issue.record("not replaced: \(outcome)"); return }
+        #expect(receipt.caretAfter == 11)  // the end of the new words
+        #expect(receipt.fieldFingerprint == "headless")
         let after = await destination.fieldText
         #expect(after == "I saw a dog.")
     }

@@ -58,6 +58,11 @@ extension Conductor {
                 // In turn, so it fixes text an earlier Dictation is still pasting.
                 await insertTurn(id)
                 respeak = await replaceSelection(cleaned.versions.cleaned, at: target)
+                // Its words landed in the field: the row reads inserted, with the lag to the fix.
+                if case .replaced(_, _, _, let receipt) = respeak {
+                    delivery = .inserted(receipt)
+                    lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
+                }
             }
             releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
             run.hold?.end()  // the Dictation landed: App Nap may return
@@ -66,8 +71,11 @@ extension Conductor {
             switch delivery {
             case .inserted(let receipt):
                 history.record(.delivered(id, receipt, lag: lag))
-                await fixes?.didInsert(id, text: cleaned.versions.cleaned, app: run.context, receipt: receipt,
-                                       access: run.access)
+                // A Re-speak's words are a fix, not a Dictation to watch for Hand fixes.
+                if run.purpose == .type {
+                    await fixes?.didInsert(id, text: cleaned.versions.cleaned, app: run.context, receipt: receipt,
+                                           access: run.access)
+                }
             case .notInserted(let reason):
                 history.record(.notInserted(id, reason))
                 emit(.notice(.readyToPaste(id)))
