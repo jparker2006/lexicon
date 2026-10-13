@@ -112,7 +112,10 @@ final class EventTapThread: @unchecked Sendable {
     /// A tap never started (tests) runs it at once, on the caller's thread.
     func send(_ command: KeyCommand, pressedAt: HostTime = .now()) {
         onTapThread { [self] in
-            if presses.isFirstReport(.hotkey, at: pressedAt) { input.tick() }
+            let first = presses.isFirstReport(.hotkey, at: pressedAt)
+            if first { input.tick() }
+            // With the tap copy's line, the gap between the two clocks for one press (Live checks reads it).
+            log.notice("hotkey report: hotkey at \(pressedAt.nanoseconds, privacy: .public) ns, first \(first, privacy: .public)")
             continuation.yield(command)
             log.notice("key command: \(String(describing: command), privacy: .public)")
         }
@@ -150,7 +153,10 @@ final class EventTapThread: @unchecked Sendable {
     private func countTyping(_ event: CGEvent, now: HostTime) {
         guard hotkeys.contains(where: { $0.matches(event) }),
               event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return input.tick() }
-        if presses.isFirstReport(.tapCopy, at: HostTime(eventTimestamp: event.timestamp, now: now)) { input.tick() }
+        let at = HostTime(pressStamp: event.timestamp, now: now)
+        let first = presses.isFirstReport(.tapCopy, at: at)
+        if first { input.tick() }
+        log.notice("hotkey report: tap copy at \(at.nanoseconds, privacy: .public) ns, first \(first, privacy: .public)")
     }
 
     /// What counts as Jake typing or clicking for `InputClock`: key-downs and
@@ -257,6 +263,13 @@ extension Hotkey {
 }
 
 extension HostTime {
+    /// A key-down's own time for pairing a hotkey press's reports: its stamp however late
+    /// the tap handles it, as the hotkey's report keeps Carbon's (`init(carbonEventTime:now:)`).
+    /// Only an unset or future stamp reads as `now`. The 1 s rule below is for fn timings.
+    init(pressStamp stamp: CGEventTimestamp, now: HostTime) {
+        self = stamp > 0 && stamp <= now.nanoseconds ? HostTime(nanoseconds: stamp) : now
+    }
+
     /// A CGEvent's timestamp is nanoseconds on the HostTime clock. An event posted
     /// without a time (stamp 0), or one that reads as not yet happened or over a
     /// second old, is taken as `now`, so a bad stamp can't turn a tap into a hold.
