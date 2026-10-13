@@ -132,7 +132,7 @@ No test target depends on an executable target: every test target links into one
 | Where | Runs |
 |---|---|
 | Core Audio IO thread | Sink block: memcpy into the SPSC ring, nothing else |
-| Audio writer queue | Drain, convert to 16 kHz, write CAF, `F_FULLFSYNC` each 1 s and at stop, yield chunks |
+| Audio writer queue | Drain, convert to 16 kHz, write CAF (created on the caller at fn-down, so it exists before the queue gets to it), `F_FULLFSYNC` each 1 s and at stop, yield chunks |
 | Event tap thread (own run loop) | Tap callback in microseconds, `FnGesture`, `InputClock` |
 | AX thread (own run loop, custom executor) | `TargetApp`: Accessibility calls with timeouts, observers, Cmd-V |
 | Main actor | AppKit, the History window's read-only connection, pasteboard promise callbacks |

@@ -15,7 +15,8 @@ import LexiconDomain
 /// error, the capture carries on in RAM.
 ///
 /// `@unchecked Sendable`: every `var` is touched only on `queue` (all entry
-/// points dispatch onto it), except `tailLength` (see there); the `let`s are
+/// points dispatch onto it), except `tailLength` (see there) and `writer`, which
+/// `init` sets on the caller before anything is queued; the `let`s are
 /// immutable or thread-safe themselves.
 final class CaptureCore: @unchecked Sendable {
     let feed: AudioFeed
@@ -76,11 +77,16 @@ final class CaptureCore: @unchecked Sendable {
         self.problems = problems
         signals = CaptureSignals(first: OneShot(), end: OneShot(), problems: problemStream)
         samples.reserveCapacity(PCM16k.sampleRate * 30)
+        // The file is made here, on the caller, so it exists when `Recorder.start`
+        // returns: the shared writer queue may still be closing the last Dictation,
+        // and a kill before its turn would leave no trace (recovery adopts a file
+        // with no row). One file open, no sync; the ring holds the first audio meanwhile.
+        if hasRoom() { writer = try? CAFWriter(creating: file, calls: policy.files) }
     }
 
-    /// Creates the file and the drain timer on the writer queue, and starts the
-    /// producer meanwhile: the file never stands in front of the first audio
-    /// (the ring holds it), and is queued before anything the producer reports.
+    /// Arms the drain timer on the writer queue and starts the producer. A file
+    /// `init` could not create (under 1 GB free, a failed or refused create) makes
+    /// the capture RAM-only from the start, reported before anything the producer does.
     func begin() {
         defer {
             let (first, end) = (signals.first, signals.end)
@@ -88,15 +94,7 @@ final class CaptureCore: @unchecked Sendable {
                                       switched: { [weak self] in self?.switchSegment(to: $0) }))
         }
         queue.async { [self] in
-            if hasRoom() {
-                do {
-                    writer = try CAFWriter(creating: fileURL, calls: policy.files)
-                } catch {
-                    diskTrouble()
-                }
-            } else {
-                diskTrouble()
-            }
+            if writer == nil { diskTrouble() }
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now() + policy.drainEvery.dispatch, repeating: policy.drainEvery.dispatch,
                            leeway: .milliseconds(5))

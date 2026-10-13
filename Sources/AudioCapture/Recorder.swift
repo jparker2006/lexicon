@@ -75,9 +75,10 @@ public final class Recorder: Sendable {
         microphone.prepare(deviceUID: uid)
     }
 
-    /// fn-down at `keyDown`. Starts the engine, then (on the writer queue, not in
-    /// front of the hardware start) creates `file`. Returns as soon as capture is
-    /// running. The summary's start gap counts from `keyDown`.
+    /// fn-down at `keyDown`. Starts the engine, then creates `file` (after the
+    /// hardware start, never in front of it), so the file exists once this
+    /// returns. Returns as soon as capture is running. The summary's start gap
+    /// counts from `keyDown`.
     ///
     /// Ownership handoff: while the LiveCapture is open, this module is the only
     /// writer of `file`. After `stop`, the file belongs to History (#4).

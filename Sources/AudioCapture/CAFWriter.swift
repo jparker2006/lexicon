@@ -18,7 +18,7 @@ struct FileCalls: Sendable {
 /// recordings), FLAC through ExtAudioFile (unreadable after a crash), and WAV
 /// through AudioFile (reads back empty after a crash).
 ///
-/// Confined to the writer queue.
+/// Created on the capture's caller, then confined to the writer queue.
 final class CAFWriter {
     struct Failure: Error {
         let step: String
@@ -45,12 +45,14 @@ final class CAFWriter {
     private var packets: Int64 = 0
     private let calls: FileCalls
 
+    /// Never over an existing file: a second capture on one id fails here and
+    /// goes RAM-only, so the first Dictation's audio is never erased.
     init(creating url: URL, calls: FileCalls = FileCalls()) throws(Failure) {
         self.calls = calls
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var format = Self.format
         var id: AudioFileID?
-        let status = AudioFileCreateWithURL(url as CFURL, kAudioFileCAFType, &format, .eraseFile, &id)
+        let status = AudioFileCreateWithURL(url as CFURL, kAudioFileCAFType, &format, [], &id)
         guard status == noErr, let id else { throw Failure(step: "create", status: status) }
         file = id
         // If this fails the file still survives an app crash; it just can't be synced.
