@@ -79,7 +79,7 @@ enum HistorySchema {
         """
         -- What each Retry replaced (#213): the row's text before it, never audio.
         CREATE TABLE earlier_version (
-          id            TEXT PRIMARY KEY,          -- minted once per Retry: a replayed event is a no-op
+          id            TEXT PRIMARY KEY,          -- minted once per Retry: a replay keeps one version
           dictation_id  TEXT NOT NULL REFERENCES dictation(id) ON DELETE CASCADE,
           model         TEXT,                      -- SpeechModel.id that heard the replaced text
           cleaned_text  TEXT NOT NULL,

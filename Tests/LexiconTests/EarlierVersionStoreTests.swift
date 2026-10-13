@@ -153,3 +153,31 @@ private func writeOldHistory(at paths: AppPaths, id: DictationID) async throws {
     #expect(detail.row.status == .notInserted)
     #expect(detail.versions == TextVersions(model: "Recovered words.", cleaned: "Recovered words."))
 }
+
+// MARK: - Order
+
+/// Two Retries whose replace times run backwards, as after the Mac's clock is set back:
+/// still listed in the order the Retries ran, newest first.
+@MainActor @Test func earlierVersionsKeepTheOrderTheRetriesRanInWhenTheClockStepsBack() async throws {
+    let paths = AppPaths.temporary()
+    let id = DictationID()
+    try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
+    let cleanup = try CleanupOutcome.rulesOnly(.off).column()
+    let script = HistorySchema.migrations.joined(separator: "\n") + """
+        INSERT INTO dictation (id, started_at, origin, purpose, status, model_text, cleaned_text, final_text,
+                               cleanup, model, audio_storage)
+        VALUES ('\(id)', \(start.unixMs), 'live', 'type', 'inserted', 'third', 'Third.', 'Third.',
+                '\(cleanup)', '\(parakeet.id)', 'onDisk');
+        INSERT INTO earlier_version (id, dictation_id, model, cleaned_text, final_text, replaced_at)
+        VALUES ('\(UUID())', '\(id)', '\(parakeet.id)', 'First.', 'First.', \(start.unixMs + 60_000));
+        INSERT INTO earlier_version (id, dictation_id, model, cleaned_text, final_text, replaced_at)
+        VALUES ('\(UUID())', '\(id)', '\(parakeet.id)', 'Second.', 'Second.', \(start.unixMs + 1_000));
+        PRAGMA user_version = \(HistorySchema.migrations.count);
+        """
+    let child = try await runChild(URL(filePath: "/usr/bin/sqlite3"),
+                                   [paths.root.appending(path: "history.sqlite").path(percentEncoded: false), script])
+    try #require(child.status == 0 && child.output.isEmpty, "sqlite3 wrote the file: \(child.output)")
+
+    let detail = try #require(HistoryReader(paths: paths).detail(id))
+    #expect(detail.earlier.map(\.final) == ["Second.", "First."])
+}
