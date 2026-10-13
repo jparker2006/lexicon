@@ -195,15 +195,15 @@ final class EventTapThread: @unchecked Sendable {
         let rearmed: Bool
     }
 
-    /// A timer later than this was held up by a stall, and keys may be queued behind it.
+    /// A timer later than this may have been held up by a stall, with keys queued behind it.
     static let lateTimer: Duration = .milliseconds(1)
     /// How long a late timer waits for those keys (Jake, DECISIONS.md item 90).
     static let queuedKeysWait: Duration = .milliseconds(5)
 
     /// A deadline timer fired at `now`. Tap thread only; tests call it on a tap
     /// never started, where a re-arm does nothing.
-    func deadlineFired(_ deadline: Deadline, now: HostTime) {
-        if let next = Self.fired(deadline, now: now) { schedule(next) } else { feed(.deadline(now)) }
+    func deadlineFired(_ pending: Deadline, now: HostTime) {
+        if let next = Self.fired(pending, now: now) { schedule(next) } else { feed(.deadline(now)) }
     }
 
     /// nil means feed `.deadline(now)`; otherwise schedule the returned re-arm.
@@ -213,8 +213,8 @@ final class EventTapThread: @unchecked Sendable {
     /// second press. A timer over `lateTimer` late waits `queuedKeysWait` so those
     /// go first. Only once: the re-arm always feeds, so a handler that keeps
     /// freezing can't hold off the cap.
-    static func fired(_ deadline: Deadline, now: HostTime) -> Deadline? {
-        guard !deadline.rearmed, now.duration(since: deadline.due) > lateTimer else { return nil }
+    static func fired(_ pending: Deadline, now: HostTime) -> Deadline? {
+        guard !pending.rearmed, now.duration(since: pending.due) > lateTimer else { return nil }
         return Deadline(due: now.advanced(by: queuedKeysWait), rearmed: true)
     }
 

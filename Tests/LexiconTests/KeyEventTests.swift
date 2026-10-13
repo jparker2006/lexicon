@@ -379,9 +379,9 @@ private func stops(_ id: DictationID, in commands: [KeyCommand]) -> Bool {
 
 // When a deadline timer fires late, the tap thread was stalled, and keys queued behind the stall may
 // still be unhandled. A timer later than `EventTapThread.lateTimer` waits `queuedKeysWait` once, so
-// those keys are read first: the recognizer never judges a window, a hold or a mark on a late `now`
-// before it has seen them. The wait happens once per timer, so a handler that keeps freezing cannot
-// hold a mark off past one wait.
+// keys already queued are read first, before a window, a hold or a mark is judged on a late `now`.
+// The wait happens once per timer, so a handler that keeps freezing cannot hold a mark off past one
+// wait; a key still queued after it is judged late.
 
 @Test func aTimerOnTimeIsNotLate() {
     let due = fixedNow
@@ -544,7 +544,7 @@ private func keyDownEvent(_ keyCode: CGKeyCode, flags: CGEventFlags, stamped sta
 }
 
 @Test func aTimerOnTimeFeedsAtOnce() async throws {
-    // A deadline that fires on time feeds the recognizer, which confirms the hold there. Deferred,
+    // A deadline that fires on time feeds the recognizer, which confirms the hold there. Re-armed,
     // nothing would confirm it: no later deadline is delivered in this test.
     let config = KeyboardConfig()
     let base = recentBase()
