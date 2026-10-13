@@ -266,6 +266,6 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
 // The launch warm-up makes AudioFile's first call off fn-down's path, and leaves nothing behind.
 @Test func warmingAudioFileAtLaunchLeavesNoFileBehind() throws {
     let folder = try scratchDirectory()
-    CAFWriter.warmUp(in: folder)
+    #expect(CAFWriter.warmUp(in: folder))  // the warm-up really made an AudioFile
     #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
 }

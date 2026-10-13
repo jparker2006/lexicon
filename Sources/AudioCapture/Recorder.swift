@@ -71,8 +71,9 @@ public final class Recorder: Sendable {
 
     /// At launch, so the first `start` only has to start hardware. After every
     /// stop the microphone prepares the next engine itself. A file input's engine
-    /// has nothing to warm up. Once per process, AudioFile is warmed off the
-    /// writer queue's way of any capture, since every capture's file is made at fn-down.
+    /// has nothing to warm up. The first `prepare` also makes and removes a
+    /// scratch CAF on the writer queue (`CAFWriter.warmUp`), since every
+    /// capture's file is made on fn-down's path.
     public func prepare(_ input: AudioInput) {
         if !warmedFiles.exchange(true, ordering: .relaxed) { writerQueue.async { CAFWriter.warmUp() } }
         guard case .microphone(let uid) = input else { return }

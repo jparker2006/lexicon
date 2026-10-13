@@ -61,13 +61,17 @@ final class CAFWriter {
 
     deinit { try? close() }
 
-    /// Makes and removes one CAF in the temporary folder. The first AudioFile
-    /// call in a process loads AudioToolbox's file components; the capture's
-    /// own create runs on fn-down's path, so that cost is paid here, at launch.
-    static func warmUp(in folder: URL = FileManager.default.temporaryDirectory) {
+    /// Makes and removes one CAF in the temporary folder, with no sync (it holds
+    /// nothing). The first AudioFile call in a process loads AudioToolbox's file
+    /// components; the capture's own create runs on fn-down's path, so that cost
+    /// is paid here, at launch. True when the file was made.
+    @discardableResult
+    static func warmUp(in folder: URL = FileManager.default.temporaryDirectory) -> Bool {
         let url = folder.appending(path: "lexicon-warm-\(UUID().uuidString).caf")
-        try? CAFWriter(creating: url).close()
+        guard let writer = try? CAFWriter(creating: url, calls: FileCalls(sync: { _ in true })) else { return false }
+        try? writer.close()
         try? FileManager.default.removeItem(at: url)
+        return true
     }
 
     func write(_ samples: UnsafeBufferPointer<Int16>) throws(Failure) {
