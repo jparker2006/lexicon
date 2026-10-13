@@ -127,7 +127,7 @@ public actor TargetApp: TextDestination {
                       pasteStart: focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute)?.location })
     }
 
-    /// Quit, after the last Dictation landed: waits, at most 2 s, until Jake's
+    /// Quit, after the last Dictation landed: waits, at most 2 s per paste, until Jake's
     /// clipboard is back from the last paste, so Lexicon never exits holding his
     /// pasteboard with Dictation text.
     public func finishClipboard() async {

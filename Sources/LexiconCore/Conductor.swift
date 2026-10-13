@@ -157,7 +157,7 @@ public actor Conductor<Destination: TextDestination> {
 
     /// Quit: returns once no Dictation is recording or finishing, History and the
     /// audio files have everything, and the last paste gave Jake's clipboard back
-    /// (at most 2 s, `TargetApp.finishClipboard`). A recording Dictation ends the normal way,
+    /// (at most 2 s per paste, `TargetApp.finishClipboard`). A recording Dictation ends the normal way,
     /// at its fn-up, so an install never cuts one (`scripts/lib/install-app.sh` waits).
     /// Dictations past fn-up get `limit` to land: one stuck in the model must not
     /// hold Quit forever, and its row stays for launch recovery. Launch recovery
