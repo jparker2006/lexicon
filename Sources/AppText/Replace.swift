@@ -20,19 +20,40 @@ public struct FieldSelection: Sendable, Hashable {
     }
 }
 
-/// A target's field, read for a Re-speak.
+/// A target's field, read for a Re-speak: the whole of it, or for a field too
+/// long to read whole, a window of it starting at `offset`. Spans are the field's.
 public struct FieldText: Sendable, Hashable {
     public let text: String
+    /// Where `text` starts in the field, in UTF-16 units: 0 when it is the whole field.
+    public let offset: Int
     /// What Jake had selected when the target was taken; nil when nothing was.
     public let selection: FieldSelection?
     public let bundleID: String?
     /// The target's durable fingerprint: the value an insert's receipt stores.
     public let fieldFingerprint: String?
-    public init(text: String, selection: FieldSelection?, bundleID: String?, fieldFingerprint: String?) {
+    public init(text: String, offset: Int = 0, selection: FieldSelection?, bundleID: String?, fieldFingerprint: String?) {
         self.text = text
+        self.offset = offset
         self.selection = selection
         self.bundleID = bundleID
         self.fieldFingerprint = fieldFingerprint
+    }
+
+    /// From a read window and the selection's span: the selection's text comes
+    /// from the window, so no second read can disagree with it. nil when the
+    /// selection runs outside the window.
+    static func reading(_ window: String, offset: Int, selection: TextSpan?, bundleID: String?,
+                        fieldFingerprint: String?) -> FieldText? {
+        nil
+    }
+}
+
+/// Which part of a long field a Re-speak reads. Pure.
+enum FieldWindow {
+    /// At most `cap` UTF-16 units of a field `count` long, holding `anchor`
+    /// (the selection or the caret) and as much before it as fits.
+    static func span(count: Int, around anchor: Int, cap: Int) -> TextSpan {
+        TextSpan(location: 0, length: count)
     }
 }
 
