@@ -1,0 +1,10 @@
+# Codex project config for Lexicon (docs/agents/codex.md). Codex reads it only once
+# Jake trusts the project; the guard hook is in .codex/hooks.json.
+
+# Opus at high effort on Claude; the strongest listed Codex model at high here.
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+
+[features]
+# The plan only: Codex's Fast tier spends more of it (AGENTS.md, Ask Jake first).
+fast_mode = false
