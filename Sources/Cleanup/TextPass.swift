@@ -413,7 +413,9 @@ private struct Token {
     /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written.
     var isNumber: Bool {
         word.first?.isNumber == true
-            || word.split(separator: "-").first.map { StructuralCheck.isCardinal(String($0)) } ?? false
+            || word.split(separator: "-").first.map {
+                StructuralCheck.isCardinal(String($0)) || Fillers.bigScales.contains(String($0))
+            } ?? false
     }
     /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.
     var isName: Bool { text.contains(where: \.isUppercase) && !Fillers.firstPerson.contains(word) }

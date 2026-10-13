@@ -169,6 +169,7 @@ let numberRepeatCases: [Case] = [
     Case("The build is version two two and it's stable.", "The build is version two two and it's stable."),
     Case("It's a hundred hundred pixels wide.", "It's a hundred hundred pixels wide."),
     Case("It holds a trillion trillion bytes.", "It holds a trillion trillion bytes."),
+    Case("It holds a sextillion sextillion atoms.", "It holds a sextillion sextillion atoms."),
     Case("We shipped in twenty uh twenty six.", "We shipped in twenty twenty six."),
     Case("We're on twenty-two twenty-two now.", "We're on twenty-two twenty-two now."),
     Case("Get me a double double with no sugar.", "Get me a double double with no sugar."),

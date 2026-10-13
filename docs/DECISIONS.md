@@ -231,7 +231,7 @@ Jake, 2026-10-12 15:52:33Z: "yes". Recorded on [#82](https://github.com/jparker2
 >
 > I recommend moving it. Reply "yes" to take that.
 
-Jake, 2026-10-12, in the orchestrator's session (recorded on #163 at 2026-10-13 02:57:44Z): "7 yes". Decided: PR #245 keeps the guard's filler rule as it is on main and ships the typed-text fixes; "the guard refuses to drop any filler or word the rules keep" is an acceptance line of #75, built where the guard goes live. Recorded on [#163](https://github.com/jparker2006/lexicon/issues/163#issuecomment-6137202359). The number tables the rules share with the guard gain trillion and quadrillion; that is vocabulary, not the filler rule.
+Jake, in the orchestrator's session, between the question (2026-10-12 19:52:25Z) and its record on #163 (2026-10-13 02:57:44Z); the record gives his answer's date, 2026-10-12, not its time: "7 yes". Decided: PR #245 keeps the guard's filler rule as it is on main and ships the typed-text fixes; "the guard refuses to drop any filler or word the rules keep" is an acceptance line of #75, built where the guard goes live. Recorded on [#163](https://github.com/jparker2006/lexicon/issues/163#issuecomment-6137202359). The number tables the rules share with the guard gain trillion, quadrillion and quintillion, and `Fillers.bigScales` names the scales past Int; that is vocabulary, not the filler rule.
 
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
