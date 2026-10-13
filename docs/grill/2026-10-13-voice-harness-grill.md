@@ -42,7 +42,7 @@ Outcome: the agent runs any time, in the background as well as around a Dictatio
 **Q3. What may the background agent change without asking?** Options: nothing, anything the Test set says helps, small learning alone and bigger changes ask. Rec: the last: a Term or Rule on its own only when two or more of Jake's Fixes back it and the Test set scores no worse; anything that changes how he is written is a proposal; a weekly list with undo.
 > "C is fine I guess. The thing im thinking about is more proactive than were thinking. I also have a feeling the technical implementation to get this working is to abuse Jev calls" (16:42:03)
 
-Outcome: small learning alone, bigger changes ask. The thresholds (two or more Fixes, the Test set no worse, a weekly list with undo) were the recommendation, not his answer: Proposed.
+Outcome: Jake took option C, with a hedge. What counts as small learning (a Term or Rule on its own) and every threshold (two or more Fixes, the Test set no worse, a weekly list with undo) were the recommendation, not his words: Proposed, and left to item 10's grill (see What it would reopen).
 
 **Q4. What does "proactive" look like?** Options: it reaches out, it gets ready before you speak, it fixes after typing, it acts on what you said. Rec: get ready and fix after.
 > "What if we think about the specific use case of voice to text in the context of prompting a coding agent. That is mostly what I use voice to text for... Maybe B and def C (thats basically what were about to build). Like im thinking in an iron man way. I feel like no one has really put a true harness implementation behind a voice to text app before" (16:45:29)
@@ -118,7 +118,7 @@ Outcome: timing goes to the orchestrator; maybe part of M4; maybe a wayfinder pa
 **Q21. What may the brain read?** Options: agent sessions only, all of History, all of History with only agent text leaving the Mac. Rec: agent sessions only.
 > "Yeah, I guess it can only read the things you can prompt for agents. That means we're super strong when it comes to prompting agents, but also keep privacy. So we are still a reliable voice to text app for other things." (17:40:07)
 
-Outcome: the brain reads only his Claude Code and Codex sessions and the Dictations into them. The Secret guard keeps keys out of text calls and cuts the speech stream (DECISIONS part 2, item 16); it does not keep session or Dictation text private.
+Outcome: the brain reads only his Claude Code and Codex sessions and the Dictations into them. The Secret guard keeps keys out of text calls and cuts the speech stream, "but can't recall audio already sent" (DECISIONS part 2, item 16); it does not keep session or Dictation text private.
 
 **Q22. Which subscription runs the brain?** Options: Codex for everything, each session to its own provider, Codex with Claude sessions summarized on the Mac first. Rec: Codex for everything, after a one-hour test of startup and usage.
 > "lets just do codex for everything. since these are longer, smarter background calls lets use Sol 6.1" (17:47:18)
@@ -182,7 +182,8 @@ Building any of this reopens these, each through Jake in DECISIONS.md first:
 - DECISIONS part 2, item 10: when a Fix becomes a Rule is the after-M1 grill. Q3's Proposed thresholds (two or more Fixes, the Test set no worse) are a candidate answer that item 10's grill still has to ask Jake.
 - architecture.md, Privacy: "Jev gets only the few words around a Re-speak or Hand fix target plus candidates." The session brief sends Jev far more, on every Dictation.
 - What leaves the Mac: the Dictations into agent apps are History rows, and Q21 and Q22 send their text, with the session text, to OpenAI. Today every cloud call (speech, Cleanup, Jev, model downloads) takes a `CloudAccess`, and none happens in Private mode. The brain's calls would need the same door and the same Private mode cut.
-- review.md, Never lose a Dictation: "Nothing on the fn-up path waits on SQLite, Jev or Fix watching." Jev's calls stay off the fn-up path; a plan that puts any there reopens this rule.
+- review.md, Never lose a Dictation: "Nothing on the fn-up path waits on SQLite, Jev or Fix watching." Jev's calls stay off the fn-up path; a plan that puts any Jev call there reopens this rule. The same section's "Every Jev call has a local fallback" applies to every call made while he talks.
+- Spec #36, Privacy: "Never sent anywhere: screen text, clipboard, file contents, or text around the cursor beyond the last Dictation." Agent session text can hold file contents the agent read, so sending it to OpenAI (Q22) reopens this line.
 - Grill D5, no screenshots, stays: the brain reads session files and text, never pixels.
 
 ## Open, for the orchestrator
