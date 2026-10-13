@@ -173,3 +173,19 @@ func holdingControlCommandVNeverLetsALaterPressHoldItsOwnPaste() {
     _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
     #expect(!input.hasInput(since: mark), "the press counted before its command, not after its paste's mark")
 }
+
+@Test(.timeLimit(.minutes(1)))
+func aPressWhoseHotkeyReportWasLostNeverPairsWithTheNextPress() {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    // Half a second ago a ⌃⌘V reached the tap, and its hotkey report never came.
+    let earlier = keyDown(9, [.maskControl, .maskCommand])
+    earlier.timestamp = HostTime.now().nanoseconds - 500_000_000
+    _ = tap.handle(.keyDown, earlier)
+    // Now a new press: the hotkey's report first, the paste marks, then the tap's copy.
+    tap.send(.pasteLast)
+    let mark = input.mark()
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    #expect(!input.hasInput(since: mark), "the new press counted before its command, not after its paste's mark")
+}
