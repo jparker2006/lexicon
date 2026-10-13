@@ -129,6 +129,10 @@ public enum NotInsertedReason: String, Sendable, Codable, CaseIterable {
     case focusMoved
     case typedSince
     case noField
+    /// The app exposed no focused field, so only "same app" could be checked,
+    /// and the paste came 5 s or more after fn-up, or after the ⌃⌘V press
+    /// (`InsertGuard.fieldlessWindow`).
+    case tooLate
     case pasteFailed
     /// Jake set "Paste from Other Apps" to deny Lexicon: it can't save his
     /// clipboard, so it never replaces it.
