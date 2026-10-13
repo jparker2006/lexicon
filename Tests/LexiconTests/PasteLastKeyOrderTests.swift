@@ -237,3 +237,16 @@ func aHeldControlCommandVStillCountsAsTyping() {
     _ = tap.handle(.keyDown, repeated)
     #expect(input.hasInput(since: mark), "a held key's repeats are typing, as for every other key")
 }
+
+@Test(.timeLimit(.minutes(1)))
+func aLateTapCopyNeverHoldsItsOwnPaste() {
+    let input = InputClock()
+    let press = at(1_000), late = at(2_200)
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    tap.send(.pasteLast, pressedAt: press)
+    let mark = input.mark()
+    // A busy Mac: the tap's copy of the same key-down is handled 1.2 s after the press.
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: press), now: late)
+    #expect(!input.hasInput(since: mark), "the copy pairs by its own key-down time, however late it is handled")
+}
