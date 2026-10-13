@@ -58,6 +58,8 @@ test('refuses an apply_patch that adds, updates, deletes or moves to a private p
     [withCommand('apply-patch-add', patch('*** Add File: /Users/someone/Library/Application Support/Lexicon/new.txt')), /private data/],
     [withCommand('apply-patch-add', patch('*** Update File: ~/Library/Application Support/Lexicon/lexicon.json')), /private data/],
     [withCommand('apply-patch-add', patch('*** Add File: .env')), /\.env/],
+    [withCommand('apply-patch-add', '*** Begin Patch\n  *** Add File: .env\n+x\n*** End Patch\n'), /\.env/],
+    [withCommand('apply-patch-add', patch('*** Add File:   /Users/someone/Library/Application Support/Lexicon/x.txt  ')), /private data/],
     [withCommand('apply-patch-add', patch('*** Delete File: /Users/someone/code/lexicon/.env')), /\.env/],
     [withCommand('apply-patch-add', `*** Begin Patch\n*** Update File: notes.txt\n*** Move to: .env.local\n@@\n-a\n+b\n*** End Patch\n`), /\.env/],
     [withCommand('bash-git-status', `apply_patch <<'EOF'\n${patch('*** Add File: .env')}EOF`), /\.env/],

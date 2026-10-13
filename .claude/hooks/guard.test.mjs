@@ -711,6 +711,26 @@ test("refuses Edit, Write, MultiEdit and NotebookEdit in Jake's private folder o
   ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
 });
 
+test("refuses reading or writing Codex's login file, in every tool", (t) => {
+  const home = fakeHome(t);
+  const options = { home };
+  const auth = path.join(home, '.codex/auth.json');
+  for (const [tool, input] of [
+    ['Read', { file_path: auth }],
+    ['Write', { file_path: auth, content: '{}' }],
+    ['Bash', { command: 'cat ~/.codex/auth.json' }],
+    ['Bash', { command: `jq . ${auth}` }],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, /Codex's login/);
+  }
+  for (const [tool, input] of [
+    ['Read', { file_path: path.join(home, '.codex/config.toml') }],
+    ['Bash', { command: 'codex --version' }],
+  ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
+});
+
 test('refuses Keychain secret reads and scratch SecItem readers, naming the Live checks checklist', (t) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'guard-secitem-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
