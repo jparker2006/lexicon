@@ -1066,15 +1066,17 @@ function envSearchRefusal(name, args, cwd) {
   return null;
 }
 
-// Interpreters whose inline script (-c, -e) may open Codex's login file by a path it builds from parts.
-const LOGIN_READERS = new Set([...SCRIPT_RUNNERS, 'node', 'ruby', 'perl', 'bun', 'deno']);
+// Interpreters, under any version suffix, and the runners that start them, whose inline script (-c, -e) may open
+// Codex's login file by a path it builds from parts. A name, not a list of words: commit messages and greps may
+// mention the file freely.
+const LOGIN_READERS = /^(?:python|pypy|ruby|perl|php|node|nodejs|bun|deno|swiftc?|osascript|g?awk|uvx?|npx|pipx|env)[\d.]*$/;
 
 /**
  * Why an interpreter is refused for opening Codex's login file, or null: its inline script names auth.json with .codex,
  * or names auth.json while the shell sits in ~/.codex. Script files are not read: the guard and its tests name the file.
  */
 function codexLoginScriptRefusal(name, command, cwd) {
-  if (!LOGIN_READERS.has(name)) return null;
+  if (!LOGIN_READERS.test(name)) return null;
   const source = text(command);
   if (!/auth\.json/i.test(source)) return null;
   const inCodexHome = typeof cwd === 'string' && reach(cwd, path.join(homedir(), '.codex')) === 'inside';
