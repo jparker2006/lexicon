@@ -38,7 +38,7 @@ enum PasteOrder {
     static func run<Seen>(_ text: String, as kind: PasteKind, lane: some PasteLane, isolation: isolated (any Actor)? = #isolation,
                           check: () -> (InsertDecision, Seen)) async -> Result<Seen> {
         // Cmd-V of nothing still replaces whatever Jake has selected.
-        guard text.contains(where: { !$0.isWhitespace }) else { return .failed }
+        guard !text.isBlank else { return .failed }
         while true {
             await lane.idle()
             let checkedAt = ContinuousClock.now

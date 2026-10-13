@@ -190,18 +190,23 @@ public final class HistoryStore: @unchecked Sendable {
         let unsettled = HistorySchema.sqlList(\.isTerminal, is: false)
         let type = SQLValue.text(DictationPurpose.type.column)
         return try? await read { db in
-            guard let row = try db.query("""
+            // Blank is Swift's rule (`isBlank`), not SQLite's trim, so the pick agrees with the
+            // paste path. A blank row is rare (a Fix that empties one), so the next is read only then.
+            var skipped: Int64 = 0
+            while let row = try db.query("""
                 SELECT id, final_text, started_at FROM dictation
-                WHERE status IN (\(settled)) AND purpose = ? AND trim(final_text, ' ' || char(9, 10, 13)) <> ''
-                ORDER BY started_at DESC, rowid DESC LIMIT 1
-                """, [type]).first,
-                  let id = row.text(0).flatMap(DictationID.init(column:)), let text = row.text(1),
-                  let startedAt = row.int(2)
-            else { return nil }
-            let newer = try db.query("""
-                SELECT EXISTS (SELECT 1 FROM dictation WHERE status IN (\(unsettled)) AND purpose = ? AND started_at > ?)
-                """, [type, .int(startedAt)]).first?.int(0) == 1
-            return NewestText(id: id, text: text, newerOnItsWay: newer)
+                WHERE status IN (\(settled)) AND purpose = ? AND final_text IS NOT NULL
+                ORDER BY started_at DESC, rowid DESC LIMIT 1 OFFSET ?
+                """, [type, .int(skipped)]).first {
+                skipped += 1
+                guard let id = row.text(0).flatMap(DictationID.init(column:)), let text = row.text(1),
+                      let startedAt = row.int(2), !text.isBlank else { continue }
+                let newer = try db.query("""
+                    SELECT EXISTS (SELECT 1 FROM dictation WHERE status IN (\(unsettled)) AND purpose = ? AND started_at > ?)
+                    """, [type, .int(startedAt)]).first?.int(0) == 1
+                return NewestText(id: id, text: text, newerOnItsWay: newer)
+            }
+            return nil
         }
     }
 
