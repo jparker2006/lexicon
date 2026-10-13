@@ -77,6 +77,11 @@ private func isFixNotLanded(_ event: ConductorEvent) -> Bool {
     return false
 }
 
+private func isHistoryUnreadable(_ event: ConductorEvent) -> Bool {
+    if case .notice(.fixNotLanded(.historyUnreadable)) = event { return true }
+    return false
+}
+
 @Test(.timeLimit(.minutes(1)))
 func aRespeakOfTheSecondOfTwoIdenticalWordsEditsTheSecond() async throws {
     let system = try system(hearing: "the cat saw the cat", "dog")
@@ -220,4 +225,51 @@ func aRespeakOfACommonWordDropsItsPeriodAndMatchesTheSelectionsCase() async thro
     #expect(field == "the cat saw the dog")
     let finalText = await system.history.dictation(first.id)?.finalText
     #expect(finalText == "the cat saw the dog")
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aHistoryReadErrorAfterARespeakLandsSaysTheFixIsNotSavedAndSavesNoFix() async throws {
+    let system = try system(hearing: "the cat saw the cat", "Dog.")
+    let first = try await dictate(system)
+    await system.history.flush()
+
+    // The insertion table is gone for the rest of the test, so receipt(for:) throws after the replace.
+    // Dropping it also fails the Re-speak's own delivered write, which History logs; nothing here reads that row.
+    try await system.history.read { try $0.execute("DROP TABLE insertion") }
+    // Setup check, not the finding: the same SELECT, unswallowed, really errors now.
+    await #expect(throws: (any Error).self) { try await system.history.read { _ = try $0.query("SELECT 1 FROM insertion") } }
+
+    await system.destination.select(TextSpan(location: 16, length: 3))  // the second "cat"
+    let events = await system.conductor.events()
+    let respeak = try await dictate(system, purpose: .respeak(of: first.id))
+    await system.history.flush()
+
+    // The fix is in the field: only History failed, so the Re-speak is not "never inserted".
+    let field = await system.destination.fieldText
+    #expect(field == "the cat saw the dog")
+    #expect(respeak.status == .inserted)
+    let seen = await emitted(events, until: respeak.id)
+    #expect(seen.contains(where: isHistoryUnreadable))
+    let rows = try await fixes(system.history, of: first.id)
+    #expect(rows.isEmpty)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aRespeakWhileHistoryReadsFineSaysNothingAboutHistory() async throws {
+    let system = try system(hearing: "the cat saw the cat", "Dog.")
+    let first = try await dictate(system)
+    await system.history.flush()
+
+    await system.destination.select(TextSpan(location: 16, length: 3))  // the second "cat"
+    let events = await system.conductor.events()
+    let respeak = try await dictate(system, purpose: .respeak(of: first.id))
+    await system.history.flush()
+
+    let field = await system.destination.fieldText
+    #expect(field == "the cat saw the dog")
+    let seen = await emitted(events, until: respeak.id)
+    #expect(!seen.contains(where: isHistoryUnreadable))
+    // The Fix was saved, so the receipt read it depends on went through.
+    let rows = try await fixes(system.history, of: first.id)
+    #expect(rows == [["respeak", "cat", "dog"]])
 }

@@ -323,4 +323,31 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
     @Test func replacementKeepsTheStopWhenTheSelectionEndsInAStopAndSpace() {
         #expect(RespeakText.replacement("Dog.", replacing: "cat. ", terms: []) == "dog. ")
     }
+
+    // The closing mark comes from the selected words, never from the Re-speak (#83 review): the
+    // Re-speak's own "." "!" or "?" is dropped, and the selection's, when its last non-whitespace
+    // character is one, is kept. The Re-speak's period never stands in for the selection's "!".
+
+    /// "Dog." over "cat!" and "cat?" ends with the selection's mark, not the Re-speak's period.
+    @Test func replacementTakesTheClosingMarkOfTheSelection() {
+        #expect(RespeakText.replacement("Dog.", replacing: "cat!", terms: [], isEnglish: { _ in true }) == "dog!")
+        #expect(RespeakText.replacement("Dog.", replacing: "cat?", terms: [], isEnglish: { _ in true }) == "dog?")
+    }
+
+    /// "Dog?" over "cat." keeps the selection's period; the Re-speak's "?" is dropped.
+    @Test func replacementKeepsThePeriodOfTheSelectionOverTheSpokenQuestion() {
+        #expect(RespeakText.replacement("Dog?", replacing: "cat.", terms: [], isEnglish: { _ in true }) == "dog.")
+    }
+
+    /// Guards that pass at the head: the Re-speak's mark goes when the selection has none, and a
+    /// "?" the selection and the Re-speak both end with stays, as it always did.
+    @Test func replacementDropsTheSpokenMarkWhenTheSelectionHasNone() {
+        #expect(RespeakText.replacement("Dog!", replacing: "cat", terms: [], isEnglish: { _ in true }) == "dog")
+        #expect(RespeakText.replacement("dog?", replacing: "cat?", terms: [], isEnglish: { _ in true }) == "dog?")
+    }
+
+    /// "cat! " ends in a mark and then a space: the mark is the selection's and the space stays.
+    @Test func replacementKeepsTheSelectionsMarkBeforeItsSpace() {
+        #expect(RespeakText.replacement("Dog.", replacing: "cat! ", terms: [], isEnglish: { _ in true }) == "dog! ")
+    }
 }
