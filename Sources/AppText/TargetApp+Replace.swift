@@ -45,7 +45,8 @@ extension TargetApp {
         // Chromium applies a new selection a moment later, and some apps ignore it.
         if !Self.selection(of: field, is: span, reading: expected) {
             guard AX.select(span, in: field) else { return .refused(.cannotSelect) }
-            let deadline = ContinuousClock.now + .milliseconds(50)
+            // Long enough for a busy app; past it nothing has changed, and the notice says so.
+            let deadline = ContinuousClock.now + .milliseconds(250)
             while !Self.selection(of: field, is: span, reading: expected) {
                 guard ContinuousClock.now < deadline else {
                     return AX.string(field, in: span.cfRange) == expected ? .refused(.cannotSelect) : .refused(.textChanged)
@@ -72,8 +73,11 @@ extension TargetApp {
         guard await Paster.shared.receipt(paste) else { return .refused(.pasteFailed) }
         let end = span.location + text.utf16.count
         await caretPassed(end, in: field)
-        guard AX.string(field, in: CFRange(location: span.location, length: text.utf16.count)) == text else {
-            return .unverified
+        // Read again, up to 250 ms, before calling it unverified: an app can show the paste late.
+        let landed = CFRange(location: span.location, length: text.utf16.count), verifyBy = ContinuousClock.now + .milliseconds(250)
+        while AX.string(field, in: landed) != text {
+            guard ContinuousClock.now < verifyBy else { return .unverified }
+            try? await Task.sleep(for: .milliseconds(10))
         }
         // Read before the caret goes back: the receipt's caret is the end of the new words.
         let receipt = Focus(pid: target.focus.pid, app: AX.app(target.focus.pid), field: field)

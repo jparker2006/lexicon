@@ -86,7 +86,7 @@ extension Conductor {
                 }
             case .notInserted(let reason):
                 history.record(.notInserted(id, reason))
-                // A Re-speak's words are a correction, never offered to paste-last: its notice says why.
+                // A Re-speak's words are a correction: no paste-last notice; its own notice says why.
                 if run.purpose == .type { emit(.notice(.readyToPaste(id))) }
             case .historyOnly:
                 // Esc'd or late live Dictation: say it's waiting in paste-last (#18 indicator state).
