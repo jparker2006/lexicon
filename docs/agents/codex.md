@@ -2,7 +2,7 @@
 
 When Claude's plan runs out, the orchestrator, builders, the Reviewer and Live checks run on OpenAI's Codex CLI for a day or two, then go back to Claude (Jake, 2026-10-13, [DECISIONS.md](../DECISIONS.md) item 96). The workflow is the same: GitHub holds the state, the scripts do the work, and the skills say the steps. This page is what changes.
 
-#325 lands in two PRs, guard first ([Jake, 19:29Z](https://github.com/jparker2006/lexicon/issues/325#issuecomment-6153497334)). This first one is the last merge on Claude: it covers the guard and the start prompts for all four roles on Codex. The second adds the skills as Codex skills, the helpers as Codex roles and the review lenses on Codex.
+#325 lands in two PRs, guard first ([Jake, 19:29Z](https://github.com/jparker2006/lexicon/issues/325#issuecomment-6153497334)). This first one is the last merge on Claude: it covers the guard and the start prompts for all four roles on Codex. The second, [#344](https://github.com/jparker2006/lexicon/issues/344), adds the skills as Codex skills, the helpers as Codex roles and the review lenses on Codex.
 
 **No Codex orchestrator, builder, Reviewer or Live checks session starts on the repo until** `scripts/checks/45-codex.sh` and `scripts/codex-probe.sh` are both green on the Codex CLI you will use, and each session's first command is refused (see "Every session's first command" below). The guard is the only thing that stops an agent reading your private folder or pushing to main, and Codex skips an untrusted hook without a word.
 
@@ -45,7 +45,7 @@ Then: test "$(git rev-parse --git-dir)" = .git && test "$(git branch --show-curr
 Then read the newest Reviewer handoff note on #36 and pick up from it.
 Standing approvals (Jake, 2026-10-12), by pasting this:
 - Merge your own merge verdicts with scripts/merge-pr.mjs, one at a time, without waiting for me.
-- Reviews: put every blocking item in your first verdict. Until #325's second PR merges, the lexicon-review Workflow can't run on Codex: review low-tier PRs as the skill's light pass says, and hold high-tier ones, except #325's second PR, which you review with the review driver that PR adds, run from a worktree of its branch.
+- Reviews: put every blocking item in your first verdict. Until #344 merges, the lexicon-review Workflow can't run on Codex: review low-tier PRs as the skill's light pass says, and hold high-tier ones, except #344's PR, which you review with the review driver that PR adds, run from a worktree of its branch.
 - Install: once a wave has merged and its Jake items have passed in a Live checks sitting, run scripts/install.sh on main once, without asking, unless a merged PR's Install section lists a step beyond "Code only." Any other install waits for me to type "install" in this session, and so does the one that finishes a milestone.
 Approvals the merge script doesn't cover (anything private, any spend, any other deletion) you ask me for here. Decisions go on the issue for the orchestrator to ask.
 ```
@@ -105,10 +105,11 @@ Paste this line, then the ticket's `chip:` line from `scripts/unblocked.sh`:
 You are a Lexicon builder (jparker2006/lexicon), on Codex. Read docs/agents/codex.md, then .claude/skills/implement-ticket/SKILL.md, and build the ticket below with it; where a step uses a Claude-only tool, do what codex.md says instead. First command: git push --dry-run origin HEAD:main. The guard must refuse it; if it runs, stop and tell me. If the ticket's last comment is a Claude builder's state comment, pick up from it.
 ```
 
-## Until the second PR lands
+## Until #344 lands
 
-- **No review Workflow on Codex.** A Codex builder does `spec-checker`'s job itself and says in its Ready line that the lexicon-review Workflow did not run. A Codex Reviewer merges low-tier PRs and holds high-tier ones, which need the `## Review` table, except #325's second PR: it reviews that one with the review driver that PR adds, run from a worktree of its branch.
+- **No review Workflow on Codex.** A Codex builder does `spec-checker`'s job itself and says in its Ready line that the lexicon-review Workflow did not run. A Codex Reviewer merges low-tier PRs and holds high-tier ones, which need the `## Review` table, except #344's PR: it reviews that one with the review driver that PR adds, run from a worktree of its branch.
 - **No helper roles:** a Codex session does the helpers' work itself or with `spawn_agent` default workers.
+- **A skill called by name** ("call the Skill tool with ..."): a repo skill is `.claude/skills/<name>/SKILL.md`, read it and follow it (the `pr` skill, say). pstack's skills (`/pstack:architect`, `/pstack:swarm`) are Claude plugins and don't exist on Codex: sketch the types and signatures yourself and post the same `Sketch:`, and do a swarm's pieces with `spawn_agent` workers.
 - **Watchers:** run `mkdir -p .build && nohup scripts/watch-events.sh --role <role> >> .build/watch-<role>.log 2>&1 &` once, and read `tail -n 20 .build/watch-<role>.log` at the start of each turn. `scripts/live-lane.sh` takes the nearest `codex` process as the lane's holder, as it takes `claude`.
 - **The orchestrator's Claude-only steps:** no chips (it hands you `chip:` lines), no session titles, `get_usage` or `list_sessions` (you watch usage), and no keep-awake (run `caffeinate -dis` in a terminal while sessions work and quit it when they stop).
 
