@@ -19,7 +19,9 @@ func loneTapLeavesNoHistoryRowAndNoAudioFile() async throws {
     let rig = try FnRig()
     var events = await rig.conductor.events().makeAsyncIterator()
 
-    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false, id: DictationID()), .fnUp(fnAt(90))]))
+    // No second press within the double-tap window: the tap is dropped when the window closes.
+    await rig.conductor.follow(fnCommands([.fnDown(fnAt(0), secureInput: false, id: DictationID()), .fnUp(fnAt(90)),
+                                           .deadline(fnAt(390))]))
     let started = await awaitStart(&events)
     let id = try #require(started)
     await settleFn(rig)
@@ -128,7 +130,8 @@ func sleepWithTheNextPressStillQueuedKeepsThatDictation() async throws {
 
     keys.press(.fnUp(fnAt(600)), .fnDown(fnAt(700), secureInput: false, id: second))
     await rig.conductor.systemWillSleep()
-    keys.press(.fnUp(fnAt(1_500)), .fnDown(fnAt(1_800), secureInput: false, id: tap), .fnUp(fnAt(1_850)))
+    keys.press(.fnUp(fnAt(1_500)), .fnDown(fnAt(1_800), secureInput: false, id: tap), .fnUp(fnAt(1_850)),
+               .deadline(fnAt(2_150)))
     keys.end()
     while let command = await commands.next() { await rig.conductor.handle(command) }
     await settleFn(rig)
@@ -364,7 +367,7 @@ private final class ScriptedKeys: Sendable {
 
 /// One recognizer behind a lock, so the test and the Conductor can both feed it.
 private final class Gesture: Sendable {
-    private let gesture = Mutex(FnGesture(holdThreshold: KeyboardConfig().holdThreshold))
+    private let gesture = Mutex(FnGesture(KeyboardConfig()))
     func handle(_ input: KeyInput) -> [KeyCommand] { gesture.withLock { $0.handle(input).commands } }
 }
 
@@ -438,7 +441,7 @@ private func fnAt(_ milliseconds: Int) -> HostTime {
 
 /// The commands the fn tap would deliver for `inputs`: one recognizer, then the end of the stream.
 private func fnCommands(_ inputs: [KeyInput]) -> AsyncStream<KeyCommand> {
-    var gesture = FnGesture(holdThreshold: KeyboardConfig().holdThreshold)
+    var gesture = FnGesture(KeyboardConfig())
     let (stream, continuation) = AsyncStream<KeyCommand>.makeStream()
     for input in inputs {
         for command in gesture.handle(input).commands { continuation.yield(command) }

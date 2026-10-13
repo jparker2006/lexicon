@@ -1,6 +1,7 @@
 import AppKit
 import os
 import LexiconDomain
+import KeyInput
 import LexiconCore
 import LexiconUI
 import LocalParakeet
@@ -55,14 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Inert until a test hook asks it to slow an answer.
         let local = SlowedTranscriber(ParakeetTranscriber(paths: paths))
         slowModel = local
+        let keys = AppTestHooks.keyboardConfig(bundleID: bundleID)
         #else
         let paths = AppPaths.forBundle(id: bundleID)
         let local = ParakeetTranscriber(paths: paths)
+        let keys = KeyboardConfig()
         #endif
         self.paths = paths
         do {
             try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
-            let system = try LexiconSystem.live(paths: paths, bundleID: bundleID, local: local)
+            let system = try LexiconSystem.live(paths: paths, bundleID: bundleID, local: local, keys: keys)
             self.system = system
             Task.detached { await system.run() }
             let ms = LaunchClock.sinceProcessStart().map { Int(($0 * 1000).rounded()) } ?? -1

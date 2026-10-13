@@ -217,6 +217,20 @@ Jake, 2026-10-12 07:25:54Z: "recs for all" (items 57, 58 and 59). Retry stores t
 
 Jake: as item 57. Decided: a package, import or file name in his repos keeps the word. Proposed, from #36's wording of this item, which Jake was not shown: a type name counts too, and prose and comments don't. #73 builds it.
 
+**79. The 20-minute cap and its 19-minute warning act 50 ms after their marks.**
+> Jake: decide whether the 20-minute cap may act 50 ms after the 20-minute mark. I recommend yes. [...] Yes (recommended): the cap stops the recording at exactly 20:00 (the audio ends there), but acts 50 ms later. So an Esc or a tap of fn pressed just before 20:00 always counts, whichever the fn tap sees first. Cost: if fn-up was lost, Quit can wait 20 minutes plus 50 ms instead of exactly 20 minutes. [...] No: the cap acts at exactly 20:00 and Quit never waits past it. Cost: an Esc pressed in the last few milliseconds before 20:00 can arrive just after the cap and be ignored, so that Dictation is typed instead of held. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6126616497))
+
+Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 14:54:52Z): "cap yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6126756110)). Decided: the cap's stop is stamped at the cap and acts 50 ms later, as the double-tap window's drop does; #58's "Quit waits no longer than the cap" becomes "no longer than the cap plus 50 ms". `FnGesture.lateKeyGrace`.
+
+> Jake: decide whether the 19-minute warning sound may also play 50 ms after 19:00, the same as your "cap yes" for the cap. I recommend yes. [...] Yes (recommended): a key pressed just before 19:00 always counts the same way, whichever the fn tap sees first. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127087016))
+
+Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 15:15:50Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127137470)). Decided: the 19-minute warning acts 50 ms after its mark too.
+
+**80. Esc is taken from the confirmed Dictation, not from fn-down.**
+> Jake: decide whether Esc reaches your app during the first third of a second of holding fn (PR #262, DECISIONS item 75, Proposed). #58 says Lexicon takes Esc "at recording start", the moment fn goes down. The build takes it only once the hold is confirmed (0.3 s) or on the second tap of a double tap. [...] Keep the build (recommended): Esc pressed in that first 0.3 s, or between the two taps, does its normal job in the front app (closes a dialog, cancels in the terminal). The half-started take is dropped: nothing typed, nothing in History. A stray fn tap or the Globe key never eats your Esc. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6128270245))
+
+Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 16:31:39Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6128393563)). The question's and the record's "item 75" is this entry, renumbered because #144 took 75 and #266 took 78. Decided: the Esc hotkey is registered when the recognizer confirms the hold (0.30 s) or the second tap, and removed when the Dictation ends; an Esc in the first 0.3 s or between the taps reaches the front app and the half-started take is dropped (item 43). Registered with and without fn, since a hold keeps fn down. Replaces #58's "registered at recording start".
+
 **59. M1 takes Esc and ⌃⌘V with a registered hotkey first.**
 > Q1: How M1 blocks Esc and ⌃⌘V (#58, #62). Today Lexicon only listens to keys, so Esc while recording and ⌃⌘V also reach the app in front. Blocking keys the old way added 26 to 74 ms of delay to every key you typed. Options: (a) a registered hotkey for Esc, held only while recording. [...] (b) a key-blocking tap that is on only during a Dictation, with its delay per key measured. Either way, typing delay while Lexicon is idle has to stay at 2 to 12 ms. ➡️ Rec: (a). #58 tests it first and falls back to (b) only if it fails.
 
@@ -247,6 +261,10 @@ Jake, in the orchestrator's session, about 2026-10-13 02:57Z (2026-10-12 19:57 P
 > Jake: decide what Lexicon does when your mic sends nothing but digital silence for a whole hold [...] the pill says "No sound from the microphone", nothing is typed, and the Dictation shows in History as failed with its audio kept. [...] Pressing Esc on a dead mic fails the same way [...] and Retry on it does nothing. Reply "yes" to take that.
 
 Jake, 2026-10-12 14:22Z (asked by the orchestrator in its session): "yes". Recorded on [#144](https://github.com/jparker2006/lexicon/issues/144#issuecomment-6126205597); the question is [#144](https://github.com/jparker2006/lexicon/issues/144#issuecomment-6126174486).
+
+**84. Lost audio is said: "Part of the audio was lost".** Neither the spec nor this file had the rule; frames the ring refused were only logged. Built (#179): when the mic drops part of a recording (frames the 2 s ring refused), the Dictation is still heard and typed from what was captured, and the pill shows "Part of the audio was lost" with the error sound, until the Dictation lands. Asked by the orchestrator on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6137742157) as question 11: "Jake: decide whether Lexicon tells you when the mic drops part of a recording. Recommended: yes, show "Part of the audio was lost" after that Dictation (with the error sound; the line shows until the Dictation lands)."
+
+Jake, 2026-10-13T04:29Z, in the orchestrator session: "11 yes". Recorded on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6138248868). Proposed, from #179's builder and not asked, beyond his words, which named the mic only: the same line shows for the other audio a capture can lose, input the converter failed on (at the very end, what it still held) and the unread rest of a file input whose read broke off (eval, the dictate hook); when the same Dictation also lost its file ("Can't save audio to disk", spec #4), both sound and the disk line is the one that stays; a failed close is logged, not shown, since `CAFFile.finalize` repairs the file and nothing is lost.
 
 ### Proposed: built on an agent's default, never asked
 

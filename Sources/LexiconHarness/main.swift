@@ -17,13 +17,13 @@ import TestHooks
 let usage = """
     usage: lexicon-harness check | paste-check
            lexicon-harness hook status | dictate <wav> [--result-delay <ms>] | indicator <state> [message] | sound <cue>
-           lexicon-harness hook fn down|up... [--shift] | key esc | sleep | mic zeros
+           lexicon-harness hook fn down|up... [--shift] | key esc | sleep | mic zeros | audio drops
            lexicon-harness hook insert [--delay <seconds>] <text>
            lexicon-harness hook capture <seconds> [prepared[=<idle s>]] [change] [device=<uid>]
            lexicon-harness hook privacy on|off [--always-private <bundle id>[,<bundle id>...]]
            lexicon-harness pill [--shots <dir>]
            lexicon-harness history [search word]
-           lexicon-harness relaunch [--release] [--test-hooks [--dev-data]]
+           lexicon-harness relaunch [--release] [--test-hooks [--dev-data] [--short-cap]]
            lexicon-harness wait-fn [--count <n>] [--timeout <seconds>]
            lexicon-harness fixture <text>
            lexicon-harness stats <file>
@@ -41,7 +41,8 @@ let usage = """
               fn, key: pressed through the fn tap's own handler, in order, back to
               back (so `fn down up down` is a double tap); --shift holds Shift
               sleep: the Mac is going to sleep. mic zeros: the next Dictation's
-              mic delivers only zeros
+              mic delivers only zeros. audio drops: the next Dictation (fn or
+              dictate) loses its first block, as a ring overflow does
               insert: paste <text> at the focused field after --delay seconds (default 0)
               capture: record from the mic and measure the start gap, tail, file
               and mic release; `prepared` prepares the engine first and waits
@@ -59,7 +60,7 @@ let usage = """
       relaunch  quit Lexicon Dev as Quit does (a Dictation lands first), open it again
               and print its launch timings. --release: the installed copy must be a
               release build. --test-hooks: with hooks, data in a scratch folder unless
-              --dev-data
+              --dev-data; --short-cap: the 20-minute cap is 20 s, its warning at 15 s
       wait-fn print each Dictation's outcome and lag from Lexicon Dev's log as it
               lands, until --count of them (default 1) or --timeout (default 120 s)
       fixture speak <text> into a 16 kHz WAV for `hook dictate`; prints its path

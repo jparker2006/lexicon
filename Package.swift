@@ -36,7 +36,8 @@ let package = Package(
         .target(name: "LexiconDomain"),
 
         // Thin wrapper over the system libsqlite3 (no package). Only History and
-        // WordStore may depend on it: each owns its own database file.
+        // WordStore may depend on it: each owns its own database file. LexiconTests
+        // also reads it, to test the connection itself on a temp file.
         .target(name: "SQLiteKit", linkerSettings: [.linkedLibrary("sqlite3")]),
 
         // Inbox wire format, writer and watcher (app). Tiny on purpose: a
@@ -250,6 +251,7 @@ let package = Package(
                 "LexiconCore",
                 "LexiconDomain",
                 "LexiconUI",
+                "SQLiteKit",
                 "TestHooks",
                 "TestSupport",
                 "Transcription",

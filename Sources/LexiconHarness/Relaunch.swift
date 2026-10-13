@@ -3,15 +3,16 @@ import AppKit
 import LexiconDomain
 import TestHooks
 
-/// `lexicon-harness relaunch [--release] [--test-hooks [--dev-data]]`: quits the
+/// `lexicon-harness relaunch [--release] [--test-hooks [--dev-data] [--short-cap]]`: quits the
 /// running Lexicon Dev the way Quit does (a Dictation recording or finishing
 /// lands first), opens the installed copy again, and prints the launch timings
 /// it logs. A warm relaunch: the reading the launch budget uses.
 @MainActor
 func relaunch(_ arguments: [String]) async throws {
     let flags = Set(arguments)
-    guard flags.isSubset(of: ["--release", "--test-hooks", "--dev-data"]), flags.count == arguments.count,
-          !flags.contains("--dev-data") || flags.contains("--test-hooks") else { fail(usage, code: 64) }
+    guard flags.isSubset(of: ["--release", "--test-hooks", "--dev-data", "--short-cap"]), flags.count == arguments.count,
+          flags.isDisjoint(with: ["--dev-data", "--short-cap"]) || flags.contains("--test-hooks")
+    else { fail(usage, code: 64) }
     let release = flags.contains("--release"), hooks = flags.contains("--test-hooks")
     guard !(release && hooks) else { throw HarnessError("a release build has no test hooks: drop --release or --test-hooks") }
 
@@ -32,7 +33,9 @@ func relaunch(_ arguments: [String]) async throws {
     }
 
     let since = Date()
-    let appArguments = (hooks ? [TestHookChannel.launchArgument] : []) + (flags.contains("--dev-data") ? [TestHookChannel.devDataArgument] : [])
+    let appArguments = (hooks ? [TestHookChannel.launchArgument] : [])
+        + (flags.contains("--dev-data") ? [TestHookChannel.devDataArgument] : [])
+        + (flags.contains("--short-cap") ? [TestHookChannel.shortCapArgument] : [])
     try await run("/usr/bin/open", ["-g", DevApp.installed.path] + (appArguments.isEmpty ? [] : ["--args"] + appArguments))
     if hooks {
         let app = try await DevApp.launch()
