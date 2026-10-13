@@ -144,10 +144,11 @@ final class EventTapThread: @unchecked Sendable {
     }
 
     /// One tick per keystroke; a hotkey press the hotkey's `send` already counted is not another.
-    /// A hotkey held down repeats only here (Carbon reports it once), so its repeats count nothing.
+    /// A held hotkey's repeats come only here (Carbon reports a press once): they are typing,
+    /// as any held key's are, and never a report to pair.
     private func countTyping(_ event: CGEvent) {
-        guard hotkeys.contains(where: { $0.matches(event) }) else { return input.tick() }
-        guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
+        guard hotkeys.contains(where: { $0.matches(event) }),
+              event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return input.tick() }
         if presses.isFirstReport(.tapCopy, at: HostTime(eventTimestamp: event.timestamp, now: .now())) { input.tick() }
     }
 
@@ -222,18 +223,24 @@ extension KeyInput {
 struct HotkeyPresses {
     enum Report { case tapCopy, hotkey }
     static let pairWindow: Duration = .milliseconds(250)
-    private var unpaired: (report: Report, at: HostTime)?
+    /// First reports still waiting for their partner, newer than `pairWindow`.
+    private var unpaired: [(report: Report, at: HostTime)] = []
 
-    /// True for a press's first report (count it), false for its second.
+    /// True for a press's first report (count it), false for its second, which pairs
+    /// with the nearest unpaired report of the other kind: two quick presses keep their own.
     mutating func isFirstReport(_ report: Report, at: HostTime) -> Bool {
-        if let first = unpaired, first.report != report,
-           max(first.at, at).duration(since: min(first.at, at)) <= Self.pairWindow {
-            unpaired = nil
+        unpaired.removeAll { Self.gap($0.at, at) > Self.pairWindow }
+        let partner = unpaired.indices.filter { unpaired[$0].report != report }
+            .min { Self.gap(unpaired[$0].at, at) < Self.gap(unpaired[$1].at, at) }
+        if let partner {
+            unpaired.remove(at: partner)
             return false
         }
-        unpaired = (report, at)
+        unpaired.append((report, at))
         return true
     }
+
+    private static func gap(_ a: HostTime, _ b: HostTime) -> Duration { max(a, b).duration(since: min(a, b)) }
 }
 
 extension Hotkey {
