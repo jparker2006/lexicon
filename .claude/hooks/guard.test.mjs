@@ -730,6 +730,9 @@ test("refuses reading or writing Codex's login file, in every tool", (t) => {
     ['Edit', { file_path: auth, old_string: 'a', new_string: 'b' }],
     ['Bash', { command: `python3 -c "print(open('/Users/someone/.codex/auth.json').read())"` }],
     ['Bash', { command: `node -e "console.log(require('fs').readFileSync('${auth}', 'utf8'))"` }],
+    ['Bash', { command: `python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `node -e "const p = require('path'); console.log(require('fs').readFileSync(p.join(require('os').homedir(), '.codex/auth.json'), 'utf8'))"` }],
+    ['Bash', { command: `cd ~/.codex && python3 -c "print(open('auth.json').read())"` }],
   ]) {
     const verdict = runTool(tool, input, options);
     assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
@@ -739,6 +742,7 @@ test("refuses reading or writing Codex's login file, in every tool", (t) => {
     ['Read', { file_path: path.join(home, '.codex/config.toml') }],
     ['Bash', { command: 'codex --version' }],
     ['Bash', { command: 'cat ~/.codex/config.toml' }],
+    ['Bash', { command: `python3 -c "import json; print(json.load(open('package.json')))"` }],
     ['Glob', { pattern: '*', path: path.join(home, '.codex') }],
   ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
 });
