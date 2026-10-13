@@ -230,7 +230,7 @@ Jake, 2026-10-12 14:22Z (asked by the orchestrator in its session): "yes". Recor
 
 **84. Lost audio is said: "Part of the audio was lost".** Neither the spec nor this file had the rule; frames the ring refused were only logged. Built (#179): when a Dictation's audio lost part of itself (frames the 2 s ring refused, input the converter failed on, or the unread rest of a file that broke off), the Dictation is still heard and typed from what was captured, and the pill shows "Part of the audio was lost" with the error sound, until the Dictation lands. Asked by the orchestrator on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6137742157) as question 11: "Jake: decide whether Lexicon tells you when the mic drops part of a recording. Recommended: yes, show "Part of the audio was lost" after that Dictation (with the error sound; the line shows until the Dictation lands)."
 
-Jake, 2026-10-13T04:29Z, in the orchestrator session: "11 yes". Recorded on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6138248868).
+Jake, 2026-10-13T04:29Z, in the orchestrator session: "11 yes". Recorded on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6138248868). Proposed, from #179's builder and not asked: when the same Dictation also lost its file ("Can't save audio to disk", spec #4), both sound and the disk line is the one that stays; a failed close or a converter error at the very end is logged, not shown, since the file is repaired and the few ms the converter held can't be counted.
 
 ### Proposed: built on an agent's default, never asked
 

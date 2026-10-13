@@ -498,4 +498,28 @@ func theAudioDropsHookWorksOnAFileDictationToo() async throws {
     }
     #expect(seen.filter(\.isAudioLostNotice).count == 1)
 }
+
+@Test(.timeLimit(.minutes(1)))
+func whenAudioIsLostAndTheDiskFailsTheDiskLineIsTheOneThatStays() async throws {
+    // Both notices fail the pill with a line; the later one stays. The disk line is the spec's (#4).
+    let wav = try writeWAV(syntheticSamples(count: 19_200), rate: 16_000, in: try scratchDirectory())
+    let paths = AppPaths.temporary()
+    let recorder = Recorder(policy: .diskFull)
+    let conductor = Conductor(
+        recorder: recorder, speech: SpeechEngine(local: ScriptedTranscriber(text: "Ship it"), clock: TestClock()),
+        cleanup: Cleanup(), lexicon: try Lexicon(paths: paths), history: try HistoryStore(paths: paths),
+        destination: HeadlessDestination(), preferences: PreferencesStore(fixed: .defaults),
+        secrets: Secrets(.environment), keyboard: nil, fixes: nil, jev: nil)
+    var events = await conductor.events().makeAsyncIterator()
+
+    recorder.dropNextCaptureBlock()
+    _ = await conductor.dictate(file: wav, pace: .asFastAsPossible)
+
+    var notices: [Notice] = []
+    while let event = await events.next() {
+        if case .notice(let notice) = event { notices.append(notice) }
+        if event.isFinished { break }
+    }
+    #expect(notices == [.audioLost, .diskTrouble])
+}
 #endif
