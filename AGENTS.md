@@ -46,7 +46,7 @@ Command Line Tools 26.6 only (Swift 6.3, macOS 26 SDK), SwiftPM, no Xcode ([ADR 
 
 This is the private-data rule's one home; review.md, the skills and the helper briefs point here.
 
-- Jake's Wispr export, the Test set and its gold text, the starter Lexicon, his History and his keys never enter git, a PR, an issue, a log, or any agent's or chatbot's context. They live under `~/Library/Application Support/Lexicon/` (keys also in the login Keychain and `~/code/lexicon/.env`). Agents never open them; scripts such as `lexicon-eval` read them on the Mac. Refer to them by path only, and never print a key. The guard hook and `.claude/settings.json` refuse those paths for every tool.
+- Jake's Wispr export, the Test set and its gold text, the starter Lexicon, his History and his keys never enter git, a PR, an issue, a log, or any agent's or chatbot's context. They live under `~/Library/Application Support/Lexicon/` (keys also in the login Keychain and `~/code/lexicon/.env`; Codex's login to his ChatGPT plan is `~/.codex/auth.json`). Agents never open them; scripts such as `lexicon-eval` read them on the Mac. Refer to them by path only, and never print a key. The guard hook and `.claude/settings.json` refuse those paths for every tool.
 - **Numbers on GitHub:** nothing measured on Jake's own Wispr history or his History goes into the repo, a PR or an issue: no counts, totals, lag or word figures from it. Test set sizes (clips, minutes of audio, split sizes) and eval scores may go anywhere.
 - Eval runs may send Test set audio and text only to the providers Lexicon itself uses, with zero retention; that is the one exception to "Ask Jake first" for calls on real data.
 - Test fixtures are synthesized or recorded for the test, never Jake's recordings.

@@ -151,7 +151,7 @@ const DEV_ID = 'dev.jparker.lexicon.dev';
 const DAILY_APP = /\bdev\.jparker\.lexicon\b(?![.\w-])|\b(?:application|app|process)\s+"Lexicon(?:\.app)?"|(?:^|[\s/"'])Lexicon\.app\b/i;
 // Jake's private folder, as any home writes it. "Lexicon Dev" never matches: a space follows.
 // Codex's login token, under any home.
-const CODEX_LOGIN = /(?:^|\/)\.codex\/auth\.json$/;
+const CODEX_LOGIN = /(?:^|\/)\.codex\/auth\.json$/i;
 const PRIVATE_TEXT =/(?:^|\/)Library\/Application Support\/Lexicon(?:\/|$)/i;
 // Its models folder holds model weights, not private data, and Lexicon Dev's models folder links to it.
 const MODELS_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon\/models(?:\/|$)/i;
@@ -945,7 +945,12 @@ function inModels(file, dir) {
 function pathRefusal(resolved, recursiveRead, write = false) {
   if (resolved === null) return null;
   const files = unique([resolved, realOrSelf(resolved)]);
-  if (files.some((file) => CODEX_LOGIN.test(file))) return REASONS.codexLogin;
+  // reach reads globs and ignores case, so `~/.codex/*` and `AUTH.JSON` count, and so does a recursive read of a folder above it.
+  const login = path.join(homedir(), '.codex/auth.json');
+  const reachesLogin = (file) => {
+    const reached = reach(file, login);
+    return reached === 'inside' || (recursiveRead && reached === 'above');
+  };
   for (const file of files) {
     if (namesPrivate(file) || (write && PRIVATE_TEXT.test(file))) return REASONS.private;
     for (const dir of privateDirs()) {
@@ -954,6 +959,7 @@ function pathRefusal(resolved, recursiveRead, write = false) {
       if (reached === 'inside' || (recursiveRead && reached === 'above')) return REASONS.private;
     }
   }
+  if (files.some((file) => CODEX_LOGIN.test(file) || reachesLogin(file))) return REASONS.codexLogin;
   return files.some((file) => envName(path.basename(file))) ? REASONS.env : null;
 }
 
