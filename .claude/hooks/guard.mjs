@@ -19,7 +19,8 @@
 //   - bare `swift build`, `swift test` and `swift run` once scripts/test.sh and
 //     scripts/lib/heavy.sh exist, so every build takes a build slot;
 //   - `tccutil reset` without the Lexicon Dev bundle ID, which resets Jake's daily
-//     Lexicon or every app, and a reset of Lexicon Dev outside an open sitting;
+//     Lexicon or every app, and a reset of Lexicon Dev outside an open sitting
+//     or in a hands-free one, which has no step for Jake's Allow click;
 //   - `gh pr create` or `edit` whose body closes an issue or carries an em dash;
 //   - starting Docker, which can take the Mac down mid-build;
 //   - killing processes by name, which can kill other sessions' processes;
@@ -95,6 +96,7 @@ const REASONS = {
   mergeForm: 'Refused: the Reviewer merges only with `gh pr merge <pr> --squash --match-head-commit <full head sha>`.',
   tcc: "Refused: tccutil reset names the Lexicon Dev bundle ID only; anything else resets Jake's daily Lexicon or every app.",
   sitting: "Refused: each reset of Lexicon Dev's permissions costs Jake an Allow click, so it runs only in an open sitting (scripts/live-lane.sh sitting start); put it on the Live checks checklist.",
+  handsFree: "Refused: a hands-free sitting has no step for Jake's Allow click after a reset of Lexicon Dev's permissions; put the reset on the next sitting's checklist.",
   private: "Refused: ~/Library/Application Support/Lexicon/ holds Jake's private data; agents never open it or search a folder above it (AGENTS.md). Lexicon Dev's folder is fine.",
   env: "Refused: .env files hold Jake's keys; agents never read them (AGENTS.md).",
   keychain: 'Refused: agents never read Keychain items (AGENTS.md); put the step that needs a key on the Live checks checklist.',
@@ -855,25 +857,27 @@ function tccRefusal(args) {
   if (args[0] !== 'reset') return null;
   // `tccutil reset <service> [bundle id]`; with no bundle ID it resets every app.
   if ((args[2] ?? '').toLowerCase() !== DEV_ID) return REASONS.tcc;
-  return sittingOpen() ? null : REASONS.sitting;
+  const sitting = openSitting();
+  if (!sitting) return REASONS.sitting;
+  return /^hands-free=yes$/m.test(sitting) ? REASONS.handsFree : null;
 }
 
 /**
- * Whether a sitting is open: scripts/live-lane.sh sitting start writes the marker on Jake's go, and sitting end removes it.
+ * The open sitting's marker, or null: scripts/live-lane.sh sitting start writes it on Jake's go, and sitting end removes it.
  * A sitting whose holder crashed leaves the marker behind, so its pid must still be the process that started then.
  */
-function sittingOpen() {
+function openSitting() {
   let marker;
   try {
     marker = readFileSync(path.join(homedir(), 'Library/Application Support/Lexicon Dev/live-sitting.open'), 'utf8');
   } catch {
-    return false;
+    return null;
   }
   const field = (name) => new RegExp(`^${name}=(.*)$`, 'm').exec(marker)?.[1].trim();
   const pid = field('pid');
-  if (!/^\d+$/.test(pid ?? '')) return false;
+  if (!/^\d+$/.test(pid ?? '')) return null;
   const started = spawnSync('ps', ['-o', 'lstart=', '-p', pid], { encoding: 'utf8', timeout: 2000, env: { ...process.env, TZ: 'UTC' } });
-  return started.status === 0 && started.stdout.trim() === field('pid-started');
+  return started.status === 0 && started.stdout.trim() === field('pid-started') ? marker : null;
 }
 
 /** `file` with the links in its deepest existing folder followed, so a link to a folder above the private one is seen. */

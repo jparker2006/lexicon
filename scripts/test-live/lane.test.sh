@@ -112,7 +112,11 @@ fake_listener "$T/worktree/.build/bundle/debug/Lexicon Dev.app/Contents/MacOS/Le
 expect fail "a second Lexicon Dev is running \(pid $LISTENER" "a second Lexicon Dev counts as a listener" "$LANE" preflight 64
 stop_listeners
 
-# Sittings. #53's hold step without its speak field can't render.
+# Sittings. Each case starts with no Jake items kept from the cases before
+# (render keeps them past their request's result, #233).
+fresh_queue() { rm -f "$DEV/live-lane/jake-items.tsv" "$DEV/live-lane/jake-passed.tsv"; }
+# #53's hold step without its speak field can't render.
+fresh_queue
 request "claude/issue-53 @ $read" "$F/53-hold-no-speak.txt" > "$T/r53b"
 jq -n --rawfile r "$T/r53b" '[{number: 53, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
 expect ok "^not in a sitting: #53 claude/issue-53 @ $read: the request can't be read: item 1 \\(Hold\\): no speak field\$" "#53's hold step can't render without its speak field" "$LANE" sitting render
@@ -176,6 +180,7 @@ expect ok 'cleared the marker of a sitting whose session ended' "a dead session'
 [ ! -e "$DEV/live-sitting.open" ] && pass "the guard no longer sees a crashed sitting as open" || fail "a crashed sitting's marker survived"
 
 # A sitting of only #57's Dictation step still counts as fn.
+fresh_queue
 only_request 57 "$T/r57b" "$T/issues-sitting.json"
 jq '[.[] | select(.number == 57)]' "$T/issues.json" > "$T/issues-57.json"
 cp "$T/issues-57.json" "$T/issues.json"
@@ -184,15 +189,132 @@ fake_listener "$T/elsewhere/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicat
 expect fail 'Lexicon Indicator is running' "a Dictation-only sitting won't start while another app answers fn" "$LANE" sitting start
 stop_listeners
 
+fresh_queue
 jq -n --rawfile r "$T/r64c" '[{number: 64, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
 expect ok '^No Jake items are queued, so no sitting\.$' "no physical items, no sitting" "$LANE" sitting render
 expect fail 'no rendered sitting' "a sitting with no steps can't start" "$LANE" sitting start
 
+# A hands-free sitting (#225): Jake typed "hands free", so it opens with no steps.
+expect ok '^live-lane: hands-free sitting open \(0 steps\)\. fn listeners: none$' "a hands-free sitting opens with no rendered steps" "$LANE" sitting start --hands-free
+grep -qx 'hands-free=yes' "$DEV/live-sitting.open" && pass "the marker says hands-free, for the guard" || fail "the hands-free marker has no hands-free=yes line"
+expect ok 'a hands-free sitting is open' "status names a hands-free sitting" "$LANE" status
+expect fail 'no step 1' "a hands-free sitting has no step to ack" "$LANE" sitting ack 1 pass
+expect ok '^live-lane: sitting closed$' "sitting end closes a hands-free sitting with zero steps" "$LANE" sitting end
+[ ! -e "$DEV/live-sitting.open" ] && pass "the end removes the hands-free marker" || fail "the hands-free marker outlived the sitting"
+
+# Another app answering fn refuses it, whether or not fn steps are rendered.
+fake_listener "$T/elsewhere/Lexicon Indicator.app/Contents/MacOS/Lexicon Indicator"
+expect fail "Lexicon Indicator is running \(pid $LISTENER" "a hands-free sitting with no steps won't start while another app answers fn" "$LANE" sitting start --hands-free
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" sitting render > /dev/null
+expect fail "Lexicon Indicator is running \(pid $LISTENER" "a hands-free sitting won't start over rendered fn steps while another app answers fn" "$LANE" sitting start --hands-free
+[ ! -e "$DEV/live-sitting.open" ] && pass "a refused hands-free start leaves no marker" || fail "a refused hands-free start left the marker"
+[ -s "$DEV/live-lane/sitting.tsv" ] && pass "a refused hands-free start keeps the rendered steps" || fail "a refused hands-free start lost the rendered steps"
+stop_listeners
+
+# With the daily Lexicon listening: a Dictation in progress refuses before any
+# quit; without one, it reaches daily quit, which refuses under this fake HOME.
+fake_listener "$HOME/Applications/Lexicon.app/Contents/MacOS/Lexicon"
+echo '2026-10-12 09:40:01.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationBegan(hold: true)' > "$T/log.txt"
+expect fail 'Dictation in progress' "a hands-free sitting won't quit the daily Lexicon mid-Dictation" "$LANE" sitting start --hands-free
+[ ! -e "$DEV/live-sitting.open" ] && pass "a start refused for a Dictation leaves no marker" || fail "a start refused for a Dictation left the marker"
+# A log that can't be read could hide a Dictation, so it refuses too.
+cp "$T/bin/fake-log" "$T/fake-log.ok"
+printf '#!/bin/sh\necho "log: cannot read the store" >&2\nexit 1\n' > "$T/bin/fake-log"
+: > "$T/log.txt"
+expect fail "can't read the daily Lexicon's log" "an unreadable log counts as a Dictation in progress" "$LANE" sitting start --hands-free
+[ ! -e "$DEV/live-sitting.open" ] && pass "a start refused for an unreadable log leaves no marker" || fail "a start refused for an unreadable log left the marker"
+cp "$T/fake-log.ok" "$T/bin/fake-log"
+echo '2026-10-12 09:40:01.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationBegan(hold: true)' > "$T/log.txt"
+echo '2026-10-12 09:40:09.000 Df Lexicon[123:456] [Lexicon:fn] fn gesture: dictationLanded' >> "$T/log.txt"
+expect fail "is not your login home.*|the sitting didn't open: the daily Lexicon wasn't quit" "a hands-free sitting quits the daily Lexicon itself, here refused by the HOME check" "$LANE" sitting start --hands-free
+[ ! -e "$DEV/live-sitting.open" ] && pass "a hands-free sitting whose daily quit failed leaves no marker" || fail "a failed daily quit left the hands-free marker"
+[ -s "$DEV/live-lane/sitting.tsv" ] && pass "a hands-free start whose daily quit failed keeps the rendered steps" || fail "a failed daily quit lost the rendered steps"
+: > "$T/log.txt"
+stop_listeners
+expect fail 'usage: live-lane.sh sitting' "an unknown sitting start option is refused" "$LANE" sitting start --hands
+
+# Jake's items outlive their request's hands-off result and the issue's close
+# at merge (#233): a sitting end forgets each one acked pass.
+fresh_queue
+# Only the lane holder's look keeps them: a builder's queue changes nothing.
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" release > /dev/null
+"$LANE" queue > /dev/null
+jq --arg read "$read" '(.[0].comments) += [{createdAt: "2026-10-11T22:00:00Z", body: "Live checks: claude/issue-57 @ \($read)"}]' "$T/issues-57.json" > "$T/issues.json"
+take_lane "$REPO"
+expect ok '^No Jake items are queued, so no sitting\.$' "a builder's look at the queue keeps no Jake item" "$LANE" sitting render
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" queue > /dev/null
+jq --arg read "$read" '(.[0].comments) += [{createdAt: "2026-10-11T22:00:00Z", body: "Live checks: claude/issue-57 @ \($read)\n\nall pass"}]' "$T/issues-57.json" > "$T/issues.json"
+absent '#57' "the answered request leaves the queue" "$LANE" queue
+expect ok '^2\. Mic prompt \(#57\)' "its Jake item stays in the next sitting after the hands-off result" "$LANE" sitting render
+echo '[]' > "$T/issues.json"
+expect ok '^2\. Mic prompt \(#57\)' "and after the issue closes at merge" "$LANE" sitting render
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 skip > /dev/null
+"$LANE" sitting end > /dev/null
+expect ok '^2\. Mic prompt \(#57\)' "a skipped step stays queued" "$LANE" sitting render
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 fail no prompt > /dev/null
+"$LANE" sitting end > /dev/null
+expect ok '^2\. Mic prompt \(#57\)' "a failed step stays queued until it passes (Q6)" "$LANE" sitting render
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 pass > /dev/null
+"$LANE" sitting end > /dev/null
+expect ok '^No Jake items are queued, so no sitting\.$' "a step acked pass leaves the queue" "$LANE" sitting render
+# The queue is read and rewritten under a lock, so a look at it never undoes a
+# sitting end's change; a holder that died leaves a lock the next one clears.
+sleep 60 &
+held=$!
+echo "$held" > "$DEV/live-lane/jake-items.tsv.lock"
+expect fail 'the Jake queue is locked by pid' "a second writer waits for the queue's lock, then refuses" "$LANE" queue
+kill "$held"; wait "$held" 2> /dev/null || true
+expect ok '^No Jake items are queued' "a dead holder's lock is cleared" "$LANE" sitting render
+# A pass holds while its request is still open: the next look doesn't bring it back.
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" sitting render > /dev/null
+"$LANE" sitting start > /dev/null
+"$LANE" sitting ack 2 pass > /dev/null
+"$LANE" sitting end > /dev/null
+"$LANE" queue > /dev/null
+expect ok '^No Jake items are queued, so no sitting\.$' "a passed step stays out while its request is open" "$LANE" sitting render
+# A pass is that item's, not its slot's: a new request at the same head with another item 1 queues it.
+sed 's/^item: Mic prompt$/item: Mic prompt again/' "$T/57.txt" > "$T/57b.txt"
+request "claude/issue-57 @ $read" "$T/57b.txt" > "$T/r57d"
+only_request 57 "$T/r57d" "$T/issues-57.json"
+expect ok '^2\. Mic prompt again \(#57\)' "a pass doesn't hide a different item in the same slot" "$LANE" sitting render
+cp "$T/issues-57.json" "$T/issues.json"
+# A newer request for the issue replaces what the older head left.
+cp "$T/issues-57.json" "$T/issues.json"
+"$LANE" queue > /dev/null
+request "claude/issue-57 @ ccccccc" "$T/hook.txt" > "$T/r57c"
+only_request 57 "$T/r57c" "$T/issues-57.json"
+expect ok '^No Jake items are queued, so no sitting\.$' "a newer request with no Jake items replaces the older head's" "$LANE" sitting render
+
+# A hands-off fn item has no Jake step, so render names it for a hands-free sitting.
+sed 's/^fn: no$/fn: yes/; s/^item: WAV paste$/item: WAV fn/' "$T/hook.txt" > "$T/hook-fn.txt"
+request "claude/issue-64 @ $read" "$T/hook-fn.txt" > "$T/r64f"
+jq -n --rawfile r "$T/r64f" '[{number: 64, body: "", comments: [{createdAt: "2026-10-11T06:00:00Z", body: $r}]}]' > "$T/issues.json"
+expect ok '^Waiting for the daily Lexicon to quit: #64 claude/issue-64 @ [0-9a-f]+ item 1 \(WAV fn\)' "a hands-off fn item is named while it waits" "$LANE" sitting render
+
 # Idle time, read from ioreg in nanoseconds.
-printf '#!/bin/sh\necho "    | |   \\"HIDIdleTime\\" = 45000000000"\n' > "$T/bin/ioreg"
-chmod +x "$T/bin/ioreg"
+fake_idle() { printf '#!/bin/sh\necho "    | |   \\"HIDIdleTime\\" = %s000000000"\n' "$1" > "$T/bin/ioreg"; chmod +x "$T/bin/ioreg"; }
+fake_idle 45
 expect ok '^live-lane: idle 45 s$' "45 s of HID idle passes the default 30 s" "$LANE" idle
 expect fail 'Jake is at the keyboard \(idle 45 s, want 60 s\)' "a longer wait for idle fails while he's active" "$LANE" idle 60
+# The harness notes each window it posts keys in (from, to, the idle time when
+# it began; lexicon-harness's PostedInput). Input inside one is the harness's,
+# so idle steps back to the last input before it, across windows back to back.
+now=1760000000
+printf '#!/bin/sh\n[ "$1" = +%%s ] && { echo %s; exit 0; }\nexec /bin/date "$@"\n' "$now" > "$T/bin/date"
+chmod +x "$T/bin/date"
+printf '%s\t%s\t%s\n' $((now - 40)) $((now - 30)) 50 $((now - 12)) $((now - 6)) 25 > "$DEV/live-lane/posted-input.tsv"
+fake_idle 7
+expect ok '^live-lane: idle 90 s$' "a paste-check's own keys don't reset idle, nor an earlier run's" "$LANE" idle 60
+fake_idle 2
+expect fail 'Jake is at the keyboard \(idle 2 s' "input after the window ends is Jake's" "$LANE" idle 60
+rm "$DEV/live-lane/posted-input.tsv" "$T/bin/date"
 
 # A long wait becomes a timer and frees the lane; a due timer stays queued until the holder reads it.
 expect ok 'due in 600 s; released the lane' "a long wait becomes a timer that releases the lane" "$LANE" timer 600 memory-settle

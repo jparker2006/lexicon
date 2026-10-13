@@ -219,6 +219,8 @@ final class FakeMic: Sendable {
     private let count = Mutex(0)
     /// Engines, by the order they are made, that stop themselves the moment they start.
     private let diesAtStart: Set<Int>
+    /// Engines, by the order they are made, that run but deliver no frames, as a stalled device does.
+    private let mute: Set<Int>
     /// Starts, by the order they happen, that block their thread until `unwedge`.
     private let wedgesAtStart: Set<Int>
     /// Each engine whose start is blocked, as it blocks.
@@ -241,12 +243,13 @@ final class FakeMic: Sendable {
         (false, 0, []))
 
     /// The default clock never moves: no start hits the limit because the machine is slow.
-    init(diesAtStart: Set<Int> = [], wedgesAtStart: Set<Int> = [], wedgesAtFind: Set<Int> = [],
+    init(diesAtStart: Set<Int> = [], mute: Set<Int> = [], wedgesAtStart: Set<Int> = [], wedgesAtFind: Set<Int> = [],
          clock: any Clock<Duration> = TestClock(), askingPermission: Bool = false) {
         (made, continuation) = AsyncStream.makeStream()
         (wedged, wedging) = AsyncStream.makeStream()
         (findWedged, findWedging) = AsyncStream.makeStream()
         self.diesAtStart = diesAtStart
+        self.mute = mute
         self.wedgesAtStart = wedgesAtStart
         self.wedgesAtFind = wedgesAtFind
         self.clock = clock
@@ -269,7 +272,7 @@ final class FakeMic: Sendable {
                 defer { count += 1 }
                 return count
             }
-            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index), wedge: { [self] engine in
+            let engine = FakeEngine(diesAtStart: diesAtStart.contains(index), mute: mute.contains(index), wedge: { [self] engine in
                 let index = starts.withLock { count in
                     defer { count += 1 }
                     return count
@@ -329,14 +332,17 @@ final class FakeEngine: InputEngine, Sendable {
     let stopped: AsyncStream<Void>
 
     private let diesAtStart: Bool
+    private let mute: Bool
     /// Asked at each start: a semaphore to block on, as a stuck Core Audio call does.
     private let wedge: @Sendable (FakeEngine) -> DispatchSemaphore?
     private let running = Atomic(false)
     private let stamp = Mutex<HostTime?>(nil)
     private let stops: AsyncStream<Void>.Continuation
 
-    init(diesAtStart: Bool, wedge: @escaping @Sendable (FakeEngine) -> DispatchSemaphore? = { _ in nil }) {
+    init(diesAtStart: Bool, mute: Bool = false,
+         wedge: @escaping @Sendable (FakeEngine) -> DispatchSemaphore? = { _ in nil }) {
         self.diesAtStart = diesAtStart
+        self.mute = mute
         self.wedge = wedge
         (stopped, stops) = AsyncStream.makeStream()
     }
@@ -345,6 +351,7 @@ final class FakeEngine: InputEngine, Sendable {
         wedge(self)?.wait()  // timing-ok: the stuck Core Audio call under test; the test releases it
         guard !diesAtStart else { return }
         running.store(true, ordering: .relaxed)
+        guard !mute else { return }
         let tone = (0..<Self.frames).map { Float(sin(2 * Double.pi * 440 * Double($0) / 16_000)) / 4 }
         _ = tone.withUnsafeBufferPointer { segment.ring.write($0) }
         stamp.withLock { $0 = .now() }

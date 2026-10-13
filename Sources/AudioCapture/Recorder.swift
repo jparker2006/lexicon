@@ -143,11 +143,34 @@ public enum Ending: Sendable, Hashable {
 public struct Take: Sendable {
     public let clip: AudioClip
     public let summary: AudioSummary
+    public let sound: InputSound
+}
+
+/// What the input gave over the whole capture, judged on the raw frames before
+/// conversion: quiet speech can round to zero at 16 kHz, a dead input is exact zeros.
+/// Whole capture, not its start: a device that starts late with zeros (a Bluetooth
+/// profile switch) and then delivers audio must still be transcribed.
+public enum InputSound: Sendable, Hashable {
+    case real
+    /// Frames came and every one was exactly 0: a dead or contended device.
+    case zeros
+    /// Not one frame: the engine ran, or stopped on its own with no configuration
+    /// change, and never delivered a buffer.
+    case noFrames
+
+    /// The same verdict from a stored clip, for audio whose raw frames are gone
+    /// (Retry). Judged at 16 kHz, so input that was real but
+    /// below one step reads as zeros: it held no words either.
+    public init(stored clip: AudioClip) {
+        if clip.samples.isEmpty {
+            self = .noFrames
+        } else {
+            self = clip.samples.contains { $0 != 0 } ? .real : .zeros
+        }
+    }
 }
 
 public enum CaptureProblem: Sendable, Hashable {
-    /// Exactly-zero samples in the first ~300 ms: missing permission or a dead device (#4).
-    case silentInput
     /// AirPods stem mute (AVAudioApplication input mute).
     case inputMuted
     /// Under 1 GB free or a write failed: continuing in RAM only.

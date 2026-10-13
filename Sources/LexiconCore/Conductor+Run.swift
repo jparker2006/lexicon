@@ -75,10 +75,13 @@ extension Conductor {
 
         case .cancel:
             // Esc (#18): stop now, still transcribe and save, never type (no target).
-            // It lands as notInserted with text, and paste-last gets it back.
+            // It lands as notInserted with text, and paste-last gets it back. A dead mic has no words to save.
             let take = await capture.stop(.immediately)
             history.record(.audioEnded(id, take.summary))
             noteStorage(take.summary)
+            guard take.sound == .real else {                           // a dead mic: nothing to transcribe
+                return await noSound(id, take.sound, attempt: attempt, cleaning: cleaning)
+            }
             emit(.transcribing(id))
             let outcome = await attempt.finish(take.clip)
             let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
@@ -93,6 +96,9 @@ extension Conductor {
             let take = await capture.stop(.released(at: releasedAt))  // adaptive tail, cap 200 ms
             history.record(.audioEnded(id, take.summary))              // enqueue only; never waits on SQLite
             noteStorage(take.summary)
+            guard take.sound == .real else {                           // a dead mic: nothing to transcribe
+                return await noSound(id, take.sound, attempt: attempt, cleaning: cleaning)
+            }
             emit(.transcribing(id))
             let outcome = await attempt.finish(take.clip)              // finalize + race local + deadline
             let run = DictationRun(id: id, origin: start.origin, purpose: start.purpose, context: context,
