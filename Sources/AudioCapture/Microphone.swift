@@ -48,10 +48,11 @@ protocol InputEngine: AnyObject, Sendable {
 ///
 /// After a Microphone permission change, building an engine's input node can
 /// block its thread for good, deep in Core Audio (#142). Nothing can unblock
-/// it, so an engine gets at most `startLimit` to start: past that the
-/// Dictation fails with a notice, the stuck lane is abandoned, and the next
-/// fn-down builds on a new lane with its own queue. Whatever the old lane
-/// finishes later is stopped and dropped.
+/// it, so a start gets at most `startLimit` in which its lane finishes nothing:
+/// past that the Dictation fails with a notice, the stuck lane is abandoned,
+/// and the next fn-down builds on a new lane with its own queue. Whatever the
+/// old lane finishes later is stopped and dropped. A start queued behind work
+/// that keeps finishing (a run of quick presses) waits its turn instead.
 ///
 /// macOS also holds an engine start while its Allow prompt is up, so when the
 /// permission is undetermined the prompt is shown first, outside the limit.
@@ -64,11 +65,14 @@ final class Microphone: Sendable {
     let hardware: MicHardware
     private let permission: MicPermission
     private let lane: Mutex<MicLane>
+    /// Time on `hardware.clock` since this microphone was made.
+    private let elapsed: @Sendable () -> Duration
 
     init(hardware: MicHardware) {
         self.hardware = hardware
         permission = MicPermission(reported: hardware.permission)
-        lane = Mutex(MicLane(hardware: hardware, permission: permission))
+        elapsed = stopwatch(hardware.clock)
+        lane = Mutex(MicLane(hardware: hardware, permission: permission, elapsed: elapsed))
     }
 
     /// The current lane's queue, where every AVAudioEngine call runs.
@@ -78,12 +82,13 @@ final class Microphone: Sendable {
     /// preparing an input unit must never be what shows the permission prompt.
     func prepare(deviceUID: String?) {
         let lane = lane.withLock { $0 }
-        lane.queue.async { lane.prepareNow(deviceUID: deviceUID) }
+        lane.run { lane.prepareNow(deviceUID: deviceUID) }
     }
 
-    /// Throws `.startTimedOut` when the engine hasn't started within
-    /// `startLimit`, when the Allow prompt is still up after `promptLimit`, or
-    /// at once when an earlier fn-down's prompt request is still out.
+    /// Throws `.startTimedOut` when the engine hasn't started and its lane has
+    /// finished nothing for `startLimit`, when the Allow prompt is still up
+    /// after `promptLimit`, or at once when an earlier fn-down's prompt request
+    /// is still out.
     func start(deviceUID: String?, keyDown: HostTime) async throws(RecorderError) -> MicSource {
         if permission.current == .undetermined {
             // The prompt is already up for an earlier fn-down: asking again would
@@ -108,8 +113,10 @@ final class Microphone: Sendable {
             guard allowed else { throw .micPermissionDenied }
         }
         let lane = lane.withLock { $0 }
-        let started = await within(Self.startLimit) { deliver in
-            lane.queue.async {
+        let calledAt = elapsed()
+        let quiet = { @Sendable [elapsed] in elapsed() - max(calledAt, lane.lastFinished) }
+        let started = await within(Self.startLimit, quiet: quiet) { deliver in
+            lane.run {
                 let result = Result { () throws(RecorderError) in try lane.begin(deviceUID: deviceUID, keyDown: keyDown) }
                 // Too late: the Dictation already failed, so this engine must not hold the device.
                 if !deliver(result), case .success(let late) = result { late.cutOff() }
@@ -127,14 +134,17 @@ final class Microphone: Sendable {
     /// the engine stops itself, then posts a configuration change.
     func simulateDeviceChange() {
         let lane = lane.withLock { $0 }
-        lane.queue.async { lane.simulateDeviceChange() }
+        lane.run { lane.simulateDeviceChange() }
     }
     #endif
 
     /// `work`'s value, or nil once `limit` passes. `work` hands its value to
-    /// `deliver`, which returns false when the limit came first.
+    /// `deliver`, which returns false when the limit came first. With `quiet`,
+    /// the limit counts only the time `quiet` reports: how long the work's lane
+    /// has gone without finishing anything.
     private func within<Value: Sendable>(
-        _ limit: Duration, _ work: (_ deliver: @escaping @Sendable (Value) -> Bool) -> Void
+        _ limit: Duration, quiet: (@Sendable () -> Duration)? = nil,
+        _ work: (_ deliver: @escaping @Sendable (Value) -> Bool) -> Void
     ) async -> Value? {
         await withCheckedContinuation { (done: CheckedContinuation<Value?, Never>) in
             let reply = Mutex<CheckedContinuation<Value?, Never>?>(done)
@@ -144,8 +154,15 @@ final class Microphone: Sendable {
                 return true
             }
             let deadline = Task { [clock = hardware.clock] in
-                try? await clock.sleep(for: limit)  // throws only when cancelled
-                if !Task.isCancelled { _ = answer(nil) }
+                var wait = limit
+                while true {
+                    try? await clock.sleep(for: wait)  // throws only when cancelled
+                    if Task.isCancelled { return }
+                    let still = quiet?() ?? limit
+                    if still >= limit { break }
+                    wait = limit - still
+                }
+                _ = answer(nil)
             }
             work { value in
                 deadline.cancel()
@@ -157,7 +174,7 @@ final class Microphone: Sendable {
     private func abandon(_ stuck: MicLane) {
         stuck.abandon()
         lane.withLock { current in
-            if current === stuck { current = MicLane(hardware: hardware, permission: permission) }
+            if current === stuck { current = MicLane(hardware: hardware, permission: permission, elapsed: elapsed) }
         }
         Self.log.error("mic start passed \(Self.startLimit.ms, privacy: .public) ms: engine queue abandoned")
     }
@@ -204,11 +221,15 @@ final class MicPermission: Sendable {
 /// `queue`: never the writer queue (an F_FULLFSYNC there must not delay
 /// fn-down), never the real-time thread.
 ///
-/// `@unchecked Sendable`: every `var` is touched only on `queue`; `abandoned` is atomic.
+/// `@unchecked Sendable`: every `var` is touched only on `queue`; `abandoned`
+/// and `finishedAt` are atomic and locked.
 final class MicLane: @unchecked Sendable {
     let queue = DispatchQueue(label: "lexicon.audio.engine", qos: .userInteractive)
     let hardware: MicHardware
     private let permission: MicPermission
+    private let elapsed: @Sendable () -> Duration
+    /// When the last piece of work queued with `run` finished, on `elapsed`.
+    private let finishedAt: Mutex<Duration>
 
     /// A start on this lane passed the limit: it builds and starts nothing more.
     private let abandoned = Atomic(false)
@@ -217,10 +238,23 @@ final class MicLane: @unchecked Sendable {
     /// The capture using the mic, until it stops or is cut off.
     private weak var active: MicSource?
 
-    init(hardware: MicHardware, permission: MicPermission) {
+    init(hardware: MicHardware, permission: MicPermission, elapsed: @escaping @Sendable () -> Duration) {
         self.hardware = hardware
         self.permission = permission
+        self.elapsed = elapsed
+        finishedAt = Mutex(elapsed())
     }
+
+    /// Every piece of work on this lane goes through here, so a start waiting its
+    /// turn can tell a queue that is moving from one that is stuck.
+    func run(_ work: @escaping @Sendable () -> Void) {
+        queue.async { [self] in
+            work()
+            finishedAt.withLock { $0 = elapsed() }
+        }
+    }
+
+    var lastFinished: Duration { finishedAt.withLock { $0 } }
 
     func abandon() { abandoned.store(true, ordering: .releasing) }
     private var isAbandoned: Bool { abandoned.load(ordering: .acquiring) }
@@ -298,6 +332,8 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     private var stopped = false
     private var observer: (any NSObjectProtocol)?
     private var poll: (any DispatchSourceTimer)?
+    /// The next rebuild try, while it waits.
+    private var retrying: Task<Void, Never>?
 
     var deviceName: String? { info.withLock { $0.name } }
     var gaps: [Duration] { info.withLock { $0.gaps } }
@@ -315,7 +351,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     }
 
     func start(_ events: SourceEvents) {
-        lane.queue.async { [self] in
+        lane.run { [self] in
             self.events = events
             guard !stopped, let engine else { return events.ended(nil) }
             watch(engine)
@@ -333,7 +369,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     /// the next one take tens of ms, and fn-up must not wait on either. The
     /// capture reads no ring after this, so a last buffer or two is harmless.
     func stop() {
-        lane.queue.async { self.release(prepareNext: true) }
+        lane.run { self.release(prepareNext: true) }
     }
 
     /// A new fn-down while this capture is in its tail: give up the mic now
@@ -348,6 +384,8 @@ final class MicSource: CaptureSource, @unchecked Sendable {
         stopped = true
         poll?.cancel()
         poll = nil
+        retrying?.cancel()
+        retrying = nil
         unwatch()
         engine?.stop()
         engine = nil  // released before the next engine is prepared on the same device
@@ -360,7 +398,7 @@ final class MicSource: CaptureSource, @unchecked Sendable {
         ) { [weak self] _ in
             guard let self else { return }
             let lostAt = HostTime.now()
-            lane.queue.async { self.rebuild(lostAt: lostAt, attempt: 1) }
+            lane.run { self.rebuild(lostAt: lostAt, attempt: 1) }
         }
     }
 
@@ -412,9 +450,11 @@ final class MicSource: CaptureSource, @unchecked Sendable {
     /// would otherwise keep this queue spinning until fn-up. Timed by the
     /// hardware clock, as the start limits are, so a test can drive it.
     private func retry(lostAt: HostTime, attempt: Int) {
-        Task { [self, clock = lane.hardware.clock] in
-            try? await clock.sleep(for: .milliseconds(100))  // never cancelled
-            lane.queue.async { self.rebuild(lostAt: lostAt, attempt: attempt) }
+        retrying?.cancel()
+        retrying = Task { [self, clock = lane.hardware.clock] in
+            // Cancelled by fn-up, which keeps everything captured and ends the loop.
+            guard (try? await clock.sleep(for: .milliseconds(100))) != nil else { return }
+            lane.run { self.rebuild(lostAt: lostAt, attempt: attempt) }
         }
     }
 
@@ -621,6 +661,12 @@ enum InputDevices {
                                 scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
     }
+}
+
+/// Time on `clock` since this call: the start limit compares readings of it.
+func stopwatch<C: Clock>(_ clock: C) -> @Sendable () -> Duration where C.Duration == Duration {
+    let origin = clock.now
+    return { origin.duration(to: clock.now) }
 }
 
 extension Duration {
