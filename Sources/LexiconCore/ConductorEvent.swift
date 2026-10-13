@@ -13,6 +13,9 @@ public enum ConductorEvent: Sendable {
     case stopped(DictationID)
     case transcribing(DictationID)
     case finished(DictationID, DictationStatus)
+    /// ⌃⌘V typed this Dictation's text. `newerOnItsWay`: it is the one before the
+    /// newest, which is still being made. Not `.finished`: no Dictation finished.
+    case pasted(DictationID, newerOnItsWay: Bool)
     case notice(Notice)
 }
 

@@ -40,6 +40,8 @@ public struct IndicatorFollower: Sendable {
         case .finished(let id, let status):
             guard id == current, !isRecording else { return nil }
             return finish(status)
+        case .pasted:
+            return nil  // scaffold (#62): filled test-first
         case .notice(let notice):
             return show(notice)
         }

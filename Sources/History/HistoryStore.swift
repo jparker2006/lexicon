@@ -46,6 +46,22 @@ public enum DictationEvent: Sendable {
     case deleted(DictationID)
 }
 
+/// What ⌃⌘V pastes.
+public struct NewestText: Sendable, Hashable {
+    public let id: DictationID
+    /// Final text (cleaned plus Fixes), never blank.
+    public let text: String
+    /// A Dictation newer than this one is still being made (recording,
+    /// transcribing, waiting, or mid-paste), so this is the one before the newest.
+    public let newerOnItsWay: Bool
+
+    public init(id: DictationID, text: String, newerOnItsWay: Bool) {
+        self.id = id
+        self.text = text
+        self.newerOnItsWay = newerOnItsWay
+    }
+}
+
 /// Sole owner of `history.sqlite` and of the audio files' lifecycle (path,
 /// finalize after a crash, retention, delete). AudioCapture writes a file's
 /// bytes only while its LiveCapture is open.
@@ -154,8 +170,15 @@ public final class HistoryStore: @unchecked Sendable {
         return await Task.detached { try? CAFFile.read(url) }.value
     }
 
-    /// Paste-last: newest Dictation whose status has text, and its final text.
-    public func newestText() async -> (DictationID, String)? { fatalError("not implemented") }
+    /// Paste-last: the newest Dictation Jake can paste, by fn-down (`started_at`).
+    ///
+    /// Counts: purpose `.type` (a Re-speak's text fixes another Dictation, never
+    /// pastes), any origin, a status that has text and is settled (inserted, not
+    /// inserted, recovered; never `ready`, which is mid-paste), and a final text
+    /// that is not blank. nil: nothing to paste yet.
+    public func newestText() async -> NewestText? {
+        nil  // scaffold (#62): filled test-first
+    }
 
     public func dictation(_ id: DictationID) async -> DictationRecord? {
         try? await read { db in

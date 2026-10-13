@@ -100,6 +100,13 @@ final class EventTapThread: @unchecked Sendable {
         onTapThread { self.feed(input) }
     }
 
+    /// A command that is not a gesture (⌃⌘V's hotkey), yielded on the tap thread so
+    /// it queues behind every fn command already sent: `commands` keeps one producer.
+    /// A tap never started (tests) yields it at once, on the caller's thread.
+    func send(_ command: KeyCommand) {
+        // scaffold (#62): filled test-first
+    }
+
     func onTapThread(_ work: @escaping @Sendable () -> Void) {
         guard let runLoop else { return work() }
         CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue, work)
