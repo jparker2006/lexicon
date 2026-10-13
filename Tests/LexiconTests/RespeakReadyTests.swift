@@ -37,6 +37,39 @@ private actor HearingInOrder: LocalTranscriber {
     }
 }
 
+/// Hears one text per clip, in order, as HearingInOrder does, but only while its weights are
+/// installed: `remove` takes them away, so the load and every answer throw `LocalModelNotInstalled`
+/// and a Dictation waits for a model (`.noModel`); `install` brings them back. Copied from
+/// CrashRecoveryTests' InstallableModel, which starts uninstalled.
+private actor RemovableHearing: LocalTranscriber {
+    nonisolated let model = LocalModel.parakeetUnified
+    private var texts: [String]
+    private var installed = true
+    private var resident = false
+
+    init(_ texts: [String]) { self.texts = texts }
+
+    var isResident: Bool { resident }
+    func load() throws {
+        guard installed else { throw LocalModelNotInstalled(model) }
+        resident = true
+    }
+    func unload() { resident = false }
+    func remove() {
+        installed = false
+        resident = false
+    }
+    func install() { installed = true }
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in try await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
+    func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) throws -> String {
+        guard installed else { throw LocalModelNotInstalled(model) }
+        return texts.count > 1 ? texts.removeFirst() : texts[0]
+    }
+}
+
 /// One field, as HeadlessDestination is. Jake's selection is set with `select`
 /// before fn-down and captured at `target()`. `refusal` nil: `replace` pastes;
 /// otherwise it refuses with that reason. Each `replace` first reads, from
@@ -168,6 +201,17 @@ private func notices(_ events: [ConductorEvent]) -> [Notice] {
     }
 }
 
+/// The events of a Dictation through its late landing. A waiting Dictation's first `finished` is
+/// `.waiting`, so this reads on until the status it lands with.
+private func emittedThroughLanding(_ stream: AsyncStream<ConductorEvent>, until id: DictationID) async -> [ConductorEvent] {
+    var seen: [ConductorEvent] = []
+    for await event in stream {
+        seen.append(event)
+        if case .finished(let finished, let status) = event, finished == id, status != .waiting { break }
+    }
+    return seen
+}
+
 @Test(.timeLimit(.minutes(1)))
 func aLiveRespeakReadsReadyInHistoryWhileItsWordsArePastedAndInsertedAfter() async throws {
     let paths = AppPaths.temporary()
@@ -272,6 +316,56 @@ func aLiveRespeakEndedByEscLeavesTheFieldAloneAndIsNotToldNoFieldWasThere() asyn
     #expect(await history.dictation(respeak)?.finalText == "dog")
     #expect(await destination.fieldText == before)
     #expect(!notices(seen).contains(.fixNotLanded(.noField)), "an Esc'd Re-speak said \(notices(seen))")
+    // A Re-speak's words are a correction, never offered to paste-last.
+    #expect(!notices(seen).contains(.readyToPaste(respeak)))
+}
+
+/// A live Re-speak whose speech has to wait: no model can answer at its fn-up, so the Dictation is
+/// `waiting` with its target captured, and the waiting retry lands the words later with no target.
+/// The field must not be edited by that late landing, and the Re-speak must say the words came too late.
+@Test(.timeLimit(.minutes(1)))
+func aLiveRespeakWhoseWordsComeLateLeavesTheFieldAloneAndSaysTheyCameTooLate() async throws {
+    let paths = AppPaths.temporary()
+    let history = try HistoryStore(paths: paths)
+    let destination = RespeakFieldDestination(history: history)
+    let model = RemovableHearing(["the cat saw the cat", "dog"])
+    let clock = TestClock()
+    let conductor = Conductor(
+        recorder: Recorder(), speech: SpeechEngine(local: model, clock: clock), cleanup: Cleanup(),
+        lexicon: try Lexicon(paths: paths), history: history, destination: destination,
+        preferences: PreferencesStore(fixed: .defaults), secrets: Secrets(.environment),
+        keyboard: nil, fixes: nil, jev: nil)
+    let first = try await dictate(conductor)
+    await history.flush()
+    #expect(first.status == .inserted)
+    let before = await destination.fieldText
+
+    await destination.select(TextSpan(location: 16, length: 3))  // the second "cat"
+    await model.remove()  // no model can answer at fn-up
+    let events = await conductor.events()
+    let respeak = DictationID()
+    let waiting = try await liveRespeak(conductor, of: first.id, id: respeak)
+    #expect(waiting.status == .waiting)
+
+    // The retry sleeps on the fake clock. Bring the model back, then let its 30 s pass.
+    await model.install()
+    let retry = try #require(await conductor.waiting[respeak])
+    await clock.waitForSleep(endingAt: SpeechEngine.retryInterval)
+    await clock.advance(by: SpeechEngine.retryInterval)
+    await retry.value
+    await history.flush()
+
+    #expect(await history.dictation(respeak)?.finalText == "dog")  // the late words are saved
+    #expect(await destination.fieldText == before)
+    let seen = await emittedThroughLanding(events, until: respeak)
+    // `.tooLate` is the FixProblem case the fix adds. Until it exists this reads the problem's name,
+    // so the file compiles and the check fails on the missing notice. Once the case exists, use
+    // #expect(notices(seen).contains(.fixNotLanded(.tooLate))) in its place.
+    let said = notices(seen).contains { notice in
+        guard case .fixNotLanded(let problem) = notice else { return false }
+        return String(describing: problem) == "tooLate"
+    }
+    #expect(said, "the late words said \(notices(seen))")
     // A Re-speak's words are a correction, never offered to paste-last.
     #expect(!notices(seen).contains(.readyToPaste(respeak)))
 }

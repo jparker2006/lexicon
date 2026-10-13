@@ -350,4 +350,32 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
     @Test func replacementKeepsTheSelectionsMarkBeforeItsSpace() {
         #expect(RespeakText.replacement("Dog.", replacing: "cat! ", terms: [], isEnglish: { _ in true }) == "dog! ")
     }
+
+    // The first word is judged without the punctuation after it (#83 review): "Dog," is the English
+    // word "dog" with a comma, so the comma must not keep the capital. Only "," ";" ":" are stripped
+    // here; an apostrophe is part of a word ("I'm"), and the "I" rule reads the bare word too.
+
+    /// "Dog, then." over "cat": "Dog," failed isEnglish, so the capital stayed; the first word is "Dog".
+    @Test func replacementLowercasesAFirstWordFollowedByAComma() {
+        #expect(RespeakText.replacement("Dog, then.", replacing: "cat", terms: [],
+                                        isEnglish: { $0 == "dog" || $0 == "then" }) == "dog, then")
+    }
+
+    @Test func replacementLowercasesAFirstWordFollowedBySemicolonOrColon() {
+        #expect(RespeakText.replacement("Dog; then.", replacing: "cat", terms: [],
+                                        isEnglish: { $0 == "dog" || $0 == "then" }) == "dog; then")
+        #expect(RespeakText.replacement("Dog: then.", replacing: "cat", terms: [],
+                                        isEnglish: { $0 == "dog" || $0 == "then" }) == "dog: then")
+    }
+
+    /// "I," is the pronoun "I" with a comma, so it keeps its capital as "I." does (the "I" rule reads the bare word).
+    @Test func replacementKeepsTheWordIBeforeAComma() {
+        #expect(RespeakText.replacement("I, then.", replacing: "eye", terms: [], isEnglish: { _ in true }) == "I, then")
+    }
+
+    /// Guard that passes at the head and after the fix: a name before a comma keeps its capital.
+    @Test func replacementKeepsANameBeforeAComma() {
+        #expect(RespeakText.replacement("Alice, then.", replacing: "alice", terms: [],
+                                        isEnglish: { $0 == "then" }) == "Alice, then")
+    }
 }
