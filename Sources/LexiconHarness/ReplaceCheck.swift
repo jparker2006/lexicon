@@ -107,10 +107,12 @@ func replaceCheck(frontmost: Bool) async throws {
     print("PASS  replace-check: both replaces landed in the field and the clipboard is restored")
 }
 
-/// The focused field of the frontmost app, through the system-wide element.
+/// The focused field of the frontmost app, read per app: the system-wide
+/// focused-element query fails with some apps frontmost (Claude desktop).
 @MainActor
 private func focusedField() throws -> AXUIElement {
-    guard let field = AX.element(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute) else {
+    guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+          let field = AX.element(AX.app(pid), kAXFocusedUIElementAttribute) else {
         throw HarnessError("no focused field: click into an empty field in the frontmost app, then run this again")
     }
     return field
