@@ -100,3 +100,25 @@ private func access(_ preferences: Preferences = .defaults, app: AppContext = .u
     #expect(await ended.value == "revoked: secretFound")
     closeSocket.finish()
 }
+
+// Each model is checked against its own status, so these hold before and after
+// Jake confirms a provider's terms.
+
+@Test func anEvalIsGrantedOnlyForAModelWhoseZeroRetentionIsConfirmed() {
+    for model in CloudModel.allCases {
+        let confirmed = model.retention == .confirmed
+        #expect(Preferences.defaults.cloudDenied(for: .eval(model)) == (confirmed ? nil : .retentionUnconfirmed))
+        #expect((CloudAccess.granted(by: .defaults, for: .eval(model), keys: fakeKeys) != nil) == confirmed)
+    }
+}
+
+@Test func privateModeIsCheckedFirstAndTheRetentionGateLeavesDailyDictationAlone() throws {
+    var privateMode = Preferences.defaults
+    privateMode.privacy = .private
+    for model in CloudModel.allCases {
+        #expect(privateMode.cloudDenied(for: .eval(model)) == .privateModeOn)
+    }
+    // The gate covers evals only: daily Dictation with defaults is still granted.
+    #expect(Preferences.defaults.cloudDenied(for: .app(.unknown)) == nil)
+    #expect(try access().key(.speech(.museVoice)) == "fake-key-for-speech.meta.muse-voice-transcribe-1.0")
+}

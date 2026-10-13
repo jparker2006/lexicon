@@ -2,7 +2,6 @@
 // (https://github.com/Muesli-HQ/muesli, MIT License).
 // Copyright (c) 2026 Pranav Hari
 
-import Accelerate
 import FluidAudio
 import Foundation
 public import LexiconDomain
@@ -13,13 +12,24 @@ public import Transcription
 /// (it over-fired in measurement; Rules fix words after transcription).
 /// About 80 ms per clip of 6 s or less, warm load 0.4-0.6 s, weights under
 /// `<root>/models/` (never in the bundle).
+///
+/// Long audio is read in FluidAudio's own grid of 15 s windows overlapping by
+/// 2 s, each decoded on its own (`WindowDecoder`) and then merged on the overlap
+/// (`SeamMerge`). Each window is decoded as soon as it is captured, so a
+/// 20-minute Dictation waits at fn-up for its last window and the merge, not for
+/// 93 windows. The windows and the merge are the one-shot path's, so the words
+/// are too. The streaming encoder is not used: it is a second 565 MB download
+/// and decodes worse.
 public actor ParakeetTranscriber: LocalTranscriber {
     public nonisolated let model: LocalModel = .parakeetUnified
     let folder: URL
-    private var manager: UnifiedAsrManager?
+    private var decoder: WindowDecoder?
     /// A load in flight, shared by every caller that needs the model meanwhile.
-    private var loading: Task<UnifiedAsrManager, any Error>?
-    /// Every model call (transcribe, unload) runs here: one at a time, live first.
+    private var loading: Task<WindowDecoder, any Error>?
+    /// Joins windows into text. Read from the vocabulary on the first join and
+    /// kept: a few KB, and a join never needs the model itself.
+    private var words: SeamMerge?
+    /// Every model call (one window, unload) runs here: one at a time, live first.
     private let jobs = LocalJobQueue()
 
     /// Weights live in `<root>/models/` (this module names that folder). If they
@@ -45,7 +55,7 @@ public actor ParakeetTranscriber: LocalTranscriber {
         ModelNames.ParakeetUnified.vocab,
     ]
 
-    public var isResident: Bool { manager != nil }
+    public var isResident: Bool { decoder != nil }
 
     /// Every required file is whole. FluidAudio streams each file into
     /// `<name>.partial` inside its final `.mlmodelc` folder and renames it once
@@ -82,50 +92,57 @@ public actor ParakeetTranscriber: LocalTranscriber {
     }
 
     /// Waits for any running transcription, so the model never goes away under one.
+    /// Only a cancelled unload, which keeps the model, can throw.
     public func unload() async {
-        await jobs.run(.background) { await self.dropModel() }
+        try? await jobs.run(.background) { await self.dropModel() }
     }
 
     /// `terms` is ignored: no FluidAudio boosting (see the type's doc).
-    public func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String {
+    public nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WindowedSession(grid: WindowDecoder.grid,
+                        decode: { samples, start in try await self.decode(samples, at: start, priority: priority) },
+                        join: { windows in try await self.join(windows) })
+    }
+
+    /// One window, as its own job: a live Dictation waits behind at most one
+    /// window of a background Retry, never the whole clip.
+    private func decode(_ samples: [Int16], at start: Int, priority: LocalPriority) async throws
+        -> [SeamMerge.TokenWindow] {
         try await jobs.run(priority) {
-            let manager = try await self.loaded()
-            return try await manager.transcribe(Self.floats(clip.samples))
+            // Its Dictation was cancelled, or the cloud won, while it waited its turn.
+            try Task.checkCancellation()
+            return try await self.loaded().decode(samples, at: start)
         }
     }
 
-    private func loaded() async throws -> UnifiedAsrManager {
-        if let manager { return manager }
+    private func join(_ windows: [[SeamMerge.TokenWindow]]) throws -> String {
+        guard !windows.isEmpty else { return "" }
+        if words == nil {
+            let tokenizer = try Tokenizer(vocabPath: folder.appending(path: ModelNames.ParakeetUnified.vocab))
+            words = SeamMerge(vocabulary: tokenizer.vocabulary)
+        }
+        return words!.text(windows)
+    }
+
+    private func loaded() async throws -> WindowDecoder {
+        if let decoder { return decoder }
         if let loading { return try await loading.value }
         let folder = folder
         guard Self.isComplete(folder) else { throw LocalModelNotInstalled(model) }
-        let task = Task {
-            let manager = UnifiedAsrManager(encoderPrecision: .int8)
-            try await manager.loadModels(from: folder)
-            return manager
-        }
+        let task = Task { try await WindowDecoder.load(from: folder) }
         loading = task
         defer { loading = nil }
-        let manager = try await task.value
-        self.manager = manager
-        return manager
+        let decoder = try await task.value
+        self.decoder = decoder
+        return decoder
     }
 
+    /// Lets go of the CoreML models; they are freed with the last reference.
     private func dropModel() async {
         if let loading { _ = try? await loading.value }
-        let dropped = manager
-        manager = nil
-        // Releases the CoreML models now rather than whenever the last reference goes.
-        await dropped?.cleanup()
+        decoder = nil
     }
 
-    /// Int16 PCM to the [-1, 1) floats FluidAudio takes.
-    static func floats(_ samples: [Int16]) -> [Float] {
-        var floats = [Float](repeating: 0, count: samples.count)
-        vDSP.convertElements(of: samples, to: &floats)
-        vDSP.multiply(1 / 32768, floats, result: &floats)
-        return floats
-    }
 
     /// Model install (first-run setup, or `scripts/install-model.sh`): downloads
     /// the offline int8 tier (about 614 MB) into `<root>/models/` and loads it
