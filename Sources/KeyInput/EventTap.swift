@@ -37,8 +37,9 @@ final class EventTapThread: @unchecked Sendable {
     /// only once, if the hotkey never registered or the tap never saw the key). It is
     /// one keystroke: the first report ticks, and the other report of it does not.
     private let hotkeys: [Hotkey]
-    /// Presses one report counted and the other has not come in yet. Tap thread only.
-    private var tapCopiesAhead = 0, hotkeyPressesAhead = 0
+    /// A press one report counted while the other has not come in yet: at most one,
+    /// since a press's two reports come within moments of each other. Tap thread only.
+    private var tapCopyAhead = false, hotkeyPressAhead = false
     private let log = Logger(subsystem: "Lexicon", category: "fn")
 
     init(gesture: FnGesture, input: InputClock, continuation: AsyncStream<KeyCommand>.Continuation,
@@ -116,11 +117,11 @@ final class EventTapThread: @unchecked Sendable {
     /// A tap never started (tests) runs it at once, on the caller's thread.
     func send(_ command: KeyCommand) {
         onTapThread { [self] in
-            if tapCopiesAhead > 0 {
-                tapCopiesAhead -= 1
+            if tapCopyAhead {
+                tapCopyAhead = false
             } else {
                 input.tick()
-                hotkeyPressesAhead += 1
+                hotkeyPressAhead = true
             }
             continuation.yield(command)
             log.notice("key command: \(String(describing: command), privacy: .public)")
@@ -153,13 +154,15 @@ final class EventTapThread: @unchecked Sendable {
     }
 
     /// One tick per keystroke; a hotkey press the hotkey's `send` already counted is not another.
+    /// A hotkey held down repeats only here (Carbon reports it once), so its repeats count nothing.
     private func countTyping(_ event: CGEvent) {
         guard hotkeys.contains(where: { $0.matches(event) }) else { return input.tick() }
-        if hotkeyPressesAhead > 0 {
-            hotkeyPressesAhead -= 1
+        guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
+        if hotkeyPressAhead {
+            hotkeyPressAhead = false
         } else {
             input.tick()
-            tapCopiesAhead += 1
+            tapCopyAhead = true
         }
     }
 
