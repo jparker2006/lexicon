@@ -78,7 +78,7 @@ import Testing
     var showingWhenQuitReturned: String?
     let quit = Task {
         started = true
-        await keeper.finishForQuit(within: .seconds(2), clock: quitClock)
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
         showingWhenQuitReturned = board.showing
     }
     // Wait for quit to begin on its own signal: the restore is still to come.
@@ -103,7 +103,7 @@ import Testing
     var showingWhenQuitReturned: String?
     let quit = Task {
         started = true
-        await keeper.finishForQuit(within: .seconds(2), clock: quitClock)
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
         showingWhenQuitReturned = board.showing
     }
     while !started { await Task.yield() }
@@ -120,13 +120,13 @@ import Testing
     board.jakeCopies("jake's text")
     let keeper = keeper(board, clock)
 
-    await keeper.finishForQuit(within: .seconds(2), clock: quitClock)
+    await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
     #expect(board.showing == "jake's text")
 
     let paste = keeper.put("dictated")
     _ = clock.at(0)
     #expect(board.targetReads() == "dictated")
     #expect(keeper.expire(at: clock.at(200)) == .settled(paste))
-    await keeper.finishForQuit(within: .seconds(2), clock: quitClock)
+    await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
     #expect(board.showing == "jake's text")
 }

@@ -74,7 +74,7 @@ import Testing
 
     var finished = false
     let quit = Task {
-        await keeper.finishForQuit(within: .seconds(2), clock: quitClock)
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
         finished = true
     }
     // Wait until the quit sleeps on the clock or has already returned. Waiting for
@@ -82,7 +82,7 @@ import Testing
     while !finished, quitClock.sleepers != 1 { await Task.yield() }
     #expect(!finished, "quit returned before its 2 s cap passed")
 
-    await quitClock.advance(by: .seconds(2))
+    await quitClock.advance(by: ClipboardKeeper.missedHold)
     await quit.value
     #expect(board.showing == "jake's text")
 }
@@ -98,7 +98,7 @@ import Testing
 
     var finished = false
     let quit = Task {
-        await keeper.finishForQuit(within: .seconds(2), clock: quitClock)
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
         finished = true
     }
     while !finished, quitClock.sleepers != 1 { await Task.yield() }
@@ -106,7 +106,7 @@ import Testing
     #expect(!finished, "quit returned before its 2 s cap passed")
 
     board.jakeCopies("copied later")
-    await quitClock.advance(by: .seconds(2))
+    await quitClock.advance(by: ClipboardKeeper.missedHold)
     await quit.value
     #expect(board.showing == "copied later")
 }
