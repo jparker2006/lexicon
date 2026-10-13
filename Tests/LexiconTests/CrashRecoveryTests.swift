@@ -394,6 +394,10 @@ private actor InstallableModel: LocalTranscriber {
         isResident = true
     }
     func unload() { isResident = false }
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in try await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String {
         guard installed else { throw LocalModelNotInstalled(model) }
         transcribed += 1

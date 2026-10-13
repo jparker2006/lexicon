@@ -11,13 +11,17 @@
 #   scripts/live-lane.sh check              succeed only if this session holds it
 #
 #   scripts/live-lane.sh queue              open requests in arrival order, and due timers
-#   scripts/live-lane.sh idle [seconds]     succeed once Jake hasn't typed or moved the mouse for that long (default 30)
+#   scripts/live-lane.sh idle [seconds]     succeed once Jake hasn't typed or moved the mouse for that long (default 30);
+#                                           keys the harness posts, or Dev posts for it, don't count
 #   scripts/live-lane.sh timer <seconds> <label>   note a long wait instead of sitting on the lane
 #   scripts/live-lane.sh timers             each timer, due or not
 #   scripts/live-lane.sh preflight <issue>  refuse what that issue's request can't pass; print the open command
 #
 #   scripts/live-lane.sh sitting render     Jake's queued items as one numbered checklist
 #   scripts/live-lane.sh sitting start      on Jake's go: open the sitting (writes the marker; quits the daily Lexicon for fn steps)
+#   scripts/live-lane.sh sitting start --hands-free
+#                                           only after Jake types "hands free" here: a sitting with no steps for
+#                                           him that quits the daily Lexicon, so hands-off fn items can run
 #   scripts/live-lane.sh sitting ack <step> pass|fail|skip [note]
 #   scripts/live-lane.sh sitting end        close it, print every step's ack, reopen the daily Lexicon if start quit it
 #
@@ -45,6 +49,16 @@ MARKER="$DATA/live-sitting.open"
 STATE="$DATA/live-lane"
 PARKED="$SUPPORT/$NAME parked"
 DAILY_ID=dev.jparker.lexicon
+# Jake's items, kept from every open request seen (#233): a hands-off result
+# answers the request, and the merge closes the issue, before his sitting comes.
+JAKE="$STATE/jake-items.tsv"
+# Each Jake item passed in a sitting (issue, head, item number, title) while
+# its request is still open, so the next look doesn't add it back.
+PASSED="$STATE/jake-passed.tsv"
+# The windows the harness posted keys in, which idle skips (idle_seconds).
+POSTED="$STATE/posted-input.tsv"
+# The unified log reader; a test sets its own, so it never reads the real Mac's.
+LOG=${LIVE_LANE_LOG:-/usr/bin/log}
 
 die() { echo "live-lane: $*" >&2; exit 1; }
 
@@ -260,32 +274,80 @@ next_slot() {
     fi
 }
 
+# The holder's queue look and its sitting end can run at once (a watcher's
+# status beside a sitting), so each read and rewrite of $JAKE holds this lock.
+# shlock clears a lock whose pid has died; a live one is waited out, 10 s at most.
+jake_lock() {
+    mkdir -p "$STATE"
+    tries=0
+    until shlock -f "$JAKE.lock" -p $$; do
+        tries=$((tries + 1))
+        [ "$tries" -lt 50 ] || die "the Jake queue is locked by pid $(cat "$JAKE.lock" 2> /dev/null); try again"
+        sleep 0.2
+    done
+}
+jake_unlock() { rm -f "$JAKE.lock"; }
+
+# Writes $ISSUES.jake: the kept Jake items (issue, head, then the item's
+# fields), first seen first, with each open request's added unless it passed.
+# An issue's newer request replaces what its older head left. Only the lane's
+# holder saves it to $JAKE, on every queue, preflight and render, so an item is
+# kept before the hands-off result that answers its request; a builder's look
+# changes nothing.
+remember_jake_items() {
+    requests > "$ISSUES.remember"
+    mine=
+    if read_lock 2> /dev/null && holds; then mine=1; jake_lock; fi
+    { [ ! -f "$JAKE" ] || cat "$JAKE"; } > "$ISSUES.kept"
+    { [ ! -f "$PASSED" ] || cat "$PASSED"; } > "$ISSUES.passed"
+    awk -F'\t' 'FILENAME == ARGV[1] { head[$2] = $3; next } !($1 in head) || head[$1] == $2' "$ISSUES.remember" "$ISSUES.kept" > "$ISSUES.jake"
+    while IFS='	' read -r created issue head index; do
+        items=$(request_body "$issue" "$index" | scripts/live-request.sh items - 2> /dev/null) || continue
+        printf '%s\n' "$items" | awk -F'\t' -v i="$issue" -v h="$head" '$3 == "jake" { print i "\t" h "\t" $0 }'
+    done < "$ISSUES.remember" > "$ISSUES.open"
+    awk -F'\t' 'FILENAME == ARGV[1] || FILENAME == ARGV[2] { seen[$1 FS $2 FS $3 FS $4] = 1; next } !seen[$1 FS $2 FS $3 FS $4]++' \
+        "$ISSUES.jake" "$ISSUES.passed" "$ISSUES.open" >> "$ISSUES.jake"
+    if [ -n "$mine" ]; then
+        cp "$ISSUES.jake" "$JAKE.$$"
+        mv "$JAKE.$$" "$JAKE"
+        # A pass is needed only while its request is open: then nothing can add it back.
+        awk -F'\t' 'FILENAME == ARGV[1] { open[$1 FS $2 FS $3 FS $4] = 1; next } ($1 FS $2 FS $3 FS $4) in open' "$ISSUES.open" "$ISSUES.passed" > "$PASSED.$$"
+        mv "$PASSED.$$" "$PASSED"
+        jake_unlock
+    fi
+}
+
 # Writes $STATE/sitting.tsv (step, issue, head, item, title, fn) and prints the checklist.
 sitting_render() {
     # Acks are by step number, so the numbers stay fixed while a sitting is open.
     ! sitting_open || die "a sitting is open; end it before rendering the next one"
     mkdir -p "$STATE"
+    remember_jake_items
     steps=$(mktemp -t live-sitting)
     out=$(mktemp -t live-sitting)
-    skipped=
-    requests > "$ISSUES.requests"
-    while IFS='	' read -r created issue head index; do
-        sha=${head##* @ }
+    waiting=
+    {
         # A request that can't be read stays out of the sitting, named, and the rest go on.
-        if ! items=$(request_body "$issue" "$index" | scripts/live-request.sh items - 2> "$ISSUES.err"); then
-            printf 'skip\t#%s %s: the request can'"'"'t be read: %s\n' "$issue" "$head" "$(sed 's/^live-request: //' "$ISSUES.err" | paste -sd ';' - | sed 's/;/; /g')"
-            continue
-        fi
-        printf '%s\n' "$items" | while IFS= read -r item; do
-            kind=$(printf '%s\n' "$item" | cut -f3)
-            [ "$kind" = jake ] || continue
-            why=$(static_refusals "$issue" "$sha" "$item")
+        while IFS='	' read -r created issue head index; do
+            if ! items=$(request_body "$issue" "$index" | scripts/live-request.sh items - 2> "$ISSUES.err"); then
+                printf 'skip\t#%s %s: the request can'"'"'t be read: %s\n' "$issue" "$head" "$(sed 's/^live-request: //' "$ISSUES.err" | paste -sd ';' - | sed 's/;/; /g')"
+                continue
+            fi
+            # A hands-off fn item has no step for Jake: it waits for the daily Lexicon to quit.
+            printf '%s\n' "$items" | awk -F'\t' -v i="$issue" -v h="$head" '$3 == "hands-off" && $7 == "yes" { print "fn\t#" i " " h " item " $1 " (" $2 ")" }'
+        done < "$ISSUES.remember"
+        while IFS='	' read -r issue head item; do
+            why=$(static_refusals "$issue" "${head##* @ }" "$item")
             if [ -n "$why" ]; then printf 'skip\t%s\n' "$why"; else printf 'item\t%s\t%s\t%s\n' "$issue" "$head" "$item"; fi
-        done
-    done < "$ISSUES.requests" > "$steps"
+        done < "$ISSUES.jake"
+    } > "$steps"
+    if grep -q '^fn' "$steps"; then
+        waiting="Waiting for the daily Lexicon to quit: $(sed -n 's/^fn	//p' "$steps" | paste -sd ';' - | sed 's/;/; /g'). They run in the next sitting's hands-off part, or in a hands-free sitting (sitting start --hands-free) once Jake says \"hands free\"."
+    fi
     if ! grep -q '^item' "$steps"; then
         rm -f "$STATE/sitting.tsv" "$STATE/sitting.txt"
         echo "No Jake items are queued, so no sitting."
+        [ -z "$waiting" ] || echo "$waiting"
         sed -n 's/^skip	/not in a sitting: /p' "$steps"
         rm -f "$steps" "$out"
         return 0
@@ -326,6 +388,7 @@ sitting_render() {
         fi
     } > "$STATE/sitting.txt"
     cat "$STATE/sitting.txt"
+    [ -z "$waiting" ] || printf '\n%s\n' "$waiting"
     rm -f "$steps" "$out" "$out".*
 }
 
@@ -335,26 +398,48 @@ sitting() {
         start)
             require_lane
             ! sitting_open || die "a sitting is already open (sitting end closes it)"
-            [ -s "$STATE/sitting.tsv" ] || die "no rendered sitting with Jake's steps: run sitting render, and start one only when it has steps"
+            # Hands-free: Jake typed "hands free" in this session, so the sitting has
+            # no steps for him and quits the daily Lexicon for the hands-off fn items.
+            case "${2:-}" in
+                "") handsfree= ;;
+                --hands-free) handsfree=yes ;;
+                *) die "usage: live-lane.sh sitting start [--hands-free]" ;;
+            esac
+            fn=$handsfree
+            if [ -z "$handsfree" ]; then
+                [ -s "$STATE/sitting.tsv" ] || die "no rendered sitting with Jake's steps: run sitting render, and start one only when it has steps"
+                if awk -F'\t' '$6 == "yes"' "$STATE/sitting.tsv" | grep -q .; then fn=yes; fi
+            fi
             quit=
-            if awk -F'\t' '$6 == "yes"' "$STATE/sitting.tsv" | grep -q .; then
+            if [ -n "$fn" ]; then
                 # Jake's daily Lexicon is quit below, inside the sitting (Q8); any other listener refuses now.
                 others=$(fn_listeners | awk -F'|' '$2 != "the daily Lexicon"')
                 if [ -n "$others" ]; then
                     printf '%s\n' "$others" | while IFS='|' read -r p what path; do
                         echo "$what is running (pid $p, $path) and answers fn, so Dev's fn results would be wrong. Quit it, then rerun." >&2
                     done
-                    die "this sitting has fn steps; it didn't open"
+                    die "this sitting uses fn; it didn't open"
                 fi
-                if fn_listeners | grep -q '|the daily Lexicon|'; then quit=yes; fi
+                if fn_listeners | grep -q '|the daily Lexicon|'; then
+                    ! dictating || die "the daily Lexicon has a Dictation in progress, so the sitting didn't open; wait for it to land"
+                    quit=yes
+                fi
             fi
-            printf 'opened=%s\nholder=%s\npid=%s\npid-started=%s\n' "$(TZ=UTC date '+%Y-%m-%dT%H:%M:%SZ')" "$holder" "$pid" "$since" > "$MARKER"
+            printf 'opened=%s\nholder=%s\npid=%s\npid-started=%s\n%s' "$(TZ=UTC date '+%Y-%m-%dT%H:%M:%SZ')" "$holder" "$pid" "$since" "${handsfree:+hands-free=yes
+}" > "$MARKER"
             if [ -n "$quit" ]; then
                 ( daily quit ) || { rm -f "$MARKER"; die "the sitting didn't open: the daily Lexicon wasn't quit"; }
-                require_no_fn_listeners || { rm -f "$MARKER"; die "the sitting didn't open: another app still answers fn"; }
+                # The quit happened: put the daily Lexicon back before refusing.
+                require_no_fn_listeners || { rm -f "$MARKER"; ( daily reopen ) || true; die "the sitting didn't open: another app still answers fn"; }
+            fi
+            # Only once it is open: a refused start keeps the rendered steps.
+            if [ -n "$handsfree" ]; then
+                mkdir -p "$STATE"
+                : > "$STATE/sitting.tsv"
+                rm -f "$STATE/sitting.txt"
             fi
             : > "$STATE/sitting.acks"
-            echo "live-lane: sitting open ($(wc -l < "$STATE/sitting.tsv" | tr -d ' ') steps). $(fn_listeners_line)"
+            echo "live-lane: ${handsfree:+hands-free }sitting open ($(wc -l < "$STATE/sitting.tsv" | tr -d ' ') steps). $(fn_listeners_line)"
             ;;
         ack)
             require_lane
@@ -371,19 +456,30 @@ sitting() {
         end)
             require_lane
             sitting_open || die "no sitting is open"
-            [ -s "$STATE/sitting.tsv" ] || die "the open sitting has lost its steps ($STATE/sitting.tsv); its acks are in $STATE/sitting.acks"
+            # A hands-free sitting has no steps, so only a sitting with Jake's can lose them.
+            grep -qx 'hands-free=yes' "$MARKER" || [ -s "$STATE/sitting.tsv" ] || die "the open sitting has lost its steps ($STATE/sitting.tsv); its acks are in $STATE/sitting.acks"
+            touch "$STATE/sitting.tsv" "$STATE/sitting.acks"
             while IFS='	' read -r step issue head item title fn; do
                 ack=$(awk -F'\t' -v s="$step" '$1 == s { a = $2 ($3 != "" ? ": " $3 : "") } END { print a }' "$STATE/sitting.acks")
                 where=; [ "$issue" = - ] || where=" (#$issue $head item $item)"
                 printf '%s\n' "$step. $title$where: ${ack:-no ack}"
             done < "$STATE/sitting.tsv"
+            # A step acked pass leaves Jake's queue; a fail, a skip or no ack keeps it,
+            # since nothing installs until his items pass (Q6).
+            jake_lock
+            touch "$JAKE"
+            awk -F'\t' 'FILENAME == ARGV[1] { passed[$1] = ($2 == "pass"); next }
+                passed[$1] && $2 != "-" { print $2 "\t" $3 "\t" $4 "\t" $5 }' "$STATE/sitting.acks" "$STATE/sitting.tsv" >> "$PASSED"
+            awk -F'\t' 'FILENAME == ARGV[1] { gone[$1 FS $2 FS $3 FS $4] = 1; next } !(($1 FS $2 FS $3 FS $4) in gone)' "$PASSED" "$JAKE" > "$JAKE.$$"
+            mv "$JAKE.$$" "$JAKE"
+            jake_unlock
             rm -f "$MARKER" "$STATE/sitting.tsv" "$STATE/sitting.txt" "$STATE/sitting.acks"
             echo "live-lane: sitting closed"
             if [ -e "$STATE/daily-quit" ]; then
                 ( daily reopen ) || echo "live-lane: the daily Lexicon didn't reopen; run: scripts/live-lane.sh daily reopen" >&2
             fi
             ;;
-        *) echo "usage: live-lane.sh sitting render | start | ack <step> pass|fail|skip [note] | end" >&2; exit 64 ;;
+        *) echo "usage: live-lane.sh sitting render | start [--hands-free] | ack <step> pass|fail|skip [note] | end" >&2; exit 64 ;;
     esac
 }
 
@@ -394,19 +490,20 @@ daily_pid() { lsappinfo info -only pid "$DAILY_ID" | sed -n 's/^"pid"=\([0-9][0-
 # A Dictation is in progress when the daily app's newest Dictation gesture in
 # the last 21 minutes (the 20-minute cap plus landing) began or confirmed one.
 # KeyInput logs them as "fn gesture: dictationBegan(...)" (subsystem Lexicon, category fn).
+# A log that can't be read could hide one, so it refuses rather than answer no.
 dictating() {
-    last=$(/usr/bin/log show --last 21m --style compact --predicate \
-        "subsystem == \"Lexicon\" && category == \"fn\" && processImagePath CONTAINS \"/Lexicon.app/\" && eventMessage BEGINSWITH \"fn gesture: dictation\"" \
-        | sed -n 's/.*fn gesture: //p' | tail -1)
+    gestures=$("$LOG" show --last 21m --style compact --predicate \
+        "subsystem == \"Lexicon\" && category == \"fn\" && processImagePath CONTAINS \"/Lexicon.app/\" && eventMessage BEGINSWITH \"fn gesture: dictation\"") \
+        || die "can't read the daily Lexicon's log, so a Dictation may be in progress; not quitting it"
+    last=$(printf '%s\n' "$gestures" | sed -n 's/.*fn gesture: //p' | tail -1)
     case "$last" in dictationBegan* | dictationConfirmed*) return 0 ;; *) return 1 ;; esac
 }
 
 daily() {
     require_lane
-    # Only around a sitting (Q8): sitting start quits it, sitting end reopens it.
     # Only around a sitting (Q8): quit inside one, reopen only what quit closed.
     case "${1:-}" in
-        quit) sitting_open || die "daily quit runs only in an open sitting; sitting start quits it for a sitting with fn steps" ;;
+        quit) sitting_open || die "daily quit runs only in an open sitting; sitting start quits it for a sitting with fn steps, and sitting start --hands-free once Jake says \"hands free\"" ;;
         reopen) [ -e "$STATE/daily-quit" ] || die "daily reopen only reopens a daily Lexicon that daily quit closed" ;;
     esac
     # lsappinfo, System Events and open reach the real Mac whatever HOME says,
@@ -420,10 +517,14 @@ daily() {
             [ -n "$pid" ] || { echo "live-lane: the daily Lexicon is not running"; return 0; }
             [ "$(ps -o comm= -p "$pid")" = "$app/Contents/MacOS/Lexicon" ] || die "the running daily Lexicon (pid $pid) is not $app; not quitting it"
             ! dictating || die "the daily Lexicon has a Dictation in progress; wait for it to land"
-            # From its own menu, the same Quit Jake clicks: never a kill.
-            osascript -e "tell application \"System Events\" to tell (first application process whose bundle identifier is \"$DAILY_ID\")" \
-                -e 'click menu bar item 1 of menu bar 2' \
-                -e 'click menu item "Quit Lexicon" of menu 1 of menu bar item 1 of menu bar 2' \
+            # From its own menu, the same Quit Jake clicks: never a kill. By pid,
+            # since Lexicon Dev's process is named Lexicon too. The status menu is
+            # the last menu bar: an app not activated since launch (as after
+            # daily reopen) has no main menu bar, so it is menu bar 1, not 2.
+            osascript -e "tell application \"System Events\" to tell (first application process whose unix id is $pid)" \
+                -e 'set extras to last menu bar' \
+                -e 'click menu bar item 1 of extras' \
+                -e 'click menu item "Quit Lexicon" of menu 1 of menu bar item 1 of extras' \
                 -e 'end tell' > /dev/null
             ticks=0
             while kill -0 "$pid" 2>/dev/null; do
@@ -531,8 +632,22 @@ timers() {
     done
 }
 
-# Seconds since the last key press or mouse move (IOHIDSystem's HIDIdleTime, in ns).
-idle_seconds() { ioreg -c IOHIDSystem -d 4 | awk '/"HIDIdleTime"/ { print int($NF / 1000000000); exit }'; }
+# Seconds since Jake's last key press or mouse move. IOHIDSystem's HIDIdleTime
+# (ns) counts posted keys too: the harness's own and Dev's Cmd-V. So the harness
+# notes each window it posts in (lexicon-harness's PostedInput: from, to, and
+# the idle time when it began), and input inside one steps back to the last
+# input before it, window by window. Integer seconds, so each edge has slack.
+idle_seconds() {
+    hid=$(ioreg -c IOHIDSystem -d 4 | awk '/"HIDIdleTime"/ { printf "%.3f", $NF / 1000000000; exit }')
+    [ -n "$hid" ] || return 0
+    { [ ! -f "$POSTED" ] || tail -n 50 "$POSTED"; } | awk -F'\t' -v now="$(date +%s)" -v hid="$hid" '
+        { from[NR] = $1; to[NR] = $2; idle[NR] = $3 }
+        END {
+            last = now - hid
+            for (i = NR; i >= 1; i--) if (last >= from[i] - 1 && last <= to[i] + 2) last = from[i] - idle[i]
+            print int(now - last)
+        }'
+}
 
 case "${1:-}" in
     take)
@@ -561,7 +676,7 @@ case "${1:-}" in
         ;;
     status)
         if read_lock; then echo "live-lane: held by $holder (pid $pid)"; else echo "live-lane: free"; fi
-        ! sitting_open || echo "live-lane: a sitting is open (since $(sed -n 's/^opened=//p' "$MARKER"))"
+        ! sitting_open || echo "live-lane: a $(sed -n 's/^hands-free=yes$/hands-free /p' "$MARKER")sitting is open (since $(sed -n 's/^opened=//p' "$MARKER"))"
         [ ! -e "$PARKED" ] || echo "live-lane: $NAME's data is parked"
         echo "live-lane: $(fn_listeners_line)"
         ;;
@@ -570,6 +685,7 @@ case "${1:-}" in
         ;;
     queue)
         fetch_issues
+        remember_jake_items
         timers
         requests | awk -F'\t' '{ printf "%d. #%s %s (%s)\n", NR, $2, $3, $1 }'
         ;;
@@ -598,6 +714,7 @@ case "${1:-}" in
     preflight)
         [ $# -eq 2 ] || { echo "usage: live-lane.sh preflight <issue>" >&2; exit 64; }
         fetch_issues
+        remember_jake_items
         preflight "$2"
         ;;
     sitting) shift; sitting "$@" ;;
