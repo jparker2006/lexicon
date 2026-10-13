@@ -447,6 +447,8 @@ private enum EmptyCAFShape: CaseIterable {
     case headerOnly
     /// The data chunk's tag, its size set to -1 as a crash leaves it, and its edit count, with no sample.
     case dataChunkWithNoSample
+    /// A closed CAF cut after its edit count: the header still claims samples the disk no longer has.
+    case closedCutToNoSample
 }
 
 /// Writes an empty CAF of `shape` at `url`, cut from a real closed CAF the Recorder wrote, so the
@@ -463,9 +465,21 @@ private func writeEmptyCAF(_ shape: EmptyCAFShape, at url: URL) async throws {
     } else {
         // The tag, the 8-byte size and the 4-byte edit count, and no sample after them.
         var cut = Data(bytes[..<(tag.upperBound + 12)])
-        cut.replaceSubrange(tag.upperBound..<(tag.upperBound + 8), with: repeatElement(UInt8(0xFF), count: 8))
+        if shape == .dataChunkWithNoSample {
+            cut.replaceSubrange(tag.upperBound..<(tag.upperBound + 8), with: repeatElement(UInt8(0xFF), count: 8))
+        }
         try cut.write(to: url)
     }
+}
+
+/// A closed CAF whose data chunk's 8-byte size is `size`, cut to its header and edit count:
+/// with a size of 4, a file the writer closed before any sample, as it does when the disk fails.
+private func writeClosedCAFHolding(size: UInt64, at url: URL) async throws {
+    try await writeEmptyCAF(.closedCutToNoSample, at: url)
+    var bytes = try Data(contentsOf: url)
+    let tag = try #require(bytes.firstRange(of: Data("data".utf8)))
+    bytes.replaceSubrange(tag.upperBound..<(tag.upperBound + 8), with: withUnsafeBytes(of: size.bigEndian, Array.init))
+    try bytes.write(to: url)
 }
 
 @Test(arguments: EmptyCAFShape.allCases)
@@ -503,6 +517,40 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
     }
     #expect(thrown == nil, "\(shape): finalize threw \(String(describing: thrown))")
     #expect(try Data(contentsOf: url) == before, "\(shape): finalize changed the file")
+}
+
+@Test func aCAFTheWriterClosedWithNoSampleIsClosedNotEmpty() async throws {
+    // The writer closes the file and goes on in RAM when the disk fails (CaptureCore), so a closed
+    // file proves nothing about what was heard. Only a file it never closed is empty.
+    let url = try scratchDirectory().appending(path: "closed-empty.caf")
+    try await writeClosedCAFHolding(size: 4, at: url)
+    #expect(CAFFile.state(of: url) == .closed)
+}
+
+@Test func aRecordingWhoseFileTheWriterClosedWithNoSampleKeepsItsRow() async throws {
+    // Disk trouble at the first write: the file is closed with no sample while the hold goes on in
+    // RAM, and the crash takes the RAM copy. The row stays, so Jake sees the Dictation was lost.
+    let id = DictationID()
+    let paths = try await earlierRun { store in
+        store.record(.began(id, origin: .live, purpose: .type, at: earlier(), app: app))
+        try await writeClosedCAFHolding(size: 4, at: store.audioURL(for: id))
+    }
+    let relaunched = try await relaunch(paths)
+    _ = await relaunched.recover()
+    #expect(await relaunched.dictation(id) != nil)
+}
+
+@Test func aCAFWhoseChunkRunsPastItsEndIsUnreadableNotEmpty() async throws {
+    // A damaged chunk size that jumps over the data chunk must not make a file with audio look
+    // empty: an empty file is deleted, and an unreadable one is kept.
+    let url = try scratchDirectory().appending(path: "damaged.caf")
+    try await writeClosedCAF(syntheticSamples(count: 16_000), at: url)
+    var bytes = try Data(contentsOf: url)
+    // The first chunk after the 8-byte file header is the format chunk; its size is bytes 12..<20.
+    let huge = UInt64(bytes.count * 4)
+    bytes.replaceSubrange(12..<20, with: withUnsafeBytes(of: huge.bigEndian, Array.init))
+    try bytes.write(to: url)
+    #expect(CAFFile.state(of: url) == .unreadable)
 }
 
 @Test func aClosedCAFThatCannotBeOpenedIsUnavailableAndAMissingFileIsUnreadable() async throws {

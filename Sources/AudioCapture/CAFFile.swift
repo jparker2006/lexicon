@@ -75,14 +75,17 @@ public enum CAFFile {
         /// Not a CAF, or a damaged chunk header.
         case notCAF
         /// Nothing past the header yet: zero bytes, no data chunk, or a data chunk
-        /// with no whole sample. What a capture leaves when it dies before its first write.
+        /// with no whole sample on disk. What a capture leaves when it dies before its
+        /// first write. Not a file the writer closed with no sample: it closes one and
+        /// goes on in RAM when the disk fails, so a closed file proves nothing was heard.
         case noSample
         /// The data chunk: where its header starts, and its size field (-1 while open).
         case data(offset: off_t, size: Int64)
     }
 
     /// Walks the chunk headers (big-endian) to `data`. A file the writer had not
-    /// got past its header reads `.noSample`, so a crash then is not a damaged file.
+    /// got past its header reads `.noSample`, so a crash then is not a damaged file;
+    /// a chunk that claims more bytes than the file has is damaged.
     private static func layout(_ descriptor: Int32) -> Layout {
         var info = stat()
         guard fstat(descriptor, &info) == 0 else { return .unavailable }
@@ -97,14 +100,16 @@ public enum CAFFile {
             let size = Int64(bitPattern: header[4..<12].reduce(UInt64(0)) { $0 << 8 | UInt64($1) })
             if header[0..<4].elementsEqual("data".utf8) {
                 guard size >= -1 else { return .notCAF }  // a damaged header
-                // Edit count (4 bytes), then 16-bit samples: an open chunk's samples run to the end of the file.
-                let payload = size == -1 ? length - offset - 12 : size
-                return payload - 4 < 2 ? .noSample : .data(offset: offset, size: size)
+                // Edit count (4 bytes), then 16-bit samples. A closed chunk that says it holds
+                // none is finished; one whose samples are not on disk was cut short.
+                let onDisk = length - offset - 12
+                let saysSamples = size == -1 || size - 4 >= 2
+                return saysSamples && onDisk - 4 < 2 ? .noSample : .data(offset: offset, size: size)
             }
             guard size >= 0, size <= Int64.max - 12 - offset else { return .notCAF }  // a damaged header
             offset += 12 + size
         }
-        return .noSample
+        return offset > length ? .notCAF : .noSample
     }
 
     /// Reads a 16 kHz mono Int16 CAF into RAM for retry, recovery and eval.
