@@ -22,6 +22,9 @@ public protocol TextDestination: Sendable {
     /// At stop: the focused field plus an input mark. nil when nothing can take text.
     func target() async -> Target?
 
+    /// Quit: returns once the last paste no longer holds Jake's clipboard.
+    func finishClipboard() async
+
     /// Asks `InsertGuard.decide` first (#4 late-text rule: same app and field, or
     /// same app under 5 s where no field shows; nothing typed since the mark;
     /// every insert, no grace window), then pastes.
@@ -34,6 +37,9 @@ public protocol TextDestination: Sendable {
 }
 
 extension TextDestination {
+    /// A destination that never pastes holds no clipboard.
+    public func finishClipboard() async {}
+
     public func pasteLast(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
         await insert(text, for: id, at: target)
     }

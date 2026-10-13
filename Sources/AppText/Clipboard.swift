@@ -87,11 +87,19 @@ struct PasteboardContents: Sendable, Equatable {
     private let now: @MainActor () -> Instant
     /// Jake's clipboard while Lexicon owns the pasteboard (or read ahead by `prefetch`).
     private var saved: Saved?
-    private var current: Current?
+    private var current: Current? {
+        didSet {
+            guard current?.id != oldValue?.id else { return }
+            for waiter in quitWaiters { waiter.resume() }
+            quitWaiters = []
+        }
+    }
     private var serial = 0
     private var waiters: [PasteID: [CheckedContinuation<Bool, Never>]] = [:]
     private var receipts: [PasteID: Bool] = [:]
     private var releases: [PasteID: [CheckedContinuation<Void, Never>]] = [:]
+    /// Quit, waiting for the pasteboard to be Jake's again.
+    private var quitWaiters: [CheckedContinuation<Void, Never>] = []
     /// After each read of the current paste: the deadline may have moved.
     var onRead: (@MainActor () -> Void)?
 
@@ -158,9 +166,13 @@ struct PasteboardContents: Sendable, Equatable {
             resolve(current.id, false)
             return .missed(current.id)
         }
+        finish(current)
+        return .settled(current.id)
+    }
+
+    private func finish(_ current: Current) {
         restore(current)
         settle(current.id, receipt: current.lastRead != nil)
-        return .settled(current.id)
     }
 
     /// True once the target read the text, false once it missed; waits until one happens.
@@ -178,6 +190,22 @@ struct PasteboardContents: Sendable, Equatable {
     }
 
     func isReleased(_ id: PasteID) -> Bool { current?.id != id || current?.lastRead != nil }
+
+    /// Quit: returns once no paste holds the pasteboard, and Jake's clipboard is back
+    /// (unless he copied since). Each paste gets its restore, or `cap` on `clock` from
+    /// when quit takes it up, whichever is first: waiting out the restore, not restoring
+    /// at once, keeps the post-miss hold, so a Cmd-V still queued never pastes his
+    /// clipboard. A paste put meanwhile (a Dictation fn started) is waited for in turn.
+    func finishForQuit<C: Clock<Duration>>(within cap: Duration, clock: C) async {
+        while let id = current?.id {
+            let capped = Task { @MainActor [self] in
+                do { try await clock.sleep(for: cap) } catch { return }
+                if let current, current.id == id { finish(current) }
+            }
+            while current?.id == id { await withCheckedContinuation { quitWaiters.append($0) } }
+            capped.cancel()
+        }
+    }
 
     private func didRead(_ id: PasteID) {
         guard current?.id == id else { return }  // withdrawn or superseded
