@@ -92,8 +92,11 @@ public enum CAFFile {
         let length = info.st_size
         guard length > 0 else { return .noSample }
         var header = [UInt8](repeating: 0, count: 12)
-        guard pread(descriptor, &header, 8, 0) == 8 else { return length < 8 ? .notCAF : .unavailable }
-        guard header[0..<4].elementsEqual("caff".utf8) else { return .notCAF }
+        let fileHeader: [UInt8] = Array("caff".utf8) + [0, 1, 0, 0]  // type, version 1, flags
+        let head = min(Int(length), 8)
+        guard pread(descriptor, &header, head, 0) == head else { return .unavailable }
+        guard header[0..<head].elementsEqual(fileHeader[0..<head]) else { return .notCAF }
+        guard head == 8 else { return .noSample }  // the writer died inside its first bytes
         var offset: off_t = 8
         while offset + 12 <= length {
             guard pread(descriptor, &header, 12, offset) == 12 else { return .unavailable }

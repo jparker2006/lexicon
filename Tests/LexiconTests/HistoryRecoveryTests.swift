@@ -100,6 +100,8 @@ private func unreasoned(_ actions: [RecoveryPlan.Action]) -> [RecoveryPlan.Actio
             #expect(RecoveryPlan.plan(rows: [row], files: fileMap(id, state)) == [.dropExpiredAudio(id)],
                     "\(status), file \(state)")
         }
+        // A file that can't be opened for now leaves the row as it was, its unlink too, till the next launch.
+        #expect(RecoveryPlan.plan(rows: [row], files: fileMap(id, .unavailable)) == [], "\(status), unavailable")
     }
 }
 
@@ -449,12 +451,17 @@ private enum EmptyCAFShape: CaseIterable {
     case dataChunkWithNoSample
     /// A closed CAF cut after its edit count: the header still claims samples the disk no longer has.
     case closedCutToNoSample
+    /// A closed CAF whose header says its data chunk holds no sample (size 4: the edit count only).
+    case closedSaysNoSample
+    /// Cut inside the 8-byte file header: the writer died writing its first bytes.
+    case partFileHeader
 }
 
 /// Writes an empty CAF of `shape` at `url`, cut from a real closed CAF the Recorder wrote, so the
 /// header and format chunk are the ones AudioCapture writes.
 private func writeEmptyCAF(_ shape: EmptyCAFShape, at url: URL) async throws {
     guard shape != .zeroBytes else { return try Data().write(to: url) }
+    guard shape != .partFileHeader else { return try Data("caff".utf8).write(to: url) }
     let closed = try scratchDirectory().appending(path: "closed.caf")
     try await writeClosedCAF(syntheticSamples(count: 16_000), at: closed)
     let bytes = try Data(contentsOf: closed)
@@ -465,8 +472,13 @@ private func writeEmptyCAF(_ shape: EmptyCAFShape, at url: URL) async throws {
     } else {
         // The tag, the 8-byte size and the 4-byte edit count, and no sample after them.
         var cut = Data(bytes[..<(tag.upperBound + 12)])
-        if shape == .dataChunkWithNoSample {
-            cut.replaceSubrange(tag.upperBound..<(tag.upperBound + 8), with: repeatElement(UInt8(0xFF), count: 8))
+        let size: UInt64? = switch shape {
+        case .dataChunkWithNoSample: .max  // -1, as a crash leaves it
+        case .closedSaysNoSample: 4
+        default: nil
+        }
+        if let size {
+            cut.replaceSubrange(tag.upperBound..<(tag.upperBound + 8), with: withUnsafeBytes(of: size.bigEndian, Array.init))
         }
         try cut.write(to: url)
     }
@@ -491,6 +503,10 @@ private func anEmptyCAFShapeIsReadAsEmpty(shape: EmptyCAFShape) async throws {
     #expect(CAFFile.state(of: closed) == .closed)
     #expect(CAFFile.state(of: open) == .open)
     #expect(CAFFile.state(of: prose) == .unreadable)
+    // Shorter than a CAF's file header and not the start of one: not audio, so kept, never deleted as empty.
+    let stub = folder.appending(path: "stub.caf")
+    try Data("hello".utf8).write(to: stub)
+    #expect(CAFFile.state(of: stub) == .unreadable)
 }
 
 @Test(arguments: EmptyCAFShape.allCases)

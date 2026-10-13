@@ -8,7 +8,6 @@ public import Foundation
 ///
 ///     ~/Library/Application Support/<root name>/
 ///         history.sqlite        History (WAL)
-///         history.lock          History: held by the one store writing this root
 ///         audio/<id>.caf        History owns the lifecycle; AudioCapture writes bytes while recording
 ///         lexicon.sqlite        WordStore
 ///         inbox/*.json          Inbox (read and deleted by the app)
