@@ -91,13 +91,19 @@ public final class Keyboard: Sendable {
 
     static func start(_ config: KeyboardConfig, input: InputClock, listenAccess: Bool) throws(KeyboardError) -> Keyboard {
         let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
-        let tap = EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
-                                 continuation: continuation)
+        let tap = Self.tap(config, input: input, continuation: continuation)
         try tap.start(listenAccess: listenAccess)
         // The tap sees this key-down too, as any other key; only the hotkey says paste, so one press pastes once.
         let pasteLast = RegisteredHotkey(config.pasteLast) { _ in tap.send(.pasteLast) }
         pasteLast.setRegistered(true)
         return Keyboard(tap: tap, commands: commands, pasteLastKey: pasteLast)
+    }
+
+    /// The tap as `start` makes it, not yet started: tests drive it inline.
+    static func tap(_ config: KeyboardConfig, input: InputClock,
+                    continuation: AsyncStream<KeyCommand>.Continuation) -> EventTapThread {
+        EventTapThread(gesture: FnGesture(holdThreshold: config.holdThreshold), input: input,
+                       continuation: continuation)
     }
 
     init(tap: EventTapThread, commands: AsyncStream<KeyCommand>, pasteLastKey: RegisteredHotkey? = nil) {
