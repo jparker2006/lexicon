@@ -17,11 +17,11 @@ public enum CloudCleanupModel: String, Sendable, Codable, CaseIterable {
     }
 }
 
-/// Which model cleaned a Dictation's text when AI cleanup was accepted.
+/// Which model cleaned a Dictation's text when AI cleanup was accepted. Hosted
+/// only: no on-device model qualifies, so Private mode and offline are rules only.
+/// An enum, not a bare `CloudCleanupModel`, because History stores this shape.
 public enum CleanupEngine: Sendable, Hashable, Codable {
     case cloud(CloudCleanupModel)
-    /// Apple Foundation Models on this Mac: Private mode, or offline.
-    case onDevice
 }
 
 /// What the cleanup stage did for one Dictation. Recorded by History on `.textReady`.
@@ -39,7 +39,7 @@ public enum RulesOnlyReason: Sendable, Hashable, Codable {
     case rejected(CheckFailure)
     /// The LLM missed `Preferences.cleanupDeadline` after the speech final.
     case deadline
-    /// No model could run (no key, network error, on-device model missing).
+    /// No model could run (no key, network error).
     case unavailable
 }
 

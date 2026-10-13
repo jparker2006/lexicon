@@ -38,8 +38,6 @@ public struct KeyboardConfig: Sendable, Hashable {
     public var cap: Duration
     /// How long before the cap the warning sounds.
     public var capWarning: Duration
-    /// None in v0 (#18): fn only. Kept as a seam for a non-Apple keyboard later.
-    public var fallbackHotkey: Hotkey? = nil
     public var pasteLast: Hotkey = Hotkey(keyCode: 9, modifiers: [.control, .command])
     public var justFixed: Hotkey? = nil
 
