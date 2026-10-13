@@ -35,12 +35,12 @@ public enum RespeakText {
     }
 
     /// What Jake said without the stop Cleanup ends a sentence with: "C#." is
-    /// "C#"; a mark that is part of his words (#, %, a leading dot) and a comma
-    /// or colon he said stay.
+    /// "C#"; a mark that is part of his words (#, %, a leading dot), a comma or
+    /// colon he said, and a run of dots stay.
     private static func sentence(_ spoken: String) -> String {
         var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
-        // An ellipsis is Jake's own mark, not a stop Cleanup added.
-        if let last = text.last, ".!?".contains(last), !text.hasSuffix("...") { text.removeLast() }
+        // A run of dots ("..", "...") is Jake's own mark, not a stop Cleanup added.
+        if let last = text.last, ".!?".contains(last), !text.hasSuffix("..") { text.removeLast() }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
