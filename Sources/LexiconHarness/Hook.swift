@@ -52,6 +52,8 @@ func hookCommand(_ arguments: [String]) -> TestHookCommand {
         return .sleep
     case "mic" where arguments == ["mic", "zeros"]:
         return .silenceMic
+    case "audio" where arguments == ["audio", "drops"]:
+        return .dropAudio
     case "indicator" where arguments.count == 2 || arguments.count == 3:
         guard let state = indicatorState(named: arguments[1], message: arguments.count == 3 ? arguments[2] : nil) else {
             fail(usage, code: 64)

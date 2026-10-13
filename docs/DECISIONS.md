@@ -244,6 +244,10 @@ Jake, in the orchestrator's session, about 2026-10-13 02:57Z (2026-10-12 19:57 P
 
 Jake, 2026-10-12 14:22Z (asked by the orchestrator in its session): "yes". Recorded on [#144](https://github.com/jparker2006/lexicon/issues/144#issuecomment-6126205597); the question is [#144](https://github.com/jparker2006/lexicon/issues/144#issuecomment-6126174486).
 
+**84. Lost audio is said: "Part of the audio was lost".** Neither the spec nor this file had the rule; frames the ring refused were only logged. Built (#179): when the mic drops part of a recording (frames the 2 s ring refused), the Dictation is still heard and typed from what was captured, and the pill shows "Part of the audio was lost" with the error sound, until the Dictation lands. Asked by the orchestrator on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6137742157) as question 11: "Jake: decide whether Lexicon tells you when the mic drops part of a recording. Recommended: yes, show "Part of the audio was lost" after that Dictation (with the error sound; the line shows until the Dictation lands)."
+
+Jake, 2026-10-13T04:29Z, in the orchestrator session: "11 yes". Recorded on [#179](https://github.com/jparker2006/lexicon/issues/179#issuecomment-6138248868). Proposed, from #179's builder and not asked, beyond his words, which named the mic only: the same line shows for the other audio a capture can lose, input the converter failed on (at the very end, what it still held) and the unread rest of a file input whose read broke off (eval, the dictate hook); when the same Dictation also lost its file ("Can't save audio to disk", spec #4), both sound and the disk line is the one that stays; a failed close is logged, not shown, since `CAFFile.finalize` repairs the file and nothing is lost.
+
 ### Proposed: built on an agent's default, never asked
 
 These stand as built until Jake confirms them as a batch or names items to change, in the next grill round.

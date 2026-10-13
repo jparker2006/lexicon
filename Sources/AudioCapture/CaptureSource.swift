@@ -16,6 +16,8 @@ protocol CaptureSource: AnyObject, Sendable {
     var deviceName: String? { get }
     /// Device changes so far: the audio missed while the engine was rebuilt.
     var gaps: [Duration] { get }
+    /// Audio the source failed to produce: a file's unread rest after a read error.
+    var lostAudio: Duration { get }
 }
 
 /// One stretch of frames at one rate. The mic starts a new segment when a
@@ -30,7 +32,14 @@ struct Segment: Sendable {
         ring = SPSCRing(capacityFrames: Int(rate * 2))
     }
 
-    var droppedAudio: Duration { .seconds(Double(ring.dropped) / rate) }
+    var droppedAudio: Duration { Duration(frames: ring.dropped, rate: rate) }
+}
+
+extension Duration {
+    /// To the nanosecond, so 1,600 frames at 16 kHz is exactly 100 ms.
+    init(frames: Int, rate: Double) {
+        self = .nanoseconds(Int64((Double(frames) * 1e9 / rate).rounded()))
+    }
 }
 
 /// What a source reports to its capture. Each runs off the real-time thread.

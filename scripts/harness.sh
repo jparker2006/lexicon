@@ -9,7 +9,7 @@
 #   scripts/harness.sh hook status           one test hook, reply printed as JSON
 #   scripts/harness.sh hook dictate <wav> [--result-delay <ms>]   dictate a WAV through the live path
 #   scripts/harness.sh hook fn down|up... [--shift]   fn edges through the tap's own handler
-#   scripts/harness.sh hook key esc | sleep | mic zeros   Esc, the Mac sleeping, a silent mic next
+#   scripts/harness.sh hook key esc | sleep | mic zeros | audio drops   Esc, the Mac sleeping, a silent mic or lost audio next
 #   scripts/harness.sh hook indicator <state> [message]   show one pill state
 #   scripts/harness.sh hook sound <cue>      play one sound, reply with its latency
 #   scripts/harness.sh hook privacy on|off [--always-private <ids>]   Private mode and the always-private apps

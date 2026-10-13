@@ -118,9 +118,12 @@ extension Conductor {
         return context
     }
 
-    /// The disk was nearly full or a write failed: the Dictation finishes from
-    /// RAM as normal, and Jake is told its audio was not saved (#4).
+    /// Audio lost on the way (DECISIONS item 84): the Dictation is heard and
+    /// typed from the rest, and Jake is told. The disk was nearly full or a write
+    /// failed: it finishes from RAM as normal, and Jake is told its audio was not
+    /// saved (#4). That comes last, so when both happen the pill keeps the disk line.
     func noteStorage(_ summary: AudioSummary) {
+        if summary.lost > .zero { emit(.notice(.audioLost)) }
         if summary.storage == .ramOnly { emit(.notice(.diskTrouble)) }
     }
 

@@ -17,7 +17,7 @@ import TestHooks
 let usage = """
     usage: lexicon-harness check | paste-check
            lexicon-harness hook status | dictate <wav> [--result-delay <ms>] | indicator <state> [message] | sound <cue>
-           lexicon-harness hook fn down|up... [--shift] | key esc | sleep | mic zeros
+           lexicon-harness hook fn down|up... [--shift] | key esc | sleep | mic zeros | audio drops
            lexicon-harness hook insert [--delay <seconds>] <text>
            lexicon-harness hook capture <seconds> [prepared[=<idle s>]] [change] [device=<uid>]
            lexicon-harness hook privacy on|off [--always-private <bundle id>[,<bundle id>...]]
@@ -41,7 +41,8 @@ let usage = """
               fn, key: pressed through the fn tap's own handler, in order, back to
               back (so `fn down up down` is a double tap); --shift holds Shift
               sleep: the Mac is going to sleep. mic zeros: the next Dictation's
-              mic delivers only zeros
+              mic delivers only zeros. audio drops: the next Dictation (fn or
+              dictate) loses its first block, as a ring overflow does
               insert: paste <text> at the focused field after --delay seconds (default 0)
               capture: record from the mic and measure the start gap, tail, file
               and mic release; `prepared` prepares the engine first and waits

@@ -7,9 +7,12 @@ import LexiconDomain
 /// confined to the writer queue; the rings are the only thing the producer touches.
 ///
 /// Each drain: ring -> converter -> RAM copy -> `AudioFileWritePackets` -> feed.
-/// A chunk is yielded only after it was handed to the file, so anything a
-/// consumer sees survives an app crash. F_FULLFSYNC every `fullSyncEvery`.
-/// Under 1 GB free, or on a write error, the capture carries on in RAM.
+/// While the storage is `.onDisk`, a chunk is yielded only after it was handed
+/// to the file, so anything a consumer sees survives an app crash. After
+/// `.diskTrouble` every chunk is yielded unwritten, the failed one included:
+/// RAM is the primary copy, and the problem was signalled first.
+/// F_FULLFSYNC every `fullSyncEvery`. Under 1 GB free, or on a write or sync
+/// error, the capture carries on in RAM.
 ///
 /// `@unchecked Sendable`: every `var` is touched only on `queue` (all entry
 /// points dispatch onto it), except `tailLength` (see there); the `let`s are
@@ -44,14 +47,17 @@ final class CaptureCore: @unchecked Sendable {
     private var take: Take?
     /// `.noFrames` until frames come, `.zeros` while every one is 0, then `.real` for good.
     private var sound: InputSound = .noFrames
-    /// Audio refused by rings already left behind by a device change.
-    private var droppedEarlier: Duration = .zero
+    /// Audio lost so far, outside the current ring: what rings left behind by a
+    /// device change refused, and what the converter failed on.
+    private var lostEarlier: Duration = .zero
     /// Audio kept after fn-up. Set by `finish` on the writer queue; read only
     /// after `stop` returned, which orders it after the write.
     private(set) var tailLength: Duration?
     #if DEBUG
     /// Every frame read as zero (the `mic zeros` test hook). Set before `begin`.
     var silenced = false
+    /// The first block drained is thrown away and counted as lost (the `audio drops` test hook). Set before `begin`.
+    var dropsFirstBlock = false
     #endif
 
     init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, startedAt: HostTime,
@@ -84,7 +90,7 @@ final class CaptureCore: @unchecked Sendable {
         queue.async { [self] in
             if hasRoom() {
                 do {
-                    writer = try CAFWriter(creating: fileURL)
+                    writer = try CAFWriter(creating: fileURL, calls: policy.files)
                 } catch {
                     diskTrouble()
                 }
@@ -132,7 +138,11 @@ final class CaptureCore: @unchecked Sendable {
         guard take == nil else { return }
         drain()
         if DispatchTime.now() >= lastFullSync + policy.fullSyncEvery.dispatch {
-            writer?.fullSync()
+            do {
+                try writer?.fullSync()
+            } catch {
+                diskTrouble()
+            }
             lastFullSync = .now()
         }
     }
@@ -172,7 +182,7 @@ final class CaptureCore: @unchecked Sendable {
         timer = nil
         source.stop()  // whatever it writes after this is never read
         drain()
-        resampler.flush(emit: emit)
+        lostEarlier += resampler.flush(emit: emit)
         feedContinuation.finish()
         problems.finish()
         signals.first.settle(nil)
@@ -187,7 +197,8 @@ final class CaptureCore: @unchecked Sendable {
     private func summary() -> AudioSummary {
         AudioSummary(duration: AudioClip(samples: samples).duration,
                      startGap: signals.first.current.map { $0.duration(since: startedAt) },
-                     deviceName: source.deviceName, storage: storage, gaps: source.gaps)
+                     deviceName: source.deviceName, storage: storage, gaps: source.gaps,
+                     lost: lostEarlier + segment.droppedAudio + source.lostAudio)
     }
 
     /// One line per Dictation, so the start gap and the tail are numbers in the log (#4).
@@ -195,7 +206,7 @@ final class CaptureCore: @unchecked Sendable {
         Self.log.notice("""
             captured \(summary.duration.ms, privacy: .public) ms, start gap \(summary.startGap?.ms ?? -1, privacy: .public) ms, \
             tail \(self.tailLength?.ms ?? -1, privacy: .public) ms, \(summary.gaps.count, privacy: .public) device changes, \
-            \(summary.storage.rawValue, privacy: .public), \((self.droppedEarlier + self.segment.droppedAudio).ms, privacy: .public) ms dropped, \
+            \(summary.storage.rawValue, privacy: .public), \(summary.lost.ms, privacy: .public) ms lost, \
             sound \(String(describing: self.sound), privacy: .public)
             """)
     }
@@ -208,17 +219,27 @@ final class CaptureCore: @unchecked Sendable {
             // A valid hardware rate always has a converter; without one the new ring is never read.
             guard take == nil, let converter = Self.resampler(for: next.rate, policy: policy) else { return }
             drain()
-            resampler.flush(emit: emit)
-            droppedEarlier += segment.droppedAudio
+            lostEarlier += resampler.flush(emit: emit) + segment.droppedAudio
             resampler = converter
             segment = next
             problems.yield(.deviceChanged)
         }
     }
 
+    /// A failed close can leave the header's size at -1; `CAFFile.finalize`
+    /// writes it from the file's length, as recovery does after a crash.
     private func closeFile() {
-        writer?.close()
-        writer = nil
+        guard let writer else { return }
+        self.writer = nil
+        do {
+            try writer.close()
+        } catch {
+            let repaired = (try? CAFFile.finalize(fileURL)) != nil
+            Self.log.error("""
+                audio file \(error.step, privacy: .public) failed (\(error.status, privacy: .public)), \
+                \(repaired ? "header repaired" : "header not repaired", privacy: .public)
+                """)
+        }
     }
 
     private func drain() {
@@ -237,8 +258,16 @@ final class CaptureCore: @unchecked Sendable {
                 let frames = UnsafeBufferPointer(start: input.floatChannelData![0], count: count)
                 sound = frames.contains { $0 != 0 } ? .real : .zeros
             }
+            #if DEBUG
+            // After the sound verdict: the hook loses audio, it does not silence the mic.
+            if dropsFirstBlock {
+                dropsFirstBlock = false
+                lostEarlier += Duration(frames: count, rate: segment.rate)
+                continue
+            }
+            #endif
             input.frameLength = AVAudioFrameCount(count)
-            resampler.convert(emit: emit)
+            lostEarlier += resampler.convert(emit: emit)
         }
     }
 
@@ -292,7 +321,7 @@ final class CaptureCore: @unchecked Sendable {
 
     private static func resampler(for rate: Double, policy: FlushPolicy) -> Resampler? {
         let chunkFrames = AVAudioFrameCount(rate * (policy.chunk / .seconds(1)))
-        return Resampler(inputRate: rate, maxFrames: max(chunkFrames, FileSource.blockFrames))
+        return Resampler(inputRate: rate, maxFrames: max(chunkFrames, FileSource.blockFrames), convert: policy.convert)
     }
 
     private static let log = Logger(subsystem: "Lexicon", category: "audio")
