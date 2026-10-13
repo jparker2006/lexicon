@@ -12,6 +12,8 @@ public struct IndicatorFollower: Sendable {
     public private(set) var state: IndicatorState = .hidden
     private var current: DictationID?
     private var stopSounded = false
+    /// A Re-speak's "nothing was fixed" line is showing: its `finished` comes after it and keeps it.
+    private var fixLine = false
 
     public init() {}
 
@@ -25,6 +27,7 @@ public struct IndicatorFollower: Sendable {
             if sounds {
                 current = id
                 stopSounded = false
+                fixLine = false
             }
             state = .recording(mode, minuteLeft: false)
             return sounds ? .start : nil
@@ -50,6 +53,7 @@ public struct IndicatorFollower: Sendable {
     }
 
     private mutating func finish(_ status: DictationStatus) -> SoundCue? {
+        if fixLine { return nil }
         switch status {
         case .inserted:
             state = .landed
@@ -93,7 +97,9 @@ public struct IndicatorFollower: Sendable {
         case .accessibilityNeeded: return fail("Allow Accessibility in the Lexicon menu")
         case .nothingToPaste: return fail("Nothing to paste yet")
         case .noFieldToPaste: return fail("Click a text field, then press \u{2303}\u{2318}V")
-        case .fixNotLanded(let problem): return fail(Self.line(for: problem))
+        case .fixNotLanded(let problem):
+            fixLine = true
+            return fail(Self.line(for: problem))
         }
     }
 
