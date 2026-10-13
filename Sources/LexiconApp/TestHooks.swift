@@ -261,7 +261,8 @@ enum AppTestHooks {
         }
         guard occurrence <= matches.count else { return nil }
         let range = matches[occurrence - 1]
-        let location = text.utf16.distance(from: text.startIndex, to: range.lowerBound)
+        // The field's offsets, not the window's: a long field is read as a window (`FieldText.offset`).
+        let location = field.offset + text.utf16.distance(from: text.startIndex, to: range.lowerBound)
         let length = text.utf16.distance(from: range.lowerBound, to: range.upperBound)
         return (span: TextSpan(location: location, length: length), expected: word)
     }
