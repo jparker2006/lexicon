@@ -2,6 +2,7 @@ import Foundation
 import os
 import LexiconDomain
 import AppText
+import WordStore
 
 // A Re-speak with words selected (#83): the selection is replaced by what Jake
 // said, no Jev. Only a live target reaches here, so a recovered or retried
@@ -13,7 +14,7 @@ extension Conductor {
     enum RespeakStep: Sendable {
         /// Nothing was selected: the span is found by sound (#85).
         case noSelection
-        case replaced(field: FieldText, selection: FieldSelection, with: String)
+        case replaced(field: FieldText, selection: FieldSelection, with: String, receipt: InsertionReceipt)
         case notLanded(FixProblem)
     }
 
@@ -24,10 +25,11 @@ extension Conductor {
         guard let selection = field.selection else { return .noSelection }
         // Every Term, not the fn-down selection: a Term's spelling is right wherever it is used.
         let terms = Set(await lexicon.terms.map(\.text))
-        let replacement = RespeakText.replacement(spoken, replacing: selection.text, terms: terms)
+        let replacement = RespeakText.replacement(spoken, replacing: selection.text, terms: terms,
+                                                  isEnglish: PlainEnglish.contains)
         guard !replacement.isEmpty else { return .notLanded(.nothingHeard) }
         return switch await destination.replace(selection.span, expected: selection.text, with: replacement, at: target) {
-        case .replaced: .replaced(field: field, selection: selection, with: replacement)
+        case .replaced(let receipt): .replaced(field: field, selection: selection, with: replacement, receipt: receipt)
         case .unverified: .notLanded(.unverified)
         case .refused(let refusal): .notLanded(FixProblem(refusal))
         }
@@ -44,19 +46,18 @@ extension Conductor {
         case .notLanded(let problem):
             log.notice("Re-speak \(run.id, privacy: .public) not landed (\(String(describing: problem), privacy: .public)) after \(landedIn, privacy: .public)")
             emit(.notice(.fixNotLanded(problem)))
-        case .replaced(let field, let selection, let replacement):
+        case .replaced(let field, let selection, let replacement, _):
             log.notice("Re-speak \(run.id, privacy: .public) replaced the selection, release to landed \(landedIn, privacy: .public)")
-            let receipt: InsertionReceipt?
+            let receipt: InsertionReceipt?, final: String?
             do {
-                receipt = try await history.receipt(for: fixing)
+                (receipt, final) = (try await history.receipt(for: fixing), try await history.finalText(of: fixing))
             } catch {
                 // Not "never inserted": the fix is in the field, and only History failed.
-                log.error("Re-speak \(run.id, privacy: .public): History unreadable: \(error.localizedDescription, privacy: .public)")
+                log.error("Re-speak \(run.id, privacy: .public): History unreadable, the Fix is not saved")
                 return emit(.notice(.fixNotLanded(.historyUnreadable)))
             }
             // Jake can select any words; only those inside the fixed Dictation's text are a Fix on it.
-            guard let receipt, let final = await history.dictation(fixing)?.finalText,
-                  let place = DictationPlace.locate(final, receipt: receipt, in: field),
+            guard let receipt, let final, let place = DictationPlace.locate(final, receipt: receipt, in: field),
                   selection.span.location >= place.location,
                   selection.span.location + selection.span.length <= place.location + place.length
             else { return }
@@ -91,10 +92,12 @@ enum RespeakText {
         var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
         // Cleanup ends a sentence with a stop; the words it replaces may not.
         if let last = text.last, ".!?".contains(last), before.last != last { text.removeLast() }
-        // Cleanup capitalizes a sentence's first word; mid-sentence, a common word
-        // goes back to lowercase. A Term, or a word like GitHub, keeps its form.
-        guard let first = text.first, before.first?.isLowercase == true, !terms.contains(text),
-              !(text.prefix { !$0.isWhitespace }.dropFirst().contains { $0.isUppercase }) else { return text }
+        // Cleanup capitalizes a sentence's first word; mid-sentence, a plain English
+        // word goes back to lowercase. "I", a name, a Term, or a word like GitHub keeps its form.
+        let word = String(text.prefix { !$0.isWhitespace })
+        guard let first = text.first, before.first?.isLowercase == true, word != "I", !word.hasPrefix("I'"),
+              !terms.contains(where: { $0.prefix { !$0.isWhitespace } == word }),
+              !word.dropFirst().contains(where: \.isUppercase), isEnglish(word.lowercased()) else { return text }
         return first.lowercased() + text.dropFirst()
     }
 }

@@ -12,6 +12,13 @@ import Foundation
 /// Erring toward English only costs a fold, which a Rule can add back; erring
 /// the other way rewrites a sentence. So when the list is missing, every word
 /// counts as English and nothing folds.
+/// One word at a time, for a Re-speak's first capital: reads the list, about 10 ms.
+public enum PlainEnglish {
+    public static func contains(_ word: String) -> Bool {
+        EnglishWords.among([word.lowercased()]).contains(word.lowercased())
+    }
+}
+
 enum EnglishWords {
     static let systemList = URL(filePath: "/usr/share/dict/words")
 
