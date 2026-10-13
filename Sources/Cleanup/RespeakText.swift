@@ -14,7 +14,7 @@ public enum RespeakText {
         let lead = String(before.prefix(while: opens))
         let trail = String(before.dropFirst(lead.count).reversed().prefix(while: closes).reversed())
         let selected = before.dropFirst(lead.count).dropLast(trail.count)
-        var text = sentence(spoken)
+        var text = sentence(spoken, isEnglish: isEnglish)
         guard text.contains(where: { !$0.isPunctuation }) else { return "" }
         // Mid-sentence, a plain English word loses the sentence's capital. "I", a
         // name, a Term, or a word like GitHub keeps its form (DECISIONS.md item 85).
@@ -29,7 +29,21 @@ public enum RespeakText {
 
     /// The words, lowercased, whose plainness `replacement` may ask about: the first
     /// word, and the last when a period follows it. Look them up before calling it.
-    public static func plainnessQuestions(_ spoken: String) -> Set<String> { [] }
+    public static func plainnessQuestions(_ spoken: String) -> Set<String> {
+        var words: Set<String> = [firstWord(spoken).lowercased()]
+        if let last = abbreviation(closing: spoken.trimmingCharacters(in: .whitespacesAndNewlines)) { words.insert(last) }
+        return words
+    }
+
+    /// The last word, lowercased, when a period closes it and Cleanup lists it as
+    /// an abbreviation ("etc.", "e.g.", but also "no." and "min."): whether that
+    /// period is the word's own or Cleanup's stop is then a question.
+    private static func abbreviation(closing text: String) -> String? {
+        guard text.hasSuffix("."), !text.hasSuffix(".."),
+              let last = text.split(whereSeparator: \.isWhitespace).last else { return nil }
+        let word = last.dropLast().lowercased()
+        return Fillers.abbreviations.contains(word) ? word : nil
+    }
 
     /// The first word of what Jake said, without the marks around it: the word
     /// whose plainness `isEnglish` is asked about. "Dog, then." -> "Dog".
@@ -41,13 +55,13 @@ public enum RespeakText {
     /// What Jake said without the stop Cleanup ends a sentence with: "C#." is
     /// "C#"; a mark that is part of his words (#, %, a leading dot), a comma or
     /// colon he said, a run of dots and an abbreviation's period stay.
-    private static func sentence(_ spoken: String) -> String {
+    private static func sentence(_ spoken: String, isEnglish: (String) -> Bool) -> String {
         var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A run of dots ("..", "...") is Jake's own mark, and an abbreviation's period
-        // ("etc.") is part of the word Cleanup kept: neither is a stop Cleanup added.
-        let lastWord = text.split(whereSeparator: \.isWhitespace).last.map { $0.dropLast().lowercased() } ?? ""
-        if let last = text.last, ".!?".contains(last), !text.hasSuffix(".."),
-           !(last == "." && Fillers.abbreviations.contains(lastWord)) {
+        // A run of dots ("..", "...") is Jake's own mark, and a true abbreviation's
+        // period ("etc.", "e.g.") is part of the word: neither is a stop Cleanup
+        // added. A listed abbreviation that is a plain word ("no.") is his word and Cleanup's stop.
+        let ownPeriod = abbreviation(closing: text).map { $0.contains(".") || !isEnglish($0) } ?? false
+        if let last = text.last, ".!?".contains(last), !text.hasSuffix(".."), !ownPeriod {
             text.removeLast()
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)

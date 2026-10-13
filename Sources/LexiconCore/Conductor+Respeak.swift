@@ -26,15 +26,18 @@ extension Conductor {
     /// that Dictation from pasting over Jake's selection.
     struct RespeakWords: Sendable {
         let terms: Set<String>
-        let firstIsEnglish: Bool
+        /// Each word `RespeakText` may ask about, and whether it is plain English.
+        let english: [String: Bool]
     }
 
     func respeakWords(_ spoken: String) async -> RespeakWords {
         // Every Term, not the fn-down selection: a Term's spelling is right wherever it is used.
         let terms = Set(await lexicon.terms.map(\.text))
-        let first = RespeakText.firstWord(spoken)
-        let english = await Task.detached { PlainEnglish.contains(first) }.value  // off the Conductor
-        return RespeakWords(terms: terms, firstIsEnglish: english)
+        let asked = RespeakText.plainnessQuestions(spoken)
+        let english = await Task.detached {  // off the Conductor
+            Dictionary(uniqueKeysWithValues: asked.map { ($0, PlainEnglish.contains($0)) })
+        }.value
+        return RespeakWords(terms: terms, english: english)
     }
 
     /// Under the insert turn, so it waits for earlier Dictations' pastes. Reads
@@ -46,9 +49,9 @@ extension Conductor {
     func replaceSelection(_ spoken: String, at target: Destination.Target, words: RespeakWords) async -> RespeakStep {
         guard let field = await destination.read(at: target) else { return .notLanded(.noField) }
         guard let selection = field.selection else { return .noSelection }
-        // Only the first word is ever asked about, and it was looked up before the turn.
+        // Every word it asks about was looked up before the turn.
         let replacement = RespeakText.replacement(spoken, replacing: selection.text, terms: words.terms,
-                                                  isEnglish: { _ in words.firstIsEnglish })
+                                                  isEnglish: { words.english[$0] ?? false })
         guard replacement.contains(where: { !$0.isWhitespace }) else { return .notLanded(.nothingHeard) }
         return switch await destination.replace(selection.span, expected: selection.text, with: replacement, at: target) {
         case .replaced(let receipt): .replaced(field: field, selection: selection, with: replacement, receipt: receipt)
