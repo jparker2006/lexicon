@@ -48,10 +48,16 @@ extension Conductor {
 
             var delivery = Delivery.historyOnly
             var lag: Duration?
+            var respeak: RespeakStep?
             if typing, let target = run.target {
                 await insertTurn(id)  // Dictations insert in the order they were spoken (#18)
                 delivery = await destination.insert(cleaned.versions.cleaned, for: id, at: target)  // text at the cursor
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
+            } else if case .respeak = run.purpose, let target = run.target {
+                // Only a live target may change another app: a recovered or retried Re-speak has none (#4).
+                // In turn, so it fixes text an earlier Dictation is still pasting.
+                await insertTurn(id)
+                respeak = await replaceSelection(cleaned.versions.cleaned, at: target)
             }
             releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
             run.hold?.end()  // the Dictation landed: App Nap may return
@@ -72,9 +78,8 @@ extension Conductor {
                     emit(.notice(.readyToPaste(id)))
                 }
             }
-            // Only a live target may change another app: recovered or late text is never typed (#4).
-            if case .respeak(let fixing) = run.purpose, run.target != nil {
-                _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)
+            if case .respeak(let fixing) = run.purpose, let respeak {
+                await settleRespeak(respeak, cleaned.versions.cleaned, fixing: fixing, run)
             }
             let status = DictationStatus.landed(delivery, origin: run.origin, previous: run.previous)
             // `lag` is the spec's number: fn-up to the target app reading the paste (scripts/lag-report.sh).

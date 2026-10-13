@@ -57,6 +57,21 @@ public actor HeadlessDestination: TextDestination {
         return Target(serial: delivered.count, focus: FocusSnapshot(pid: 0, fieldFingerprint: "headless"), selection: selection)
     }
 
+    // `async` like the requirement: a sync method beside the protocol's async
+    // default would lose to it in a caller's `await`.
+    public func read(at target: Target) async -> FieldText? {
+        FieldText(text: fieldText, selection: target.selection, bundleID: current.bundleID, fieldFingerprint: "headless")
+    }
+
+    /// Like `TargetApp.replace` with no app to ask: only while the span still reads `expected`.
+    public func replace(_ span: TextSpan, expected: String, with text: String, at target: Target) async -> ReplaceOutcome {
+        guard Self.text(in: fieldText, at: span) == expected else { return .refused(.textChanged) }
+        let utf16 = fieldText.utf16
+        let start = utf16.index(utf16.startIndex, offsetBy: span.location)
+        fieldText.replaceSubrange(start..<utf16.index(start, offsetBy: span.length), with: text)
+        return .replaced
+    }
+
     /// The text at `span` of `text`, in UTF-16 offsets; nil when the span runs past it.
     static func text(in text: String, at span: TextSpan) -> String? {
         let utf16 = text.utf16

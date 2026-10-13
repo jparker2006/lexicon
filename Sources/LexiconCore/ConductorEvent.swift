@@ -51,4 +51,6 @@ public enum FixProblem: Sendable, Hashable, CaseIterable {
     case unverified
     /// The fix landed in the app, but History couldn't be read to save it.
     case historyUnreadable
+    /// The Re-speak held no word to put in.
+    case nothingHeard
 }
