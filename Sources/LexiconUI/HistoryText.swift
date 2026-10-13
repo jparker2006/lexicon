@@ -46,9 +46,10 @@ enum HistoryText {
             let day = title(for: calendar.dateComponents([.year, .month, .day], from: earlier.replacedAt), now: now,
                             calendar: calendar)
             let heard = earlier.model.map { " · \($0.displayName)" } ?? ""
-            sections.append(("Replaced \(day) at \(earlier.replacedAt.formatted(time))\(heard)", earlier.final))
+            let replaced = "Replaced \(day) at \(earlier.replacedAt.formatted(time))\(heard)"
+            sections.append((replaced, earlier.final))
             // The text a Fix was made on, when one changed it.
-            if earlier.cleaned != earlier.final { sections.append(("Before Fixes", earlier.cleaned)) }
+            if earlier.cleaned != earlier.final { sections.append(("\(replaced), before Fixes", earlier.cleaned)) }
         }
         for attempt in detail.attempts where attempt.result != .won {
             sections.append(("\(attempt.model.displayName): \(label(for: attempt.result))", attempt.text ?? attempt.error ?? ""))

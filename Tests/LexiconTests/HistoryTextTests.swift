@@ -111,6 +111,6 @@ func playAndRetryAreGreyedOutOnceTheAudioAgedOut(status: DictationStatus) {
     try #require(labels.count == 3)
     // The clock's spacing before AM/PM is the locale's, so only the parts Lexicon writes are pinned.
     #expect(labels[0].hasPrefix("Replaced Today at 2:59") && labels[0].hasSuffix(" · Meta Muse Voice"))
-    #expect(labels[1] == "Before Fixes")
+    #expect(labels[1].hasPrefix("Replaced Today at 2:59") && labels[1].hasSuffix(" · Meta Muse Voice, before Fixes"))
     #expect(labels[2].hasPrefix("Replaced Yesterday at 3:00") && labels[2].hasSuffix(" · Parakeet (on this Mac)"))
 }
