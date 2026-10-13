@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // codex-agents: writes each typed helper in .claude/agents/<name>.md as a Codex
-// custom agent, .codex/agents/<name>.toml, with the same prompt and a Codex model
-// and effort (docs/agents/codex.md says why each). The .md file is the one source.
+// custom agent, .codex/agents/<name>.toml, with the same prompt and the Codex model
+// and effort MODELS gives its Claude model (docs/agents/codex.md says why). The .md
+// file is the one source.
 //
 //   node scripts/codex-agents.mjs           write every .codex/agents/<name>.toml
 //   node scripts/codex-agents.mjs --check   fail, naming each file, where a .toml is
@@ -14,9 +15,10 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLAUDE = path.join(REPO, '.claude/agents');
 const CODEX = path.join(REPO, '.codex/agents');
 
-// Claude model to Codex model. Haiku's reading and checking jobs go to the small
-// model; Sonnet's judgment lenses go to the everyday one. Effort carries over.
-export const MODELS = { 'claude-haiku-5-5': 'gpt-5.4-mini', 'claude-sonnet-5-5': 'gpt-5.4' };
+// Claude model to Codex model and effort. Jake's ChatGPT plan offers Codex one current
+// model, gpt-6-astra (no luna or sol on his account, 2026-10-13), so effort sets the cost:
+// Haiku's reading and checking jobs run at medium, Sonnet's judgment lenses at high.
+export const MODELS = { 'claude-haiku-5-5': ['gpt-6-astra', 'medium'], 'claude-sonnet-5-5': ['gpt-6-astra', 'high'] };
 
 function parse(file) {
   const text = readFileSync(file, 'utf8');
@@ -32,7 +34,7 @@ const basic = (s) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 /** The .toml text for one .claude/agents/<name>.md file. */
 export function toml(file) {
   const { fields, prompt } = parse(file);
-  const model = MODELS[fields.model];
+  const [model, effort] = MODELS[fields.model] ?? [];
   if (!model) throw new Error(`${path.relative(REPO, file)}: no Codex model for ${fields.model}; add it to MODELS in scripts/codex-agents.mjs`);
   if (prompt.includes("'''")) throw new Error(`${path.relative(REPO, file)}: the prompt holds ''', which a TOML literal string can't`);
   return [
@@ -40,7 +42,7 @@ export function toml(file) {
     `name = ${basic(fields.name)}`,
     `description = ${basic(fields.description)}`,
     `model = ${basic(model)}`,
-    `model_reasoning_effort = ${basic(fields.effort)}`,
+    `model_reasoning_effort = ${basic(effort)}`,
     `developer_instructions = '''`,
     prompt + "'''",
     '',

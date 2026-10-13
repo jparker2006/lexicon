@@ -3,7 +3,7 @@
 // the table scripts/merge-pr.mjs accepts. No model, no network. Run by 45-codex.sh.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -42,7 +42,7 @@ function fixture(t) {
   git(repo, 'config', 'user.email', 'fixture@example.com');
   git(repo, 'config', 'user.name', 'fixture');
   git(repo, 'config', 'commit.gpgsign', 'false');
-  for (const rel of ['docs/agents/review.md', '.claude/workflows/review-map.json']) {
+  for (const rel of ['docs/agents/review.md', '.claude/workflows/review-map.json', '.codex/hooks.json']) {
     mkdirSync(path.join(repo, path.dirname(rel)), { recursive: true });
     copyFileSync(path.join(REPO, rel), path.join(repo, rel));
   }
@@ -83,7 +83,7 @@ test('a reviewer-mode run prints the Review table merge-pr.mjs accepts, with Cod
   assert.match(markdown, new RegExp(`^Reviewed sha: \`${f.sha.slice(0, 7)}\``, 'm'));
   assert.match(markdown, /^\| CONFIRMED \| `Sources\/History\/a\.swift:1` \| a dictation can be lost \|/m);
   assert.equal(result.reviewedSha, f.sha);
-  assert.match(markdown, /^Helpers: 1 snapshot \(script, no model\), .*critic-deep \(Codex gpt-5\.4 high\)/m);
+  assert.match(markdown, /^Helpers: 1 snapshot \(script, no model\), .*critic-deep \(Codex gpt-6-astra high\)/m);
   assert.doesNotMatch(markdown, /\((haiku|sonnet|opus) /);
   assert.ok(calls.length >= 3, 'critics, a verifier and blast radius ran through codex');
 });
@@ -98,9 +98,10 @@ test('each helper runs as codex exec with its role prompt, model, effort and a s
   for (const { args, prompt, schema } of critics) {
     assert.equal(args[0], 'exec');
     assert.ok(prompt.startsWith(role), 'the critic role prompt leads');
-    assert.equal(args[args.indexOf('-m') + 1], 'gpt-5.4-mini');
-    assert.ok(args.includes('model_reasoning_effort="xhigh"'));
+    assert.equal(args[args.indexOf('-m') + 1], 'gpt-6-astra');
+    assert.ok(args.includes('model_reasoning_effort="medium"'));
     assert.ok(args.includes('--ephemeral'));
+    assert.ok(args.some((arg) => arg.startsWith('hooks.state={ ') && arg.includes(`${realpathSync(f.repo)}/.codex/hooks.json:pre_tool_use:0:0`)), 'the guard hook is trusted for the run');
     assert.equal(schema.additionalProperties, false);
     assert.deepEqual(schema.required, Object.keys(schema.properties));
   }
@@ -108,7 +109,7 @@ test('each helper runs as codex exec with its role prompt, model, effort and a s
   const verifiers = calls.filter((c) => c.prompt.includes('Try to disprove'));
   assert.equal(verifiers.length, 1, "the one finding gets one verifier");
   assert.ok(verifiers[0].prompt.startsWith(verifier), 'the verifier role prompt leads');
-  assert.equal(verifiers[0].args[verifiers[0].args.indexOf('-m') + 1], 'gpt-5.4-mini');
+  assert.equal(verifiers[0].args[verifiers[0].args.indexOf('-m') + 1], 'gpt-6-astra');
 });
 
 test('strict closes every object and requires every property, nested ones too', () => {

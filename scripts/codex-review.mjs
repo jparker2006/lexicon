@@ -14,17 +14,19 @@
 // markdown; --out also writes the Workflow's whole result as JSON. CODEX_BIN names the
 // codex binary (default: codex on PATH).
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { trustEntries, trustFlag } from '../.codex/hooks/trust.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// review.js names Claude tiers; these are the Codex models that stand in for them
-// (docs/agents/codex.md says why). Codex's top effort is xhigh.
-export const TIERS = { haiku: 'gpt-5.4-mini', sonnet: 'gpt-5.4', opus: 'gpt-5.4' };
-const effortOf = (effort) => (effort === 'max' ? 'xhigh' : effort);
+// review.js names Claude tiers and efforts. Jake's plan has one current Codex model, so the
+// tier sets the effort, as scripts/codex-agents.mjs does for the typed helpers.
+const MODEL = 'gpt-6-astra';
+export const EFFORTS = { haiku: 'medium', sonnet: 'high', opus: 'high' };
+const modelOf = (tier) => `${MODEL} ${EFFORTS[tier] ?? 'high'}`;
 
 /**
  * The schema in the strict form Codex's --output-schema needs: every object closed
@@ -49,6 +51,19 @@ function rolePrompt(type) {
   return match[1];
 }
 
+/**
+ * The -c flags that trust this repo and its guard hook for one run. Codex skips an untrusted
+ * hook without a word, so every helper run carries them. In a linked worktree Codex reads
+ * hooks.json from the main checkout, so the trust names that file.
+ */
+export function guardFlags(cwd) {
+  const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8' }).trim();
+  const main = path.dirname(common);
+  const hooks = path.join(main, '.codex/hooks.json');
+  if (!existsSync(hooks)) throw new Error(`${hooks} is missing, so a Codex helper would run with no guard; merge main first`);
+  return ['-c', `projects={ ${JSON.stringify(main)} = { trust_level = "trusted" } }`, '-c', trustFlag(trustEntries(hooks))];
+}
+
 /** Runs one helper as a codex exec and returns its JSON answer. */
 async function codex(prompt, opts, scratch, n) {
   const schemaFile = path.join(scratch, `${n}.schema.json`);
@@ -57,11 +72,11 @@ async function codex(prompt, opts, scratch, n) {
   const full = opts.agentType ? `${rolePrompt(opts.agentType)}\n---\n\n${prompt}` : prompt;
   const args = [
     'exec', '--ephemeral', '--color', 'never',
-    '-C', process.cwd(),
+    '-C', process.cwd(), ...guardFlags(process.cwd()),
     // gh reads the issue and open PRs, so the sandbox keeps the network.
     '-s', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true',
-    '-m', TIERS[opts.model] || TIERS.sonnet,
-    '-c', `model_reasoning_effort="${effortOf(opts.effort)}"`,
+    '-m', MODEL,
+    '-c', `model_reasoning_effort="${EFFORTS[opts.model] ?? 'high'}"`,
     '--output-schema', schemaFile, '-o', outFile, '-',
   ];
   const child = spawn(process.env.CODEX_BIN || 'codex', args, { stdio: ['pipe', 'ignore', 'pipe'] });
@@ -86,7 +101,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
       return { out: execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8', maxBuffer: 1 << 28 }) };
     }
     n += 1;
-    log(`codex: ${opts.label} (${TIERS[opts.model]} ${effortOf(opts.effort)})`);
+    log(`codex: ${opts.label} (${modelOf(opts.model)})`);
     return codex(prompt, opts, scratch, n);
   };
   // The Workflow runtime's semantics: a helper that throws leaves null, which review.js reports as incomplete.
@@ -108,7 +123,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
 function codexHelpers(markdown) {
   return markdown.replace(/^Helpers: .*$/m, (line) => line
     .replace(/(\d+) prep \(haiku xhigh\)/, '$1 snapshot (script, no model)')
-    .replace(/\((haiku|sonnet|opus) (\w+)\)/g, (_, tier, effort) => `(Codex ${TIERS[tier]} ${effortOf(effort)})`));
+    .replace(/\((haiku|sonnet|opus) \w+\)/g, (_, tier) => `(Codex ${modelOf(tier)})`));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,8 +1,8 @@
 # Written by scripts/codex-agents.mjs from .claude/agents/spec-checker.md; edit that file, then rerun it.
 name = "spec-checker"
 description = "Read-only Haiku spec checker. Use to list every place a ticket or a diff departs from the spec (#36 and its supersessions comment) and docs/DECISIONS.md, each with the line it departs from."
-model = "gpt-5.4-mini"
-model_reasoning_effort = "xhigh"
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
 developer_instructions = '''
 You compare one ticket or one diff with what is already decided, and list each departure.
 

@@ -1,8 +1,8 @@
 # Written by scripts/codex-agents.mjs from .claude/agents/bench-runner.md; edit that file, then rerun it.
 name = "bench-runner"
 description = "Haiku bench reporter. Use to turn saved timing samples into the bench table with `scripts/bench.sh report` (or the same protocol by hand on a dry-run sample). Never measures live and never sets a budget; live measurements go to the Live checks session."
-model = "gpt-5.4-mini"
-model_reasoning_effort = "xhigh"
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
 developer_instructions = '''
 You turn saved timing samples into the bench table. You never take a measurement yourself: a run that installs, launches or drives Lexicon Dev (`scripts/bench.sh <budget> ...`, `background`, `sample`) belongs to the Live checks session, which holds the live-app lane. Ask it for the samples.
 

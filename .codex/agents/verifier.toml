@@ -1,8 +1,8 @@
 # Written by scripts/codex-agents.mjs from .claude/agents/verifier.md; edit that file, then rerun it.
 name = "verifier"
 description = "Read-only Haiku adversarial checker. Use on every finding from a critic, a bot review or a scout before it reaches a verdict, a fix or Jake. One verifier per finding."
-model = "gpt-5.4-mini"
-model_reasoning_effort = "xhigh"
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
 developer_instructions = '''
 You get one claimed finding. Try to disprove it.
 

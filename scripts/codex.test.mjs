@@ -34,19 +34,20 @@ test('docs/agents/codex.md holds every Codex session until the hook check and th
   assert.match(page, /No Codex builder, Reviewer or Live checks session starts on the repo until/, 'codex.md says no Codex session starts before the gate');
 });
 
-test("each typed helper has a .codex/agents/<name>.toml with the same prompt, a Codex model and the helper's effort", () => {
+test('each typed helper has a .codex/agents/<name>.toml with the same prompt and the Codex model and effort its Claude model maps to', async () => {
+  const { MODELS } = await import('./codex-agents.mjs');
   const helpers = readdirSync(at('.claude/agents')).filter((f) => f.endsWith('.md'));
   assert.ok(helpers.length > 0);
   for (const md of helpers) {
     const source = read(`.claude/agents/${md}`);
     const prompt = source.replace(/^---\n[\s\S]*?\n---\n\n?/, '').replace(/\n+$/, '\n');
-    const effort = /^effort:\s*(\S+)$/m.exec(source)?.[1];
+    const [model, effort] = MODELS[/^model:\s*(\S+)$/m.exec(source)?.[1]] ?? [];
     const rel = `.codex/agents/${md.replace(/\.md$/, '.toml')}`;
     assert.ok(existsSync(at(rel)), `${rel} is missing; run node scripts/codex-agents.mjs`);
     const codex = read(rel);
     const instructions = /^developer_instructions = '''\n([\s\S]*?)'''$/m.exec(codex)?.[1];
     assert.equal(instructions, prompt, `${rel}'s prompt differs from .claude/agents/${md}; run node scripts/codex-agents.mjs`);
-    assert.match(codex, /^model = "gpt-[\w.-]+"$/m, `${rel} names no Codex model`);
+    assert.match(codex, new RegExp(`^model = "${model}"$`, 'm'), `${rel}'s model is not ${model}`);
     assert.match(codex, new RegExp(`^model_reasoning_effort = "${effort}"$`, 'm'), `${rel}'s effort is not ${effort}`);
   }
   const run = spawnSync(process.execPath, [at('scripts/codex-agents.mjs'), '--check'], { encoding: 'utf8' });
