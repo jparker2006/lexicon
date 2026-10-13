@@ -87,7 +87,11 @@ final class Microphone: Sendable {
         if permission.current == .undetermined {
             // The prompt is already up for an earlier fn-down: asking again would
             // only hold this one for another minute (DECISIONS item 87).
-            guard permission.startAsking() else { throw .startTimedOut }
+            guard permission.startAsking() else {
+                Self.log.notice("mic start refused: the Allow prompt is already up")
+                throw .startTimedOut
+            }
+            Self.log.notice("mic permission undetermined: asking for the Allow prompt")
             let allowed = await within(Self.promptLimit) { deliver in
                 Task { [hardware, permission] in
                     let allowed = await hardware.requestPermission()
