@@ -151,6 +151,8 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 **67. What a `// timing-ok:` line covers.** Besides a real-time deadline that only bounds a hang, the timing lint (`scripts/checks/20-test-timing.sh`) accepts a `// timing-ok:` disclosure on the line for: a poll interval, a kill moment that is the test's own input, a semaphore the test itself releases, and a cancellation-only stand-in. The Reviewer's ruling in its verdict on PR #211 (#160).
 
+**70. A hands-free sitting.** Proposed. A sitting with no steps for Jake, opened only after he types "hands free" in the Live checks session (`scripts/live-lane.sh sitting start --hands-free`), so hands-off fn items run while his daily app is quit and reopened as Q8 says. It uses neither of Q7's two daily slots, since it asks nothing of his hands. Jake's yes on the M1 plan covers building #225 (its fillers line: "a hands-free sitting must quit the daily app", [plan](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6120839008)), but his own words on the sitting itself are not recorded. #225's builder. Lives in AGENTS.md, Dev builds and the live app, and workflow.md, Live checks.
+
 ## Current: the product (spec part 3)
 
 Items 25 to 60 come from the spec's first comment, part 3, "what building M0 changed". Each says what the spec said, what was built, and who decided.

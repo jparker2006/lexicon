@@ -56,6 +56,13 @@ for tool in lsappinfo osascript open; do
     chmod +x "$T/bin/$tool"
 done
 
+# The daily Lexicon's Dictation check reads the unified log of the real Mac:
+# here it reads $T/log.txt instead, empty unless a test writes a gesture line.
+touch "$T/log.txt"
+printf '#!/bin/sh\ncat "%s/log.txt"\n' "$T" > "$T/bin/fake-log"
+chmod +x "$T/bin/fake-log"
+export LIVE_LANE_LOG="$T/bin/fake-log"
+
 # The app's temporary folder (where a test-hooks run keeps its scratch data) is
 # the test's own TMPDIR, so nothing here reads or writes the real one.
 printf '#!/bin/sh\n[ "$1" = DARWIN_USER_TEMP_DIR ] && { echo "%s/"; exit 0; }\nexec /usr/bin/getconf "$@"\n' "$TMPDIR" > "$T/bin/getconf"
