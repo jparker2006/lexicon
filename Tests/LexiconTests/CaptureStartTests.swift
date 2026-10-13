@@ -147,7 +147,7 @@ func aCaptureOnAFolderThatCannotBeWrittenStartsAndStaysInRAM() async throws {
 
 // Criterion 4, a guard: a capture dropped at once, with no stop, never leaves an
 // audio file that no History row owns. Launch recovery either adopts the file (a
-// row exists for its id) or the file is gone. It holds with a queued create too.
+// row exists for its id) or the file is gone, whenever the file was created.
 @Test(.timeLimit(.minutes(1)))
 func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     let paths = AppPaths.temporary()
@@ -165,7 +165,7 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     await recorder.settle()
 
     // Recovery adopts only a file created before the store opened, to the millisecond,
-    // so the store opens once the clock has passed the file's millisecond, as a relaunch does.
+    // so the store opens once the clock has passed the millisecond the file was closed in, as a relaunch does.
     let closed = (Date().timeIntervalSince1970 * 1_000).rounded()
     await until { (Date().timeIntervalSince1970 * 1_000).rounded() > closed }
     let store = try HistoryStore(paths: paths)
