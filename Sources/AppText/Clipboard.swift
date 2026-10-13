@@ -87,7 +87,13 @@ struct PasteboardContents: Sendable, Equatable {
     private let now: @MainActor () -> Instant
     /// Jake's clipboard while Lexicon owns the pasteboard (or read ahead by `prefetch`).
     private var saved: Saved?
-    private var current: Current?
+    private var current: Current? {
+        didSet {
+            guard current?.id != oldValue?.id else { return }
+            for waiter in quitWaiters { waiter.resume() }
+            quitWaiters = []
+        }
+    }
     private var serial = 0
     private var waiters: [PasteID: [CheckedContinuation<Bool, Never>]] = [:]
     private var receipts: [PasteID: Bool] = [:]
@@ -189,13 +195,16 @@ struct PasteboardContents: Sendable, Equatable {
     /// `cap` has passed on `clock`, and then Jake's clipboard is back either way
     /// (unless he copied since). Waiting out the restore, not restoring at once,
     /// keeps the post-miss hold: a Cmd-V still queued must not paste his clipboard.
+    ///
+    /// Waits on the paste up now only: a later one (a Dictation fn started meanwhile)
+    /// keeps its own 2 s hold, and the Conductor waits for that one in turn.
     func finishForQuit<C: Clock<Duration>>(within cap: Duration, clock: C) async {
-        guard current != nil else { return }
+        guard let id = current?.id else { return }
         let capped = Task { @MainActor [self] in
             do { try await clock.sleep(for: cap) } catch { return }
-            if let current { finish(current) }
+            if let current, current.id == id { finish(current) }
         }
-        if current != nil { await withCheckedContinuation { quitWaiters.append($0) } }
+        while current?.id == id { await withCheckedContinuation { quitWaiters.append($0) } }
         capped.cancel()
     }
 
@@ -209,11 +218,7 @@ struct PasteboardContents: Sendable, Equatable {
 
     private func restore(_ current: Current) {
         self.current = nil
-        defer {
-            saved = nil
-            for waiter in quitWaiters { waiter.resume() }
-            quitWaiters = []
-        }
+        defer { saved = nil }
         guard current.restores, pasteboard.changeCount == current.changeCount, let saved else { return }
         pasteboard.write(saved.contents)
     }
