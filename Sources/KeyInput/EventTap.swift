@@ -127,7 +127,7 @@ final class EventTapThread: @unchecked Sendable {
             return pass
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
-        if Self.isTypingOrClicking(type) { input.tick() }
+        if Self.isTypingOrClicking(type), !KeyInput.isFnItself(event) { input.tick() }
         guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
         #if DEBUG
         let pressing = gesture.isRecording && !gesture.takesEscape  // a press or a tap not yet confirmed
@@ -199,6 +199,13 @@ extension KeyInput {
     /// that is fn, not another key, so it must not end the tap as a chord would.
     static let globeKeyCode: Int64 = 179
 
+    /// A key-down for fn itself: not another key and not typing.
+    static func isFnItself(_ event: CGEvent) -> Bool {
+        guard event.type == .keyDown else { return false }
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        return keyCode == fnKeyCode || keyCode == globeKeyCode
+    }
+
     /// What the recognizer sees of one event, or nil for an event it ignores.
     /// fn is a flag change on keycode 63; every other flag change (Shift, Cmd,
     /// Option, Control, Caps Lock) is ignored, so a modifier never cancels.
@@ -211,8 +218,8 @@ extension KeyInput {
             self = event.flags.contains(.maskSecondaryFn)
                 ? .fnDown(at, secureInput: secureInput(), id: DictationID()) : .fnUp(at)
         case .keyDown:
+            guard !Self.isFnItself(event) else { return nil }
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            guard keyCode != Self.fnKeyCode, keyCode != Self.globeKeyCode else { return nil }
             let at = HostTime(eventTimestamp: event.timestamp, now: now)
             // Plain Esc, fn or not (a hold keeps fn down); with Cmd, Option, Control or Shift it is a shortcut.
             let plain = event.flags.isDisjoint(with: [.maskCommand, .maskAlternate, .maskControl, .maskShift])
