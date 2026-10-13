@@ -213,6 +213,20 @@ Jake, 2026-10-12 07:25:54Z: "recs for all" (items 57, 58 and 59). Retry stores t
 
 Jake: as item 57. Decided: a package, import or file name in his repos keeps the word. Proposed, from #36's wording of this item, which Jake was not shown: a type name counts too, and prose and comments don't. #73 builds it.
 
+**79. The 20-minute cap and its 19-minute warning act 50 ms after their marks.**
+> Jake: decide whether the 20-minute cap may act 50 ms after the 20-minute mark. I recommend yes. [...] Yes (recommended): the cap stops the recording at exactly 20:00 (the audio ends there), but acts 50 ms later. So an Esc or a tap of fn pressed just before 20:00 always counts, whichever the fn tap sees first. Cost: if fn-up was lost, Quit can wait 20 minutes plus 50 ms instead of exactly 20 minutes. [...] No: the cap acts at exactly 20:00 and Quit never waits past it. Cost: an Esc pressed in the last few milliseconds before 20:00 can arrive just after the cap and be ignored, so that Dictation is typed instead of held. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6126616497))
+
+Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 14:54:52Z): "cap yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6126756110)). Decided: the cap's stop is stamped at the cap and acts 50 ms later, as the double-tap window's drop does; #58's "Quit waits no longer than the cap" becomes "no longer than the cap plus 50 ms". `FnGesture.lateKeyGrace`.
+
+> Jake: decide whether the 19-minute warning sound may also play 50 ms after 19:00, the same as your "cap yes" for the cap. I recommend yes. [...] Yes (recommended): a key pressed just before 19:00 always counts the same way, whichever the fn tap sees first. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127087016))
+
+Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 15:15:50Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6127137470)). Decided: the 19-minute warning acts 50 ms after its mark too.
+
+**80. Esc is taken from the confirmed Dictation, not from fn-down.**
+> Jake: decide whether Esc reaches your app during the first third of a second of holding fn (PR #262, DECISIONS item 75, Proposed). #58 says Lexicon takes Esc "at recording start", the moment fn goes down. The build takes it only once the hold is confirmed (0.3 s) or on the second tap of a double tap. [...] Keep the build (recommended): Esc pressed in that first 0.3 s, or between the two taps, does its normal job in the front app (closes a dialog, cancels in the terminal). The half-started take is dropped: nothing typed, nothing in History. A stray fn tap or the Globe key never eats your Esc. ([#58](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6128270245))
+
+Jake, asked by the orchestrator in its session, 2026-10-12 (recorded 16:31:39Z): "yes" ([record](https://github.com/jparker2006/lexicon/issues/58#issuecomment-6128393563)). The question's and the record's "item 75" is this entry, renumbered because #144 took 75 and #266 took 78. Decided: the Esc hotkey is registered when the recognizer confirms the hold (0.30 s) or the second tap, and removed when the Dictation ends; an Esc in the first 0.3 s or between the taps reaches the front app and the half-started take is dropped (item 43). Registered with and without fn, since a hold keeps fn down. Replaces #58's "registered at recording start".
+
 **59. M1 takes Esc and ⌃⌘V with a registered hotkey first.**
 > Q1: How M1 blocks Esc and ⌃⌘V (#58, #62). Today Lexicon only listens to keys, so Esc while recording and ⌃⌘V also reach the app in front. Blocking keys the old way added 26 to 74 ms of delay to every key you typed. Options: (a) a registered hotkey for Esc, held only while recording. [...] (b) a key-blocking tap that is on only during a Dictation, with its delay per key measured. Either way, typing delay while Lexicon is idle has to stay at 2 to 12 ms. ➡️ Rec: (a). #58 tests it first and falls back to (b) only if it fails.
 

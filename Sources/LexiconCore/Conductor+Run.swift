@@ -63,8 +63,8 @@ extension Conductor {
         let signals = capture.signals
         Task { if await signals.firstAudio() != nil { self.emit(.listening(id)) } }
 
-        // Wait for fn-up (or Esc, a stray tap, sleep, end of file). The 20-minute cap and
-        // the 19-minute warning chime are M1's (#58), as a normal stop from FnGesture.
+        // Wait for fn-up (or the hands-free stop press, Esc, a stray tap, sleep, the cap,
+        // end of file). The cap is a normal stop from FnGesture.
         switch await nextEnd(ends, signals: signals) {
         case .discard:
             _ = await capture.stop(.immediately)
