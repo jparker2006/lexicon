@@ -358,9 +358,6 @@ func aLiveRespeakWhoseWordsComeLateLeavesTheFieldAloneAndSaysTheyCameTooLate() a
     #expect(await history.dictation(respeak)?.finalText == "dog")  // the late words are saved
     #expect(await destination.fieldText == before)
     let seen = await emittedThroughLanding(events, until: respeak)
-    // `.tooLate` is the FixProblem case the fix adds. Until it exists this reads the problem's name,
-    // so the file compiles and the check fails on the missing notice. Once the case exists, use
-    // #expect(notices(seen).contains(.fixNotLanded(.tooLate))) in its place.
     #expect(notices(seen).contains(.fixNotLanded(.tooLate)), "the late words said \(notices(seen))")
     // A Re-speak's words are a correction, never offered to paste-last.
     #expect(!notices(seen).contains(.readyToPaste(respeak)))
