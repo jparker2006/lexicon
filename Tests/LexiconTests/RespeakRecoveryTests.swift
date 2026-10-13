@@ -8,9 +8,9 @@ import LexiconDomain
 import Transcription
 
 // Re-speak (#83), headless: the real Conductor on synthetic WAVs. A Re-speak may
-// change another app's text only through a live target. A Retry of a Re-speak row
-// lands with no target, so the field and History's first Dictation stay as they were.
-// No mic, keys or network.
+// change another app's text only through a live target. A Retry or a launch
+// recovery of a Re-speak row lands with no target, so the field and History's
+// first Dictation stay as they were. No mic, keys or network.
 
 /// Hears `texts` in order, then the last one again: one answer per clip.
 private actor QueuedTranscriber: LocalTranscriber {
@@ -82,4 +82,69 @@ func aLiveRespeakOfASelectedWordReplacesIt() async throws {
     let field = await system.destination.fieldText
     #expect(respeak.versions?.cleaned == "dog")
     #expect(field == "the cat saw the dog")
+}
+
+private let app = AppContext(bundleID: "com.example.editor", appName: "Editor", windowTitle: nil, workingDirectory: nil)
+private let audio = AudioSummary(duration: .milliseconds(1_200), startGap: .milliseconds(40), deviceName: "Mic",
+                                 storage: .onDisk, gaps: [])
+
+/// When an earlier run began a Dictation: well before any store these tests open.
+private func earlier() -> Date { Date().addingTimeInterval(-60) }
+
+/// A closed CAF the way a finished recording leaves it. Copied from HistoryRecoveryTests, where it is private.
+private func writeClosedCAF(_ samples: [Int16], at url: URL) async throws {
+    let wav = try writeWAV(samples, rate: 16_000, in: try scratchDirectory())
+    let recorder = Recorder()
+    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: url)
+    let ended = try #require(await capture.signals.inputEnded())
+    _ = await capture.stop(.released(at: ended))
+    await recorder.settle()
+    #expect(CAFFile.state(of: url) == .closed)
+}
+
+/// Launch recovery takes only what an earlier run wrote, so the next store must open in a later
+/// millisecond than the last file. Copied from HistoryRecoveryTests' `relaunch`, where it is private.
+private func untilRelaunch() async {
+    let written = (Date().timeIntervalSince1970 * 1_000).rounded()
+    await until { (Date().timeIntervalSince1970 * 1_000).rounded() > written }
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aRespeakLeftUnfinishedByACrashEditsNothingWhenRecovered() async throws {
+    let paths = AppPaths.temporary()
+    // The last run: a Dictation that landed, then a Re-speak of it whose audio ended and whose text never came.
+    let lastRun = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
+                                          local: QueuedTranscriber(["the cat saw the cat"]), clock: TestClock())
+    let original = await lastRun.conductor.dictate(file: try wav(), pace: .asFastAsPossible)
+    #expect(original.status == .inserted)
+    let respeak = DictationID()
+    lastRun.history.record(.began(respeak, origin: .live, purpose: .respeak(of: original.id), at: earlier(), app: app))
+    lastRun.history.record(.audioEnded(respeak, audio))
+    try await writeClosedCAF(syntheticSamples(count: 16_000), at: lastRun.history.audioURL(for: respeak))
+    await lastRun.history.flush()
+
+    // The relaunch, on the same data folder: a new store, and a new field that starts empty.
+    await untilRelaunch()
+    let relaunched = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
+                                             local: QueuedTranscriber(["the cat saw the cat", "dog"]), clock: TestClock())
+    // Jake types the same words into the new field, then selects the second "cat" before launch recovery runs.
+    let typed = await relaunched.conductor.dictate(file: try wav(), pace: .asFastAsPossible)
+    #expect(typed.status == .inserted)
+    #expect(await relaunched.destination.fieldText == "the cat saw the cat")  // so the field check below means something
+    await relaunched.destination.select(secondCat)
+
+    await relaunched.conductor.recover()
+    await relaunched.conductor.settle()
+    await relaunched.history.flush()
+
+    // Recovery lands the Re-speak with no target: the field does not move, and nothing is typed for it.
+    #expect(await relaunched.destination.fieldText == "the cat saw the cat")
+    #expect(await relaunched.destination.delivered[respeak] == nil)
+
+    // It reached its recovered landing: its text is in History, and the first Dictation keeps its text.
+    let row = try #require(await relaunched.history.dictation(respeak))
+    #expect(row.status == .recovered)
+    #expect(row.finalText == "dog")
+    #expect(row.purpose == .respeak(of: original.id))
+    #expect(try #require(await relaunched.history.dictation(original.id)).finalText == "the cat saw the cat")
 }

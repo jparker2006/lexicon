@@ -174,4 +174,42 @@ private func field(_ text: String, fingerprint: String? = "field-1", bundleID: S
     @Test func replacementIsEmptyForAPeriodAlone() {
         #expect(RespeakText.replacement(".", replacing: "cat", terms: []) == "")
     }
+
+    // The first letter goes lower only when the replaced text starts lowercase, the first word is
+    // plain English, it is not "I" or an "I'" contraction, and it is not a Term's first word (#83 review).
+
+    /// "I." over "eye": the pronoun "I" keeps its capital even though the replaced word is lowercase.
+    @Test func replacementKeepsTheWordIEvenOverALowercaseSelection() {
+        #expect(RespeakText.replacement("I.", replacing: "eye", terms: [], isEnglish: { _ in true }) == "I")
+    }
+
+    @Test func replacementKeepsAnIContractionCapitalized() {
+        #expect(RespeakText.replacement("I'm", replacing: "um", terms: []) == "I'm")
+    }
+
+    /// "alice" is not an English word to isEnglish, so a name Cleanup capitalized keeps its capital.
+    @Test func replacementKeepsAWordThatIsNotEnglish() {
+        #expect(RespeakText.replacement("Alice.", replacing: "alice", terms: [], isEnglish: { $0 != "alice" }) == "Alice")
+    }
+
+    /// The guard for the cases above: a plain English word still goes lowercase mid-sentence.
+    @Test func replacementLowercasesACommonEnglishWord() {
+        #expect(RespeakText.replacement("Dog.", replacing: "cat", terms: [], isEnglish: { _ in true }) == "dog")
+    }
+
+    /// "Next" is a Term, and the text is exactly that Term: its capital stays.
+    @Test func replacementKeepsATermsWrittenFormWhenItStartsTheText() {
+        #expect(RespeakText.replacement("Next.", replacing: "next", terms: ["Next"], isEnglish: { _ in true }) == "Next")
+    }
+
+    /// "Next" is a Term's first word and begins a longer phrase: the phrase keeps the Term's capital.
+    @Test func replacementKeepsATermsFirstWordWhenMoreWordsFollow() {
+        #expect(RespeakText.replacement("Next steps.", replacing: "next step", terms: ["Next"]) == "Next steps")
+    }
+
+    /// The brief's "Dog." over "Cat" case, with isEnglish given explicitly. The replaced text starts
+    /// uppercase, so the English word keeps its capital too. (The older test above pins the same line.)
+    @Test func replacementKeepsTheCapitalOfAWordOverAnUppercaseSelection() {
+        #expect(RespeakText.replacement("Dog.", replacing: "Cat", terms: [], isEnglish: { _ in true }) == "Dog")
+    }
 }

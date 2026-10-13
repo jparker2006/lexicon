@@ -85,3 +85,34 @@ func aFailedReceiptReadThrowsInsteadOfSayingNeverInserted(status: DictationStatu
 
     #expect(try await store.receipt(for: id) == receipt)
 }
+
+// `finalText(of:)` reads the same way: a known Dictation's text, nil for no such Dictation, and a
+// throw when History can't be read. Today the read goes through `dictation(_:)`, which swallows it.
+
+@Test func aKnownDictationsFinalTextIsReturned() async throws {
+    let store = try makeStore()
+    let id = try begin(store)
+    for event in path(to: .inserted, id) { store.record(event) }
+    await store.flush()
+
+    #expect(try await store.finalText(of: id) == text.cleaned)
+}
+
+@Test func anUnknownDictationHasNoFinalText() async throws {
+    let store = try makeStore()
+    #expect(try await store.finalText(of: DictationID()) == nil)
+}
+
+@Test func aFailedFinalTextReadThrowsInsteadOfSayingNoText() async throws {
+    let store = try makeStore()
+    let id = try begin(store)
+    for event in path(to: .inserted, id) { store.record(event) }
+    await store.flush()
+
+    // The dictation table is renamed away, so the SELECT in dictation(_:) fails with an SQLite error.
+    try await store.read { try $0.execute("ALTER TABLE dictation RENAME TO dictation_gone") }
+    // Setup check, not the finding: the same SELECT, unswallowed, really errors now.
+    await #expect(throws: (any Error).self) { try await store.read { _ = try $0.query("SELECT 1 FROM dictation") } }
+
+    await #expect(throws: (any Error).self) { try await store.finalText(of: id) }
+}
