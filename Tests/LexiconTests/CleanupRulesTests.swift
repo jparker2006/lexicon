@@ -223,6 +223,8 @@ let likeKeptCases: [Case] = [
     Case("It's, like, sextillions of atoms.", "It's, like, sextillions of atoms."),
     Case("It's, like, twofold faster.", "It's, like, twofold faster."),
     Case("It's, like, quadruple the size.", "It's, like, quadruple the size."),
+    Case("It, like, tripled overnight.", "It, like, tripled overnight."),
+    Case("The bill, like, halved.", "The bill, like, halved."),
     Case("It failed, like, thrice today.", "It failed, like, thrice today."),
     Case("Send them to, like, ER, then home.", "Send them to, like, ER, then home."),
     Case("They're, like, teens.", "They're, like, teens."),

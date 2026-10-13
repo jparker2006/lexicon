@@ -65,8 +65,8 @@ enum Fillers {
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some", "many",
         "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice", "thrice", "double",
-        "triple", "quarter", "quarters", "halves", "once", "teens", "lots", "more", "less",
-        "between", "upwards", "somewhere",
+        "triple", "doubled", "tripled", "quadrupled", "halved", "quarter", "quarters", "halves", "once", "teens",
+        "lots", "more", "less", "between", "upwards", "somewhere",
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
