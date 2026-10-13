@@ -222,12 +222,16 @@ Jake, 2026-10-12 15:52:33Z: "yes". Recorded on [#82](https://github.com/jparker2
 **82. The AI cleanup guard's filler rule is #75's, not #163's.** #163 widened what rules-only Cleanup keeps (number repeats, "like" before a number or a name, "uh huh"). The structural check's contract lets a filler go only "where the rules would also drop it", so the Reviewer asked that #163 also hold the guard to the new keeps. The guard has no caller until #75, and every review round on it found a new edge case. Question, on [#163](https://github.com/jparker2006/lexicon/issues/163#issuecomment-6131529924):
 > Jake: decide whether the AI cleanup guard work moves from this ticket to #75, so #163 can ship the fixes to what gets typed today.
 >
+> What you'd see: today Lexicon types the rules-only Cleanup. PR #245 fixes it so it stops changing what you said: "twenty twenty six", "ten ten", "five five five", "go go go", "uh huh", "like, eighty minutes", "like, Postgres", "etc." all stay as spoken. Those fixes are done and green.
+>
+> The Reviewer also asked the AI cleanup guard (the check that will vet AI cleanup once #75 turns it on) to refuse dropping anything those rules keep. Nothing calls that guard yet. Fourteen review rounds on it have each found a new edge case in how it matches a kept "like" to its word (dashes, line breaks, "like" as a verb versus a hedge). Each fix is real, but none of it can change what you see until #75, and each round costs about an hour.
+>
 > - Move it (recommended): this PR keeps the guard as it is on main, and "the guard keeps every filler the rules keep" becomes an acceptance line of #75, built where the guard goes live and can be tested on real AI output. You get the typed-text fixes now.
 > - Keep it here: I keep closing guard edge cases in this PR until a review round comes back clean. The typed-text fixes wait with it.
 >
 > I recommend moving it. Reply "yes" to take that.
 
-Jake, in the orchestrator's session, recorded 2026-10-13 02:57:44Z: "7 yes". Decided: PR #245 keeps the guard's filler rule as it is on main and ships the typed-text fixes; "the guard refuses to drop any filler or word the rules keep" is an acceptance line of #75, built where the guard goes live. Recorded on [#163](https://github.com/jparker2006/lexicon/issues/163#issuecomment-6137202359). The number tables the rules share with the guard gain trillion and quadrillion; that is vocabulary, not the filler rule.
+Jake, 2026-10-12, in the orchestrator's session (recorded on #163 at 2026-10-13 02:57:44Z): "7 yes". Decided: PR #245 keeps the guard's filler rule as it is on main and ships the typed-text fixes; "the guard refuses to drop any filler or word the rules keep" is an acceptance line of #75, built where the guard goes live. Recorded on [#163](https://github.com/jparker2006/lexicon/issues/163#issuecomment-6137202359). The number tables the rules share with the guard gain trillion and quadrillion; that is vocabulary, not the filler rule.
 
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 

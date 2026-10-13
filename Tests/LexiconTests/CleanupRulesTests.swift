@@ -214,6 +214,8 @@ let likeKeptCases: [Case] = [
     Case("We split it, like, halves and thirds.", "We split it, like, halves and thirds."),
     Case("It's, like, trillionths of a cent.", "It's, like, trillionths of a cent."),
     Case("It's, like, quadrillions of rows.", "It's, like, quadrillions of rows."),
+    Case("It's, like, quintillions of rows.", "It's, like, quintillions of rows."),
+    Case("It's, like, sextillions of atoms.", "It's, like, sextillions of atoms."),
     Case("It's, like, twofold faster.", "It's, like, twofold faster."),
     Case("It's, like, quadruple the size.", "It's, like, quadruple the size."),
     Case("It failed, like, thrice today.", "It failed, like, thrice today."),

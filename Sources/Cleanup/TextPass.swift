@@ -65,8 +65,8 @@ enum Fillers {
         "the", "my", "your", "his", "her", "its", "our", "their", "this", "that", "these", "those", "in", "on", "at",
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some", "many",
         "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice", "thrice", "double",
-        "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "teens", "lots",
-        "more", "less", "between", "upwards", "somewhere",
+        "triple", "quarter", "quarters", "halves", "once", "dozen", "dozens", "teens", "lots", "more", "less",
+        "between", "upwards", "somewhere",
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
@@ -269,8 +269,13 @@ enum Fillers {
         if word.hasSuffix("s") { stems.append(String(word.dropLast())) }
         if word.hasSuffix("ths") { stems.append(String(word.dropLast(3))) }
         if word.hasSuffix("th") { stems.append(String(word.dropLast(2))) }
-        return stems.contains { StructuralCheck.isCardinal($0) || StructuralCheck.ordinals[$0] != nil }
+        return stems.contains {
+            StructuralCheck.isCardinal($0) || StructuralCheck.ordinals[$0] != nil || bigScales.contains($0)
+        }
     }
+
+    /// Scales past quintillion, too big for `StructuralCheck`'s Int tables but still number words.
+    static let bigScales: Set<String> = ["sextillion", "septillion", "octillion", "nonillion", "decillion"]
 
     /// The last kept token is a "like" set off on both sides, kept as a hedge
     /// ("takes, like, um, eighty"): its comma stays when a filler after it goes.
