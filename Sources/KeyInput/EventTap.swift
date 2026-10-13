@@ -125,15 +125,16 @@ final class EventTapThread: @unchecked Sendable {
     }
 
     /// Tap thread only (the callback); tests call it on a tap never started.
-    func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+    /// `now`: when the callback runs; tests pass their own, so no test reads the clock.
+    func handle(_ type: CGEventType, _ event: CGEvent, now: HostTime = .now()) -> Unmanaged<CGEvent>? {
         let pass = Unmanaged.passUnretained(event)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             reenable(because: type == .tapDisabledByTimeout ? "timeout" : "user input")
             return pass
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
-        if Self.isTypingOrClicking(type) { countTyping(event) }
-        guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
+        if Self.isTypingOrClicking(type) { countTyping(event, now: now) }
+        guard let key = KeyInput(event, secureInput: secureInput, now: now) else { return pass }
         feed(key)
         switch key {
         case .fnDown(let at, _, _): logDelivery("down", at: at)
@@ -146,10 +147,10 @@ final class EventTapThread: @unchecked Sendable {
     /// One tick per keystroke; a hotkey press the hotkey's `send` already counted is not another.
     /// A held hotkey's repeats come only here (Carbon reports a press once): they are typing,
     /// as any held key's are, and never a report to pair.
-    private func countTyping(_ event: CGEvent) {
+    private func countTyping(_ event: CGEvent, now: HostTime) {
         guard hotkeys.contains(where: { $0.matches(event) }),
               event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return input.tick() }
-        if presses.isFirstReport(.tapCopy, at: HostTime(eventTimestamp: event.timestamp, now: .now())) { input.tick() }
+        if presses.isFirstReport(.tapCopy, at: HostTime(eventTimestamp: event.timestamp, now: now)) { input.tick() }
     }
 
     /// What counts as Jake typing or clicking for `InputClock`: key-downs and
