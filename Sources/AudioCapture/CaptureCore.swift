@@ -52,6 +52,8 @@ final class CaptureCore: @unchecked Sendable {
     #if DEBUG
     /// Every frame read as zero (the `mic zeros` test hook). Set before `begin`.
     var silenced = false
+    /// The first block drained is thrown away and counted as lost (the `mic drops` test hook). Set before `begin`.
+    var dropsFirstBlock = false
     #endif
 
     init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, startedAt: HostTime,
@@ -84,7 +86,7 @@ final class CaptureCore: @unchecked Sendable {
         queue.async { [self] in
             if hasRoom() {
                 do {
-                    writer = try CAFWriter(creating: fileURL)
+                    writer = try CAFWriter(creating: fileURL, calls: policy.files)
                 } catch {
                     diskTrouble()
                 }
@@ -292,7 +294,7 @@ final class CaptureCore: @unchecked Sendable {
 
     private static func resampler(for rate: Double, policy: FlushPolicy) -> Resampler? {
         let chunkFrames = AVAudioFrameCount(rate * (policy.chunk / .seconds(1)))
-        return Resampler(inputRate: rate, maxFrames: max(chunkFrames, FileSource.blockFrames))
+        return Resampler(inputRate: rate, maxFrames: max(chunkFrames, FileSource.blockFrames), convert: policy.convert)
     }
 
     private static let log = Logger(subsystem: "Lexicon", category: "audio")

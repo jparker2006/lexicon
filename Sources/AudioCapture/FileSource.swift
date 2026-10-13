@@ -16,6 +16,7 @@ final class FileSource: CaptureSource, @unchecked Sendable {
     let firstSegment: Segment
     var deviceName: String? { nil }
     var gaps: [Duration] { [] }
+    var lostAudio: Duration { .zero }
     private let file: AVAudioFile
     private let pace: FilePace
     private let stopRequested = Atomic<Bool>(false)

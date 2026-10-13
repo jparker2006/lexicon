@@ -55,6 +55,7 @@ public final class Recorder: Sendable {
     let policy: FlushPolicy
     #if DEBUG
     private let silenceNext = Atomic(false)
+    private let dropNext = Atomic(false)
     #endif
 
     public convenience init() {
@@ -87,6 +88,7 @@ public final class Recorder: Sendable {
         #if DEBUG
         // Spent by the next mic Dictation even when its start fails, as the hook says.
         let silenced = if case .microphone = input { silenceNext.exchange(false, ordering: .relaxed) } else { false }
+        let drops = if case .microphone = input { dropNext.exchange(false, ordering: .relaxed) } else { false }
         #endif
         let source: any CaptureSource
         var policy = policy
@@ -104,6 +106,7 @@ public final class Recorder: Sendable {
         }
         #if DEBUG
         core.silenced = silenced
+        core.dropsFirstBlock = drops
         #endif
         core.begin()
         return LiveCapture(core: core)
@@ -126,6 +129,12 @@ public final class Recorder: Sendable {
     /// runs as usual; its samples are zeroed before anything reads them. A start
     /// that fails spends it too.
     public func silenceNextMicrophoneCapture() { silenceNext.store(true, ordering: .relaxed) }
+
+    /// The `mic drops` test hook: the next Dictation from the mic throws away
+    /// the first block it drains and counts it as lost, as a ring that overflowed
+    /// does, so the lost-audio notice can be seen in the live app. A start that
+    /// fails spends it too.
+    public func dropNextMicrophoneBlock() { dropNext.store(true, ordering: .relaxed) }
     #endif
 }
 

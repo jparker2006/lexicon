@@ -16,6 +16,8 @@ protocol CaptureSource: AnyObject, Sendable {
     var deviceName: String? { get }
     /// Device changes so far: the audio missed while the engine was rebuilt.
     var gaps: [Duration] { get }
+    /// Audio the source failed to produce: a file's unread rest after a read error.
+    var lostAudio: Duration { get }
 }
 
 /// One stretch of frames at one rate. The mic starts a new segment when a

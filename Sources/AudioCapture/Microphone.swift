@@ -272,6 +272,8 @@ final class MicSource: CaptureSource, @unchecked Sendable {
 
     var deviceName: String? { info.withLock { $0.name } }
     var gaps: [Duration] { info.withLock { $0.gaps } }
+    /// The ring's drops are the capture's to count; the mic itself loses nothing.
+    var lostAudio: Duration { .zero }
 
     init(lane: MicLane, engine: any InputEngine, deviceUID: String?, keyDown: HostTime, warm: Bool) {
         self.lane = lane

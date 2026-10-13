@@ -11,6 +11,13 @@ import LexiconDomain
 /// recordings), FLAC through ExtAudioFile (unreadable after a crash), and WAV
 /// through AudioFile (reads back empty after a crash).
 ///
+/// The file calls whose results the capture acts on, so a test can make them fail.
+struct FileCalls: Sendable {
+    var close: @Sendable (AudioFileID) -> OSStatus = { AudioFileClose($0) }
+    /// F_FULLFSYNC, or fsync where unsupported: true when either worked.
+    var sync: @Sendable (Int32) -> Bool = { CAFWriter.fullSync($0) }
+}
+
 /// Confined to the writer queue.
 final class CAFWriter {
     struct Failure: Error {
@@ -36,8 +43,10 @@ final class CAFWriter {
     /// descriptor can flush what AudioFile wrote.
     private var syncDescriptor: Int32
     private var packets: Int64 = 0
+    private let calls: FileCalls
 
-    init(creating url: URL) throws(Failure) {
+    init(creating url: URL, calls: FileCalls = FileCalls()) throws(Failure) {
+        self.calls = calls
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var format = Self.format
         var id: AudioFileID?
@@ -62,18 +71,18 @@ final class CAFWriter {
     @discardableResult
     func fullSync() -> Bool {
         guard syncDescriptor >= 0 else { return false }
-        return Self.fullSync(syncDescriptor)
+        return calls.sync(syncDescriptor)
     }
 
     /// Writes the real data size into the header, then makes it durable.
     /// Idempotent.
     func close() {
         if let file {
-            AudioFileClose(file)
+            _ = calls.close(file)
             self.file = nil
         }
         if syncDescriptor >= 0 {
-            Self.fullSync(syncDescriptor)
+            _ = calls.sync(syncDescriptor)
             Darwin.close(syncDescriptor)
             syncDescriptor = -1
         }
