@@ -326,9 +326,8 @@ enum Fillers {
         if let previous, token.isWord, !meantDoubles.contains(word),
            !previous.text.last!.isPunctuation, previous.word == word,
            previous.text == token.text || previous.opensSentence,
-           // A number word repeats on purpose ("a dozen dozen"); an ordinal ("first first") stutters.
-           !token.isNumber, !(isNumberWord(word) && StructuralCheck.ordinals[word] == nil),
-           !token.isZero, !token.isEmphasis,
+           // A number repeats on purpose ("a dozen dozen"); a plural or ordinal ("first first") stutters.
+           !token.isNumber, !token.isZero, !token.isEmphasis,
            // "mm mm hmm": the second "mm" opens an interjection.
            !(token.trailing.isEmpty && next.map { interjections.contains(word + " " + $0.word) } == true) {
             return 1
