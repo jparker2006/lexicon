@@ -195,9 +195,10 @@ enum RecoveryPlan {
                 actions.append(.deleteGarbage(row.id))
                 continue
             }
-            // An open that failed for now (EMFILE, EIO) says nothing about the audio:
-            // the next launch looks again, rather than fail a Dictation that may be whole.
-            if file == .unavailable, [.recording, .transcribing, .waiting].contains(row.status) { continue }
+            // An open that failed for now (EMFILE, EIO) says nothing about the audio: the
+            // Dictation stays as it was and the next launch looks again, rather than fail one
+            // that may be whole. A delete Jake made is still finished: it needs no read.
+            if file == .unavailable { continue }
             if row.audio == .expired, file != nil {
                 actions.append(.dropExpiredAudio(row.id))
             } else if file == .open {
@@ -211,7 +212,7 @@ enum RecoveryPlan {
                 if row.audio != .expired, file == .open || file == .closed {
                     actions.append(.transcribe(row.id, wasWaiting: row.status == .waiting))
                 } else if file == .empty, row.status == .recording {
-                    // It never heard anything: no row, as for a stray tap.
+                    // No sample reached the disk: no row, as for a stray tap (DECISIONS 87).
                     actions.append(.discard(row.id))
                 } else if file == .empty {
                     // Its words, if any, were only in RAM. Deleted first: a crash in between
