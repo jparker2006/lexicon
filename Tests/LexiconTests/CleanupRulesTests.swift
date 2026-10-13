@@ -154,7 +154,52 @@ func onlyAccidentalRepeatsGo(_ c: Case) {
     #expect(clean(c.raw) == c.gold)
 }
 
-/// A repeated number word is a number, not a stutter: a year, a time, a digit run.
+/// Only a function word stutters. A content word said twice stays as spoken: the
+/// rules cannot tell a stutter from a word meant twice ("testing testing", "won won").
+let contentDoubleCases: [Case] = [
+    Case("testing testing one two three", "testing testing one two three"),
+    Case("Testing testing, one two three.", "Testing testing, one two three."),
+    Case("Testing, um, testing one two three.", "Testing, testing one two three."),
+    Case("Our team won won the hackathon.", "Our team won won the hackathon."),
+    Case("Wait a couple couple minutes.", "Wait a couple couple minutes."),
+    Case("Fix the first first step.", "Fix the first first step."),
+    Case("Wait two seconds seconds now.", "Wait two seconds seconds now."),
+    Case("It's a big big deal.", "It's a big big deal."),
+    Case("Run the tests tests again.", "Run the tests tests again."),
+    // Soft fillers that are not function words stay too: often meant.
+    Case("I like like her idea.", "I like like her idea."),
+    Case("Okay okay, I get it.", "Okay okay, I get it."),
+    Case("Basically basically, it works.", "Basically basically, it works."),
+    // The structural check may drop these, but they are not function words.
+    Case("I'm sorry sorry about that.", "I'm sorry sorry about that."),
+    Case("It's still still working.", "It's still still working."),
+    Case("I already already sent it.", "I already already sent it."),
+]
+
+@Test(arguments: contentDoubleCases)
+func contentWordDoublesStayAsSpoken(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// A function word (the, to, at, in, we, I) said twice or three times is a stutter, and goes.
+let functionStutterCases: [Case] = [
+    Case("I I think so.", "I think so."),
+    Case("Ship it to to five users.", "Ship it to five users."),
+    Case("Meet me at at ten.", "Meet me at ten."),
+    Case("The the the build failed.", "The build failed."),
+    Case("I I I think it works.", "I think it works."),
+    Case("We we should ship.", "We should ship."),
+    Case("It is in in the cache.", "It is in the cache."),
+    Case("The build was was broken.", "The build was broken."),
+]
+
+@Test(arguments: functionStutterCases)
+func functionWordStuttersGo(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+/// A repeated number word is a number, not a stutter: a year, a time, a digit run. Real stutters
+/// and meant doubles next to numbers keep the repeat rule's answer.
 let numberRepeatCases: [Case] = [
     Case("We shipped it in twenty twenty six.", "We shipped it in twenty twenty six."),
     Case("Twenty twenty six was the year.", "Twenty twenty six was the year."),
@@ -171,9 +216,6 @@ let numberRepeatCases: [Case] = [
     Case("It holds a trillion trillion bytes.", "It holds a trillion trillion bytes."),
     Case("It holds a sextillion sextillion atoms.", "It holds a sextillion sextillion atoms."),
     Case("We need a dozen dozen eggs.", "We need a dozen dozen eggs."),
-    Case("Fix the first first step.", "Fix the first step."),
-    Case("Wait a couple couple minutes.", "Wait a couple minutes."),
-    Case("Wait two seconds seconds now.", "Wait two seconds now."),
     Case("We shipped in twenty uh twenty six.", "We shipped in twenty twenty six."),
     Case("We're on twenty-two twenty-two now.", "We're on twenty-two twenty-two now."),
     Case("Get me a double double with no sugar.", "Get me a double double with no sugar."),
@@ -181,17 +223,13 @@ let numberRepeatCases: [Case] = [
     Case("I I think the the build is fine.", "I think the build is fine."),
     Case("It takes the the twenty minutes we budgeted.", "It takes the twenty minutes we budgeted."),
     Case("Meet me at at ten tomorrow.", "Meet me at ten tomorrow."),
-    Case("Our team won won the hackathon.", "Our team won the hackathon."),
     Case("Ship it to to five users first.", "Ship it to five users first."),
     Case("Ha ha, very funny.", "Ha ha, very funny."),
     Case("Oh oh, five servers are down.", "Oh oh, five servers are down."),
-    // Three or more in a row is emphasis, not a stutter.
+    // Three or more of a word that is not a function word stay as spoken.
     Case("Go go go, ship it.", "Go go go, ship it."),
     Case("Go go, go, ship it.", "Go go, go, ship it."),
     Case("It's a no no no from me.", "It's a no no no from me."),
-    // A function word said three times is still a stutter.
-    Case("The the the build failed.", "The build failed."),
-    Case("I I I think it works.", "I think it works."),
 ]
 
 @Test(arguments: numberRepeatCases)
