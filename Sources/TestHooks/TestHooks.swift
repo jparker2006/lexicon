@@ -165,6 +165,8 @@ public struct TestHookChannel: Sendable {
     /// With `launchArgument`: keep the dev app's own data folder instead of a
     /// scratch one, for checks that need its real History or Lexicon.
     public static let devDataArgument = "--dev-data"
+    /// With `launchArgument`: the 20-minute cap is 20 s, its warning 5 s before it.
+    public static let shortCapArgument = "--short-cap"
 
     /// A test-hooks run's data root: the scratch one, so synthetic Dictations
     /// never land in the dev app's History, or its own with `devDataArgument`.

@@ -282,3 +282,150 @@ import Testing
     #expect(board.contents() == before)
     #expect(board.string == "Jake's note")
 }
+
+// MARK: Quit gives Jake's clipboard back (#132)
+
+/// The target read the Dictation at 0 ms, so the restore is due at 200 ms of quiet.
+/// Quit starts first and must not return before that restore: when it returns,
+/// Jake's clipboard is back.
+@MainActor @Test(.timeLimit(.minutes(1))) func quittingDuringAPendingRestoreGivesJakesClipboardBack() async {
+    let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
+    board.jakeCopies("jake's text")
+    let keeper = keeper(board, clock)
+    _ = keeper.put("dictation")
+    _ = clock.at(0)
+    #expect(board.targetReads() == "dictation")
+
+    var started = false
+    var showingWhenQuitReturned: String?
+    let quit = Task {
+        started = true
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
+        showingWhenQuitReturned = board.showing
+    }
+    // Wait for quit to begin on its own signal: the restore is still to come.
+    while !started { await Task.yield() }
+    // Quit must not take the clipboard back itself: a Cmd-V still queued would paste it.
+    #expect(board.showing == "dictation")
+    _ = keeper.expire(at: clock.at(200))  // Paster's timer: reads went quiet, the restore runs
+    await quit.value
+    #expect(showingWhenQuitReturned == "jake's text")
+}
+
+/// No target read the Dictation: it missed at 1 s and its text is held until 2 s after the write.
+/// Quit starts inside that hold and must return only after the restore at 2 s.
+@MainActor @Test(.timeLimit(.minutes(1))) func quittingDuringThePostMissHoldGivesJakesClipboardBack() async {
+    let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
+    board.jakeCopies("jake's text")
+    let keeper = keeper(board, clock)
+    let paste = keeper.put("dictated")
+    #expect(keeper.expire(at: clock.at(1_000)) == .missed(paste))  // no read within 1 s
+
+    var started = false
+    var showingWhenQuitReturned: String?
+    let quit = Task {
+        started = true
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
+        showingWhenQuitReturned = board.showing
+    }
+    while !started { await Task.yield() }
+    #expect(board.showing == "dictated")  // the hold is still on: quit did not take it down
+    _ = keeper.expire(at: clock.at(2_000))  // the hold ends, the restore runs
+    await quit.value
+    #expect(showingWhenQuitReturned == "jake's text")
+}
+
+/// Nothing pending, from a fresh keeper and after a paste already settled: quit
+/// returns at once, with Jake's clipboard where it was.
+@MainActor @Test(.timeLimit(.minutes(1))) func quittingWithNothingPendingReturnsAtOnce() async {
+    let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
+    board.jakeCopies("jake's text")
+    let keeper = keeper(board, clock)
+
+    await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
+    #expect(board.showing == "jake's text")
+
+    let paste = keeper.put("dictated")
+    _ = clock.at(0)
+    #expect(board.targetReads() == "dictated")
+    #expect(keeper.expire(at: clock.at(200)) == .settled(paste))
+    await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
+    #expect(board.showing == "jake's text")
+}
+
+/// Quit while the target has read a paste and nothing has settled it: `expire` is
+/// never called, so only the 2 s cap can end the wait. The wait must not end
+/// before the cap, must end at it, and must give Jake's clipboard back.
+@MainActor @Test(.timeLimit(.minutes(1))) func quitWaitsNoLongerThanItsCapAndStillGivesJakesClipboardBack() async {
+    let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
+    board.jakeCopies("jake's text")
+    let keeper = keeper(board, clock)
+    _ = keeper.put("dictation")
+    _ = board.targetReads()
+
+    var finished = false
+    let quit = Task {
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
+        finished = true
+    }
+    // Wait until the quit sleeps on the clock or has already returned. Waiting for
+    // the sleep alone would hang forever at a quit that returns at once.
+    while !finished, quitClock.sleepers != 1, !Task.isCancelled { await Task.yield() }
+    #expect(!finished, "quit returned before its 2 s cap passed")
+
+    await quitClock.advance(by: ClipboardKeeper.missedHold)
+    await quit.value
+    #expect(board.showing == "jake's text")
+}
+
+/// Jake copies something while quit waits. When the cap passes, the restore must
+/// leave his copy alone, not put his old clipboard over it.
+@MainActor @Test(.timeLimit(.minutes(1))) func aQuitCapNeverOverwritesSomethingJakeCopied() async {
+    let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
+    board.jakeCopies("jake's text")
+    let keeper = keeper(board, clock)
+    _ = keeper.put("dictation")
+    _ = board.targetReads()
+
+    var finished = false
+    let quit = Task {
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
+        finished = true
+    }
+    while !finished, quitClock.sleepers != 1, !Task.isCancelled { await Task.yield() }
+    // The guard: the overwrite check below only means something while the wait is still running.
+    #expect(!finished, "quit returned before its 2 s cap passed")
+
+    board.jakeCopies("copied later")
+    await quitClock.advance(by: ClipboardKeeper.missedHold)
+    await quit.value
+    #expect(board.showing == "copied later")
+}
+
+/// A paste made after quit began (a Dictation fn started meanwhile) is waited for too,
+/// with its own cap from when quit takes it up, so its 2 s hold is never cut short.
+@MainActor @Test(.timeLimit(.minutes(1))) func quitWaitsForALaterPasteWithoutCuttingItsHold() async {
+    let board = FakePasteboard(), clock = FakeClock(), quitClock = TestClock()
+    board.jakeCopies("jake's text")
+    let keeper = keeper(board, clock)
+    _ = keeper.put("dictation")
+    _ = board.targetReads()
+
+    var finished = false
+    let quit = Task {
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: quitClock)
+        finished = true
+    }
+    await quitClock.waitForSleep(endingAt: ClipboardKeeper.missedHold)  // quit waits on the first paste
+    await quitClock.advance(by: .seconds(1))
+    _ = keeper.put("later dictation")  // nobody has read it yet: it is in its hold
+    // Quit takes the later paste up a second in: its cap ends a hold's length after that.
+    await quitClock.waitForSleep(endingAt: .seconds(3))
+    #expect(!finished, "quit waits for the later paste too")
+
+    await quitClock.advance(by: .seconds(1))
+    #expect(board.showing == "later dictation", "the later paste's text is still up for a queued Cmd-V")
+    await quitClock.advance(by: .seconds(1))
+    await quit.value
+    #expect(board.showing == "jake's text")
+}

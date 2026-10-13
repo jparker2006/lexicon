@@ -19,6 +19,15 @@ enum AppTestHooks {
         bundleID == AppPaths.devBundleID && CommandLine.arguments.contains(TestHookChannel.launchArgument)
     }
 
+    /// The fn timing for this launch: with `--test-hooks --short-cap`, a 20 s cap
+    /// whose warning sounds 5 s before it, so Live checks hears both in one sitting.
+    static func keyboardConfig(bundleID: String) -> KeyboardConfig {
+        guard isOn(bundleID: bundleID), CommandLine.arguments.contains(TestHookChannel.shortCapArgument) else {
+            return KeyboardConfig()
+        }
+        return KeyboardConfig(cap: .seconds(20), capWarning: .seconds(5))
+    }
+
     /// A test-hooks run's data root: a scratch folder whose models link to the
     /// dev app's, so synthetic Dictations never land in its History. The dev
     /// app's own folder with `--dev-data`.
