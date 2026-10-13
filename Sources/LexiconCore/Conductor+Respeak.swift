@@ -20,8 +20,10 @@ extension Conductor {
     }
 
     /// What fitting the spoken words needs that takes time: the Lexicon's Terms
-    /// and a scan of the system word list. Read before the insert turn, so a
-    /// Dictation spoken after the Re-speak never waits on it.
+    /// and a scan of the system word list. Read before the insert turn, so it
+    /// overlaps an earlier Dictation's paste. A Dictation spoken after the
+    /// Re-speak still waits for the Re-speak as a whole: its place in line keeps
+    /// that Dictation from pasting over Jake's selection.
     struct RespeakWords: Sendable {
         let terms: Set<String>
         let firstIsEnglish: Bool

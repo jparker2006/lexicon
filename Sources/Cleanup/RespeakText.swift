@@ -39,8 +39,8 @@ public enum RespeakText {
     /// or colon he said stay.
     private static func sentence(_ spoken: String) -> String {
         var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
-        while let last = text.last, ".!?".contains(last) || last.isWhitespace { text.removeLast() }
-        return text
+        if let last = text.last, ".!?".contains(last) { text.removeLast() }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// What surrounds a selected word rather than belonging to it: spaces, quotes
