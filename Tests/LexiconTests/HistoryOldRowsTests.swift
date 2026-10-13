@@ -52,8 +52,16 @@ struct HistoryOldRowsTests {
              .aiAccepted(.cloud(.openRouterFast))),
             (DictationID(), "Cleanup off.", #"{"rulesOnly":{"_0":{"off":{}}}}"#,
              .rulesOnly(.off)),
-            (DictationID(), "Cleanup rejected.", #"{"rulesOnly":{"_0":{"rejected":{"_0":"droppedContentWord"}}}}"#,
+            (DictationID(), "Dropped a word.", #"{"rulesOnly":{"_0":{"rejected":{"_0":"droppedContentWord"}}}}"#,
              .rulesOnly(.rejected(.droppedContentWord))),
+            (DictationID(), "Added a word.", #"{"rulesOnly":{"_0":{"rejected":{"_0":"addedWord"}}}}"#,
+             .rulesOnly(.rejected(.addedWord))),
+            (DictationID(), "Changed a number.", #"{"rulesOnly":{"_0":{"rejected":{"_0":"numberMismatch"}}}}"#,
+             .rulesOnly(.rejected(.numberMismatch))),
+            (DictationID(), "Ran too long.", #"{"rulesOnly":{"_0":{"rejected":{"_0":"tooLong"}}}}"#,
+             .rulesOnly(.rejected(.tooLong))),
+            (DictationID(), "Wrote unspoken code.", #"{"rulesOnly":{"_0":{"rejected":{"_0":"unspokenCode"}}}}"#,
+             .rulesOnly(.rejected(.unspokenCode))),
             (DictationID(), "Cleanup past its deadline.", #"{"rulesOnly":{"_0":{"deadline":{}}}}"#,
              .rulesOnly(.deadline)),
             (DictationID(), "No cleanup model ran.", #"{"rulesOnly":{"_0":{"unavailable":{}}}}"#,
@@ -73,14 +81,14 @@ struct HistoryOldRowsTests {
     @Test func aRowWhoseEngineThisBuildNoLongerHasStillShowsItsText() async throws {
         let (store, paths) = try makeStore()
         let id = DictationID()
-        // The shape the dropped on-device engine had. No build ever wrote one (that engine
-        // never ran), but a row this build can't decode must still show, not vanish.
-        try await insertOldRows(store, [(id: id.description, text: "Cleaned on this Mac.",
-                                         cleanup: #"{"aiAccepted":{"_0":{"onDevice":{}}}}"#)])
+        // An engine this build doesn't know, in the shape a dropped engine case leaves.
+        // A row this build can't decode must still show, not vanish.
+        try await insertOldRows(store, [(id: id.description, text: "Cleaned by a retired engine.",
+                                         cleanup: #"{"aiAccepted":{"_0":{"retiredEngine":{}}}}"#)])
 
         let reader = HistoryReader(paths: paths, calendar: pacific)
         let row = try #require(listed(reader).first { $0.id == id })
-        #expect(row.finalText == "Cleaned on this Mac.")
+        #expect(row.finalText == "Cleaned by a retired engine.")
         #expect(row.cleanup == nil)
     }
 }
