@@ -15,10 +15,12 @@ import LexiconDomain
 import TestHooks
 
 let usage = """
-    usage: lexicon-harness check | paste-check
+    usage: lexicon-harness check | paste-check | replace-check [--frontmost]
            lexicon-harness hook status | dictate <wav> [--result-delay <ms>] | indicator <state> [message] | sound <cue>
            lexicon-harness hook fn down|up... [--shift] | key esc | sleep | mic zeros
            lexicon-harness hook insert [--delay <seconds>] <text>
+           lexicon-harness hook replace [--delay <seconds>] <word> <n> <text>
+           lexicon-harness hook replace-selection [--delay <seconds>] <text>
            lexicon-harness hook capture <seconds> [prepared[=<idle s>]] [change] [device=<uid>]
            lexicon-harness hook privacy on|off [--always-private <bundle id>[,<bundle id>...]]
            lexicon-harness pill [--shots <dir>]
@@ -34,6 +36,11 @@ let usage = """
               list its windows, open the target field, read it and clear it
       paste-check  focus the target field, paste a sentence into it through the real
               paste path, then check the field reads it and the clipboard is restored
+      replace-check  paste a nonce sentence into the target field, replace its second
+              "beta" with "Supabase" through the real replace path, select "gamma" through
+              Accessibility and replace the selection with "Kotlin"; checks the field after
+              each step and the clipboard after. --frontmost: the same in the focused field of
+              the frontmost app, which must read empty first. Never sends Return
       hook    send one test hook to the running Lexicon Dev and print the reply
               states: hidden held handsfree warning finishing landed paste error
               cues:   start stop warning error
@@ -43,6 +50,9 @@ let usage = """
               sleep: the Mac is going to sleep. mic zeros: the next Dictation's
               mic delivers only zeros
               insert: paste <text> at the focused field after --delay seconds (default 0)
+              replace: the n-th (from 1) whole-word <word> in the focused field becomes
+              <text>, after --delay seconds (default 0). replace-selection: the field's
+              selection becomes <text>. Both print the reply: outcome and timings only
               capture: record from the mic and measure the start gap, tail, file
               and mic release; `prepared` prepares the engine first and waits
               0.3 s (or the idle seconds given) before fn-down, else it is built
@@ -90,10 +100,12 @@ do {
     switch arguments.first {
     case "check": try await check()
     // These post input, Dev's Cmd-V or History's own keys: idle skips their windows.
-    case "hook" where ["dictate", "insert"].contains(rest.first): try await PostedInput.during { try await hook(rest) }
+    case "hook" where ["dictate", "insert", "replace", "replace-selection"].contains(rest.first): try await PostedInput.during { try await hook(rest) }
     case "hook": try await hook(rest)
     case "pill": try await pill(rest)
     case "paste-check": try await PostedInput.during { try await pasteCheck() }
+    case "replace-check" where rest.isEmpty || rest == ["--frontmost"]:
+        try await PostedInput.during { try await replaceCheck(frontmost: !rest.isEmpty) }
     case "history": try await PostedInput.during { try await HistoryCheck.run(search: rest.first) }
     case "relaunch": try await relaunch(rest)
     case "wait-fn": try await waitFn(rest)

@@ -10,6 +10,8 @@ func hook(_ arguments: [String]) async throws {
     if case .capture(let seconds, let idle, _, _) = command { timeout += .seconds(seconds + (idle ?? 0)) }
     // The app waits `delay` seconds for a click into the field before it pastes.
     if case .insert(_, let delay) = command { timeout += .seconds(delay) }
+    if case .replace(_, _, _, let delay) = command { timeout += .seconds(delay) }
+    if case .replaceSelection(_, let delay) = command { timeout += .seconds(delay) }
     // A WAV plays at the speed of speech, then lands.
     if case .dictate(_, let delay) = command { timeout += .seconds(60 + (delay ?? 0)) }
     let encoder = JSONEncoder()
@@ -27,6 +29,8 @@ func hook(_ arguments: [String]) async throws {
         print(String(decoding: try encoder.encode(insertion), as: UTF8.self))
     case .dictated(let dictation):
         print(String(decoding: try encoder.encode(dictation), as: UTF8.self))
+    case .replaced(let replacement):
+        print(String(decoding: try encoder.encode(replacement), as: UTF8.self))
     case .failed(let reason):
         fail("FAIL  \(reason)")
     }
@@ -71,12 +75,38 @@ func hookCommand(_ arguments: [String]) -> TestHookCommand {
         }
         guard !words.isEmpty else { fail(usage, code: 64) }
         return .insert(text: words.joined(separator: " "), delay: delay)
+    case "replace" where arguments.count >= 2:
+        return replace(arguments.dropFirst())
+    case "replace-selection" where arguments.count >= 2:
+        return replaceSelection(arguments.dropFirst())
     case "sound" where arguments.count == 2:
         guard let cue = SoundCue(rawValue: arguments[1]) else { fail(usage, code: 64) }
         return .sound(cue)
     default:
         fail(usage, code: 64)
     }
+}
+
+/// `replace [--delay <seconds>] <word> <n> <text...>`: the n-th (from 1) whole-word `word` in the
+/// focused field becomes `text`.
+func replace(_ arguments: ArraySlice<String>) -> TestHookCommand {
+    let (delay, words) = delayed(arguments)
+    guard words.count >= 3, let occurrence = Int(words[1]), occurrence >= 1 else { fail(usage, code: 64) }
+    return .replace(word: words[0], occurrence: occurrence, with: words.dropFirst(2).joined(separator: " "), delay: delay)
+}
+
+/// `replace-selection [--delay <seconds>] <text...>`: the focused field's selection becomes `text`.
+func replaceSelection(_ arguments: ArraySlice<String>) -> TestHookCommand {
+    let (delay, words) = delayed(arguments)
+    guard !words.isEmpty else { fail(usage, code: 64) }
+    return .replaceSelection(with: words.joined(separator: " "), delay: delay)
+}
+
+/// A line's leading `--delay <seconds>` (default 0), and the words after it.
+func delayed(_ arguments: ArraySlice<String>) -> (delay: Double, words: [String]) {
+    guard arguments.first == "--delay" else { return (0, Array(arguments)) }
+    guard let seconds = arguments.dropFirst().first.flatMap(Double.init), seconds >= 0 else { fail(usage, code: 64) }
+    return (seconds, Array(arguments.dropFirst(2)))
 }
 
 /// `fn down|up... [--shift]`: the edges in order, each with Shift held or not.

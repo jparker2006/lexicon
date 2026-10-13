@@ -41,6 +41,12 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     /// would at fn-up: capture the focused field after `delay` seconds (time to
     /// click into the field), then insert.
     case insert(text: String, delay: Double)
+    /// Re-speak's replace through the real AppText path, as a harness asks for it: after `delay`
+    /// seconds (time to click into the field), the `occurrence`-th (from 1) whole-word `word` in
+    /// the target field becomes `with`. Never sends Return.
+    case replace(word: String, occurrence: Int, with: String, delay: Double)
+    /// The same replace, of the target field's selection, after `delay` seconds.
+    case replaceSelection(with: String, delay: Double)
     /// Turn Private mode on or off. A non-nil `alwaysPrivateApps` replaces the
     /// always-private list: nil leaves it as it is, [] clears it. Replies with the status.
     case privacy(PrivacyMode, alwaysPrivateApps: [String]?)
@@ -61,6 +67,7 @@ public enum TestHookReply: Codable, Sendable, Equatable {
     case capture(MicMeasurement)
     case inserted(TestHookInsertion)
     case dictated(TestHookDictation)
+    case replaced(TestHookReplacement)
     /// The app understood the command but could not do it; the text says why.
     case failed(String)
 }
@@ -148,6 +155,29 @@ public struct TestHookDictation: Codable, Sendable, Equatable {
         self.lagMillis = lagMillis
         self.model = model
         self.characters = characters
+    }
+}
+
+/// What one `replace` or `replaceSelection` did. Counts and timings only: the field's text never
+/// leaves the app through a hook, since the field can be one of Jake's.
+public struct TestHookReplacement: Codable, Sendable, Equatable {
+    /// The field's app, as its read named it.
+    public let bundleID: String?
+    /// "replaced", "unverified", or the `ReplaceRefusal`.
+    public let outcome: String
+    /// Capturing the target and reading its field, in microseconds.
+    public let readMicros: Int
+    /// The replace's own work, in microseconds.
+    public let replaceMicros: Int
+    /// The field's length before the replace, in UTF-16 units.
+    public let fieldLengthBefore: Int
+
+    public init(bundleID: String?, outcome: String, readMicros: Int, replaceMicros: Int, fieldLengthBefore: Int) {
+        self.bundleID = bundleID
+        self.outcome = outcome
+        self.readMicros = readMicros
+        self.replaceMicros = replaceMicros
+        self.fieldLengthBefore = fieldLengthBefore
     }
 }
 

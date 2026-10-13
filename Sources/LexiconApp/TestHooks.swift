@@ -99,6 +99,19 @@ enum AppTestHooks {
             await capture(seconds: seconds, preparedIdle: preparedIdle, deviceChange: deviceChange, deviceUID: deviceUID)
         case .insert(let text, let delay):
             if let system { await insert(text, after: delay, into: system.text) } else { closed }
+        case .replace(let word, let occurrence, let text, let delay):
+            if let system {
+                await replace(text, after: delay, into: system.text,
+                              missing: "the field has no occurrence \(occurrence) of that word") {
+                    wholeWord(word, occurrence: occurrence, in: $0)
+                }
+            } else { closed }
+        case .replaceSelection(let text, let delay):
+            if let system {
+                await replace(text, after: delay, into: system.text, missing: "nothing is selected") {
+                    selectedSpan(in: $0)
+                }
+            } else { closed }
         }
     }
 
@@ -208,6 +221,59 @@ enum AppTestHooks {
             caretAfter: receipt?.caretAfter, contextBeforeCount: receipt?.contextBefore.count ?? 0,
             contextAfterCount: receipt?.contextAfter.count ?? 0, clipboardAccessBefore: before,
             clipboardAccessAfter: access()))
+    }
+
+    /// The Re-speak's replace alone: a fresh target and its field read, then the span `pick` chooses
+    /// replaced with `text` through `TargetApp.replace`, the call a Re-speak makes. Refused before any
+    /// wait when the text is empty or spans lines: a hook never types a line break.
+    private static func replace(_ text: String, after delay: Double, into app: TargetApp, missing: String,
+                                picking pick: (FieldText) -> (span: TextSpan, expected: String)?) async -> TestHookReply {
+        guard !text.isEmpty, !text.contains(where: \.isNewline) else {
+            return .failed("a replacement is one line of text, not empty")
+        }
+        try? await Task.sleep(for: .seconds(max(0, min(delay, 20))))
+        let clock = ContinuousClock()
+        let start = clock.now
+        guard let target = await app.target() else { return .failed("nothing has keyboard focus") }
+        guard let field = await app.read(at: target) else { return .failed("the focused field cannot be read") }
+        let readTime = clock.now - start
+        guard let choice = pick(field) else { return .failed(missing) }
+        let replaceStart = clock.now
+        let result = await app.replace(choice.span, expected: choice.expected, with: text, at: target)
+        let replaceTime = clock.now - replaceStart
+        let outcome = switch result {
+        case .replaced: "replaced"
+        case .unverified: "unverified"
+        case .refused(let reason): reason.rawValue
+        }
+        return .replaced(TestHookReplacement(bundleID: field.bundleID, outcome: outcome, readMicros: micros(readTime),
+                                             replaceMicros: micros(replaceTime), fieldLengthBefore: field.text.utf16.count))
+    }
+
+    /// The `occurrence`-th (from 1) whole-word `word` in the field, as UTF-16 offsets. A whole word
+    /// is one no letter or digit touches, so "beta" is not found in "betamax".
+    private static func wholeWord(_ word: String, occurrence: Int, in field: FieldText)
+        -> (span: TextSpan, expected: String)? {
+        guard !word.isEmpty, occurrence >= 1 else { return nil }
+        let text = field.text
+        let matches = text.ranges(of: word).filter { range in
+            !isLetterOrDigit(text[..<range.lowerBound].last) && !isLetterOrDigit(text[range.upperBound...].first)
+        }
+        guard occurrence <= matches.count else { return nil }
+        let range = matches[occurrence - 1]
+        let location = text.utf16.distance(from: text.startIndex, to: range.lowerBound)
+        let length = text.utf16.distance(from: range.lowerBound, to: range.upperBound)
+        return (span: TextSpan(location: location, length: length), expected: word)
+    }
+
+    /// What Jake had selected when the target was taken, if anything was.
+    private static func selectedSpan(in field: FieldText) -> (span: TextSpan, expected: String)? {
+        guard let selection = field.selection, selection.span.length > 0 else { return nil }
+        return (span: selection.span, expected: selection.text)
+    }
+
+    private static func isLetterOrDigit(_ character: Character?) -> Bool {
+        character.map { $0.isLetter || $0.isWholeNumber } ?? false
     }
 
     static func isFixture(_ url: URL) -> Bool {
