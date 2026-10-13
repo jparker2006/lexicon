@@ -425,11 +425,17 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
         #expect(RespeakText.replacement("Really?!", replacing: "rally", terms: [], isEnglish: { _ in true }) == "really?")
     }
 
-    /// An ellipsis is Jake's own mark, not Cleanup's stop: all its dots stay.
-    @Test func replacementKeepsAnEllipsis() {
+    /// A run of dots is Jake's own mark, not Cleanup's stop: all its dots stay.
+    @Test func replacementKeepsARunOfDots() {
         #expect(RespeakText.replacement("Wait...", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait...")
         #expect(RespeakText.replacement("Wait\u{2026}", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait\u{2026}")
         #expect(RespeakText.replacement("Wait..", replacing: "weight", terms: [], isEnglish: { _ in true }) == "wait..")
+    }
+
+    /// An abbreviation's period is part of the word Cleanup kept, not its stop (DECISIONS item 82).
+    @Test func replacementKeepsAnAbbreviationsPeriod() {
+        #expect(RespeakText.replacement("Etc.", replacing: "et cetera", terms: [], isEnglish: { _ in true }) == "etc.")
+        #expect(RespeakText.replacement("Inc.", replacing: "ink", terms: [], isEnglish: { _ in false }) == "Inc.")
     }
 }
 
