@@ -177,27 +177,28 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     #expect(!fileRemains || row != nil, "a file with no History row after recovery")
 }
 
-// MARK: The free-space check is off fn-down's path
+// MARK: The free-space read is cheap on fn-down's path
 
-// The first free-space read after an idle gap can take tens of ms, and `Recorder.start`
-// is what fn-down's `.started` and the speech stream wait on. So start makes the file
-// without asking, and the writer queue asks before anything is written: under the
-// floor, the still-empty file goes and the capture is RAM-only, as before.
-@Test(.timeLimit(.minutes(1))) func aFullDiskIsCheckedAfterStartAndLeavesNoFile() async throws {
-    let source = syntheticSamples(count: 8_000)
-    let wav = try writeWAV(source, rate: 16_000, in: try scratchDirectory())
-    let caf = try scratchDirectory().appending(path: "audio/full.caf")
+// `Recorder.start` is what fn-down's `.started` and the speech stream wait on, and the
+// "important usage" free-space figure can take tens of ms on a first call. It is read
+// only when the quick one says the disk is under the floor, where purgeable space matters.
+@Test func theSlowFreeSpaceReadRunsOnlyWhenTheQuickOneIsUnderTheFloor() {
+    let thoroughReads = Mutex(0)
+    func readers(quick: Int64?, thorough: Int64?) -> FreeSpace.Readers {
+        FreeSpace.Readers(quick: { _ in quick }, thorough: { _ in
+            thoroughReads.withLock { $0 += 1 }
+            return thorough
+        })
+    }
+    let folder = URL(filePath: "/")
 
-    let recorder = Recorder(policy: .diskFull)
-    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: caf)
-    #expect(FileManager.default.fileExists(atPath: caf.path))  // made before any free-space read
-    let problems = capture.signals.problems
-    let ended = try #require(await capture.signals.inputEnded())
-    let take = await capture.stop(.released(at: ended))
-    await recorder.settle()
+    #expect(FreeSpace.hasRoom(at: folder, minimum: 1_000, readers: readers(quick: 5_000, thorough: 0)))
+    #expect(thoroughReads.withLock { $0 } == 0)
 
-    #expect(take.clip.samples == source)
-    #expect(take.summary.storage == .ramOnly)
-    #expect(await problems.first { _ in true } == .diskTrouble)
-    #expect(!FileManager.default.fileExists(atPath: caf.path))
+    // Under the floor by the quick read: purgeable space can still make room.
+    #expect(FreeSpace.hasRoom(at: folder, minimum: 1_000, readers: readers(quick: 10, thorough: 5_000)))
+    #expect(!FreeSpace.hasRoom(at: folder, minimum: 1_000, readers: readers(quick: 10, thorough: 10)))
+    // Neither known: room, as a failed write still falls back.
+    #expect(FreeSpace.hasRoom(at: folder, minimum: 1_000, readers: readers(quick: nil, thorough: nil)))
+    #expect(thoroughReads.withLock { $0 } == 3)
 }
