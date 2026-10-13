@@ -122,7 +122,7 @@ public actor Conductor<Destination: TextDestination> {
         case .pasteLast:
             Task { await self.pasteLast() }
         case .justFixed:
-            // The fix is in the frontmost app, so the always-private list applies to it.
+            // The fix is in the app keys go to, so the always-private list applies to it.
             if let fixes {
                 Task {
                     let app = await destination.context()

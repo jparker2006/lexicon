@@ -30,6 +30,11 @@ enum AX {
         return child
     }
 
+    static func pid(_ element: AXUIElement) -> pid_t? {
+        var pid: pid_t = 0
+        return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+    }
+
     static func int(_ element: AXUIElement, _ attribute: String) -> Int? {
         (value(element, attribute) as? NSNumber)?.intValue
     }
@@ -63,17 +68,70 @@ struct FieldRef: @unchecked Sendable {
 struct Focus {
     let pid: pid_t
     let app: AXUIElement
-    /// nil when the app exposes no focused element (an Electron app before
-    /// `AXManualAccessibility` takes, or no field at all).
+    /// nil when the app answers that it has no focused element (`Answer.none`).
     let field: AXUIElement?
 
-    static func now() -> Focus? {
+    /// The app keys go to, by Accessibility, whatever its focused element says.
+    /// The frontmost app is no stand-in for a target: a non-activating panel
+    /// (Spotlight, a password manager) takes the keys while the app behind it
+    /// stays frontmost and truly has no focused element.
+    static func focusedApp() -> (pid: pid_t, app: AXUIElement)? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, AX.timeout)
-        guard let app = AX.element(system, kAXFocusedApplicationAttribute) else { return nil }
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(app, &pid) == .success else { return nil }
-        return Focus(pid: pid, app: app, field: AX.element(app, kAXFocusedUIElementAttribute))
+        guard let pid = AX.element(system, kAXFocusedApplicationAttribute).flatMap(AX.pid) else { return nil }
+        return (pid, AX.app(pid))
+    }
+
+    static func now() -> Focus? {
+        readTwice(naming: { focusedApp()?.pid }) { pid -> (Answer, Focus?) in
+            let app = AX.app(pid)
+            var value: CFTypeRef?
+            switch Answer(AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value).rawValue) {
+            case .unreadable:
+                return (.unreadable, nil)
+            case .none:
+                return (.none, Focus(pid: pid, app: app, field: nil))
+            case .element:
+                guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return (.element, nil) }
+                let field = value as! AXUIElement  // the type id was checked above
+                AXUIElementSetMessagingTimeout(field, AX.timeout)
+                return (.element, Focus(pid: pid, app: app, field: field))
+            }
+        }
+    }
+
+    /// Reads once more after an unreadable answer: one slow or failed read is not
+    /// the app's answer. The retry names the focused app again and counts only if
+    /// it is the same app: focus that moved meanwhile with no key or click (an app
+    /// activating itself, a panel taking keys) never becomes the target. No app
+    /// named means nothing to retry. Costs up to two more `AX.timeout`s (300 ms),
+    /// only when the first read failed.
+    static func readTwice<App: Equatable, Value>(naming: () -> App?, answering: (App) -> (Answer, Value?)) -> Value? {
+        guard let app = naming() else { return nil }
+        let first = answering(app)
+        guard first.0 == .unreadable else { return first.1 }
+        guard naming() == app else { return nil }
+        return answering(app).1
+    }
+
+    /// An app's answer for its focused element, one meaning on every path. No
+    /// value, unsupported or not implemented is `none`; a timeout or any other
+    /// error is `unreadable`, read once more (`readTwice`), then held: an app
+    /// that never answers only ever holds text.
+    enum Answer: Equatable {
+        case element
+        /// The app says it has no focused element: the same-app 5 s rule covers it.
+        case none
+        case unreadable
+
+        /// From an `AXError` raw value, so tests need no ApplicationServices.
+        init(_ code: Int32) {
+            switch AXError(rawValue: code) {
+            case .success: self = .element
+            case .noValue, .attributeUnsupported, .notImplemented: self = .none  // the app says it has none
+            default: self = .unreadable
+            }
+        }
     }
 
     var isSecure: Bool { traits.map { FieldTraits.accepts($0) == .secure } ?? false }

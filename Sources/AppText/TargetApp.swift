@@ -70,7 +70,9 @@ public actor TargetApp: TextDestination {
         let focus: FocusSnapshot
         let bundleID: String?
         let mark: InputMark
-        let capturedAt: HostTime
+        /// Continuous: it keeps counting while the Mac sleeps, so a lid closed
+        /// mid-Dictation counts toward the fieldless window.
+        let capturedAt: ContinuousClock.Instant
         let field: FieldRef?
         /// What the receipt stores (`Focus.durableFingerprint`).
         let fingerprint: String?
@@ -79,11 +81,12 @@ public actor TargetApp: TextDestination {
     }
 
     public func context() -> AppContext {
-        // No focused element (or no Accessibility): the frontmost app still names
-        // where Jake is, so an app he made always-private is still recognized.
-        guard let focus = Focus.now() else { return Self.context(of: NSWorkspace.shared.frontmostApplication) }
-        let app = NSRunningApplication(processIdentifier: focus.pid)
-        let window = AX.element(focus.app, kAXFocusedWindowAttribute)
+        // The app keys go to, even when its focused element can't be read, so an app
+        // Jake made always-private is recognized; the frontmost app only when
+        // Accessibility names none.
+        guard let (pid, element) = Focus.focusedApp() else { return Self.context(of: NSWorkspace.shared.frontmostApplication) }
+        let app = NSRunningApplication(processIdentifier: pid)
+        let window = AX.element(element, kAXFocusedWindowAttribute)
         return AppContext(bundleID: app?.bundleIdentifier, appName: app?.localizedName,
                           windowTitle: window.flatMap { AX.string($0, kAXTitleAttribute) }, workingDirectory: nil)
     }
@@ -109,7 +112,9 @@ public actor TargetApp: TextDestination {
     }
 
     public func target() async -> Target? {
-        let mark = input.mark()
+        // Both name the moment the target is taken (fn-up, or the ⌃⌘V press): the mark
+        // for typing since, the time for the fieldless window.
+        let mark = input.mark(), capturedAt = ContinuousClock.now
         guard let focus = Focus.now() else { return nil }
         // A password field never gets a Dictation, in any mode, and a link or button
         // takes none. An app that exposes no focused element at all gets the paste.
@@ -118,7 +123,7 @@ public actor TargetApp: TextDestination {
         let fingerprint = focus.durableFingerprint(bundleID: bundleID)
         await Paster.shared.prefetch()  // Jake's clipboard, read now, off the text-ready-to-Cmd-V path
         return Target(focus: focus.snapshot(durable: fingerprint), bundleID: bundleID, mark: mark,
-                      capturedAt: .now(), field: focus.field.map(FieldRef.init), fingerprint: fingerprint,
+                      capturedAt: capturedAt, field: focus.field.map(FieldRef.init), fingerprint: fingerprint,
                       pasteStart: focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute)?.location })
     }
 
@@ -139,7 +144,8 @@ public actor TargetApp: TextDestination {
                     : now.snapshot(durable: nil)
             }
             return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
-                                       inputSinceMark: input.hasInput(since: target.mark)), now)
+                                       inputSinceMark: input.hasInput(since: target.mark),
+                                       sinceCapture: ContinuousClock.now - target.capturedAt), now)
         }
         let paste: ClipboardKeeper.PasteID, now: Focus?
         switch order {

@@ -129,6 +129,10 @@ public enum NotInsertedReason: String, Sendable, Codable, CaseIterable {
     case focusMoved
     case typedSince
     case noField
+    /// The app exposed no focused field, so only "same app" could be checked,
+    /// and the paste came 5 s or more after fn-up, or after the ⌃⌘V press
+    /// (`InsertGuard.fieldlessWindow`).
+    case tooLate
     case pasteFailed
     /// Jake set "Paste from Other Apps" to deny Lexicon: it can't save his
     /// clipboard, so it never replaces it.
@@ -237,8 +241,10 @@ extension DictationStatus {
         case .inserted: return .inserted
         case .notInserted: return .notInserted
         case .historyOnly:
-            if origin == .recovered { return .recovered }
+            // A row that already has text keeps its status (a Retry): a recovered
+            // Dictation Jake pasted stays inserted.
             if let previous, previous.hasText { return previous }
+            if origin == .recovered { return .recovered }
             return .notInserted
         }
     }
