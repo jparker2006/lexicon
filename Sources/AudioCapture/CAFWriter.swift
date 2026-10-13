@@ -61,6 +61,15 @@ final class CAFWriter {
 
     deinit { try? close() }
 
+    /// Makes and removes one CAF in the temporary folder. The first AudioFile
+    /// call in a process loads AudioToolbox's file components; the capture's
+    /// own create runs on fn-down's path, so that cost is paid here, at launch.
+    static func warmUp(in folder: URL = FileManager.default.temporaryDirectory) {
+        let url = folder.appending(path: "lexicon-warm-\(UUID().uuidString).caf")
+        try? CAFWriter(creating: url).close()
+        try? FileManager.default.removeItem(at: url)
+    }
+
     func write(_ samples: UnsafeBufferPointer<Int16>) throws(Failure) {
         guard let file, let base = samples.baseAddress, !samples.isEmpty else { return }
         var count = UInt32(samples.count)

@@ -262,3 +262,10 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     #expect(thoroughReads.withLock { $0 } == 0)  // decided by the quick read, as a disk with room is
     #expect(!FreeSpace.hasRoom(at: folder, minimum: 1_000_000_000, readers: readers(blocks: 1_000, size: 4_096)))
 }
+
+// The launch warm-up makes AudioFile's first call off fn-down's path, and leaves nothing behind.
+@Test func warmingAudioFileAtLaunchLeavesNoFileBehind() throws {
+    let folder = try scratchDirectory()
+    CAFWriter.warmUp(in: folder)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
+}

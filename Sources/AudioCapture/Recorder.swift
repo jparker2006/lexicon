@@ -53,6 +53,7 @@ public final class Recorder: Sendable {
     private let broadcaster = LevelBroadcaster()
     let microphone: Microphone
     let policy: FlushPolicy
+    private let warmedFiles = Atomic(false)
     #if DEBUG
     private let silenceNext = Atomic(false)
     private let dropNext = Atomic(false)
@@ -69,8 +70,11 @@ public final class Recorder: Sendable {
     }
 
     /// At launch, so the first `start` only has to start hardware. After every
-    /// stop the microphone prepares the next engine itself. A file has nothing to warm up.
+    /// stop the microphone prepares the next engine itself. A file input's engine
+    /// has nothing to warm up. Once per process, AudioFile is warmed off the
+    /// writer queue's way of any capture, since every capture's file is made at fn-down.
     public func prepare(_ input: AudioInput) {
+        if !warmedFiles.exchange(true, ordering: .relaxed) { writerQueue.async { CAFWriter.warmUp() } }
         guard case .microphone(let uid) = input else { return }
         microphone.prepare(deviceUID: uid)
     }
