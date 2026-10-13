@@ -40,7 +40,7 @@ public enum RespeakOutcome: Sendable, Hashable {
 /// Re-speak's live target).
 ///
 /// Writes Fixes only through `HistoryStore.record(.fixRecorded)` and Rules only
-/// through `Lexicon.add`. Owns nothing durable itself; its only state is the
+/// through `Lexicon.add`; a Re-speak's Fix is the Conductor's, which made the replace. Owns nothing durable itself; its only state is the
 /// in-memory watch windows.
 public actor FixEngine {
     public init(history: HistoryStore, lexicon: Lexicon, text: TargetApp, jev: JevClient, prompter: any FixPrompter) {
