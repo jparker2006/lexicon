@@ -35,9 +35,11 @@ public enum TextPass {
 /// `research/cleanup-pass`):
 ///   - hard fillers ("um", "uh"), anywhere
 ///   - hard fillers inside an interjection ("uh huh", "uh oh", "mm hmm", "ah ha") stay
-///   - an immediate repeat of the word before ("the the"), unless the double can
-///     be meant ("that that", "had had", "not not") or is a number ("twenty
-///     twenty six", "ten ten", "five five five")
+///   - an immediate repeat of a function word ("the the", "I I"), unless the
+///     double can be meant ("that that", "had had", "not not"). Any other word
+///     said twice stays as spoken ("testing testing", "won won", "twenty twenty
+///     six"): the rules can't tell a stutter from a word meant twice, so from
+///     M3 the AI cleanup decides on it.
 ///   - "like" and "you know" only when set off on both sides: a comma or the
 ///     start of a sentence before, a comma after. "like" stays before a
 ///     comparison, an estimate or a name ("like, the primary color", "like,
@@ -85,12 +87,13 @@ enum Fillers {
         "before", "after", "if", "dont", "doesnt", "cant", "wont", "ain't", "kinda", "sorta", "nah", "nope",
     ]
 
-    /// Doubles that grammar allows, on top of `protected` and numbers. "oh oh" and "ha ha"
-    /// are exclamations; a lone "oh" before a number would read as a zero. A doubled
-    /// ordinal ("the first first step") stays a stutter: it makes no number.
+    /// Doubles the rules keep though the word is in `StructuralCheck.stop`, on top of
+    /// `protected`. Grammar allows them ("I know that that is wrong", "what it had had"),
+    /// or the word is a cue or an adverb the check may drop, not a function word
+    /// ("sorry sorry", "still still").
     static let meantDoubles: Set<String> = [
-        "that", "had", "is", "do", "so", "very", "bye", "ha", "oh", "knock", "much", "long", "far", "way", "super",
-        "many", "more", "well", "too", "pretty", "totally", "double", "triple",
+        "that", "had", "is", "do", "very", "too", "sorry", "scratch", "still", "already", "again", "also", "once",
+        "own",
     ]
 
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".
@@ -122,25 +125,6 @@ enum Fillers {
         // ends a sentence and "etc. um, then ship it" does not.
         for i in tokens.indices.dropLast() where tokens[i].isAbbreviation && !titles.contains(tokens[i].word) {
             tokens[i].endsSentence = tokens[i + 1].isCapitalized
-        }
-        // Three or more of a content word running, commas allowed, is emphasis ("go go, go");
-        // a function word said three times is still a stutter ("the the the").
-        var run = tokens.startIndex
-        while run < tokens.endIndex {
-            var end = run + 1
-            while end < tokens.endIndex, tokens[end - 1].trailing.isEmpty || tokens[end - 1].trailing == ",",
-                  tokens[end].word == tokens[run].word {
-                end += 1
-            }
-            if end - run >= 3, !tokens[run].word.isEmpty, !StructuralCheck.stop.contains(tokens[run].word) {
-                for k in run..<end { tokens[k].isEmphasis = true }
-            }
-            run = end
-        }
-        // "oh" touching a number with no mark between is a zero ("oh oh seven", "five oh oh oh"),
-        // and a filler sound before it inside the number is a filler ("five uh oh seven").
-        for k in tokens.indices where tokens[k].word == "oh" {
-            tokens[k].isZero = zeroRun(tokens, around: k)
         }
         for k in tokens.indices where tokens[k].isHardFiller {
             tokens[k].isInNumber = soundInNumber(tokens, at: k)
@@ -209,20 +193,8 @@ enum Fillers {
         return kept.joined(separator: " ")
     }
 
-    /// The "oh" run holding `k` touches a number: right after one ("five, oh oh") or right
-    /// before one with no mark between ("oh oh seven"; "uh oh, five servers" is no zero).
-    private static func zeroRun(_ tokens: [Token], around k: Int) -> Bool {
-        var first = k
-        while first > 0, tokens[first - 1].word == "oh", tokens[first - 1].trailing.isEmpty { first -= 1 }
-        var last = k
-        while last + 1 < tokens.count, tokens[last].trailing.isEmpty, tokens[last + 1].word == "oh" { last += 1 }
-        return first > 0 && (tokens[first - 1].trailing.isEmpty || tokens[first - 1].trailing == ",")
-                && tokens[first - 1].isNumber
-            || last + 1 < tokens.count && tokens[last].trailing.isEmpty && tokens[last + 1].isNumber
-    }
-
     /// A filler sound at `k` inside a spoken number, before a zero "oh": "five uh oh seven",
-    /// "five, uh oh oh seven" (a comma may follow the number, as in `zeroRun`).
+    /// "five, uh oh oh seven" (a comma may follow the number).
     private static func soundInNumber(_ tokens: [Token], at k: Int) -> Bool {
         guard k > 0, tokens[k - 1].trailing.isEmpty || tokens[k - 1].trailing == ",", tokens[k - 1].isNumber,
               tokens[k].trailing.isEmpty else { return false }
@@ -323,13 +295,9 @@ enum Fillers {
             return 1
         }
 
-        if let previous, token.isWord, !meantDoubles.contains(word),
+        if let previous, StructuralCheck.stop.contains(word), !meantDoubles.contains(word),
            !previous.text.last!.isPunctuation, previous.word == word,
-           previous.text == token.text || previous.opensSentence,
-           // A number repeats on purpose ("a dozen dozen"); a plural or ordinal ("first first") stutters.
-           !token.isNumber, !token.isZero, !token.isEmphasis,
-           // "mm mm hmm": the second "mm" opens an interjection.
-           !(token.trailing.isEmpty && next.map { interjections.contains(word + " " + $0.word) } == true) {
+           previous.text == token.text || previous.opensSentence {
             return 1
         }
         return 0
@@ -349,10 +317,7 @@ private struct Token {
     var endsSentence: Bool
     /// "etc.", "e.g.", "p.m.": the period may be the abbreviation's own.
     let isAbbreviation: Bool
-    /// Set by `Fillers.clean` from the tokens around: an "oh" read as zero, a word said
-    /// three or more times running, a filler sound inside a spoken number.
-    var isZero = false
-    var isEmphasis = false
+    /// Set by `Fillers.clean` from the tokens around: a filler sound inside a spoken number.
     var isInNumber = false
 
     init(_ text: Substring) {
@@ -401,8 +366,6 @@ private struct Token {
     var isPunctuationOnly: Bool { word.isEmpty && !trailing.isEmpty }
     /// A comma or a sentence end after this token sets off the one after it.
     var setsOffNext: Bool { !trailing.isEmpty }
-    /// Letters and apostrophes only: digits and code are never "repeats".
-    var isWord: Bool { !word.isEmpty && word.allSatisfy { $0.isLetter || $0 == "'" } }
     /// "config.json", "snake_case", "/review", "v2": never recapitalized.
     var isCode: Bool { word.contains { $0 == "." || $0 == "/" || $0 == "_" || $0.isNumber } }
     /// "um", "Uh"; not "ER" or "UH", which are names.
