@@ -75,11 +75,12 @@ func aControlCommandVKeyDownSeenByTheTapNeverPastes() async {
     #expect(!commands.contains(.pasteLast), "the tap sees ⌃⌘V as an ordinary key; only the hotkey pastes")
 }
 
-/// A key-down from the keyboard (pid 0), as the tap's own handler sees it.
-private func keyDown(_ keyCode: CGKeyCode, _ flags: CGEventFlags) -> CGEvent {
+/// A key-down from the keyboard (pid 0), as the tap's own handler sees it, pressed at `at`
+/// (an explicit time, so pairing never depends on how long the test takes).
+private func keyDown(_ keyCode: CGKeyCode, _ flags: CGEventFlags, at: HostTime = HostTime(nanoseconds: 0)) -> CGEvent {
     let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true)!
     event.flags = flags
-    event.timestamp = 0
+    event.timestamp = at.nanoseconds
     event.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
     return event
 }
@@ -87,13 +88,14 @@ private func keyDown(_ keyCode: CGKeyCode, _ flags: CGEventFlags) -> CGEvent {
 @Test(.timeLimit(.minutes(1)))
 func aPasteLastPressNeverHoldsItsOwnPaste() {
     let input = InputClock()
+    let t = HostTime.now()  // one press time for both of a press's reports
     let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
     let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
     // The hotkey's command goes first and the paste takes its mark; only then does the
     // tap's copy of the same ⌃⌘V key-down arrive. It is not typing since the press.
-    tap.send(.pasteLast)
+    tap.send(.pasteLast, pressedAt: t)
     let mark = input.mark()
-    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t))
     let field = FocusSnapshot(pid: 42, fieldFingerprint: "field")
     let decision = InsertGuard.decide(target: field, focusNow: field, inputSinceMark: input.hasInput(since: mark),
                                       sinceCapture: .zero)
@@ -113,80 +115,85 @@ func everyOtherVKeyDownStillCountsAsTyping(_ flags: CGEventFlags) {
 @Test(.timeLimit(.minutes(1)), arguments: [false, true])
 func aPasteLastPressStillCountsAsTypingForADictationInFlight(tapCopyFirst: Bool) {
     let input = InputClock()
+    let t = HostTime.now()  // one press time for both of a press's reports
     let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
     let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
     // An earlier Dictation took its target at fn-up; then Jake presses ⌃⌘V. Its text,
     // still on the way, must not land after the paste he asked for.
     let fnUp = input.mark()
-    if tapCopyFirst { _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand])) }
-    tap.send(.pasteLast)
-    if !tapCopyFirst { _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand])) }
+    if tapCopyFirst { _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t)) }
+    tap.send(.pasteLast, pressedAt: t)
+    if !tapCopyFirst { _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t)) }
     #expect(input.hasInput(since: fnUp), "⌃⌘V is typing since that fn-up")
 }
 
 @Test(.timeLimit(.minutes(1)))
 func aPasteLastPressCountsAsTypingAtItsFirstReport() {
     let input = InputClock()
+    let t = HostTime.now()  // one press time for both of a press's reports
     let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
     let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
     let fnUp = input.mark()
     // The tap's copy can come before the hotkey's press: the press counts from then on.
-    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t))
     #expect(input.hasInput(since: fnUp), "a Dictation checked between the two reports sees the press")
     // The hotkey's report of the same press is not a second keystroke, and the paste
     // it asks for marks after the press, so the press never holds it.
     let beforeHotkey = input.mark()
-    tap.send(.pasteLast)
+    tap.send(.pasteLast, pressedAt: t)
     #expect(!input.hasInput(since: beforeHotkey), "one press is one keystroke")
 }
 
 @Test(.timeLimit(.minutes(1)))
 func aControlCommandVTheHotkeyNeverSawStillCountsAsTyping() {
     let input = InputClock()
+    let t = HostTime.now()  // one press time for both of a press's reports
     let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
     let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
     // Another app holds ⌃⌘V, so the hotkey never registered: the key reaches the app.
     let fnUp = input.mark()
-    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t))
     #expect(input.hasInput(since: fnUp))
     let afterFirst = input.mark()
-    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t))
     #expect(input.hasInput(since: afterFirst), "each press the hotkey never reported is typing")
 }
 
 @Test(.timeLimit(.minutes(1)))
 func holdingControlCommandVNeverLetsALaterPressHoldItsOwnPaste() {
     let input = InputClock()
+    let t = HostTime.now()  // one press time for both of a press's reports
     let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
     let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
     // Jake holds ⌃⌘V: one hotkey report, and the key repeats at the tap.
-    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
-    tap.send(.pasteLast)
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t))
+    tap.send(.pasteLast, pressedAt: t)
     for _ in 0..<3 {
-        let repeated = keyDown(9, [.maskControl, .maskCommand])
+        let repeated = keyDown(9, [.maskControl, .maskCommand], at: t)
         repeated.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
         _ = tap.handle(.keyDown, repeated)
     }
     // His next press: this time the hotkey's report comes first, the paste marks, then the tap's copy.
-    tap.send(.pasteLast)
+    tap.send(.pasteLast, pressedAt: t)
     let mark = input.mark()
-    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t))
     #expect(!input.hasInput(since: mark), "the press counted before its command, not after its paste's mark")
 }
 
 @Test(.timeLimit(.minutes(1)))
 func aPressWhoseHotkeyReportWasLostNeverPairsWithTheNextPress() {
     let input = InputClock()
+    let t = HostTime.now()  // one press time for both of a press's reports
     let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
     let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
     // Half a second ago a ⌃⌘V reached the tap, and its hotkey report never came.
-    let earlier = keyDown(9, [.maskControl, .maskCommand])
-    earlier.timestamp = HostTime.now().nanoseconds - 500_000_000
+    let earlier = keyDown(9, [.maskControl, .maskCommand], at: t)
+    earlier.timestamp = t.nanoseconds - 500_000_000
     _ = tap.handle(.keyDown, earlier)
     // Now a new press: the hotkey's report first, the paste marks, then the tap's copy.
-    tap.send(.pasteLast)
+    tap.send(.pasteLast, pressedAt: t)
     let mark = input.mark()
-    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand]))
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t))
     #expect(!input.hasInput(since: mark), "the new press counted before its command, not after its paste's mark")
 }
 
@@ -202,4 +209,32 @@ func aPressWhoseHotkeyReportWasLostNeverPairsWithTheNextPress() {
         presses.isFirstReport(.tapCopy, at: at(4_000)), presses.isFirstReport(.tapCopy, at: at(4_100)),
     ]
     #expect(counted == [true, false, true, false, true, true, true, true])
+}
+
+@Test(.timeLimit(.minutes(1)))
+func twoQuickPressesEachPairWithTheirOwnReports() {
+    let input = InputClock()
+    let t = HostTime.now()
+    let first = HostTime(nanoseconds: t.nanoseconds - 100_000_000)
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    // Two presses 100 ms apart; both tap copies reach the tap thread before either hotkey report.
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: first))
+    _ = tap.handle(.keyDown, keyDown(9, [.maskControl, .maskCommand], at: t))
+    tap.send(.pasteLast, pressedAt: first)
+    let afterFirstCommand = input.mark()
+    tap.send(.pasteLast, pressedAt: t)
+    #expect(!input.hasInput(since: afterFirstCommand), "two presses are two keystrokes, not three")
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aHeldControlCommandVStillCountsAsTyping() {
+    let input = InputClock()
+    let (_, continuation) = AsyncStream<KeyCommand>.makeStream()
+    let tap = Keyboard.tap(KeyboardConfig(), input: input, continuation: continuation)
+    let mark = input.mark()
+    let repeated = keyDown(9, [.maskControl, .maskCommand])
+    repeated.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+    _ = tap.handle(.keyDown, repeated)
+    #expect(input.hasInput(since: mark), "a held key's repeats are typing, as for every other key")
 }
