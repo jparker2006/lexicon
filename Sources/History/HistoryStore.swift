@@ -167,7 +167,9 @@ public final class HistoryStore: @unchecked Sendable {
     /// A Dictation's final text. Throws when History can't be read: that is not
     /// "no such Dictation".
     public func finalText(of id: DictationID) async throws -> String? {
-        await dictation(id)?.finalText
+        try await read { db in
+            try db.query("SELECT final_text FROM dictation WHERE id = ?", [.text(id.description)]).first?.text(0)
+        }
     }
 
     /// Recently inserted Dictations, newest first, for matching a hook prompt to its Dictation.
