@@ -251,7 +251,6 @@ func mayWriteRun(to out: URL, manifest: URL, lexicon: URL? = nil, repo: URL) -> 
 private func label(_ outcome: CleanupOutcome) -> String {
     switch outcome {
     case .aiAccepted(.cloud(let model)): "ai:\(model.rawValue)"
-    case .aiAccepted(.onDevice): "ai:on-device"
     case .rulesOnly(.off): "rules-only:off"
     case .rulesOnly(.rejected(let failure)): "rules-only:rejected:\(failure.rawValue)"
     case .rulesOnly(.deadline): "rules-only:deadline"

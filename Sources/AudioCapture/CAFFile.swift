@@ -10,7 +10,22 @@ public enum CAFFile {
         /// Header says data size -1: the writer never closed it (crash or power loss).
         case open
         case closed
+        /// No sample yet: zero bytes, a header with no data chunk, or a data chunk holding no sample.
+        case empty
+        /// The open failed for a reason that passes by itself (too many files open, an I/O
+        /// error, an interrupted call): the audio may be fine, so a later look may read it.
+        case unavailable
         case unreadable
+    }
+
+    /// What `finalize` did.
+    public enum Finalized: Sendable, Hashable {
+        /// The real size is in the header now.
+        case wroteSize
+        /// The header already held it.
+        case wasWhole
+        /// No sample to keep: the file was left as it was.
+        case noSample
     }
 
     public enum Failure: Error, Sendable, Hashable {
@@ -22,10 +37,16 @@ public enum CAFFile {
     /// Reads the `data` chunk's size from the header. Never decodes audio.
     public static func state(of url: URL) -> State {
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
-        guard descriptor >= 0 else { return .unreadable }
+        // Only a failure that passes by itself waits for a later look. One that stays (a
+        // permission, a missing file) would hold its Dictation in flight on every launch.
+        guard descriptor >= 0 else { return [EMFILE, ENFILE, EIO, EINTR, EAGAIN].contains(errno) ? .unavailable : .unreadable }
         defer { close(descriptor) }
-        guard let chunk = dataChunk(descriptor) else { return .unreadable }
-        return chunk.size == -1 ? .open : .closed
+        return switch layout(descriptor) {
+        case .unavailable: .unavailable
+        case .notCAF: .unreadable
+        case .noSample: .empty
+        case .data(_, let size): size == -1 ? .open : .closed
+        }
     }
 
     /// Writes the real data size into a crashed CAF's header, from the file's
@@ -35,37 +56,72 @@ public enum CAFFile {
     ///
     /// Done by hand because AudioFile does not do it: reopening the file
     /// read-write and closing it leaves the size at -1 (measured, macOS 26).
-    /// Idempotent: finalizing a closed file is a no-op.
-    public static func finalize(_ url: URL) throws(Failure) {
+    /// Idempotent: finalizing a closed file is a no-op. An empty file is left as
+    /// it is: there is no sample to keep, and recovery deletes it.
+    @discardableResult
+    public static func finalize(_ url: URL) throws(Failure) -> Finalized {
         let descriptor = open(url.path, O_RDWR | O_CLOEXEC)
         guard descriptor >= 0 else { throw .unreadable(url) }
         defer { close(descriptor) }
-        guard let chunk = dataChunk(descriptor) else { throw .unreadable(url) }
-        guard chunk.size == -1 else { return }
+        let chunk: (offset: off_t, size: Int64)
+        switch layout(descriptor) {
+        case .unavailable, .notCAF: throw .unreadable(url)
+        case .noSample: return .noSample
+        case .data(let offset, let size): chunk = (offset, size)
+        }
+        guard chunk.size == -1 else { return .wasWhole }
         var info = stat()
         guard fstat(descriptor, &info) == 0 else { throw .unreadable(url) }
         let payload = info.st_size - chunk.offset - 12  // edit count (4 bytes) + audio
-        guard payload >= 4 else { throw .unreadable(url) }
         let size = payload - (payload - 4) % 2  // whole 16-bit packets only
         if size != payload, ftruncate(descriptor, chunk.offset + 12 + size) != 0 { throw .unreadable(url) }
         let bigEndian = withUnsafeBytes(of: UInt64(size).bigEndian, Array.init)
         guard pwrite(descriptor, bigEndian, 8, chunk.offset + 4) == 8 else { throw .unreadable(url) }
         CAFWriter.fullSync(descriptor)
+        return .wroteSize
     }
 
-    /// Walks the chunk headers (big-endian) to `data`: where its header starts
-    /// and its size field. nil if this is not a CAF with a data chunk.
-    private static func dataChunk(_ descriptor: Int32) -> (offset: off_t, size: Int64)? {
+    private enum Layout {
+        /// A read failed: the bytes may be fine.
+        case unavailable
+        /// Not a CAF, or a damaged chunk header.
+        case notCAF
+        /// Nothing past the header yet: zero bytes, no data chunk, or a data chunk
+        /// with no whole sample on disk, whatever its size field says. What a capture
+        /// leaves when it dies before its first write; closing the writer then leaves
+        /// the same bytes (AudioFile keeps the size at -1 with no packet, measured).
+        case noSample
+        /// The data chunk: where its header starts, and its size field (-1 while open).
+        case data(offset: off_t, size: Int64)
+    }
+
+    /// Walks the chunk headers (big-endian) to `data`. A file the writer had not
+    /// got past its header reads `.noSample`, so a crash then is not a damaged file;
+    /// a chunk that claims more bytes than the file has is damaged.
+    private static func layout(_ descriptor: Int32) -> Layout {
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { return .unavailable }
+        let length = info.st_size
+        guard length > 0 else { return .noSample }
         var header = [UInt8](repeating: 0, count: 12)
-        guard pread(descriptor, &header, 8, 0) == 8, header[0..<4].elementsEqual("caff".utf8) else { return nil }
+        let fileHeader: [UInt8] = Array("caff".utf8) + [0, 1, 0, 0]  // type, version 1, flags
+        let head = min(Int(length), 8)
+        guard pread(descriptor, &header, head, 0) == head else { return .unavailable }
+        guard header[0..<head].elementsEqual(fileHeader[0..<head]) else { return .notCAF }
+        guard head == 8 else { return .noSample }  // the writer died inside its first bytes
         var offset: off_t = 8
-        while pread(descriptor, &header, 12, offset) == 12 {
+        while offset + 12 <= length {
+            guard pread(descriptor, &header, 12, offset) == 12 else { return .unavailable }
             let size = Int64(bitPattern: header[4..<12].reduce(UInt64(0)) { $0 << 8 | UInt64($1) })
-            if header[0..<4].elementsEqual("data".utf8) { return (offset, size) }
-            guard size >= 0, size <= Int64.max - 12 - offset else { return nil }  // a damaged header
+            if header[0..<4].elementsEqual("data".utf8) {
+                guard size >= -1 else { return .notCAF }  // a damaged header
+                // Edit count (4 bytes), then 16-bit samples, read from what is on disk.
+                return length - offset - 12 - 4 < 2 ? .noSample : .data(offset: offset, size: size)
+            }
+            guard size >= 0, size <= Int64.max - 12 - offset else { return .notCAF }  // a damaged header
             offset += 12 + size
         }
-        return nil
+        return offset > length ? .notCAF : .noSample
     }
 
     /// Reads a 16 kHz mono Int16 CAF into RAM for retry, recovery and eval.

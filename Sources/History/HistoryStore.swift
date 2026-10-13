@@ -3,6 +3,7 @@ public import LexiconDomain
 import SQLiteKit
 import AudioCapture
 import os
+import Synchronization
 
 /// Everything that happens to a Dictation that History must remember. The ONE
 /// write API: callers (the Conductor, Fixes, the UI) describe what happened;
@@ -59,12 +60,21 @@ public enum DictationEvent: Sendable {
 /// waits on SQLite. Reads that the Conductor needs are async on the same queue;
 /// the History window reads through its own connection (`HistoryReader`).
 ///
+/// One store per data folder: it holds the folder's lock for its life, so no
+/// second process (or second store) writes the same History (ADR 0001). To
+/// release one, `await flush()` and drop it: `record` and the reads hold it
+/// until the queue drains.
+///
 /// `@unchecked Sendable`: the only mutable state is `db`, touched only on `queue`
 /// after init returns; everything else is immutable or itself Sendable.
 public final class HistoryStore: @unchecked Sendable {
     private let paths: AppPaths
+    private let lock: FolderLock
     /// Rows and files from before this are an earlier run's: launch recovery's to finish.
     let openedAt = Date()
+    /// Every Dictation `.began` in this run. Recovery never touches them, even when
+    /// a clock stepped back makes one look older than `openedAt`.
+    let begunThisRun = Mutex<Set<DictationID>>([])
     private let queue = DispatchQueue(label: "lexicon.history.writer", qos: .userInitiated)
     private let db: Database
     private let changeStream: AsyncStream<DictationID>
@@ -75,6 +85,8 @@ public final class HistoryStore: @unchecked Sendable {
     public init(paths: AppPaths) throws {
         self.paths = paths
         try FileManager.default.createDirectory(at: Self.audioFolder(in: paths), withIntermediateDirectories: true)
+        // Before the database opens: a store refused here has read or written no History.
+        lock = try FolderLock(paths.root.appending(path: "history.lock"))
         db = try Database(at: paths.root.appending(path: "history.sqlite"), mode: .readWrite,
                           migrations: HistorySchema.migrations)
         try db.transaction { try HistorySchema.syncDerivedIndexes(in: $0) }
@@ -104,6 +116,8 @@ public final class HistoryStore: @unchecked Sendable {
     /// the queue drains, or if SQLite fails it (disk full, I/O error: logged, not
     /// retried). Recovery covers both, because the audio file is the truth.
     public func record(_ event: DictationEvent) {
+        // Before it is queued, so a recovery queued after it already leaves it alone.
+        if case .began(let id, _, _, _, _) = event { _ = begunThisRun.withLock { $0.insert(id) } }
         queue.async { [self] in
             do {
                 guard let applied = try db.transaction({ try apply(event, in: $0) }) else { return }
@@ -219,6 +233,27 @@ public final class HistoryStore: @unchecked Sendable {
             try FileManager.default.removeItem(at: audioURL(for: id))
         } catch CocoaError.fileNoSuchFile {}
     }
+}
+
+/// An exclusive `flock` on a file in the data folder, held while this lives. The
+/// kernel drops it when the process dies, so a crash never leaves the folder locked.
+private final class FolderLock: Sendable {
+    private let descriptor: Int32
+
+    /// Throws when another store, in this process or another, holds it.
+    init(_ url: URL) throws {
+        // O_CLOEXEC: a child process (the setup waiter's /bin/sh) must not inherit the lock.
+        let descriptor = open(url.path(percentEncoded: false), O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EWOULDBLOCK
+            close(descriptor)
+            throw POSIXError(code)
+        }
+        self.descriptor = descriptor
+    }
+
+    deinit { close(descriptor) }
 }
 
 /// A Dictation as other modules see it. Plain values; no SQL types.
