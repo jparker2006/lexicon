@@ -378,4 +378,10 @@ private func field(_ text: String, offset: Int = 0, fingerprint: String? = "fiel
         #expect(RespeakText.replacement("Alice, then.", replacing: "alice", terms: [],
                                         isEnglish: { $0 == "then" }) == "Alice, then")
     }
+
+    /// A Term written with a mark keeps its capital: the word and the Term are compared without it.
+    @Test func replacementKeepsATermWrittenWithAMark() {
+        #expect(RespeakText.replacement("Jeopardy!", replacing: "jeopardy", terms: ["Jeopardy!"],
+                                        isEnglish: { _ in true }) == "Jeopardy")
+    }
 }
