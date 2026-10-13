@@ -715,11 +715,19 @@ test("refuses reading or writing Codex's login file, in every tool", (t) => {
   const home = fakeHome(t);
   const options = { home };
   const auth = path.join(home, '.codex/auth.json');
+  mkdirSync(path.join(home, '.codex'));
   for (const [tool, input] of [
     ['Read', { file_path: auth }],
     ['Write', { file_path: auth, content: '{}' }],
     ['Bash', { command: 'cat ~/.codex/auth.json' }],
     ['Bash', { command: `jq . ${auth}` }],
+    ['Read', { file_path: path.join(home, '.codex/AUTH.JSON') }],
+    ['Bash', { command: 'cat ~/.codex/*' }],
+    ['Bash', { command: 'cat ~/.codex/auth.*' }],
+    ['Bash', { command: 'grep -r token ~/.codex' }],
+    ['Bash', { command: 'cd ~/.codex && grep -rn token .' }],
+    ['Grep', { pattern: 'token', path: path.join(home, '.codex') }],
+    ['Edit', { file_path: auth, old_string: 'a', new_string: 'b' }],
   ]) {
     const verdict = runTool(tool, input, options);
     assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
@@ -728,6 +736,8 @@ test("refuses reading or writing Codex's login file, in every tool", (t) => {
   for (const [tool, input] of [
     ['Read', { file_path: path.join(home, '.codex/config.toml') }],
     ['Bash', { command: 'codex --version' }],
+    ['Bash', { command: 'cat ~/.codex/config.toml' }],
+    ['Glob', { pattern: '*', path: path.join(home, '.codex') }],
   ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
 });
 
