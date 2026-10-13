@@ -238,6 +238,42 @@ func aStartAfterTheAllowPromptIsAnsweredRecords() async throws {
     #expect(mic.timesAsked == 1)
 }
 
+@Test(.timeLimit(.minutes(1)))
+func thePromptBlockEndsExactlyAtTheLimit() async throws {
+    // The block is time, not a step the first start takes on its way out: a
+    // fn-down at the limit asks again even before the first start has failed.
+    let clock = TestClock()
+    let mic = FakeMic(clock: clock, askingPermission: true)
+    defer { mic.answerPrompt() }  // never leave a start waiting on the prompt
+    let recorder = Recorder(hardware: mic.hardware)
+    var asked = mic.asked.makeAsyncIterator()
+    let files = try (0..<2).map { try scratchDirectory().appending(path: "limit\($0).caf") }
+    func press(_ file: URL) -> Task<RecorderError?, Never> {
+        Task {
+            do throws(RecorderError) {
+                let capture = try await recorder.start(.microphone(deviceUID: nil), writingTo: file)
+                _ = await capture.stop(.immediately)
+                return nil
+            } catch {
+                return error
+            }
+        }
+    }
+
+    let first = press(files[0])
+    _ = await asked.next()
+    await clock.waitForSleep(endingAt: Microphone.promptLimit)
+    await clock.advance(by: Microphone.promptLimit)
+    let second = press(files[1])
+    _ = await asked.next()  // a start refused here would never ask: the time limit fails the test
+    mic.answerPrompt()
+
+    #expect(await second.value == nil)
+    #expect(mic.timesAsked == 2)
+    _ = await first.value
+    await recorder.settle()
+}
+
 // MARK: The device-rebuild loop
 
 @Test(.timeLimit(.minutes(1)))
@@ -322,6 +358,37 @@ func fnUpWhileARebuildWaitsKeepsWhatWasCapturedAndEndsTheWait() async throws {
 
     #expect(take.clip.samples.count == FakeEngine.frames)
     #expect(clock.sleepers == 0)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aChangeFromARebuiltEngineThatNeverRanStillWaitsOnTheClock() async throws {
+    // The engine a rebuild made stopped at start and then posts its own change:
+    // the try already waiting covers it, so nothing runs before the clock moves.
+    let clock = TestClock()
+    let mic = FakeMic(diesAtStart: [1], clock: clock)
+    let recorder = Recorder(hardware: mic.hardware)
+    let capture = try await recorder.start(.microphone(deviceUID: nil),
+                                           writingTo: try scratchDirectory().appending(path: "noisy.caf"))
+    var engines = mic.made.makeAsyncIterator()
+    var feed = capture.feed.makeAsyncIterator()
+
+    var heard = 0
+    while heard < FakeEngine.frames { heard += try #require(await feed.next()).samples.count }
+    try #require(await engines.next()).hardwareChanged()
+    let rebuilt = try #require(await engines.next())
+    await clock.waitForSleep(endingAt: .milliseconds(100))
+
+    rebuilt.hardwareChanged()
+    for _ in 0..<2 {
+        await withCheckedContinuation { done in recorder.microphone.queue.async { done.resume() } }
+    }
+    #expect(mic.timesMade == 2)
+
+    await clock.advance(by: .milliseconds(100))
+    while heard < 2 * FakeEngine.frames { heard += try #require(await feed.next()).samples.count }
+    let take = await capture.stop(.immediately)
+    await recorder.settle()
+    #expect(take.clip.samples.count == 2 * FakeEngine.frames)
 }
 
 // MARK: Queued, not stuck
