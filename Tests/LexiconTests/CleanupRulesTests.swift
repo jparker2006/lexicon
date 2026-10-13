@@ -173,6 +173,7 @@ let numberRepeatCases: [Case] = [
     Case("We need a dozen dozen eggs.", "We need a dozen dozen eggs."),
     Case("Cut it in tenths tenths now.", "Cut it in tenths tenths now."),
     Case("Fix the first first step.", "Fix the first step."),
+    Case("Wait a couple couple minutes.", "Wait a couple minutes."),
     Case("We shipped in twenty uh twenty six.", "We shipped in twenty twenty six."),
     Case("We're on twenty-two twenty-two now.", "We're on twenty-two twenty-two now."),
     Case("Get me a double double with no sugar.", "Get me a double double with no sugar."),

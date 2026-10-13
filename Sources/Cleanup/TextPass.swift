@@ -262,7 +262,7 @@ enum Fillers {
     /// Cardinals, ordinals and their plurals, fractions and multiples: "ten", "third",
     /// "thirds", "twenties", "tenths", "hundredth", "twofold", "quadruple", "dozens".
     static func isNumberWord(_ word: String) -> Bool {
-        if word.hasSuffix("uple") { return true }
+        if word.hasSuffix("uple"), word != "couple" { return true }
         var stems = [word]
         if word.hasSuffix("fold") { stems.append(String(word.dropLast(4))) }
         if word.hasSuffix("ies") { stems.append(word.dropLast(3) + "y") }
@@ -274,7 +274,6 @@ enum Fillers {
                 || StructuralCheck.unvalued.contains($0)
         }
     }
-
 
     /// The last kept token is a "like" set off on both sides, kept as a hedge
     /// ("takes, like, um, eighty"): its comma stays when a filler after it goes.
