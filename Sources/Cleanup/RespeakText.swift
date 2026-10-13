@@ -10,7 +10,7 @@ public enum RespeakText {
     public static func replacement(_ spoken: String, replacing before: String, terms: Set<String>,
                                    isEnglish: (String) -> Bool = { _ in true }) -> String {
         // Only the words change: the selection's own spaces and punctuation around
-        // them stay ("teh," -> "the,"), and Cleanup's closing sentence marks go.
+        // them stay ("teh," -> "the,"), and the one stop Cleanup closed it with goes.
         let lead = String(before.prefix(while: opens))
         let trail = String(before.dropFirst(lead.count).reversed().prefix(while: closes).reversed())
         let selected = before.dropFirst(lead.count).dropLast(trail.count)
@@ -39,7 +39,8 @@ public enum RespeakText {
     /// or colon he said stay.
     private static func sentence(_ spoken: String) -> String {
         var text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let last = text.last, ".!?".contains(last) { text.removeLast() }
+        // An ellipsis is Jake's own mark, not a stop Cleanup added.
+        if let last = text.last, ".!?".contains(last), !text.hasSuffix("...") { text.removeLast() }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
