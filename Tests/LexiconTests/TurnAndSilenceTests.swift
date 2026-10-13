@@ -98,6 +98,10 @@ private actor GatedFailingModel: LocalTranscriber {
     func load() {}
     func unload() {}
 
+    nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
+        WholeClipSession { clip in try await self.transcribe(clip, terms: terms, priority: priority) }
+    }
+
     func transcribe(_ clip: AudioClip, terms: [Term], priority: LocalPriority) async throws -> String {
         calls += 1
         guard calls == 1 else { return "Ship it." }
