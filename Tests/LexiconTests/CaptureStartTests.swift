@@ -165,7 +165,7 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     await recorder.settle()
 
     // Recovery adopts only a file created before the store opened, to the millisecond,
-    // so the store opens once the clock has passed the millisecond the file was closed in, as a relaunch does.
+    // so the store opens once the clock has passed a millisecond read after the file was made, as a relaunch does.
     let closed = (Date().timeIntervalSince1970 * 1_000).rounded()
     await until { (Date().timeIntervalSince1970 * 1_000).rounded() > closed }
     let store = try HistoryStore(paths: paths)
