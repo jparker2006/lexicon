@@ -536,8 +536,8 @@ private func finalizingAnEmptyCAFReturnsAndLeavesItsBytesAlone(shape: EmptyCAFSh
         try await writeClosedCAFHolding(size: 4, at: store.audioURL(for: id))
     }
     let relaunched = try await relaunch(paths)
-    _ = await relaunched.recover()
-    #expect(await relaunched.dictation(id) != nil)
+    #expect(await relaunched.recover().map(\.id) == [id])  // handed back to transcribe, as before
+    #expect(await relaunched.dictation(id)?.status == .recording)
 }
 
 @Test func aCAFWhoseChunkRunsPastItsEndIsUnreadableNotEmpty() async throws {
