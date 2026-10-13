@@ -143,14 +143,14 @@ Jake, 2026-10-11 05:24:13Z: "Q2 up to 8 and see how it is at 8". Lives in workfl
 
 ### Codex when Claude's plan runs out (#88, 2026-10-13)
 
-**96. Builders, the Reviewer and Live checks run on Codex for a day or two when Claude's plan runs out, then go back to Claude.** Jake, 16:12Z, after the orchestrator flagged 93% weekly use: "Dont worry about my usage. We will burn claude, then switch to codex for a day or two before switching back to claude." The orchestrator asked, 16:23:30Z:
+**96. The orchestrator, builders, the Reviewer and Live checks run on Codex for a day or two when Claude's plan runs out, then go back to Claude.** Jake, 16:12Z, after the orchestrator flagged 93% weekly use: "Dont worry about my usage. We will burn claude, then switch to codex for a day or two before switching back to claude." The orchestrator asked, 16:23:30Z:
 
 > 1. **A ticket, "Workflow runs on Codex", built now by a Claude session while the plan lasts.** It's docs, config and scripts only, with the guard first. It ends with a short "how to run a Codex day" page for you. The guard needs Codex to test against. Your Codex is installed, so the ticket would include a few Codex runs on your ChatGPT plan, refusal checks only, with no private data. Reply yes to take that.
 > 2. **A GitHub ruleset on main:** no direct pushes, no force-pushes, no deletion, and changes only by PR. It's a repo settings change, so it needs your yes. Our merge script already merges through PRs, so nothing we do changes. I'd do it today, Codex or not. Reply yes to take that.
 >
 > Reply "yes, yes" to take both.
 
-Jake, 16:26Z: "yes, yes" ([16:12Z](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6149921132), [16:26Z](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6150184150)). That ticket, #325, has Jake paste each `chip:` line into a new Codex session, since Codex has no chips, and names no Codex orchestrator. Departs from the spec's "builders run as local Claude Code only". Lives in [codex.md](agents/codex.md).
+Jake, 16:26Z: "yes, yes" ([16:12Z](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6149921132), [16:26Z](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6150184150)). That ticket, #325, has Jake paste each `chip:` line into a new Codex session, since Codex has no chips. Then Jake, 19:42Z, unprompted, in the orchestrator session: "close all of Claude out in like a good stopping point so we can close down the orchestrator, the reviewer, and the live checker, and then switch all three of those to Codex and pick up where we left off in Codex perfectly with the workflow. And then, whenever I want to switch back to Claude, I'll switch from Codex into a new orchestrator reviewer and live checker." The orchestrator's plan from it ([19:42Z](https://github.com/jparker2006/lexicon/issues/88#issuecomment-6153736375)): Claude builders stop at a clean point, #325's first PR is the last merge on Claude and gives Codex start prompts for all four roles, each role hands off on #36, and switching back works the same way. Departs from the spec's "builders run as local Claude Code only". Lives in [codex.md](agents/codex.md).
 
 ### Proposed (stands as built, for the next grill round)
 

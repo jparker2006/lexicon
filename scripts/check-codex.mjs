@@ -25,7 +25,7 @@ test('docs/agents/codex.md exists and AGENTS.md and workflow.md link to it', () 
 test('docs/agents/codex.md holds every Codex session until the hook check and the probe are green', () => {
   const page = read('docs/agents/codex.md');
   assert.match(page, /scripts\/checks\/45-codex\.sh/, 'codex.md names the hook check');
-  assert.match(page, /No Codex builder, Reviewer or Live checks session starts on the repo until/, 'codex.md says no Codex session starts before the gate');
+  assert.match(page, /No Codex (?:orchestrator, )?builder, Reviewer or Live checks session starts on the repo until/, 'codex.md says no Codex session starts before the gate');
 });
 
 
