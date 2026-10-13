@@ -93,6 +93,22 @@ public struct IndicatorFollower: Sendable {
         case .accessibilityNeeded: return fail("Allow Accessibility in the Lexicon menu")
         case .nothingToPaste: return fail("Nothing to paste yet")
         case .noFieldToPaste: return fail("Click a text field, then press \u{2303}\u{2318}V")
+        case .fixNotLanded(let problem): return fail(Self.line(for: problem))
+        }
+    }
+
+    /// One plain sentence per problem. Exhaustive, so a new one fails the build here.
+    static func line(for problem: FixProblem) -> String {
+        switch problem {
+        case .movedOn: "You moved on, so nothing was fixed"
+        case .textChanged: "That text changed, so nothing was fixed"
+        case .cannotSelect: "This app won't let Lexicon select text. Nothing was fixed"
+        case .terminal: "Can't fix text in a terminal or a collapsed paste yet"
+        case .noField: "No text field to fix"
+        case .clipboardDenied: "Lexicon can't use the clipboard here, so nothing was fixed"
+        case .pasteFailed: "The fix didn't paste"
+        case .unverified: "Check the fix: Lexicon couldn't see it land"
+        case .historyUnreadable: "Fixed, but History couldn't be read to save it"
         }
     }
 

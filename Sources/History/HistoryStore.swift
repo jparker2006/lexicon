@@ -169,7 +169,7 @@ public final class HistoryStore: @unchecked Sendable {
 
     /// Where a Dictation's text last landed. The durable key Re-speak and Hand fix
     /// use once AppText's live references are gone (`TargetApp.reattach`).
-    public func receipt(for id: DictationID) async -> InsertionReceipt? {
+    public func receipt(for id: DictationID) async throws -> InsertionReceipt? {
         try? await read { db in
             try db.query("""
                 SELECT app_bundle_id, field_fingerprint, caret_after, context_before, context_after, inserted_at

@@ -13,6 +13,7 @@ public actor HeadlessDestination: TextDestination {
     public struct Target: Sendable {
         let serial: Int
         let focus: FocusSnapshot
+        let selection: FieldSelection?
     }
 
     private var current: AppContext
@@ -20,6 +21,10 @@ public actor HeadlessDestination: TextDestination {
     private(set) var delivered: [DictationID: String] = [:]
     /// Every Dictation typed, in the order it was typed.
     private(set) var typedOrder: [DictationID] = []
+    /// One field, as if Jake stayed in it: every Dictation is typed at its end.
+    public private(set) var fieldText = ""
+    /// What the next `target` finds selected (tests: Jake selected text first).
+    private var pendingSelection: TextSpan?
 
     /// `context`: what the Test set entry says Jake was dictating into (#15 manifest `context`).
     public init(context: AppContext = .unknown) { self.current = context }
@@ -42,8 +47,23 @@ public actor HeadlessDestination: TextDestination {
     }
 
     private func stopWatching(_ id: UUID) { focusWatchers[id] = nil }
+
+    /// Tests: Jake selects `span` of the field before the next fn-down.
+    public func select(_ span: TextSpan) { pendingSelection = span }
+
     public func target() -> Target? {
-        Target(serial: delivered.count, focus: FocusSnapshot(pid: 0, fieldFingerprint: "headless"))
+        let selection = pendingSelection.flatMap { span in Self.text(in: fieldText, at: span).map { FieldSelection(span: span, text: $0) } }
+        pendingSelection = nil
+        return Target(serial: delivered.count, focus: FocusSnapshot(pid: 0, fieldFingerprint: "headless"), selection: selection)
+    }
+
+    /// The text at `span` of `text`, in UTF-16 offsets; nil when the span runs past it.
+    static func text(in text: String, at span: TextSpan) -> String? {
+        let utf16 = text.utf16
+        guard span.location >= 0, span.length >= 0, span.location + span.length <= utf16.count else { return nil }
+        let start = utf16.index(utf16.startIndex, offsetBy: span.location)
+        let end = utf16.index(start, offsetBy: span.length)
+        return String(utf16[start..<end])
     }
 
     /// Same guard as every insert (focus never moves, nobody types here, and the
@@ -55,8 +75,10 @@ public actor HeadlessDestination: TextDestination {
         case .insert:
             delivered[id] = text
             typedOrder.append(id)
+            let before = String(fieldText.suffix(40))
+            fieldText += text
             return .inserted(InsertionReceipt(appBundleID: current.bundleID, fieldFingerprint: "headless",
-                                              caretAfter: text.utf16.count, contextBefore: "", contextAfter: "",
+                                              caretAfter: fieldText.utf16.count, contextBefore: before, contextAfter: "",
                                               insertedAt: Date()))
         }
     }
@@ -67,6 +89,8 @@ public actor HeadlessDestination: TextDestination {
 /// a caller passes real ones (read-only use only: never point eval at Jake's History).
 public final class HeadlessSystem: Sendable {
     public let conductor: Conductor<HeadlessDestination>
+    /// The Conductor's destination: what was typed, and the one field it was typed into.
+    public let destination: HeadlessDestination
     public let history: HistoryStore
     /// The Conductor's Lexicon, so a caller can import words before a run (`lexicon-eval --lexicon`).
     public let lexicon: Lexicon
@@ -79,16 +103,19 @@ public final class HeadlessSystem: Sendable {
                             clock: any Clock<Duration> = ContinuousClock()) throws -> HeadlessSystem {
         let history = try HistoryStore(paths: paths)
         let lexicon = try Lexicon(paths: paths)
+        let destination = HeadlessDestination(context: context)
         let conductor = Conductor(
             recorder: Recorder(), speech: SpeechEngine(local: local, cloud: cloud, clock: clock), cleanup: Cleanup(),
-            lexicon: lexicon, history: history, destination: HeadlessDestination(context: context),
+            lexicon: lexicon, history: history, destination: destination,
             preferences: PreferencesStore(fixed: preferences), secrets: Secrets(.environment),
             keyboard: nil, fixes: nil, jev: nil)
-        return HeadlessSystem(conductor: conductor, history: history, lexicon: lexicon)
+        return HeadlessSystem(conductor: conductor, destination: destination, history: history, lexicon: lexicon)
     }
 
-    init(conductor: Conductor<HeadlessDestination>, history: HistoryStore, lexicon: Lexicon) {
+    init(conductor: Conductor<HeadlessDestination>, destination: HeadlessDestination, history: HistoryStore,
+         lexicon: Lexicon) {
         self.conductor = conductor
+        self.destination = destination
         self.history = history
         self.lexicon = lexicon
     }

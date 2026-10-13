@@ -188,9 +188,6 @@ public actor TargetApp: TextDestination {
 
     // MARK: Finding text again (Fixes)
 
-    /// The field a recent Dictation landed in, read now. nil if gone or unreadable.
-    public func read(_ id: DictationID) -> FieldText? { fatalError("not implemented") }
-
     /// Value and focus changes of that field for `window` (Hand fix watch: #13).
     /// Ends early when focus leaves or the field clears; yields the last
     /// non-empty value seen before that.
@@ -198,31 +195,6 @@ public actor TargetApp: TextDestination {
         fatalError("not implemented")
     }
 
-    /// Replaces a span of a recent Dictation's text (Re-speak fix).
-    /// Picks the strategy for the target app; refuses (false) when it cannot be
-    /// done safely (Claude Code collapsed paste, Ghostty after typing).
-    public func replace(_ span: TextSpan, in id: DictationID, with text: String) async -> Bool {
-        fatalError("not implemented")
-    }
-
     /// "I just fixed this": the focused field (or its selection) right now.
     public func readFocused() -> FieldText? { fatalError("not implemented") }
-}
-
-/// Text read from another app's field. Offsets are UTF-16, like AX.
-public struct FieldText: Sendable, Hashable {
-    public let text: String
-    public let selection: TextSpan?
-    /// Where the Dictation's text sits now, if it can still be located.
-    public let dictationSpan: TextSpan?
-    public let app: AppContext
-}
-
-public struct TextSpan: Sendable, Hashable {
-    public let location: Int
-    public let length: Int
-    public init(location: Int, length: Int) {
-        self.location = location
-        self.length = length
-    }
 }
