@@ -2,9 +2,8 @@
 // call's cwd, the call on stdin), fed hook inputs recorded from a real Codex 0.139.0 run.
 //
 // fixtures/*.json are those inputs, with the scratch clone's path in cwd replaced; each test
-// runs them from this checkout. The recorded run (#325) refused the private-folder read and the
-// push to main. Calls no real run may make (a .env read, a reset, a write to the private folder)
-// are a recorded input of the same tool with only tool_input.command changed.
+// runs them from this checkout. Calls no real run may make (a .env read, a reset, a write to the
+// private folder) are a recorded input of the same tool with only tool_input.command changed.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
