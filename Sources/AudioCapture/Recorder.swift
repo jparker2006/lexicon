@@ -77,7 +77,7 @@ public final class Recorder: Sendable {
 
     /// fn-down at `keyDown`. Starts the engine, then creates `file` (after the
     /// hardware start, never in front of it), so the file exists once this
-    /// returns. Returns as soon as capture is running. The summary's start gap
+    /// returns, unless the disk refused it (the capture is then RAM-only). Returns as soon as capture is running. The summary's start gap
     /// counts from `keyDown`.
     ///
     /// Ownership handoff: while the LiveCapture is open, this module is the only

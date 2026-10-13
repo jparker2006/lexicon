@@ -6,10 +6,12 @@ import Testing
 import History
 import LexiconDomain
 
-// #181: the audio file exists when `Recorder.start` returns, and a second start
-// on one file never erases the first.
+// The audio file exists when `Recorder.start` returns, and a second start on one
+// file never erases the first (#181).
 
-// #181 criterion 1: the audio file exists on disk when `Recorder.start` returns,
+// MARK: The file exists at start (criterion 1)
+
+// The audio file exists on disk when `Recorder.start` returns,
 // before any drain. The shared writer queue is held inside the first capture's
 // close, so a create queued behind it cannot have run yet. File input, realtime
 // pace: no mic, keys or network.
@@ -41,7 +43,7 @@ import LexiconDomain
     _ = await closeEntered.first { _ in true }
 
     let b = try await recorder.start(.file(wav, pace: .realtime), writingTo: bURL)
-    // Red at head: B's create is queued on the writer queue behind the blocked close.
+    // A create queued on the writer queue would still be behind the blocked close.
     #expect(FileManager.default.fileExists(atPath: bURL.path))
 
     hold.open()
@@ -85,8 +87,7 @@ private final class WriterQueueHold: Sendable {
 
 // MARK: A second start never erases the first (criterion 2)
 
-// Two captures on one file: the second must not erase the first file. Written by
-// the ticket's verifier; red while CAFWriter creates with .eraseFile.
+// Two captures on one file: the second must not erase the first file.
 @Test(.timeLimit(.minutes(1))) func aSecondCaptureOnOneFileLeavesTheFirstFileAlone() async throws {
     let first = syntheticSamples(count: 16_000)
     let second = syntheticSamples(count: 8_000)
@@ -144,9 +145,9 @@ func aCaptureOnAFolderThatCannotBeWrittenStartsAndStaysInRAM() async throws {
     #expect(reported.contains(.diskTrouble))
 }
 
-// Criterion 4: a capture dropped at once, with no stop, never leaves an audio file
-// that no History row owns. Launch recovery either adopts the file (a row exists
-// for its id) or the file is gone.
+// Criterion 4, a guard: a capture dropped at once, with no stop, never leaves an
+// audio file that no History row owns. Launch recovery either adopts the file (a
+// row exists for its id) or the file is gone. It holds with a queued create too.
 @Test(.timeLimit(.minutes(1)))
 func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     let paths = AppPaths.temporary()
@@ -163,10 +164,10 @@ func aCaptureDroppedAtOnceNeverLeavesAFileWithNoHistoryRow() async throws {
     // The drop queues its close on the writer queue, so the file is closed once settle returns.
     await recorder.settle()
 
-    // Recovery adopts only a file created before the store opened, to the millisecond.
-    // A file and the open in the same millisecond would count as this run's and be left
-    // without a row. Opening a store takes longer than that in practice, and nothing here
-    // waits to make it so: a sleep would only hide the boundary.
+    // Recovery adopts only a file created before the store opened, to the millisecond,
+    // so the store opens once the clock has passed the file's millisecond, as a relaunch does.
+    let closed = (Date().timeIntervalSince1970 * 1_000).rounded()
+    await until { (Date().timeIntervalSince1970 * 1_000).rounded() > closed }
     let store = try HistoryStore(paths: paths)
     _ = await store.recover()
     await store.flush()
