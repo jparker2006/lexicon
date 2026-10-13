@@ -672,6 +672,32 @@ test("refuses Read, Grep and Glob in Jake's private folder and Grep or Read of .
   ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
 });
 
+test("refuses Edit, Write, MultiEdit and NotebookEdit in Jake's private folder or on a .env file", (t) => {
+  const home = fakeHome(t);
+  const options = { home };
+  const priv = path.join(home, 'Library/Application Support/Lexicon');
+  const dev = path.join(home, 'Library/Application Support/Lexicon Dev');
+  for (const [tool, input, why] of [
+    ['Edit', { file_path: path.join(priv, 'lexicon.json'), old_string: 'a', new_string: 'b' }, /private data/],
+    ['Write', { file_path: path.join(priv, 'new.txt'), content: 'x' }, /private data/],
+    ['MultiEdit', { file_path: path.join(priv, 'lexicon.json'), edits: [] }, /private data/],
+    ['NotebookEdit', { notebook_path: path.join(priv, 'n.ipynb'), new_source: 'x' }, /private data/],
+    ['Write', { file_path: '~/Library/Application Support/Lexicon/x.txt', content: 'x' }, /private data/],
+    ['Edit', { file_path: path.join(REPO, '.env'), old_string: 'a', new_string: 'b' }, /\.env/],
+    ['Write', { file_path: '/Users/someone/code/lexicon/.env', content: 'KEY=x' }, /\.env/],
+    ['Write', { file_path: '.env.local', content: 'KEY=x' }, /\.env/],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, why);
+  }
+  for (const [tool, input] of [
+    ['Edit', { file_path: path.join(REPO, 'AGENTS.md'), old_string: 'a', new_string: 'b' }],
+    ['Write', { file_path: path.join(dev, 'notes.txt'), content: 'x' }],
+    ['Write', { file_path: path.join(REPO, '.env.example'), content: 'KEY=' }],
+  ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
+});
+
 test('refuses Keychain secret reads and scratch SecItem readers, naming the Live checks checklist', (t) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'guard-secitem-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

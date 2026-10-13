@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Claude Code PreToolUse hook for Bash, Read, Grep and Glob, wired in .claude/settings.json.
+// Claude Code PreToolUse hook for Bash, Read, Grep, Glob, Edit, Write, MultiEdit and NotebookEdit, wired in
+// .claude/settings.json. Codex runs it too, through .codex/hooks/guard.mjs.
 // Adapted from Jake's Glox repo (glox-brain-lab, scripts/agents/guard.mjs). It turns rules
 // that lived only in sentences into refusals:
 //   - Jake's private folder (~/Library/Application Support/Lexicon/, never Lexicon Dev's)
-//     and .env files, in Bash and in Read, Grep and Glob; a recursive search of a folder
+//     and .env files, in Bash, in Read, Grep and Glob, and in the edit and write tools; a recursive search of a folder
 //     above the private one counts too. The permissions.deny rules come first; this is the
 //     backstop for the forms they miss;
 //   - Keychain secret reads (`security find-generic-password` and kin) and scratch scripts
@@ -98,7 +99,7 @@ const REASONS = {
   sitting: "Refused: each reset of Lexicon Dev's permissions costs Jake an Allow click, so it runs only in an open sitting (scripts/live-lane.sh sitting start); put it on the Live checks checklist.",
   handsFree: "Refused: a hands-free sitting has no step for Jake's Allow click after a reset of Lexicon Dev's permissions; put the reset on the next sitting's checklist.",
   private: "Refused: ~/Library/Application Support/Lexicon/ holds Jake's private data; agents never open it or search a folder above it (AGENTS.md). Lexicon Dev's folder is fine.",
-  env: "Refused: .env files hold Jake's keys; agents never read them (AGENTS.md).",
+  env: "Refused: .env files hold Jake's keys; agents never read or write them (AGENTS.md).",
   keychain: 'Refused: agents never read Keychain items (AGENTS.md); put the step that needs a key on the Live checks checklist.',
   daily: "Refused: Jake's daily Lexicon is his; only scripts/install.sh and scripts/live-lane.sh daily quit, open or kill it.",
   mergeScript: 'Refused: only the Reviewer merges, and only with scripts/merge-pr.mjs from the main checkout.',
@@ -1162,10 +1163,17 @@ function refusal(source, cwd) {
   }
 }
 
-/** Why a Read, Grep or Glob call is refused, or null: it reads the private folder, a .env file or, for Grep, a folder above the private one. */
+// The tools that write one file, by the input field that names it.
+const WRITE_TOOLS = { Edit: 'file_path', Write: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' };
+
+/**
+ * Why a Read, Grep, Glob or file-writing call is refused, or null: it reads or writes the private folder or a .env
+ * file or, for Grep, reads a folder above the private one.
+ */
 function toolRefusal(tool, toolInput, cwd) {
   const at = (file) => (typeof file === 'string' && file ? path.resolve(cwd, expandHome(file)) : null);
   if (tool === 'Read') return pathRefusal(at(toolInput.file_path), false);
+  if (tool in WRITE_TOOLS) return pathRefusal(at(toolInput[WRITE_TOOLS[tool]]), false);
   if (tool === 'Grep') {
     const reason = pathRefusal(at(toolInput.path) ?? cwd, true);
     if (reason) return reason;
@@ -1189,7 +1197,7 @@ try {
   const command = input?.tool_input?.command;
   let reason = null;
   if (tool === 'Bash' && typeof command === 'string') reason = refusal(command, cwd);
-  else if (['Read', 'Grep', 'Glob'].includes(tool) && input.tool_input) reason = toolRefusal(tool, input.tool_input, cwd);
+  else if ((['Read', 'Grep', 'Glob'].includes(tool) || tool in WRITE_TOOLS) && input.tool_input) reason = toolRefusal(tool, input.tool_input, cwd);
   if (reason) {
     process.stdout.write(`${JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
