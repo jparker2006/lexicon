@@ -38,8 +38,9 @@ extension Conductor {
     /// Under the insert turn, so it waits for earlier Dictations' pastes. Reads
     /// no SQLite and no word list: the next Dictation may be waiting for this turn.
     /// Worst case, an app that answers slowly at every step: the read's 100 ms of
-    /// retries, 250 ms to show the selection, 100 ms for the caret and 250 ms to
-    /// show the fix, plus Accessibility's own timeouts; a field that answers takes milliseconds.
+    /// retries, 250 ms to show the selection, the paste lane's wait for an earlier
+    /// unread paste (as an insert has), 100 ms for the caret and 250 ms to show the
+    /// fix, plus Accessibility's own timeouts; a field that answers takes milliseconds.
     func replaceSelection(_ spoken: String, at target: Destination.Target, words: RespeakWords) async -> RespeakStep {
         guard let field = await destination.read(at: target) else { return .notLanded(.noField) }
         guard let selection = field.selection else { return .noSelection }
