@@ -262,7 +262,7 @@ enum Fillers {
     /// Cardinals, ordinals and their plurals, fractions and multiples: "ten", "third",
     /// "thirds", "twenties", "tenths", "hundredth", "twofold", "quadruple", "dozens".
     static func isNumberWord(_ word: String) -> Bool {
-        if word.hasSuffix("uple") || word == "dozen" || word == "dozens" { return true }
+        if word.hasSuffix("uple") { return true }
         var stems = [word]
         if word.hasSuffix("fold") { stems.append(String(word.dropLast(4))) }
         if word.hasSuffix("ies") { stems.append(word.dropLast(3) + "y") }
@@ -270,12 +270,11 @@ enum Fillers {
         if word.hasSuffix("ths") { stems.append(String(word.dropLast(3))) }
         if word.hasSuffix("th") { stems.append(String(word.dropLast(2))) }
         return stems.contains {
-            StructuralCheck.isCardinal($0) || StructuralCheck.ordinals[$0] != nil || bigScales.contains($0)
+            StructuralCheck.isCardinal($0) || StructuralCheck.ordinals[$0] != nil
+                || StructuralCheck.unvalued.contains($0)
         }
     }
 
-    /// Scales past quintillion, too big for `StructuralCheck`'s Int tables but still number words.
-    static let bigScales: Set<String> = ["sextillion", "septillion", "octillion", "nonillion", "decillion"]
 
     /// The last kept token is a "like" set off on both sides, kept as a hedge
     /// ("takes, like, um, eighty"): its comma stays when a filler after it goes.
@@ -416,7 +415,7 @@ private struct Token {
     var isNumber: Bool {
         word.first?.isNumber == true
             || word.split(separator: "-").first.map {
-                StructuralCheck.isCardinal(String($0)) || Fillers.bigScales.contains(String($0))
+                StructuralCheck.isCardinal(String($0)) || StructuralCheck.unvalued.contains(String($0))
             } ?? false
     }
     /// "Postgres", "JSON", "useAuth": a name. "I" and "I'm" are capitalized but name nobody.

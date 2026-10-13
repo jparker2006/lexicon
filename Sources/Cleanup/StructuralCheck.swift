@@ -227,6 +227,9 @@ enum StructuralCheck {
         "thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000, "trillion": 1_000_000_000_000,
         "quadrillion": 1_000_000_000_000_000, "quintillion": 1_000_000_000_000_000_000,
     ]
+    /// Number words these Int tables give no value: scales past quintillion and "dozen".
+    /// Cleanup's rules read them as numbers (`Fillers.isNumberWord`); this check does not.
+    static let unvalued: Set<String> = ["sextillion", "septillion", "octillion", "nonillion", "decillion", "dozen"]
     static let ordinals: [String: Int] = [
         "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
         "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14,
