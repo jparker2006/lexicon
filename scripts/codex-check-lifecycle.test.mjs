@@ -79,6 +79,36 @@ setInterval(() => {}, 1000);
 `);
 }
 
+function writeForkPhase({ childPath, childPIDPath, termMarker, readyLine, rootPIDPath, inheritedOutput, ignoreSIGTERM }) {
+  const descendantPath = path.join(path.dirname(childPath), 'forked-descendant.mjs');
+  writeFileSync(descendantPath, `
+import { writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(childPIDPath)}, String(process.pid));
+process.on('SIGTERM', () => {
+  writeFileSync(${JSON.stringify(termMarker)}, 'term received');
+  if (!${ignoreSIGTERM}) process.exit(0);
+});
+process.send('ready');
+setInterval(() => {}, 1000);
+`);
+
+  const stdio = inheritedOutput
+    ? "['inherit', 'inherit', 'inherit', 'ipc']"
+    : "['ignore', 'ignore', 'ignore', 'ipc']";
+  writeFileSync(childPath, `
+import { fork } from 'node:child_process';
+import { writeFileSync, writeSync } from 'node:fs';
+writeFileSync(${JSON.stringify(rootPIDPath)}, String(process.pid));
+const descendant = fork(${JSON.stringify(descendantPath)}, [], { detached: true, stdio: ${stdio} });
+descendant.on('message', message => {
+  if (message !== 'ready') return;
+  writeSync(1, ${JSON.stringify(`${readyLine}\n`)});
+  descendant.disconnect();
+  process.exit(0);
+});
+`);
+}
+
 function capture(child, expectedLine) {
   const seen = deferred();
   let stdout = '';
@@ -101,6 +131,11 @@ function isAlive(pid) {
     if (error.code === 'ESRCH') return false;
     throw error;
   }
+}
+
+async function waitForExit(pid) {
+  while (isAlive(pid)) await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
 }
 
 function killRecordedPID(file) {
@@ -243,8 +278,7 @@ test('a timed-out phase waits for its detached descendant cleanup after the root
     await ready.promise;
     await parentStopped.promise;
     const rootPID = Number(readFileSync(rootPIDPath, 'utf8'));
-    while (isAlive(rootPID)) await new Promise(resolve => setImmediate(resolve));
-    await new Promise(resolve => setImmediate(resolve));
+    await waitForExit(rootPID);
 
     try {
       assert.equal(existsSync(fx.termMarker), true, 'the detached descendant receives SIGTERM');
@@ -260,4 +294,73 @@ test('a timed-out phase waits for its detached descendant cleanup after the root
     assert.equal(result.timedOut, true);
     assert.equal(isAlive(Number(readFileSync(fx.childPIDPath, 'utf8'))), false,
       'the detached descendant is gone before runPhase returns');
+  });
+
+test('a normal phase exit reaps its detached ignored-stdio child', async t => {
+  const fx = fixture(t);
+  const readyLine = 'phase=normal-exit ready=1';
+  const rootPIDPath = path.join(fx.dir, 'phase-root.pid');
+  writeForkPhase({
+    ...fx,
+    readyLine,
+    rootPIDPath,
+    inheritedOutput: false,
+    ignoreSIGTERM: false,
+  });
+  t.after(() => killRecordedPID(rootPIDPath));
+
+  const ready = deferred();
+  const running = runPhase({
+    name: 'normal-exit',
+    command: NODE,
+    args: [fx.childPath],
+    deadlineMs: 120_000,
+    onProgress(line) { if (line === readyLine) ready.resolve(); },
+  });
+  await ready.promise;
+  await running;
+
+  assert.equal(isAlive(Number(readFileSync(fx.childPIDPath, 'utf8'))), false,
+    'the phase does not return while its detached child is live');
+});
+
+test('the phase deadline still stops a detached inherited-pipe child after root exit',
+  { timeout: TEST_WATCHDOG_MS }, async t => {
+    const fx = fixture(t);
+    const readyLine = 'phase=pipe-held ready=1';
+    const rootPIDPath = path.join(fx.dir, 'phase-root.pid');
+    writeForkPhase({
+      ...fx,
+      readyLine,
+      rootPIDPath,
+      inheritedOutput: true,
+      ignoreSIGTERM: true,
+    });
+    t.after(() => killRecordedPID(rootPIDPath));
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    const ready = deferred();
+    let expire;
+    const running = runPhase({
+      name: 'pipe-held',
+      command: NODE,
+      args: [fx.childPath],
+      deadlineMs: 120_000,
+      watchdog(trigger) {
+        expire = trigger;
+        return () => {};
+      },
+      onProgress(line) { if (line === readyLine) ready.resolve(); },
+    });
+
+    await ready.promise;
+    await waitForExit(Number(readFileSync(rootPIDPath, 'utf8')));
+    expire();
+    t.mock.timers.tick(2000);
+    const result = await running;
+
+    assert.equal(result.status, 1, 'the expired phase returns failure');
+    assert.equal(result.timedOut, true, 'the expired phase reports timeout');
+    assert.equal(isAlive(Number(readFileSync(fx.childPIDPath, 'utf8'))), false,
+      'the detached process holding the output pipes is gone');
   });

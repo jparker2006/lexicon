@@ -71,8 +71,21 @@ their outcomes. Lifecycle regressions advance mock timers only after readiness
 to exercise the real deadline and forced cleanup, and send an explicit TERM to
 the runner. A further red test showed that root close could cancel escalation
 while a detached descendant with closed pipes remained alive; the runner now
-awaits that owned cleanup before returning. All six runner cases pass. Fixture start/end diagnostics make the active driver test and
+awaits that owned cleanup before returning. All eight runner cases pass after the review fixes below. Fixture start/end diagnostics make the active driver test and
 review operation visible even while Node buffers a file's ordinary results.
+
+The review confirmed two additional parent-exit cases. A root could return
+green with a detached ignored-stdio child alive, or its exit status could
+disable the deadline while a detached child retained an output pipe. Both
+Node regressions failed before repair. The fixed Node phases now preload a
+small ownership recorder: asynchronous child starts and exits go to a
+phase-local ledger. Kernel start identities are checked before signalling
+recorded PIDs, including after their parent disappears. The deadline remains
+active until phase completion, and normal completion also reaps owned children.
+The recorder does not change production review/proof environment filtering;
+the original filtering tests remain on the full invocation. The additional
+red/green evidence and first Workflow verdict are in
+`review-fix-evidence.tar.gz`, with their own SHA manifest.
 
 The runner CLI accepts no command, filter or deadline arguments. Its exported
 execution seam is used only by generated synthetic tests. Ordinary diagnostic
@@ -130,7 +143,11 @@ ownership. A cutoff still fails and never stamps successful check/review work.
 A pre-final whole-check run passed all 64 cases, with no skips, and reported
 fixtures status 0 in 60923 ms. Its working content preceded the additional
 detached-child regression; it is retained as intermediate evidence, not an
-exact-head receipt. The final check also runs that additional case.
+exact-head receipt. The final check also runs that additional case and both review regressions.
+The subsequent complete fixed check passed all 67 cases, with no skips, and
+reported fixtures status 0 in 57769 ms. It retains the original 120000 ms
+boundary, leaving 62231 ms of observed margin. This is diagnostic evidence,
+not a machine-speed test contract or a claim about every future host.
 
 The useful-work margin is established by the complete final phase result,
 reported in the PR, after removing duplicate interpreter work. The historical
