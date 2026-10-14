@@ -15,7 +15,7 @@
 // codex binary (default: codex on PATH); CODEX_REVIEW_HELPER_TIMEOUT_MS a helper's deadline.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,12 +140,22 @@ function testCommand(cwd, filter) {
   return new Promise((resolve, reject) => {
     const allowed = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'NO_COLOR', 'FAKE_REAL_GIT', 'HEAVY_SLOT', 'HEAVY_JOBS'];
     const env = Object.fromEntries(allowed.filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]));
+    const runtime = path.join(path.dirname(cwd), 'runtime');
+    mkdirSync(runtime);
+    const swift = path.join(runtime, 'swift');
+    // SwiftPM cannot nest its manifest sandbox inside ours. The outer sandbox
+    // still confines the compiler, manifests, plugins and tests. Its config and
+    // security stores are scratch data; the shared dependency cache stays enabled.
+    const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+    writeFileSync(swift, `#!/bin/sh\ncase "$1" in\nbuild|test) exec /usr/bin/swift "$@" --disable-sandbox --config-path ${quote(path.join(runtime, 'configuration'))} --security-path ${quote(path.join(runtime, 'security'))} ;;\n*) exec /usr/bin/swift "$@" ;;\nesac\n`);
+    chmodSync(swift, 0o755);
+    env.PATH = `${runtime}${path.delimiter}${env.PATH || ''}`;
     // The reviewed test code is executable input too. Keep it away from home data
     // and the network while allowing SwiftPM's shared cache and the build slot.
     const canonical = file => existsSync(file) ? realpathSync(file) : path.join(canonical(path.dirname(file)), path.basename(file));
     const homes = [...new Set([os.userInfo().homedir, os.homedir()].map(canonical))];
     const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8' }).trim();
-    const writable = [cwd, ...homes.flatMap(home => [
+    const writable = [cwd, runtime, ...homes.flatMap(home => [
       path.join(home, 'Library/Caches/org.swift.swiftpm'),
       path.join(home, 'Library/org.swift.swiftpm/cache'),
       path.join(home, '.cache/org.swift.swiftpm'),
@@ -199,7 +209,7 @@ function testCommand(cwd, filter) {
   });
 }
 
-export async function runProof({ proofId, factId, sha }, { cwd = process.cwd() } = {}) {
+export async function runProof({ proofId, factId, sha }, { cwd = process.cwd(), log = () => {} } = {}) {
   const proof = Object.hasOwn(PROOFS, proofId) ? PROOFS[proofId] : null;
   if (!proof || proof.factId !== factId) throw new Error('unsupported proof/fact pair');
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('proof needs a full pass SHA');
@@ -213,6 +223,7 @@ export async function runProof({ proofId, factId, sha }, { cwd = process.cwd() }
     const before = git(['rev-parse', 'HEAD'], tree);
     if (before !== sha) throw new Error('proof worktree SHA differs from pass SHA');
     const result = await testCommand(tree, proof.filter);
+    if (result.exitStatus !== 0 || result.timedOut) log(result.output.slice(-8192));
     const measuredSha = git(['rev-parse', 'HEAD'], tree);
     const testResult = result.output.split('\n').find(line => line.includes(`Test ${proof.filter}() passed`)) || '';
     return {
@@ -263,7 +274,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
         throw new Error('INCOMPLETE: named PR body or reported head metadata is missing or invalid');
       }
     }
-    const openPRs = fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,files,headRefOid']).map(pr => {
+    const openPRs = fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,body,files,headRefOid']).map(pr => {
       const shared = pr.files.map(f => f.path).filter(p => own.has(p));
       if (!shared.length) return { ...pr, shared, mergeTree: null };
       git(['fetch', '-q', 'origin', `pull/${pr.number}/head`]);
@@ -292,7 +303,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
       info.proofCatalogue = PROOFS;
       return { out: JSON.stringify(info) };
     }
-    if (opts.label === 'proof') return runProof({ proofId: opts.proofId, factId: opts.factId, sha: opts.sha });
+    if (opts.label === 'proof') return runProof({ proofId: opts.proofId, factId: opts.factId, sha: opts.sha }, { log });
     n += 1;
     log(`codex: ${opts.label} (${modelOf(opts.model)})`);
     return codex(prompt, opts, scratch, n, context, reviewedPR);

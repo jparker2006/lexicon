@@ -84,7 +84,13 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (process.env.FAKE_GH_LOG) fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(args) + '\\n');
 if (args[0] === 'pr' && args[1] === 'list') {
-  process.stdout.write((process.env.FAKE_GH_OPEN_PRS || '[]') + '\\n');
+  const source = JSON.parse(process.env.FAKE_GH_OPEN_PRS || '[]');
+  const jsonIndex = args.indexOf('--json');
+  const fields = jsonIndex < 0 ? [] : args[jsonIndex + 1].split(',');
+  const rows = source.map(row => Object.fromEntries(
+    fields.filter(field => Object.hasOwn(row, field)).map(field => [field, row[field]])
+  ));
+  process.stdout.write(JSON.stringify(rows) + '\\n');
 } else if (args[0] === 'pr' && args[1] === 'view') {
   const result = {
     number: Number(process.env.FAKE_GH_PR_NUMBER),
@@ -153,7 +159,7 @@ const args = process.argv.slice(2);
 const stdout = '✔ Test ' + args[1] + '() passed after 0.001 seconds.';
 const modeFile = ${JSON.stringify(path.join(dir, 'proof-mode'))};
 const mode = fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8') : '';
-fs.appendFileSync(${JSON.stringify(proofLog)}, JSON.stringify({ cwd: process.cwd(), sha: git('rev-parse','HEAD'), branch: git('branch','--show-current'), args, stdout }) + '\\n');
+fs.appendFileSync(${JSON.stringify(proofLog)}, JSON.stringify({ cwd: process.cwd(), sha: git('rev-parse','HEAD'), branch: git('branch','--show-current'), slot: process.env.HEAVY_SLOT ?? null, args, stdout }) + '\\n');
 if (mode === 'wrong-sha') git('update-ref', 'HEAD', git('rev-parse', 'HEAD^'));
 if (mode === 'nonzero') process.exit(2);
 if (mode === 'timeout') { console.log('limits: stopped after 600 s: swift test'); process.exit(1); }
@@ -816,4 +822,79 @@ test('a newer local delta preserves its pass SHA, remote PR head, Install body a
   const gitCommands = readFileSync(gitLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   assert.ok(!gitCommands.some(argv => argv[0] === 'push'), 'the local delta review does not push before review');
   assert.equal(result.reviewedSha, passSHA, 'the local pass is stamped at its own exact SHA');
+});
+
+test('proof acquires the build slot in its trusted parent under an isolated HOME', (t) => {
+  const f = fixture(t);
+  const schedulerHome = mkdtempSync(path.join(os.tmpdir(), 'codex-review-heavy-home-'));
+  t.after(() => rmSync(schedulerHome, { recursive: true, force: true }));
+  const heavyDir = path.join(schedulerHome, 'Library/Application Support/Lexicon Dev/heavy');
+  const queueNext = path.join(heavyDir, 'queue.next');
+  assert.equal(existsSync(queueNext), false, 'the isolated scheduler has not issued any slot tickets');
+
+  const { markdown, result } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' }, {
+    HOME: schedulerHome,
+    HEAVY_SLOT: '',
+  });
+
+  assert.equal(existsSync(queueNext), true, 'the trusted proof parent created the isolated scheduler ticket');
+  assert.equal(readFileSync(queueNext, 'utf8').trim(), '1', 'the proof was the first ticket in its synthetic queue');
+  const receipts = readFileSync(f.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].sha, f.sha, 'the slot receipt belongs to the exact reviewed pass SHA');
+  assert.deepEqual(receipts[0].args, ['--filter', 'aShortWavIsTypedAndSavedInHistory']);
+  assert.equal(receipts[0].slot, '1', 'the sandboxed test inherited the slot acquired by its trusted parent');
+  assert.match(receipts[0].stdout, /✔ Test aShortWavIsTypedAndSavedInHistory\(\) passed/);
+  assert.equal(result.reviewedSha, f.sha, 'the exact proof pass was stamped after its slot was acquired');
+  assert.match(markdown, /scripts\/test\.sh --filter aShortWavIsTypedAndSavedInHistory/);
+});
+
+
+test('Combining caches the body of a disjoint open PR dependency', (t) => {
+  const f = fixture(t);
+  const body = 'Depends on #354';
+  const number = 900;
+  const ghLog = path.join(f.dir, 'gh-list.log');
+  const gitLog = path.join(f.dir, 'git-list.log');
+  const openPR = {
+    number,
+    title: 'fixture dependency metadata',
+    body,
+    files: [{ path: 'Elsewhere/x.swift' }],
+    headRefOid: f.sha,
+  };
+  const { calls } = review(f, { issue: 354, sha: f.sha, mode: 'reviewer' }, {
+    FAKE_GH_LOG: ghLog,
+    FAKE_GH_OPEN_PRS: JSON.stringify([openPR]),
+    FAKE_GIT_COMMAND_LOG: gitLog,
+  });
+
+  const combining = combiningCall(calls);
+  assert.ok(combining, 'the public driver ran Combining with main');
+  const dependency = combining.cachedOpenPRs.find(pr => pr.number === number);
+  assert.ok(dependency, 'the disjoint open PR remains in cached context');
+  assert.equal(dependency.body, body,
+    'Combining receives the dependency declaration from disjoint open-PR metadata');
+  assert.deepEqual(dependency.shared, [], 'the fixture PR does not overlap the local change');
+  assert.equal(dependency.mergeTree, null, 'disjoint metadata does not trigger merge-tree analysis');
+
+  const gitCalls = readFileSync(gitLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  assert.ok(!gitCalls.some(argv => argv[0] === 'fetch' && argv.some(arg => arg === 'pull/900/head')),
+    'the disjoint PR does not need a local fetch');
+  const ghCalls = readFileSync(ghLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  assert.ok(ghCalls.some(argv => argv[0] === 'pr' && argv[1] === 'list' && argv.includes('--json')),
+    'the public driver got open-PR metadata through fake gh pr list');
+});
+
+test('pre-PR review still runs without a named PR body', (t) => {
+  const f = fixture(t);
+  const ghLog = path.join(f.dir, 'gh-no-pr.log');
+  const { calls } = review(f, { issue: 354, sha: f.sha, mode: 'reviewer' }, { FAKE_GH_LOG: ghLog });
+  const combining = combiningCall(calls);
+  assert.ok(combining, 'the pre-PR review still runs Combining with main');
+  assert.equal(combining.reviewedPR, null, 'no named PR body is synthesized before a PR exists');
+  assert.deepEqual(combining.cachedOpenPRs, [], 'the default empty open-PR listing stays valid');
+  const ghCalls = readFileSync(ghLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  assert.ok(!ghCalls.some(argv => argv[0] === 'pr' && argv[1] === 'view'),
+    'a pre-PR review does not request named-PR body metadata');
 });
