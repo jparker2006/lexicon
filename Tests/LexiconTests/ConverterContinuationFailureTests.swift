@@ -21,7 +21,8 @@ func converterFailureAfterHaveDataDoesNotCountAlreadyEmittedAudioAsLost() async 
 
     let trace = fake.trace
     #expect(trace.failedAfterHaveData)
-    #expect(trace.outputFramesBeforeFailure > 0)
+    #expect(!trace.outputBeforeFailure.isEmpty)
+    #expect(Array(take.clip.samples.prefix(trace.outputBeforeFailure.count)) == trace.outputBeforeFailure)
 
     let lostFrames = Int((take.summary.lost / .seconds(1) * 16_000).rounded())
     let expectedFrames = source.count / 3
@@ -33,15 +34,14 @@ func converterFailureAfterHaveDataDoesNotCountAlreadyEmittedAudioAsLost() async 
 /// input and leaves the real converter's buffered state untouched.
 private final class ContinuationFailure: Sendable {
     struct Trace: Sendable {
-        var realCalls = 0
         var failedAfterHaveData = false
-        var outputFramesBeforeFailure = 0
+        var outputBeforeFailure: [Int16] = []
     }
 
     private struct State: Sendable {
         var trace = Trace()
+        var emittedOutput: [Int16] = []
         var previousHadData = false
-        var previousOutputFrames = 0
         var failed = false
     }
 
@@ -66,16 +66,21 @@ private final class ContinuationFailure: Sendable {
             guard !current.failed, current.previousHadData else { return false }
             current.failed = true
             current.trace.failedAfterHaveData = true
-            current.trace.outputFramesBeforeFailure = current.previousOutputFrames
+            current.trace.outputBeforeFailure = current.emittedOutput
             return true
         }
         guard !shouldFail else { return (.error, nil) }
 
         let answer = Resampler.realConvert(converter, output, input)
+        let produced = Int(output.frameLength)
+        let samples: [Int16] = if produced > 0, let channel = output.int16ChannelData {
+            Array(UnsafeBufferPointer(start: channel[0], count: produced))
+        } else {
+            []
+        }
         state.withLock { current in
-            current.trace.realCalls += 1
             current.previousHadData = answer.0 == .haveData
-            current.previousOutputFrames = Int(output.frameLength)
+            current.emittedOutput.append(contentsOf: samples)
         }
         return answer
     }
