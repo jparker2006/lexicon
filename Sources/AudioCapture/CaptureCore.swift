@@ -41,7 +41,7 @@ final class CaptureCore: @unchecked Sendable {
     private var samples: [Int16] = []
     private var chunkIndex = 0
     private var lastFullSync = DispatchTime.now()
-    private var syncOutstanding = false
+    private var syncResult: OneShot<Bool>?
     private var timer: (any DispatchSourceTimer)?
     private var tailTimer: (any DispatchSourceTimer)?
     private var tail = Tail()
@@ -152,9 +152,10 @@ final class CaptureCore: @unchecked Sendable {
     private func tick() {
         guard take == nil else { return }
         drain()
-        guard writer != nil, !syncOutstanding,
+        guard writer != nil, syncResult == nil,
               DispatchTime.now() >= lastFullSync + policy.fullSyncEvery.dispatch else { return }
-        syncOutstanding = true
+        let result = OneShot<Bool>()
+        syncResult = result
         let file = writer?.syncFile
         syncQueue.async { [self] in
             let succeeded: Bool
@@ -168,8 +169,9 @@ final class CaptureCore: @unchecked Sendable {
             } catch {
                 succeeded = false
             }
+            result.settle(succeeded)
             queue.async { [self] in
-                syncOutstanding = false
+                syncResult = nil
                 lastFullSync = .now()
                 guard take == nil, writer != nil else { return }
                 if !succeeded { diskTrouble() }
@@ -213,6 +215,9 @@ final class CaptureCore: @unchecked Sendable {
         source.stop()  // whatever it writes after this is never read
         drain()
         lostEarlier += resampler.flush(emit: emit)
+        // A completed disk result can have its callback queued behind this stop.
+        // Apply it before ending notices and snapshotting the Take, without waiting on a sync.
+        if syncResult?.current == false { diskTrouble() }
         feedContinuation.finish()
         problems.finish()
         signals.first.settle(nil)
