@@ -672,6 +672,93 @@ test("refuses Read, Grep and Glob in Jake's private folder and Grep or Read of .
   ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
 });
 
+test("refuses Edit, Write, MultiEdit and NotebookEdit in Jake's private folder or on a .env file", (t) => {
+  const home = fakeHome(t);
+  const options = { home };
+  const priv = path.join(home, 'Library/Application Support/Lexicon');
+  const dev = path.join(home, 'Library/Application Support/Lexicon Dev');
+  for (const [tool, input, why] of [
+    ['Edit', { file_path: path.join(priv, 'lexicon.json'), old_string: 'a', new_string: 'b' }, /private data/],
+    ['Write', { file_path: path.join(priv, 'new.txt'), content: 'x' }, /private data/],
+    ['MultiEdit', { file_path: path.join(priv, 'lexicon.json'), edits: [] }, /private data/],
+    ['NotebookEdit', { notebook_path: path.join(priv, 'n.ipynb'), new_source: 'x' }, /private data/],
+    ['Write', { file_path: '~/Library/Application Support/Lexicon/x.txt', content: 'x' }, /private data/],
+    ['Edit', { file_path: path.join(REPO, '.env'), old_string: 'a', new_string: 'b' }, /\.env/],
+    ['Write', { file_path: '/Users/someone/code/lexicon/.env', content: 'KEY=x' }, /\.env/],
+    ['Write', { file_path: '.env.local', content: 'KEY=x' }, /\.env/],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, why);
+  }
+  // A link named innocently that points at a .env file, and a write into the private models folder,
+  // which reads may open but no agent writes.
+  const link = path.join(home, 'notes.txt');
+  writeFileSync(path.join(home, '.env'), 'KEY=x\n');
+  symlinkSync(path.join(home, '.env'), link);
+  for (const [tool, input, why] of [
+    ['Write', { file_path: link, content: 'x' }, /\.env/],
+    ['Write', { file_path: path.join(priv, 'models/parakeet/new.bin'), content: 'x' }, /private data/],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, why);
+  }
+  for (const [tool, input] of [
+    ['Edit', { file_path: path.join(REPO, 'AGENTS.md'), old_string: 'a', new_string: 'b' }],
+    ['Write', { file_path: path.join(dev, 'notes.txt'), content: 'x' }],
+    ['Write', { file_path: path.join(REPO, '.env.example'), content: 'KEY=' }],
+  ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
+});
+
+test("refuses reading or writing Codex's login file, in every tool", (t) => {
+  const home = fakeHome(t);
+  const options = { home };
+  const auth = path.join(home, '.codex/auth.json');
+  mkdirSync(path.join(home, '.codex'));
+  for (const [tool, input] of [
+    ['Read', { file_path: auth }],
+    ['Write', { file_path: auth, content: '{}' }],
+    ['Bash', { command: 'cat ~/.codex/auth.json' }],
+    ['Bash', { command: `jq . ${auth}` }],
+    ['Read', { file_path: path.join(home, '.codex/AUTH.JSON') }],
+    ['Bash', { command: 'cat ~/.codex/*' }],
+    ['Bash', { command: 'cat ~/.codex/auth.*' }],
+    ['Bash', { command: 'grep -r token ~/.codex' }],
+    ['Bash', { command: 'cd ~/.codex && grep -rn token .' }],
+    ['Grep', { pattern: 'token', path: path.join(home, '.codex') }],
+    ['Edit', { file_path: auth, old_string: 'a', new_string: 'b' }],
+    ['Bash', { command: `python3 -c "print(open('/Users/someone/.codex/auth.json').read())"` }],
+    ['Bash', { command: `node -e "console.log(require('fs').readFileSync('${auth}', 'utf8'))"` }],
+    ['Bash', { command: `python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `node -e "const p = require('path'); console.log(require('fs').readFileSync(p.join(require('os').homedir(), '.codex/auth.json'), 'utf8'))"` }],
+    ['Bash', { command: `cd ~/.codex && python3 -c "print(open('auth.json').read())"` }],
+    ['Bash', { command: `python3.13 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `uv run python -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `ruby -e "puts File.read(File.join(Dir.home, '.codex', 'auth.json'))"` }],
+    ['Bash', { command: `python3.13t -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `arch -arm64 python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `echo x | xargs python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `lua -e "print(io.open(os.getenv('HOME') .. '/.codex/' .. 'auth.json'):read('a'))"` }],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, /Codex's login/);
+  }
+  for (const [tool, input] of [
+    ['Read', { file_path: path.join(home, '.codex/config.toml') }],
+    ['Bash', { command: 'codex --version' }],
+    ['Bash', { command: 'cat ~/.codex/config.toml' }],
+    ['Bash', { command: `python3 -c "import json; print(json.load(open('package.json')))"` }],
+    ['Bash', { command: `cd ~/.codex && python3 -c "print(open('config.toml').read())"` }],
+    ['Bash', { command: 'git log --grep "auth.json" -- .codex' }],
+    ['Bash', { command: 'git commit -m "guard: refuse ~/.codex/auth.json"' }],
+    ['Bash', { command: 'echo "Codex keeps its login in ~/.codex/auth.json"' }],
+    ['Bash', { command: 'gh issue comment 1 --body "the guard refuses .codex/auth.json"' }],
+    ['Glob', { pattern: '*', path: path.join(home, '.codex') }],
+  ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
+});
+
 test('refuses Keychain secret reads and scratch SecItem readers, naming the Live checks checklist', (t) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'guard-secitem-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

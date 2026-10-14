@@ -1,0 +1,11 @@
+# Codex project config for Lexicon (docs/agents/codex.md). Codex reads it only once
+# Jake trusts the project; the guard hook is in .codex/hooks.json.
+
+# Opus at high effort on Claude; Codex's most capable model, the one current model Jake's
+# ChatGPT plan offers, at high here. It needs a Codex CLI newer than 0.139.0.
+model = "gpt-6-astra"
+model_reasoning_effort = "high"
+
+[features]
+# The plan only: Codex's Fast tier spends more of it (AGENTS.md, Ask Jake first).
+fast_mode = false

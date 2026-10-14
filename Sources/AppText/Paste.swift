@@ -66,6 +66,12 @@ import KeyInput
         return keys.contains { CGEventSource.keyState(.hidSystemState, key: $0) }
     }
 
+    /// Quit: Jake's clipboard back before Lexicon exits. At most `missedHold` per
+    /// paste, the longest a missed paste's text stays up.
+    func finishForQuit() async {
+        await keeper.finishForQuit(within: ClipboardKeeper.missedHold, clock: ContinuousClock())
+    }
+
     private func schedule() {
         timer?.cancel()
         guard let deadline = keeper.deadline else { return }

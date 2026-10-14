@@ -3,12 +3,13 @@ import os
 import LexiconCore
 
 // Quit, and the SIGTERM that install.sh and dev-run.sh send: a Dictation
-// recording or finishing lands first.
+// recording or finishing lands first, then Jake's clipboard comes back.
 
 extension AppDelegate {
     /// `scripts/install.sh` and `scripts/dev-run.sh` quit the old copy with SIGTERM
     /// and wait for it to exit. A Dictation recording or finishing lands first
     /// (a recording one at its own fn-up), so an install never cuts a Dictation.
+    /// The last paste's clipboard restore runs first too (`Conductor.idle`).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let system else { return .terminateNow }
         Task {

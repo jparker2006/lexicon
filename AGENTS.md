@@ -24,6 +24,7 @@ Two things are always true. Judge every change against them:
 - `docs/architecture.md`: modules, who owns what, the invariants the compiler enforces, budgets and how each is read.
 - `docs/adr/`: decisions that are hard to reverse. `GLOSSARY.md`: the words to use.
 - `docs/agents/`: how Jake, the orchestrator, builders, Live checks and the Reviewer work ([workflow.md](docs/agents/workflow.md)), the review checklist ([review.md](docs/agents/review.md)), labels and the issue tracker.
+- When Claude's plan runs out, the orchestrator, builders, the Reviewer and Live checks run on OpenAI's Codex CLI for a day or two: [docs/agents/codex.md](docs/agents/codex.md) is how. `.codex/` holds its config and the guard hook.
 - `.claude/skills/`: the repo's skills, starting with `implement-ticket` and `pr`. `.claude/agents/`: the typed helpers. `.claude/workflows/`: the `lexicon-review` Workflow. `.claude/hooks/guard.mjs`: the guard hook.
 - Code: `Package.swift`, one SwiftPM target per module under `Sources/`, tests under `Tests/`, the check script `scripts/check.sh` with its steps in `scripts/checks/`, CI in `.github/workflows/ci.yml`. Every script under `scripts/` says what it does in its header.
 
@@ -45,7 +46,7 @@ Command Line Tools 26.6 only (Swift 6.3, macOS 26 SDK), SwiftPM, no Xcode ([ADR 
 
 This is the private-data rule's one home; review.md, the skills and the helper briefs point here.
 
-- Jake's Wispr export, the Test set and its gold text, the starter Lexicon, his History and his keys never enter git, a PR, an issue, a log, or any agent's or chatbot's context. They live under `~/Library/Application Support/Lexicon/` (keys also in the login Keychain and `~/code/lexicon/.env`). Agents never open them; scripts such as `lexicon-eval` read them on the Mac. Refer to them by path only, and never print a key. The guard hook and `.claude/settings.json` refuse those paths for every tool.
+- Jake's Wispr export, the Test set and its gold text, the starter Lexicon, his History and his keys never enter git, a PR, an issue, a log, or any agent's or chatbot's context. They live under `~/Library/Application Support/Lexicon/` (keys also in the login Keychain and `~/code/lexicon/.env`; Codex's login to his ChatGPT plan is `~/.codex/auth.json`). Agents never open them; scripts such as `lexicon-eval` read them on the Mac. Refer to them by path only, and never print a key. The guard hook refuses those paths for every tool, and `.claude/settings.json`'s deny rules back it for the private folder and `.env` files.
 - **Numbers on GitHub:** nothing measured on Jake's own Wispr history or his History goes into the repo, a PR or an issue: no counts, totals, lag or word figures from it. Test set sizes (clips, minutes of audio, split sizes) and eval scores may go anywhere.
 - Eval runs may send Test set audio and text only to the providers Lexicon itself uses, with zero retention; that is the one exception to "Ask Jake first" for calls on real data.
 - Test fixtures are synthesized or recorded for the test, never Jake's recordings.

@@ -254,16 +254,25 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
 @Test(.timeLimit(.minutes(1))) func aDictationStillWaitingAtRelaunchIsRecoveredOnceAModelIsInstalled() async throws {
     let paths = AppPaths.temporary()
     let wav = try writeWAV(syntheticSamples(count: 8_000), rate: 16_000, in: try scratchDirectory())
-    let first = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
-                                        local: InstallableModel(), clock: TestClock())
-    let id = await first.conductor.dictate(file: wav, pace: .asFastAsPossible).id
-    await first.history.flush()
+    let id: DictationID
+    do {
+        let first = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
+                                            local: InstallableModel(), clock: TestClock())
+        id = await first.conductor.dictate(file: wav, pace: .asFastAsPossible).id
+        // Quit: its retry holds the Conductor and its History until a tick this clock never gives,
+        // so it is stopped first, and the store released, so the relaunch can take the folder's lock.
+        let retry = try #require(await first.conductor.waiting[id])
+        retry.cancel()
+        await retry.value
+        await first.history.flush()
+    }
 
     // Relaunch, model still missing: recovery tries it, and it goes on waiting.
     let clock = TestClock()
     let model = InstallableModel()
-    let relaunch = try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults,
-                                           local: model, clock: clock)
+    let relaunch = try await onceFolderIsFree {
+        try HeadlessSystem.make(paths: paths, context: .unknown, preferences: .defaults, local: model, clock: clock)
+    }
     let events = await relaunch.conductor.events()
     await relaunch.conductor.recover()
     #expect(await finished(in: events, id) == .waiting)

@@ -24,9 +24,10 @@ extension HistoryStore {
     /// `origin = recovered` on every row it hands back (so `.textReady` lands them
     /// as `.recovered`, never typed), then returns what still needs text.
     ///
-    /// Only what an earlier run left: a row or file from after this store opened
-    /// belongs to a Dictation this run is recording or finishing, so it is never
-    /// touched, even if Jake pressed fn before recovery ran.
+    /// Only what an earlier run left: a row or file from after this store opened, or
+    /// one this run began (whatever its date says), belongs to a Dictation this run is
+    /// recording or finishing, so it is never touched, even if Jake pressed fn before
+    /// recovery ran.
     ///
     /// Idempotent: running it twice returns the same Dictations and changes nothing
     /// the second time. See RecoveryPlan.
@@ -56,6 +57,7 @@ extension HistoryStore {
 
     private func recover(in db: Database) throws -> [UnfinishedDictation] {
         let opened = openedAt.unixMs
+        let begun = begunThisRun.withLock { $0 }
         // Every audio file an earlier run made. Its name is its Dictation's id. A file
         // whose birth date can't be read might be this run's: only an earlier row claims it.
         var created: [DictationID: Date] = [:]
@@ -63,7 +65,8 @@ extension HistoryStore {
         let listed = try FileManager.default
             .contentsOfDirectory(at: audioFolder, includingPropertiesForKeys: [.creationDateKey])
         for url in listed where url.pathExtension == "caf" {
-            guard let id = DictationID(column: url.deletingPathExtension().lastPathComponent) else { continue }
+            guard let id = DictationID(column: url.deletingPathExtension().lastPathComponent),
+                  !begun.contains(id) else { continue }
             if let date = try? url.resourceValues(forKeys: [.creationDateKey]).creationDate {
                 if date.unixMs < opened { created[id] = date }
             } else {
@@ -83,7 +86,7 @@ extension HistoryStore {
         var rows: [RecoveryPlan.RowState] = []
         var owned: Set<DictationID> = []
         for row in found {
-            guard let id = row.text(0).flatMap(DictationID.init(column:)) else { continue }
+            guard let id = row.text(0).flatMap(DictationID.init(column:)), !begun.contains(id) else { continue }
             owned.insert(id)  // a row a newer build wrote still owns its file: never adopted as an orphan
             guard let status = row.text(1).flatMap(DictationStatus.init(rawValue:)),
                   let audio = row.text(2).flatMap(AudioStorage.init(rawValue:)) else { continue }
@@ -99,6 +102,8 @@ extension HistoryStore {
             files[id] = switch CAFFile.state(of: audioURL(for: id)) {
             case .open: .open
             case .closed: .closed
+            case .empty: .empty
+            case .unavailable: .unavailable
             case .unreadable: .unreadable
             }
         }
@@ -121,6 +126,7 @@ extension HistoryStore {
                          in db: Database) throws -> UnfinishedDictation? {
         func record(_ event: DictationEvent) throws {
             guard let applied = try db.transaction({ try apply(event, in: $0) }) else { return }
+            if applied.dropAudio { try dropAudio(applied.id) }
             if applied.changed { changed.yield(applied.id) }
         }
 
@@ -133,8 +139,10 @@ extension HistoryStore {
         case .deleteGarbage(let id):
             try dropAudio(id)
             changed.yield(id)
-        case .dropExpiredAudio(let id):
+        case .dropExpiredAudio(let id), .deleteEmptyFile(let id):
             try removeAudioFile(id)
+        case .discard(let id):
+            try record(.discarded(id))
         case .markFailed(let id, let reason):
             try record(.failed(id, reason: reason))
         case .markInterrupted(let id):
@@ -162,13 +170,15 @@ enum RecoveryPlan {
         let status: DictationStatus
         let audio: AudioStorage
     }
-    enum FileState: Sendable, Hashable { case open, closed, unreadable }
+    enum FileState: Sendable, Hashable { case open, closed, empty, unavailable, unreadable }
 
     enum Action: Sendable, Hashable {
         case finalize(DictationID)                 // CAF still open: write its real size
         case adoptOrphan(DictationID)              // file with no row: insert row, origin recovered
         case deleteGarbage(DictationID)            // row says deleted: a crash cut a delete short
         case dropExpiredAudio(DictationID)         // retention marked it expired; the crash beat the unlink
+        case deleteEmptyFile(DictationID)          // a file that never got a sample: nothing to keep
+        case discard(DictationID)                  // a recording that never heard anything, like a stray tap
         case markFailed(DictationID, String)       // unfinished row, no readable audio
         case markInterrupted(DictationID)          // crashed mid-paste: notInserted(.interrupted), never retyped
         case transcribe(DictationID, wasWaiting: Bool)
@@ -185,6 +195,10 @@ enum RecoveryPlan {
                 actions.append(.deleteGarbage(row.id))
                 continue
             }
+            // An open that failed for now (EMFILE, EIO) says nothing about the audio: the
+            // Dictation stays as it was and the next launch looks again, rather than fail one
+            // that may be whole. A delete Jake made, and a mid-paste mark, need no read.
+            if file == .unavailable, row.status != .ready { continue }
             if row.audio == .expired, file != nil {
                 actions.append(.dropExpiredAudio(row.id))
             } else if file == .open {
@@ -197,6 +211,14 @@ enum RecoveryPlan {
                 // The audio file is the truth: a readable one is transcribed, even half written.
                 if row.audio != .expired, file == .open || file == .closed {
                     actions.append(.transcribe(row.id, wasWaiting: row.status == .waiting))
+                } else if file == .empty, row.status == .recording {
+                    // No sample reached the disk: no row, as for a stray tap (DECISIONS 90).
+                    actions.append(.discard(row.id))
+                } else if file == .empty {
+                    // Its words, if any, were only in RAM. Deleted first: a crash in between
+                    // leaves no file, which fails it the same way.
+                    actions.append(.deleteEmptyFile(row.id))
+                    actions.append(.markFailed(row.id, "audio missing"))
                 } else {
                     actions.append(.markFailed(row.id, file == nil ? "audio missing" : "audio unreadable"))
                 }
@@ -206,6 +228,11 @@ enum RecoveryPlan {
         }
         let known = Set(rows.map(\.id))
         for (id, file) in files.sorted(by: { $0.key.description < $1.key.description }) where !known.contains(id) {
+            switch file {
+            case .unavailable: continue  // looked at again next launch
+            case .empty: actions.append(.deleteEmptyFile(id)); continue  // nothing to adopt
+            case .open, .closed, .unreadable: break
+            }
             if file == .open { actions.append(.finalize(id)) }
             actions.append(.adoptOrphan(id))
             actions.append(file == .unreadable ? .markFailed(id, "audio unreadable")
