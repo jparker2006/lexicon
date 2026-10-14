@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { audit } from './codex-skills.mjs';
+import { audit, requiredSkills, workflowSkills } from './codex-skills.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(REPO, 'scripts/codex-skills.mjs');
@@ -38,6 +38,99 @@ test('audit reports a required skill absent from the catalogue even if prompt te
   ]);
 
   assert.deepEqual(audit(input, ['implement-ticket', 'grill-with-docs', 'pstack:swarm']), ['grill-with-docs', 'pstack:swarm']);
+});
+
+test('workflowSkills extracts active pstack and Matt Pocock entries from the Tools table only', () => {
+  const markdown = [
+    'Outside the table, /pstack:babysit is mentioned as an example.',
+    '',
+    '| Claude step or tool | Codex path |',
+    '|---|---|',
+    '| pstack architect | Invoke `/pstack:architect`. |',
+    '| pstack swarm | Invoke `/pstack:swarm`. |',
+    '| pstack correct | Invoke `/pstack:correct`. |',
+    '| pstack retro | Invoke `/pstack:retro`. |',
+    '| Deliberately not used | Never invoke `/pstack:babysit`. |',
+    '| Matt Pocock `tdd` skill | Use `tdd` from `~/.agents/skills`. |',
+  ].join('\n');
+
+  assert.deepEqual(workflowSkills(markdown).sort(), [
+    'pstack:architect', 'pstack:swarm', 'pstack:correct', 'pstack:retro', 'tdd',
+  ].sort());
+});
+
+test('requiredSkills returns path descriptors and includes workflow pstack skills', () => {
+  const skills = requiredSkills();
+  assert.ok(skills.every((skill) => typeof skill.name === 'string' && typeof skill.path === 'string' && typeof skill.explicitOnly === 'boolean'));
+  const names = new Set(skills.map((skill) => skill.name));
+  for (const name of ['pstack:architect', 'pstack:swarm', 'pstack:correct', 'pstack:retro', 'tdd']) {
+    assert.ok(names.has(name), `workflow skill ${name} is required`);
+  }
+  assert.deepEqual(skills.find((skill) => skill.name === 'implement-ticket'), {
+    name: 'implement-ticket',
+    path: path.join(REPO, '.claude/skills/implement-ticket/SKILL.md'),
+    explicitOnly: false,
+  });
+});
+
+test('audit expands a Codex skill root alias before matching the required file path', () => {
+  const input = prompt([[
+    '### Skill roots',
+    '- `r1` = `/fixture/repo/.claude/skills`',
+    '### Available skills',
+    '- pr: Create a pull request (file: r1/pr/SKILL.md)',
+  ].join('\n')]);
+  const expected = [{
+    name: 'pr',
+    path: '/fixture/repo/.claude/skills/pr/SKILL.md',
+    explicitOnly: false,
+  }];
+
+  assert.deepEqual(audit(input, expected), []);
+});
+
+test('a global skill with the same name cannot satisfy a repo skill path requirement', () => {
+  const input = prompt([[
+    '### Skill roots',
+    '- `r1` = `/fixture/user/.agents/skills`',
+    '### Available skills',
+    '- pr: Create a pull request (file: r1/pr/SKILL.md)',
+  ].join('\n')]);
+  const expected = [{
+    name: 'pr',
+    path: '/fixture/repo/.claude/skills/pr/SKILL.md',
+    explicitOnly: false,
+  }];
+
+  assert.deepEqual(audit(input, expected), ['pr']);
+});
+
+test('an explicit-only skill absent from prompt input is satisfied by an enabled inventory path', () => {
+  const expected = [{
+    name: 'pstack:retro',
+    path: '/fixture/pstack/skills/retro/SKILL.md',
+    explicitOnly: true,
+  }];
+  const inventory = [{
+    skills: [{ name: 'pstack:retro', path: expected[0].path, enabled: true }],
+    errors: [],
+  }];
+
+  assert.deepEqual(audit('[]', expected, inventory), []);
+});
+
+test('explicit-only inventory entries fail when disabled or at a different path', () => {
+  const expected = [{
+    name: 'pstack:retro',
+    path: '/fixture/pstack/skills/retro/SKILL.md',
+    explicitOnly: true,
+  }];
+  const inventories = [
+    [{ skills: [{ name: 'pstack:retro', path: expected[0].path, enabled: false }], errors: [] }],
+    [{ skills: [{ name: 'pstack:retro', path: '/fixture/other/retro/SKILL.md', enabled: true }], errors: [] }],
+  ];
+
+  for (const inventory of inventories) assert.deepEqual(audit('[]', expected, inventory), ['pstack:retro']);
 });
 
 function runAudit(t, promptText, expected) {

@@ -33,7 +33,7 @@ setInterval(() => {}, 1000);
 }
 else {
 // Named by pid: helpers run in parallel, so a count of the folder could repeat.
-fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
+fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
 const finding = { path: 'Sources/History/a.swift', line: 1, claim: 'a dictation can be lost', scenario: 'X, so Y', severity: 'blocker', confidence: 'high', cite: { kind: 'rule', source: 'review.md', quote: 'q' } };
 let reply;
 if (prompt.includes('Try to disprove')) reply = { verdict: 'CONFIRMED', citationHolds: true, evidence: 'e', trigger: 't', decider: '', headless: true, test: '' };
@@ -158,6 +158,16 @@ test('model and effort environment overrides appear in helper flags and the Help
     assert.ok(args.includes(`model_reasoning_effort="${effort}"`));
     assert.equal(args[args.indexOf('-s') + 1], 'read-only');
   }
+});
+
+test('review helpers do not inherit unrelated caller environment variables', (t) => {
+  const f = fixture(t);
+  const { calls } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' }, {
+    LEXICON_REVIEW_SYNTHETIC_SECRET: 'fixture-only-not-real',
+  });
+
+  assert.ok(calls.length > 0, 'the fixture exercised Codex helper processes');
+  assert.ok(calls.every((call) => call.hasSyntheticSecret === false), 'helpers receive no caller-supplied secret marker');
 });
 
 test('strict closes every object and requires every property, nested ones too', () => {
