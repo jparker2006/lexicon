@@ -1,0 +1,16 @@
+{
+  "review-fault-final.json": "095f8d195dbfa0569f88aa4c2c826d204b6e522f33e8454da82da23656dd5b4e",
+  "cooperative-coverage-red.log": "359e28aa941d31ac99d271bfe6d96a99619d6b6c9e7e636e6aec247f69110c93",
+  "cooperative-marker-red.log": "961a06fde80be549d51793f45c526062df37a7d2d2a45adf9decb15dc143b1bf",
+  "cooperative-green.log": "4228d72b2c929b37c5961cf2a9507841863fa06d66601a2059277bcfe21e8e89",
+  "cooperative-source-sha.txt": "bba344a0321e0a1a8ba3f9182c20511a04540da4a33354b3c1fd63bd865dcbcd",
+  "cooperative-45-green.log": "1cd68b0fca4a91503d1317310b2b2fb3f2c0c40ea5b91c636d9bd7eed8480a79",
+  "before/scripts/codex-check-children.mjs": "b9194ba4b083b493836415cbd271fbc2ddcbc14d1dd3b8874cf7bedb9e017b89",
+  "before/scripts/codex-check-cooperative.test.mjs": "b2283ae2a662651385388f8688f040133253881d6524a19cad744562604008ae",
+  "before/scripts/codex-check-faults.test.mjs": "872327898f45d4e40ca56e8d20fcf7b511958539f4558d1509b7e5fb686b4cf4",
+  "before/scripts/codex-check-group.sh": "189541dea55890a2f922ca32af14b05f8f91e911a2d9ef82c4fcf3d0cf164f8a",
+  "before/scripts/codex-check-inspection.test.mjs": "bfebcc6a69c87d37d1eccbc8ed92efa4d459aff6956e01c1cac38add0504100f",
+  "before/scripts/codex-check-launch.sh": "27d0b032236faf41e80a86b9b7cdd43fe9f3e22491bdbeee659150fd48f12e6f",
+  "before/scripts/codex-check-safety.test.mjs": "a00c656eedfd477dc2067f0fbb3a0ea18438125072536e43584fc3296b4f58da",
+  "before/scripts/codex-check.mjs": "28273f73773f2300a1691a24278cc4e1d249ca0a363599e1e5c85668e72793f0"
+}

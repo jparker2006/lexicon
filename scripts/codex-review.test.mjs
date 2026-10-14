@@ -223,17 +223,33 @@ console.log(stdout);
   const binDir = path.join(dir, 'bin');
   mkdirSync(binDir);
   const gitWrapper = path.join(binDir, 'git');
-  writeFileSync(gitWrapper, GIT_FETCH_RACE_WRAPPER);
+  const interceptor = path.join(binDir, 'git-interceptor.cjs');
+  const shellQuote = value => `'${value.replaceAll("'", "'\\''")}'`;
+  writeFileSync(interceptor, GIT_FETCH_RACE_WRAPPER);
+  // Ordinary metadata calls need only Git. Start the fake interpreter solely
+  // for the fixtures that actually change or record that command's behavior.
+  writeFileSync(gitWrapper, `#!/bin/sh
+intercept=
+[ -z "\${FAKE_GIT_COMMAND_LOG:-}" ] || intercept=1
+case "$1" in
+fetch) [ -z "\${FAKE_GIT_FETCH_LOG:-}\${FAKE_GIT_COMPETE_SHA:-}" ] || intercept=1 ;;
+archive) [ ! -f "\${FAKE_CODEX_LOG%/*}/snapshot-mode" ] || intercept=1 ;;
+esac
+if [ -n "$intercept" ]; then exec ${shellQuote(process.execPath)} ${shellQuote(interceptor)} "$@"; fi
+exec "$FAKE_REAL_GIT" "$@"
+`);
   chmodSync(gitWrapper, 0o755);
   const gh = path.join(binDir, 'gh');
   writeFileSync(gh, FAKE_GH);
   chmodSync(gh, 0o755);
   const log = path.join(dir, 'log');
   mkdirSync(log);
-  return { dir, repo, bin, binDir, log, proofLog, sha: git(repo, 'rev-parse', 'HEAD') };
+  return { dir, repo, bin, binDir, log, proofLog, name: t.name, sha: git(repo, 'rev-parse', 'HEAD') };
 }
 
-function runReview({ dir, repo, bin, binDir, log }, args, env = {}, options = {}) {
+function runReview({ dir, repo, bin, binDir, log, name }, args, env = {}, options = {}) {
+  const started = Date.now();
+  process.stderr.write(`codex-fixture: begin test=${name} operation=review child-deadline=${options.timeout ?? 60_000}ms\n`);
   const out = path.join(dir, 'result.json');
   const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/codex-review.mjs'), JSON.stringify(args), '--out', out], {
     cwd: repo,
@@ -242,6 +258,7 @@ function runReview({ dir, repo, bin, binDir, log }, args, env = {}, options = {}
     timeout: options.timeout ?? 60_000,
     detached: options.detached ?? false,
   });
+  process.stderr.write(`codex-fixture: end test=${name} status=${run.status} elapsed=${Date.now() - started}ms\n`);
   return { run, out };
 }
 
@@ -258,6 +275,23 @@ function stopGrandchildren(pidFile) {
     try { process.kill(Number(pid), 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; }
   }
 }
+
+test('ordinary fixture Git calls exec Git directly and preserve its output and failure', t => {
+  const f = fixture(t);
+  const marker = path.join(f.dir, 'unneeded-node-launch');
+  const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+  const wrapper = path.join(f.binDir, 'git');
+  writeFileSync(path.join(f.binDir, 'node'), `#!/bin/sh\nif [ "$1" = ${quote(wrapper)} ]; then : > ${quote(marker)}; fi\nexec ${quote(process.execPath)} "$@"\n`);
+  chmodSync(path.join(f.binDir, 'node'), 0o755);
+  const env = { ...process.env, PATH: `${f.binDir}:${process.env.PATH}`, FAKE_REAL_GIT: REAL_GIT };
+  const success = spawnSync(wrapper, ['rev-parse', 'HEAD'], { cwd: f.repo, env, encoding: 'utf8' });
+  assert.equal(success.status, 0, success.stderr);
+  assert.equal(success.stdout.trim(), f.sha);
+  const failure = spawnSync(wrapper, ['rev-parse', '--verify', 'missing-ref'], { cwd: f.repo, env, encoding: 'utf8' });
+  assert.notEqual(failure.status, 0);
+  assert.match(failure.stderr, /fatal:/);
+  assert.equal(existsSync(marker), false, 'ordinary Git operations need no fake Node interpreter');
+});
 
 test('a reviewer-mode run prints the Review table merge-pr.mjs accepts, with Codex models in its Helpers line', (t) => {
   const f = fixture(t);
