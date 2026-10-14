@@ -181,7 +181,8 @@ export const PHASES = Object.freeze([
     '.codex/hooks/guard.test.mjs', 'scripts/codex-probe.test.mjs', 'scripts/codex-review.test.mjs',
     'scripts/codex-skills.test.mjs', 'scripts/codex-agents.test.mjs', 'scripts/codex-check.test.mjs',
     'scripts/codex-check-lifecycle.test.mjs', 'scripts/codex-check-inspection.test.mjs',
-    'scripts/codex-check-safety.test.mjs', 'scripts/codex-check-faults.test.mjs'], deadlineMs: 120_000 },
+    'scripts/codex-check-safety.test.mjs', 'scripts/codex-check-faults.test.mjs',
+    'scripts/codex-check-cooperative.test.mjs'], deadlineMs: 120_000 },
 ]);
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -75,21 +75,37 @@ if (ledger) {
         });
       }).map(entry => entry.group));
   }
-  const stopUnreserved = (allowNestedCleanup = false) => {
+  const stopUnreserved = (allowNestedCleanup = false, value = 'SIGKILL') => {
+    const pending = [];
     for (const tracked of direct) {
       const { child, entry, childLedger } = tracked;
       // An unreaped direct leader still pins its group. Filtered helper
       // environments do not load this preloader, so their parent owns teardown.
       if (entry.group !== entry.pid || readGroups().has(entry.group) || child.exitCode !== null || child.signalCode !== null) continue;
       if (allowNestedCleanup && readGroups(childLedger).has(entry.group)) continue;
-      try { process.kill(-entry.group, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-      direct.delete(tracked);
+      try { process.kill(-entry.group, value); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      if (value === 'SIGKILL') direct.delete(tracked);
+      else pending.push(child);
     }
+    return pending;
   };
   process.once('exit', () => { stopUnreserved(); record({ ...self, live: false }); });
   for (const value of ['SIGTERM', 'SIGINT']) process.on(value, () => {
-    stopUnreserved(true);
-    if (process.listenerCount(value) === 1) process.exit(value === 'SIGTERM' ? 143 : 130);
+    const pending = stopUnreserved(true, 'SIGTERM');
+    if (process.listenerCount(value) !== 1) return;
+    const status = value === 'SIGTERM' ? 143 : 130;
+    if (!pending.length) { process.exit(status); return; }
+    // Finish known unleased children before the controller's two-second grace.
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      stopUnreserved();
+      process.exit(status);
+    };
+    const timer = setTimeout(finish, 1000);
+    Promise.all(pending.map(child => new Promise(resolve => child.once('exit', resolve)))).then(finish);
   });
   for (const name of ['spawn', 'fork', 'exec', 'execFile']) {
     const original = cp[name];
