@@ -71,7 +71,7 @@ their outcomes. Lifecycle regressions advance mock timers only after readiness
 to exercise the real deadline and forced cleanup, and send an explicit TERM to
 the runner. A further red test showed that root close could cancel escalation
 while a detached descendant with closed pipes remained alive; the runner now
-awaits that owned cleanup before returning. All eight runner cases pass after the review fixes below. Fixture start/end diagnostics make the active driver test and
+awaits that owned cleanup before returning. All nine runner cases pass after the review fixes below. Fixture start/end diagnostics make the active driver test and
 review operation visible even while Node buffers a file's ordinary results.
 
 The review confirmed two additional parent-exit cases. A root could return
@@ -86,6 +86,17 @@ The recorder does not change production review/proof environment filtering;
 the original filtering tests remain on the full invocation. The additional
 red/green evidence and first Workflow verdict are in
 `review-fix-evidence.tar.gz`, with their own SHA manifest.
+
+The delta review also confirmed that a process-inspection error could throw
+before signalling the root or scheduling escalation. A readiness-controlled
+fake `ps` reproduces the missing root cleanup. The repaired path still stops
+the known live root group, schedules escalation, reports inspection failure
+and returns nonzero. Recorded detached PIDs are never signalled without an
+identity check; if inspection stays unavailable their cleanup is explicitly
+unverified, so no successful phase/check stamp is possible. The same-group
+root and descendant complete cleanup in the injected failure test, while its
+unrelated control remains alive. This red/green evidence and delta verdict
+are retained in `inspection-fix-evidence.tar.gz` with its SHA manifest.
 
 The runner CLI accepts no command, filter or deadline arguments. Its exported
 execution seam is used only by generated synthetic tests. Ordinary diagnostic
@@ -143,7 +154,8 @@ ownership. A cutoff still fails and never stamps successful check/review work.
 A pre-final whole-check run passed all 64 cases, with no skips, and reported
 fixtures status 0 in 60923 ms. Its working content preceded the additional
 detached-child regression; it is retained as intermediate evidence, not an
-exact-head receipt. The final check also runs that additional case and both review regressions.
+exact-head receipt. The final check also runs that additional case, both parent-exit regressions
+and the subsequent inspection-failure regression.
 The subsequent complete fixed check passed all 67 cases, with no skips, and
 reported fixtures status 0 in 57769 ms. It retains the original 120000 ms
 boundary, leaving 62231 ms of observed margin. This is diagnostic evidence,

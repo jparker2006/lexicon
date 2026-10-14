@@ -30,6 +30,7 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
   let timedOut = false;
   let owned = [];
   let finished = false;
+  let inspectionFailed = false;
   let cleanupTimer;
   let cleanup = Promise.resolve();
   let stopping = false;
@@ -61,9 +62,17 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
     for (const entry of owned) if (!recorded.has(entry.pid)) recorded.set(entry.pid, entry);
     return [...recorded.values()].filter(entry => entry.pid !== child.pid && snapshot.get(entry.pid)?.start === entry.start);
   };
+  const inspectionFailure = error => {
+    inspectionFailed = true;
+    process.stderr.write(`codex-check: cleanup failed phase=${name}: ${error.message}\n`);
+  };
   const stopOwned = value => {
-    owned = collect();
-    for (const entry of owned) signal(entry.pid, value);
+    try {
+      owned = collect();
+      for (const entry of owned) signal(entry.pid, value);
+    } catch (error) { inspectionFailure(error); }
+    // This group is ours while its unreaped leader is alive. Inspection of
+    // detached children must never prevent stopping that known root group.
     if (rootAlive()) signal(-child.pid, value);
   };
   process.stdout.write(`codex-check: start phase=${name} pid=${child.pid} deadline=${deadlineMs}ms\n`);
@@ -110,7 +119,10 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
       child.once('error', reject);
       child.once('exit', () => {
         // Ownership records survive parent exit and process-group separation.
-        if (!stopping && collect().length) stop();
+        if (!stopping) {
+          try { if (collect().length) stop(); }
+          catch (error) { inspectionFailure(error); stop(); }
+        }
       });
       child.once('close', code => resolve(timedOut ? 1 : (code ?? 1)));
     });
@@ -118,12 +130,15 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
     // grace/escalation operation alive until every PID we owned has stopped.
     await cleanup;
     const stoppedBy = Date.now() + 2000;
-    while (stopping && collect().length && Date.now() < stoppedBy) await new Promise(resolve => setImmediate(resolve));
-    if (stopping && collect().length) {
-      status = 1;
-      process.stderr.write(`codex-check: cleanup incomplete phase=${name} pids=${collect().map(entry => entry.pid).join(',')}\n`);
-    }
-    if (timedOut) status = 1;
+    try {
+      while (stopping && collect().length && Date.now() < stoppedBy) await new Promise(resolve => setImmediate(resolve));
+      if (stopping && collect().length) {
+        status = 1;
+        process.stderr.write(`codex-check: cleanup incomplete phase=${name} pids=${collect().map(entry => entry.pid).join(',')}\n`);
+      }
+    } catch (error) { inspectionFailure(error); }
+    if (inspectionFailed) process.stderr.write(`codex-check: cleanup unverified phase=${name}: detached process inspection unavailable\n`);
+    if (timedOut || inspectionFailed) status = 1;
     finished = true;
   } finally {
     clearTimeout(timer);
@@ -142,7 +157,7 @@ export const PHASES = Object.freeze([
   { name: 'fixtures', args: ['--test', '--test-reporter', './scripts/codex-check-reporter.mjs',
     '.codex/hooks/guard.test.mjs', 'scripts/codex-probe.test.mjs', 'scripts/codex-review.test.mjs',
     'scripts/codex-skills.test.mjs', 'scripts/codex-agents.test.mjs', 'scripts/codex-check.test.mjs',
-    'scripts/codex-check-lifecycle.test.mjs'], deadlineMs: 120_000 },
+    'scripts/codex-check-lifecycle.test.mjs', 'scripts/codex-check-inspection.test.mjs'], deadlineMs: 120_000 },
 ]);
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
