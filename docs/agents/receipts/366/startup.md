@@ -72,3 +72,35 @@ Local raw receipts: `/private/tmp/lexicon-366/repeated-nested.log`,
 `observed-nested.log`, `startup-trace.jsonl`. The unchanged baseline gate passed
 82 tests; the gate with diagnostic coverage passed 83. These passes alone are
 not diagnosis or a mechanism repair.
+
+## Deterministic regression and repair
+
+`scripts/codex-check-startup.test.mjs` runs the real outer and inner `runPhase`
+chain. A generated import intercepts only the generated harness's exact
+self-identity call, before the inherited tracker loads. An explicit one-shot
+marker injects `ETIMEDOUT` once; the next lookup calls real `ps`. There are no
+sleeps or elapsed-time assertions. The generated inner phase deliberately exits
+23 to prove status propagation and the absence of a false success stamp.
+
+Invocation: `node /private/tmp/lexicon-366/startup-nested.mjs`, whose outer
+`runPhase` runs `node --test scripts/codex-check-startup.test.mjs` with the same
+120000 ms deadline and inherited ownership preloader as the full fixtures phase.
+
+Before repair (`3086d03`): one test failed, two passed. The transient case saw one
+lookup instead of the required successful retry, and the harness never entered.
+The persistent and non-timeout errors already failed closed.
+
+After repair: three passed, none failed. The one-shot error is consumed, the
+second lookup returns real process identity, both generated bodies enter, and
+the inner and outer results preserve exit 23 with `timedOut=false`. Persistent
+`ETIMEDOUT` and `EACCES` still prevent entry, result and success-stamp creation.
+
+The repair retries the initial self lookup once only for `ETIMEDOUT`. Each probe
+still has its original 2000 ms timeout. A second timeout or any other error
+throws. Ownership registration waits for a successful identity. Direct-child
+inspection, keeper readiness, cleanup, phase deadlines and test watchdogs are
+unchanged. An additional probe can consume up to its existing 2000 ms budget;
+this does not extend the enclosing phase deadline or test watchdog.
+
+Raw regression receipts: `/private/tmp/lexicon-366/startup-nested-red.log` and
+`startup-nested-green.log`.
