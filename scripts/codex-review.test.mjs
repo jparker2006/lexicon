@@ -33,7 +33,9 @@ setInterval(() => {}, 1000);
 }
 else {
 // Named by pid: helpers run in parallel, so a count of the folder could repeat.
-fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
+const cachedContext = /is cached at ([^\\n]+?)\\. Read it/.exec(prompt)?.[1];
+const hasSyntheticContextMarker = Boolean(cachedContext && fs.readFileSync(cachedContext, 'utf8').includes('LEXICON_REVIEW_FIXTURE_CONTEXT_MARKER_ONLY'));
+fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), hasSyntheticContextMarker, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
 const finding = { path: 'Sources/History/a.swift', line: 1, claim: 'a dictation can be lost', scenario: 'X, so Y', severity: 'blocker', confidence: 'high', cite: { kind: 'rule', source: 'review.md', quote: 'q' } };
 let reply;
 if (prompt.includes('Try to disprove')) reply = { verdict: 'CONFIRMED', citationHolds: true, evidence: 'e', trigger: 't', decider: '', headless: true, test: '' };
@@ -41,6 +43,13 @@ else if (prompt.includes('Blast radius for issue')) reply = { safetyFact: 'fact'
 else reply = { findings: /one lens: Never lose/.test(prompt) ? [finding] : [], notes: [], checked: 'looked', incomplete: '' };
 fs.writeFileSync(args[args.indexOf('-o') + 1], JSON.stringify(reply));
 }
+`;
+
+const FAKE_GH = `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === 'pr' && args[1] === 'list') process.stdout.write('[]\\n');
+else if (args[0] === 'issue' && args[1] === 'view') process.stdout.write(JSON.stringify({ body: 'fixture issue', comments: [] }) + '\\n');
+else { process.stderr.write('unexpected fake gh command\\n'); process.exit(64); }
 `;
 
 function fixture(t) {
@@ -58,6 +67,7 @@ function fixture(t) {
   }
   git(repo, 'add', '-A');
   git(repo, 'commit', '-q', '-m', 'base');
+  git(repo, 'remote', 'add', 'origin', repo);
   git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
   git(repo, 'checkout', '-q', '-b', 'claude/issue-1');
   mkdirSync(path.join(repo, 'Sources/History'), { recursive: true });
@@ -67,18 +77,22 @@ function fixture(t) {
   const bin = path.join(dir, 'codex');
   writeFileSync(bin, FAKE);
   chmodSync(bin, 0o755);
+  const binDir = path.join(dir, 'bin');
+  mkdirSync(binDir);
+  const gh = path.join(binDir, 'gh');
+  writeFileSync(gh, FAKE_GH);
+  chmodSync(gh, 0o755);
   const log = path.join(dir, 'log');
   mkdirSync(log);
-  writeFileSync(path.join(dir, 'context.json'), JSON.stringify({ issue: { body: 'fixture', comments: [] }, spec: { body: 'fixture', comments: [] }, openPRs: [] }));
-  return { dir, repo, bin, log, sha: git(repo, 'rev-parse', 'HEAD') };
+  return { dir, repo, bin, binDir, log, sha: git(repo, 'rev-parse', 'HEAD') };
 }
 
-function runReview({ dir, repo, bin, log }, args, env = {}, options = {}) {
+function runReview({ dir, repo, bin, binDir, log }, args, env = {}, options = {}) {
   const out = path.join(dir, 'result.json');
   const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/codex-review.mjs'), JSON.stringify(args), '--out', out], {
     cwd: repo,
     encoding: 'utf8',
-    env: { ...process.env, CODEX_BIN: bin, FAKE_CODEX_LOG: log, CODEX_REVIEW_CONTEXT_FILE: path.join(dir, 'context.json'), TMPDIR: dir, ...env },
+    env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir, ...env },
     timeout: options.timeout ?? 60_000,
     detached: options.detached ?? false,
   });
@@ -168,6 +182,28 @@ test('review helpers do not inherit unrelated caller environment variables', (t)
 
   assert.ok(calls.length > 0, 'the fixture exercised Codex helper processes');
   assert.ok(calls.every((call) => call.hasSyntheticSecret === false), 'helpers receive no caller-supplied secret marker');
+});
+
+test('review stops without a stamp when refreshing origin main fails, even if fake gh succeeds', (t) => {
+  const f = fixture(t);
+  git(f.repo, 'remote', 'set-url', 'origin', path.join(f.dir, 'missing-origin'));
+  const { run, out } = runReview(f, { issue: 1, sha: f.sha, mode: 'reviewer' });
+
+  assert.notEqual(run.status, 0, run.stderr);
+  assert.doesNotMatch(run.stdout, /^Reviewed sha:/m);
+  assert.equal(existsSync(out), false, 'a failed main refresh cannot write a review result');
+});
+
+test('a caller-selected context file is not exposed to review helpers', (t) => {
+  const f = fixture(t);
+  const contextFile = path.join(f.dir, 'caller-context.json');
+  writeFileSync(contextFile, JSON.stringify({ marker: 'LEXICON_REVIEW_FIXTURE_CONTEXT_MARKER_ONLY' }));
+  const { calls } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' }, {
+    CODEX_REVIEW_CONTEXT_FILE: contextFile,
+  });
+
+  assert.ok(calls.length > 0, 'the fixture exercised Codex helper processes');
+  assert.ok(calls.every((call) => call.hasSyntheticContextMarker === false), 'helpers cannot read an arbitrary caller-selected context file');
 });
 
 test('strict closes every object and requires every property, nested ones too', () => {
