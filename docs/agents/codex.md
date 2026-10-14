@@ -19,7 +19,7 @@ Codex reads repo skills through `.agents/skills`, which links to `.claude/skills
    `45-codex.sh` is headless. `codex-probe.sh` is one real Codex run on your plan, in a scratch worktree: it passes when the hook refuses a `cat` of a file under `~/Library/Application Support/Lexicon/` that doesn't exist and `git push --dry-run origin HEAD:main`, and it prints both refusals. Neither leaks anything if the hook misses.
 4. **Trust the project and its hook:** run `codex` in `~/code/lexicon`. When it asks about the project's hooks, review and trust the one named "Lexicon guard". Codex keeps that trust in `~/.codex/config.toml`, keyed to `~/code/lexicon/.codex/hooks.json`; every worktree uses it. A change to `.codex/hooks.json` needs a fresh trust: `node .codex/hooks/trust.mjs` prints the key and hash Codex should show.
 5. **Install pstack for Codex:** follow the [pstack Codex instructions](https://github.com/michael-denyer/pstack-claude/blob/main/docs/reference.md#codex): `codex plugin marketplace add michael-denyer/pstack-claude`, then `codex plugin add pstack@pstack-claude`. Keep the routing hook off with `session hook: off` in `~/.codex/pstack-models.md`; Lexicon invokes skills explicitly. The Codex swarm default is `swarm workers: gpt-6-luna @xhigh`, overridable by Jake.
-6. **Check skill visibility:** `node scripts/codex-skills.mjs` checks the model-visible `codex debug prompt-input` catalogue and the local `skills/list` inventory for enabled explicit-only skills such as Matt Pocock's `retro`. It derives required tools from the workflow table and verifies each skill's name and source file, so a global `pr` cannot substitute for the repo's `pr`. It prints `visible` or `MISSING` for every required skill and fails on a missing one. CI uses positive and negative fixtures and never requires Jake's installed skill folders. To audit receipts, pass `--prompt <JSON>` and `--inventory <JSON>`.
+6. **Check skill visibility:** `node ~/code/lexicon/scripts/codex-skills.mjs` uses the current-main skill checker to check the model-visible `codex debug prompt-input` catalogue and the local `skills/list` inventory for enabled explicit-only skills such as Matt Pocock's `retro`. It derives required tools from the workflow table and verifies each skill's name and source file, so a global `pr` cannot substitute for the repo's `pr`. It prints `visible` or `MISSING` for every required skill and fails on a missing one. CI uses positive and negative fixtures and never requires Jake's installed skill folders. To audit receipts, pass `--prompt <JSON>` and `--inventory <JSON>`.
 
 
 ## Switching over from Claude
@@ -51,7 +51,7 @@ Then: test "$(git rev-parse --git-dir)" = .git && test "$(git branch --show-curr
 Then read the newest Reviewer handoff note on #36 and pick up from it.
 Standing approvals (Jake, 2026-10-12), by pasting this:
 - Merge your own merge verdicts with scripts/merge-pr.mjs, one at a time, without waiting for me.
-- Reviews: put every blocking item in your first verdict. Use the tier in `review-merge`: run the full Workflow through `scripts/codex-review.mjs` for high-tier PRs, and the light pass for low-tier PRs. A missing or incomplete high-tier review is a hold. The driver's `CODEX_REVIEW_MODEL` and `CODEX_REVIEW_EFFORT` environment variables override the review-helper defaults.
+- Reviews: put every blocking item in your first verdict. Use the tier in `review-merge`: run the full Workflow through the current-main driver at `~/code/lexicon/scripts/codex-review.mjs` for high-tier PRs, and the light pass for low-tier PRs. A missing or incomplete high-tier review is a hold. The driver's `CODEX_REVIEW_MODEL` and `CODEX_REVIEW_EFFORT` environment variables override the review-helper defaults.
 - Install: once a wave has merged and its Jake items have passed in a Live checks sitting, run scripts/install.sh on main once, without asking, unless a merged PR's Install section lists a step beyond "Code only." Any other install waits for me to type "install" in this session, and so does the one that finishes a milestone.
 Approvals the merge script doesn't cover (anything private, any spend, any other deletion) you ask me for here. Decisions go on the issue for the orchestrator to ask.
 ```
@@ -115,11 +115,13 @@ You are a Lexicon builder (jparker2006/lexicon), on Codex. Read docs/agents/code
 
 Use the matching Codex capability for each shared skill step. Desktop app tools are available only in sessions that expose them. When one is absent, use the manual fallback shown here.
 
+The skill checker and review driver are current-main tools and may be absent from an older ticket branch. Use their main-checkout-qualified paths. Run the review driver from the worktree being reviewed; its working directory selects the ticket, while its main-checkout path supplies the merged tooling. Pinned sources: [skill checker](https://github.com/jparker2006/lexicon/blob/79e4d3c/scripts/codex-skills.mjs), [review driver](https://github.com/jparker2006/lexicon/blob/79e4d3c/scripts/codex-review.mjs).
+
 | Claude step or tool | Codex path |
 |---|---|
 | Repo `Skill` tool | Use the skill listed by Codex. Repo skills load through `.agents/skills`; pstack skills load by their installed names, such as `pstack:architect` and `pstack:swarm`. Follow the skill's Codex mapping. |
 | Matt Pocock `tdd` skill | Use the installed `tdd` skill from `~/.agents/skills` when it appears in the Codex skill list. |
-| `lexicon-review` Workflow | Run `node scripts/codex-review.mjs '<the same args as JSON>'`. It prints the same review markdown. |
+| `lexicon-review` Workflow | Run `node ~/code/lexicon/scripts/codex-review.mjs '<the same args as JSON>'` from the worktree being reviewed. It prints the same review markdown. |
 | Typed helper or swarm worker | Use `spawn_agent` with the matching `.codex/agents/<name>.toml` role, at most 6 concurrent helpers. `maxTurns` has no Codex role equivalent. Keep each helper's assigned scope in its prompt. |
 | Reviewer `ToolSearch` and session tools | In Codex desktop, use available `list_threads`, `set_thread_title` and `send_message_to_thread` tools. If unavailable, read `scripts/status.sh` and GitHub, and give Jake a manual pointer. |
 | Orchestrator session creation and messages | In Codex desktop, use `create_thread` and `send_message_to_thread` when available. Otherwise give Jake the exact prompt and worktree command to start manually. GitHub remains canonical; a message does not transfer approvals. |
