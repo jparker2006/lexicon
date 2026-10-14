@@ -11,11 +11,11 @@ import { createInterface } from 'node:readline';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function processSnapshot() {
-  const result = spawnSync('ps', ['-axo', 'pid=,ppid=,lstart='], { encoding: 'utf8', timeout: 2000 });
+  const result = spawnSync('ps', ['-axo', 'pid=,ppid=,pgid=,lstart='], { encoding: 'utf8', timeout: 2000 });
   if (result.error || result.status !== 0) throw new Error('cannot inspect owned check descendants');
   return new Map(result.stdout.trim().split('\n').map(line => {
-    const [, pid, ppid, start] = /^(\d+)\s+(\d+)\s+(.+)$/.exec(line.trim());
-    return [Number(pid), { pid: Number(pid), ppid: Number(ppid), start: start.replace(/\s+/g, ' ') }];
+    const [, pid, ppid, group, start] = /^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/.exec(line.trim());
+    return [Number(pid), { pid: Number(pid), ppid: Number(ppid), group: Number(group), start: start.replace(/\s+/g, ' ') }];
   }));
 }
 
@@ -34,21 +34,26 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
   let cleanupTimer;
   let cleanup = Promise.resolve();
   let stopping = false;
+  const killedGroups = new Set();
   const started = Date.now();
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'codex-check-'));
   const ledger = path.join(scratch, 'children.jsonl');
   writeFileSync(ledger, '', { mode: 0o600 });
-  const tracker = pathToFileURL(path.join(ROOT, 'scripts/codex-check-children.cjs')).href;
+  const tracker = pathToFileURL(path.join(ROOT, 'scripts/codex-check-children.mjs')).href;
   const child = spawn(command, args, { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, LEXICON_CODEX_CHECK_LEDGER: ledger,
+      LEXICON_CODEX_CHECK_KEEPER_SECONDS: String(Math.ceil(deadlineMs / 1000) + 20),
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${tracker}`.trim() },
   });
   const rootAlive = () => child.pid && child.exitCode === null && child.signalCode === null;
+  const entries = () => readFileSync(ledger, 'utf8').split('\n').slice(0, -1).map(JSON.parse);
+  const groups = () => entries().filter(entry => entry.kind === 'group' && !killedGroups.has(entry.group)
+    && BigInt(entry.expires) > process.hrtime.bigint());
   const collect = () => {
     const snapshot = processSnapshot();
     const recorded = new Map();
-    for (const line of readFileSync(ledger, 'utf8').split('\n').slice(0, -1)) {
-      const entry = JSON.parse(line);
+    for (const entry of entries()) {
+      if (entry.kind === 'group') continue;
       if (entry.live) recorded.set(entry.pid, entry);
       else if (recorded.get(entry.pid)?.start === entry.start) recorded.delete(entry.pid);
     }
@@ -67,13 +72,19 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
     process.stderr.write(`codex-check: cleanup failed phase=${name}: ${error.message}\n`);
   };
   const stopOwned = value => {
+    const reserved = new Set();
+    for (const entry of groups()) {
+      reserved.add(entry.group);
+      signal(-entry.group, value);
+      if (value === 'SIGKILL') killedGroups.add(entry.group);
+    }
     try {
       owned = collect();
-      for (const entry of owned) signal(entry.pid, value);
+      for (const entry of owned) if (!reserved.has(entry.group) && !killedGroups.has(entry.group)) signal(entry.pid, value);
     } catch (error) { inspectionFailure(error); }
     // This group is ours while its unreaped leader is alive. Inspection of
     // detached children must never prevent stopping that known root group.
-    if (rootAlive()) signal(-child.pid, value);
+    if (rootAlive() && !reserved.has(child.pid) && !killedGroups.has(child.pid)) signal(-child.pid, value);
   };
   process.stdout.write(`codex-check: start phase=${name} pid=${child.pid} deadline=${deadlineMs}ms\n`);
   const stop = () => {
@@ -120,7 +131,7 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
       child.once('exit', () => {
         // Ownership records survive parent exit and process-group separation.
         if (!stopping) {
-          try { if (collect().length) stop(); }
+          try { if (groups().length || collect().length) stop(); }
           catch (error) { inspectionFailure(error); stop(); }
         }
       });
@@ -129,9 +140,9 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
     // A detached descendant with no inherited pipe can outlive close. Keep the
     // grace/escalation operation alive until every PID we owned has stopped.
     await cleanup;
-    const stoppedBy = Date.now() + 2000;
+    const stoppedBy = performance.now() + 2000;
     try {
-      while (stopping && collect().length && Date.now() < stoppedBy) await new Promise(resolve => setImmediate(resolve));
+      while (stopping && collect().length && performance.now() < stoppedBy) await new Promise(resolve => setImmediate(resolve));
       if (stopping && collect().length) {
         status = 1;
         process.stderr.write(`codex-check: cleanup incomplete phase=${name} pids=${collect().map(entry => entry.pid).join(',')}\n`);

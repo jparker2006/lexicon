@@ -1,6 +1,6 @@
 // A failed process inspection must not skip known-root cleanup or stamp success.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -56,38 +56,38 @@ function killRecordedPID(file) {
   }
 }
 
-test('a failed process inspection still stops the phase process group',
-  { timeout: TEST_WATCHDOG_MS }, async t => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), 'codex-check-inspection-'));
-    const fakeBin = path.join(dir, 'bin');
-    const flag = path.join(dir, 'fail-ps');
-    const phasePath = path.join(dir, 'phase.mjs');
-    const descendantPath = path.join(dir, 'descendant.mjs');
-    const phasePIDPath = path.join(dir, 'phase.pid');
-    const descendantPIDPath = path.join(dir, 'descendant.pid');
-    const phaseStopped = path.join(dir, 'phase.stopped');
-    const descendantStopped = path.join(dir, 'descendant.stopped');
-    const successStamp = path.join(dir, 'success.stamp');
-    const resultPath = path.join(dir, 'result.json');
-    const psPath = path.join(fakeBin, 'ps');
-    const readyLine = 'phase=inspection-ready ready=1';
+async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM }) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'codex-check-inspection-'));
+  const fakeBin = path.join(dir, 'bin');
+  const flag = path.join(dir, 'fail-ps');
+  const phasePath = path.join(dir, 'phase.mjs');
+  const descendantPath = path.join(dir, 'descendant.mjs');
+  const phasePIDPath = path.join(dir, 'phase.pid');
+  const descendantPIDPath = path.join(dir, 'descendant.pid');
+  const phaseStopped = path.join(dir, 'phase.stopped');
+  const descendantStopped = path.join(dir, 'descendant.stopped');
+  const successStamp = path.join(dir, 'success.stamp');
+  const resultPath = path.join(dir, 'result.json');
+  const psPath = path.join(fakeBin, 'ps');
+  const readyLine = 'phase=inspection-ready ready=1';
 
-    mkdirSync(fakeBin);
-    writeFileSync(psPath, `#!/bin/sh
+  mkdirSync(fakeBin);
+  writeFileSync(psPath, `#!/bin/sh
 if [ -e ${shellQuote(flag)} ]; then exit 2; fi
 exec /bin/ps "$@"
 `, { mode: 0o755 });
-    writeFileSync(descendantPath, `
+  writeFileSync(descendantPath, `
 import { writeFileSync } from 'node:fs';
 writeFileSync(${JSON.stringify(descendantPIDPath)}, String(process.pid));
 process.on('SIGTERM', () => {
   writeFileSync(${JSON.stringify(descendantStopped)}, 'stopped');
-  process.exit(0);
+  if (!${ignoreSIGTERM}) process.exit(0);
 });
 process.send('ready');
 setInterval(() => {}, 1000);
 `);
-    writeFileSync(phasePath, `
+  const detached = detachedChild ? 'true' : 'false';
+  writeFileSync(phasePath, `
 import { fork } from 'node:child_process';
 import { writeFileSync, writeSync } from 'node:fs';
 writeFileSync(${JSON.stringify(phasePIDPath)}, String(process.pid));
@@ -96,6 +96,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 const descendant = fork(${JSON.stringify(descendantPath)}, [], {
+  detached: ${detached},
   stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
 });
 descendant.on('message', message => {
@@ -104,27 +105,27 @@ descendant.on('message', message => {
 setInterval(() => {}, 1000);
 `);
 
-    t.after(() => {
-      killRecordedPID(phasePIDPath);
-      killRecordedPID(descendantPIDPath);
-      rmSync(dir, { recursive: true, force: true });
-    });
+  t.after(() => {
+    killRecordedPID(phasePIDPath);
+    killRecordedPID(descendantPIDPath);
+    rmSync(dir, { recursive: true, force: true });
+  });
 
-    const control = spawn(NODE, ['-e', "process.stdout.write('control ready=1\\n'); setInterval(() => {}, 1000)"], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const controlCapture = capture(control, 'control ready=1');
-    t.after(async () => {
-      if (control.exitCode === null && control.signalCode === null) {
-        control.kill('SIGTERM');
-        await new Promise(resolve => control.once('close', resolve));
-      }
-    });
-    await controlCapture.ready;
+  const control = spawn(NODE, ['-e', "process.stdout.write('control ready=1\\n'); setInterval(() => {}, 1000)"], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const controlCapture = capture(control, 'control ready=1');
+  t.after(async () => {
+    if (control.exitCode === null && control.signalCode === null) {
+      control.kill('SIGTERM');
+      await new Promise(resolve => control.once('close', resolve));
+    }
+  });
+  await controlCapture.ready;
 
-    const harnessPath = path.join(dir, 'harness.mjs');
-    const runnerURL = pathToFileURL(path.join(REPO, 'scripts/codex-check.mjs')).href;
-    writeFileSync(harnessPath, `
+  const harnessPath = path.join(dir, 'harness.mjs');
+  const runnerURL = pathToFileURL(path.join(REPO, 'scripts/codex-check.mjs')).href;
+  writeFileSync(harnessPath, `
 import { writeFileSync } from 'node:fs';
 import { runPhase } from ${JSON.stringify(runnerURL)};
 let expire;
@@ -145,35 +146,51 @@ if (result.status === 0) writeFileSync(${JSON.stringify(successStamp)}, 'success
 process.exitCode = result.status;
 `);
 
-    const harness = spawn(NODE, [harnessPath], {
-      cwd: REPO,
-      env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}` },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const harnessCapture = capture(harness);
-    const closed = new Promise(resolve => harness.once('close', (code, signal) => resolve({ code, signal })));
-    t.after(async () => {
-      if (harness.exitCode === null && harness.signalCode === null) {
-        harness.kill('SIGTERM');
-        await closed;
-      }
-    });
-
-    const outcome = await closed;
-    const output = harnessCapture.output();
-    assert.deepEqual(outcome, { code: 1, signal: null }, 'inspection failure exits the harness unsuccessfully');
-    assert.equal(existsSync(phasePIDPath), true, 'the phase started before inspection failed');
-    assert.equal(existsSync(descendantPIDPath), true, 'the descendant became ready before inspection failed');
-    assert.equal(existsSync(phaseStopped), true, 'the root phase receives cleanup');
-    assert.equal(existsSync(descendantStopped), true, 'the owned descendant receives cleanup');
-    assert.equal(existsSync(successStamp), false, 'a failed phase never records success');
-    assert.equal(existsSync(resultPath), true, 'the harness returns a phase result after handling the inspection failure');
-    const result = JSON.parse(readFileSync(resultPath, 'utf8'));
-    assert.equal(result.status, 1, 'the phase result is nonzero');
-    assert.equal(result.timedOut, true, 'the phase preserves its timeout outcome');
-    assert.match(output, /codex-check: cleanup failed phase=inspection-failure: cannot inspect owned check descendants/,
-      'the harness reports the process inspection failure explicitly');
-    assert.equal(isAlive(Number(readFileSync(phasePIDPath, 'utf8'))), false, 'the root phase is gone');
-    assert.equal(isAlive(Number(readFileSync(descendantPIDPath, 'utf8'))), false, 'the descendant is gone');
-    assert.equal(isAlive(control.pid), true, 'the unrelated control process remains alive');
+  const harness = spawn(NODE, [harnessPath], {
+    cwd: REPO,
+    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}` },
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const harnessCapture = capture(harness);
+  const closed = new Promise(resolve => harness.once('close', (code, signal) => resolve({ code, signal })));
+  t.after(async () => {
+    if (harness.exitCode === null && harness.signalCode === null) {
+      harness.kill('SIGTERM');
+      await closed;
+    }
+  });
+
+  const outcome = await closed;
+  const output = harnessCapture.output();
+  const phasePID = Number(readFileSync(phasePIDPath, 'utf8'));
+  const descendantPID = Number(readFileSync(descendantPIDPath, 'utf8'));
+  // The process-table snapshot may fail, but the owned process group remains the safety boundary.
+  const census = spawnSync('/bin/ps', [
+    '-o', 'pid=,ppid=,pgid=,stat=', '-p', `${phasePID},${descendantPID},${control.pid}`,
+  ], { encoding: 'utf8' });
+  t.diagnostic(`cleanup actor census before assertions:\n${census.stdout ?? ''}${census.stderr ?? ''}control alive=${isAlive(control.pid)}`);
+
+  assert.deepEqual(outcome, { code: 1, signal: null }, 'inspection failure exits the harness unsuccessfully');
+  assert.equal(existsSync(phasePIDPath), true, 'the phase started before inspection failed');
+  assert.equal(existsSync(descendantPIDPath), true, 'the descendant became ready before inspection failed');
+  assert.equal(existsSync(phaseStopped), true, 'the root phase receives cleanup');
+  assert.equal(existsSync(descendantStopped), true, 'the owned descendant receives cleanup');
+  assert.equal(existsSync(successStamp), false, 'a failed phase never records success');
+  assert.equal(existsSync(resultPath), true, 'the harness returns a phase result after handling the inspection failure');
+  const result = JSON.parse(readFileSync(resultPath, 'utf8'));
+  assert.equal(result.status, 1, 'the phase result is nonzero');
+  assert.equal(result.timedOut, true, 'the phase preserves its timeout outcome');
+  assert.match(output, /codex-check: cleanup failed phase=inspection-failure: cannot inspect owned check descendants/,
+    'the harness reports the process inspection failure explicitly');
+  assert.equal(isAlive(phasePID), false, 'the root phase is gone');
+  assert.equal(isAlive(descendantPID), false, 'the descendant is gone');
+  assert.equal(isAlive(control.pid), true, 'the unrelated control process remains alive');
+}
+
+for (const scenario of [
+  { name: 'failed inspection reaps same-group child', detachedChild: false, ignoreSIGTERM: false },
+  { name: 'failed inspection reaps detached child', detachedChild: true, ignoreSIGTERM: false },
+  { name: 'failed inspection reaps leaderless stubborn child', detachedChild: false, ignoreSIGTERM: true },
+]) {
+  test(scenario.name, { timeout: TEST_WATCHDOG_MS }, async t => failedInspectionCleanup(t, scenario));
+}

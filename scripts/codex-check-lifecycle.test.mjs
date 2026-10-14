@@ -364,3 +364,44 @@ test('the phase deadline still stops a detached inherited-pipe child after root 
     assert.equal(isAlive(Number(readFileSync(fx.childPIDPath, 'utf8'))), false,
       'the detached process holding the output pipes is gone');
   });
+
+test('the group keeper kills only its reserved process group',
+  { timeout: TEST_WATCHDOG_MS }, async t => {
+    const keeperPath = path.join(REPO, 'scripts/codex-check-group.sh');
+    const keeper = spawn('/bin/sh', [
+      '-c', 'exec /bin/sh "$1" "$$" 1', 'codex-check-group-test', keeperPath,
+    ], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const keeperOutput = capture(keeper, 'reserved\n');
+    const keeperClosed = new Promise(resolve => keeper.once('close', (code, signal) => resolve({ code, signal })));
+
+    const control = spawn(NODE, ['-e', "process.stdout.write('control ready=1\\n'); setInterval(() => {}, 1000)"], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const controlOutput = capture(control, 'control ready=1');
+    const controlClosed = new Promise(resolve => control.once('close', resolve));
+    t.after(async () => {
+      if (Number.isInteger(keeper.pid) && keeper.exitCode === null && keeper.signalCode === null) {
+        try {
+          process.kill(-keeper.pid, 'SIGKILL');
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
+      if (Number.isInteger(control.pid) && control.exitCode === null && control.signalCode === null) control.kill('SIGTERM');
+      await Promise.all([keeperClosed, controlClosed]);
+    });
+
+    const waitForReady = (child, output) => Promise.all([
+      new Promise((resolve, reject) => {
+        child.once('spawn', resolve);
+        child.once('error', reject);
+      }),
+      output.seen,
+    ]);
+    await Promise.all([waitForReady(keeper, keeperOutput), waitForReady(control, controlOutput)]);
+    const outcome = await keeperClosed;
+
+    assert.deepEqual(outcome, { code: null, signal: 'SIGKILL' },
+      'the keeper ends by killing its reserved process group');
+    assert.equal(isAlive(control.pid), true, 'the unrelated control process remains alive');
+  });

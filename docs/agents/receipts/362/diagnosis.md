@@ -89,14 +89,34 @@ red/green evidence and first Workflow verdict are in
 
 The delta review also confirmed that a process-inspection error could throw
 before signalling the root or scheduling escalation. A readiness-controlled
-fake `ps` reproduces the missing root cleanup. The repaired path still stops
-the known live root group, schedules escalation, reports inspection failure
-and returns nonzero. Recorded detached PIDs are never signalled without an
-identity check; if inspection stays unavailable their cleanup is explicitly
-unverified, so no successful phase/check stamp is possible. The same-group
-root and descendant complete cleanup in the injected failure test, while its
-unrelated control remains alive. This red/green evidence and delta verdict
+fake `ps` reproduces the missing root cleanup. The first repair stopped
+the known live root group, scheduled escalation, reported inspection failure
+and returned nonzero. A later review and readiness-controlled process census
+showed that failure alone was insufficient: a detached child survived, as did
+a TERM-ignoring child after its group leader exited. The unrelated control
+remained alive in both failing cases. This earlier red/green evidence and verdict
 are retained in `inspection-fix-evidence.tar.gz` with its SHA manifest.
+
+The finished runner reserves every owned Node process group before fixture
+code runs. A tiny native shell keeper ignores TERM, keeping that group's kernel
+identity reserved through escalation even after its leader exits. The controller
+can therefore kill the reserved group without a fresh process-table read and
+never signals that group again after releasing it. Inspection still attributes
+additional descendants and validates their kernel birth identities. A failed
+inspection still fails the check, rather than emitting a successful stamp.
+Filtered helper environments remain unchanged: their unreserved direct child
+groups are stopped through the parent's live ChildProcess handles on exit.
+Nested runners retain their own cooperative signal cleanup.
+
+Each keeper has a fallback that kills only its own group after the phase's
+120-second deadline plus 20 seconds. This reserve covers the bounded inspection,
+two-second grace and two-second death-confirmation operations. It does not extend
+the phase deadline. Both original phases still have 120-second limits and their
+sequential worst-case cleanup stays below the existing 300-second enclosing
+limit. A direct keeper regression checks fallback termination and unrelated
+control survival without asserting machine speed. The new census red/green
+logs and review verdict are retained in `group-fix-evidence.tar.gz` with a SHA
+manifest. No real model calls were used to reproduce or measure these fixtures.
 
 The runner CLI accepts no command, filter or deadline arguments. Its exported
 execution seam is used only by generated synthetic tests. Ordinary diagnostic
