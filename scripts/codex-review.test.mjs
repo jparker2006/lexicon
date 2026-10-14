@@ -150,6 +150,8 @@ function fixture(t) {
     copyFileSync(path.join(REPO, rel), path.join(repo, rel));
   }
   const proofLog = path.join(dir, 'proof-log');
+  mkdirSync(path.join(repo, 'fixture'), { recursive: true });
+  writeFileSync(path.join(repo, 'fixture/TrackedProofSource.txt'), 'committed fixture baseline\n');
   mkdirSync(path.join(repo, 'scripts'), { recursive: true });
   const proofScript = `#!/usr/bin/env node
 const fs = require('node:fs');
@@ -159,7 +161,8 @@ const args = process.argv.slice(2);
 const stdout = '✔ Test ' + args[1] + '() passed after 0.001 seconds.';
 const modeFile = ${JSON.stringify(path.join(dir, 'proof-mode'))};
 const mode = fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8') : '';
-fs.appendFileSync(${JSON.stringify(proofLog)}, JSON.stringify({ cwd: process.cwd(), sha: git('rev-parse','HEAD'), branch: git('branch','--show-current'), slot: process.env.HEAVY_SLOT ?? null, args, stdout }) + '\\n');
+if (mode === 'dirty-tracked') fs.appendFileSync(process.cwd() + '/fixture/TrackedProofSource.txt', 'dirtied during proof');
+fs.appendFileSync(${JSON.stringify(proofLog)}, JSON.stringify({ cwd: process.cwd(), sha: git('rev-parse','HEAD'), fixtureStatus: git('status','--porcelain'), branch: git('branch','--show-current'), slot: process.env.HEAVY_SLOT ?? null, args, stdout }) + '\\n');
 if (mode === 'wrong-sha') git('update-ref', 'HEAD', git('rev-parse', 'HEAD^'));
 if (mode === 'nonzero') process.exit(2);
 if (mode === 'timeout') { console.log('limits: stopped after 600 s: swift test'); process.exit(1); }
@@ -898,3 +901,123 @@ test('pre-PR review still runs without a named PR body', (t) => {
   assert.ok(!ghCalls.some(argv => argv[0] === 'pr' && argv[1] === 'view'),
     'a pre-PR review does not request named-PR body metadata');
 });
+
+
+test('a dirty tracked fixture proof cannot stamp or advance an earlier delta stamp', (t) => {
+  const f = fixture(t);
+  writeFileSync(path.join(f.dir, 'proof-mode'), 'dirty-tracked');
+  const gitLog = path.join(f.dir, 'git-commands.log');
+  const full = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' }, {
+    FAKE_GIT_COMMAND_LOG: gitLog,
+  });
+  const receipts = readFileSync(f.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.equal(receipts.length, 1, 'the public driver subprocess ran the fake proof test');
+  assert.equal(receipts[0].sha, f.sha, 'the fixture proof measured the pinned HEAD');
+  assert.match(receipts[0].fixtureStatus, /fixture\/TrackedProofSource\.txt/,
+    'the approved test pass left a tracked fixture source modified');
+  assert.equal(full.result.complete, false,
+    'a dirty tracked worktree makes the proof incomplete despite matching HEAD');
+  assert.equal(full.result.reviewedSha, null, 'the dirty proof does not stamp the full review');
+  assert.match(full.markdown, /^Not stamped \(INCOMPLETE below\)/m);
+
+  appendFileSync(path.join(f.repo, 'Sources/History/a.swift'), 'local delta after first proof\n');
+  git(f.repo, 'add', 'Sources/History/a.swift');
+  git(f.repo, 'commit', '-q', '-m', 'delta after dirty proof');
+  const deltaSHA = git(f.repo, 'rev-parse', 'HEAD');
+  assert.notEqual(deltaSHA, f.sha, 'the second review has a distinct local pass SHA');
+  const delta = review(f, { issue: 1, sha: deltaSHA, reviewed: f.sha, mode: 'reviewer' }, {
+    FAKE_GIT_COMMAND_LOG: gitLog,
+  });
+  assert.equal(delta.result.complete, false);
+  assert.equal(delta.result.reviewedSha, f.sha,
+    'an incomplete dirty proof preserves the earlier delta stamp');
+  assert.doesNotMatch(delta.markdown, /^Reviewed sha:|Blast radius \(delta\):/m);
+  const allReceipts = readFileSync(f.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.deepEqual(allReceipts.map(receipt => receipt.sha), [f.sha, deltaSHA],
+    'each proof executes at its own pinned local pass SHA');
+  assert.ok(allReceipts.every(receipt => /fixture\/TrackedProofSource\.txt/.test(receipt.fixtureStatus)),
+    'both fake proof runs dirtied only the generated tracked fixture source');
+  const commands = readFileSync(gitLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.ok(!commands.some(argv => argv[0] === 'push'), 'proof rejection does not push the local delta');
+});
+
+test('proof sandbox can read but cannot mutate the isolated build scheduler', (t) => {
+  const f = fixture(t);
+  const syntheticHome = mkdtempSync(path.join(os.tmpdir(), 'codex-review-scheduler-home-'));
+  t.after(() => rmSync(syntheticHome, { recursive: true, force: true }));
+  const heavyDir = path.join(syntheticHome, 'Library/Application Support/Lexicon Dev/heavy');
+  const queueNext = path.join(heavyDir, 'queue.next');
+  const slotFile = path.join(heavyDir, 'slot1');
+  assert.equal(existsSync(queueNext), false);
+  assert.equal(existsSync(slotFile), false);
+
+  // This generated runner attempts only synthetic scheduler mutations. It emits
+  // the normal fixed-filter pass line only if both writes are denied and the
+  // queue/held-slot state remains readable and unchanged.
+  const proofScript = `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync: run } = require('node:child_process');
+const git = (...args) => run('git', args, { encoding: 'utf8' }).trim();
+const args = process.argv.slice(2);
+const heavy = path.join(process.env.HOME, 'Library/Application Support/Lexicon Dev/heavy');
+const slotPath = path.join(heavy, 'slot' + process.env.HEAVY_SLOT);
+const queuePath = path.join(heavy, 'queue.next');
+const slotExistsBefore = fs.existsSync(slotPath);
+const queueBefore = fs.readFileSync(queuePath, 'utf8').trim();
+let unlinkDenied = false;
+let unlinkCode = null;
+let writeDenied = false;
+let writeCode = null;
+try { fs.unlinkSync(slotPath); } catch (error) { unlinkDenied = true; unlinkCode = error.code || 'denied'; }
+try { fs.writeFileSync(queuePath, 'synthetic-child-must-not-change-scheduler\\n'); } catch (error) { writeDenied = true; writeCode = error.code || 'denied'; }
+const slotExistsAfter = fs.existsSync(slotPath);
+const queueAfter = fs.readFileSync(queuePath, 'utf8').trim();
+const safe = slotExistsBefore && unlinkDenied && writeDenied && slotExistsAfter && queueBefore === '1' && queueAfter === '1';
+const testLine = '✔ Test ' + args[1] + '() passed after 0.001 seconds.';
+const stdout = safe
+  ? 'synthetic scheduler writes denied; state remains readable\\n' + testLine
+  : 'synthetic scheduler mutation was allowed or scheduler reads were unavailable';
+const receipt = {
+  cwd: process.cwd(), sha: git('rev-parse', 'HEAD'), slot: process.env.HEAVY_SLOT,
+  args, slotExistsBefore, unlinkDenied, unlinkCode, writeDenied, writeCode,
+  slotExistsAfter, queueBefore, queueAfter, stdout,
+};
+fs.appendFileSync(${JSON.stringify(f.proofLog)}, JSON.stringify(receipt) + '\\n');
+process.stdout.write(stdout + '\\n');
+if (!safe) process.exit(3);
+`;
+  const fixtureRunner = path.join(f.repo, 'scripts/test.sh');
+  writeFileSync(fixtureRunner, proofScript);
+  chmodSync(fixtureRunner, 0o755);
+  git(f.repo, 'add', 'scripts/test.sh');
+  git(f.repo, 'commit', '-q', '-m', 'synthetic scheduler write-denial fixture');
+  f.sha = git(f.repo, 'rev-parse', 'HEAD');
+
+  const { markdown, result } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' }, {
+    HOME: syntheticHome,
+    HEAVY_SLOT: '',
+  });
+
+  const receipts = readFileSync(f.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.equal(receipts.length, 1);
+  const receipt = receipts[0];
+  assert.equal(receipt.sha, f.sha);
+  assert.equal(receipt.slot, '1');
+  assert.deepEqual(receipt.args, ['--filter', 'aShortWavIsTypedAndSavedInHistory']);
+  assert.equal(receipt.slotExistsBefore, true);
+  assert.equal(receipt.unlinkDenied, true, 'the sandbox denied unlinking the held synthetic slot');
+  assert.equal(receipt.writeDenied, true, 'the sandbox denied writing synthetic queue state');
+  assert.equal(receipt.slotExistsAfter, true);
+  assert.equal(receipt.queueBefore, '1');
+  assert.equal(receipt.queueAfter, '1');
+  assert.equal(existsSync(queueNext), true, 'the trusted parent acquired a slot in the isolated scheduler');
+  assert.equal(readFileSync(queueNext, 'utf8').trim(), '1');
+  assert.equal(existsSync(slotFile), true, 'the held synthetic slot file survived the proof');
+  assert.match(receipt.stdout, /synthetic scheduler writes denied/);
+  assert.match(receipt.stdout, /✔ Test aShortWavIsTypedAndSavedInHistory\(\) passed/);
+  assert.equal(result.reviewedSha, f.sha);
+  assert.equal(result.complete, true, 'the approved fixed-filter proof and review still complete');
+  assert.match(markdown, /scripts\/test\.sh --filter aShortWavIsTypedAndSavedInHistory/);
+});
+
