@@ -265,3 +265,38 @@ the preceding complete Workflow verdict. Its SHA manifest verifies every
 uncompressed member. The subsequent receipt-only commit changes no tested
 runner or fixture source. Finished-content repository-check and exact pushed
 head CI results remain separately reported in the PR.
+
+
+## Cooperative shutdown coverage
+
+The subsequent review required two fixtures to keep their cooperative TERM
+assertions. Public CLI replays at source
+`1072fb61b7c2fffaaa76bd9c15ec4974ade13dfa` deliberately suppress the generated
+child's TERM handler. Both old fixtures still pass, so both new coverage tests
+fail. Restoring the actual marker assertion also reproduces the dead-keeper
+runner's missing cooperative TERM before its forced cleanup.
+
+Both fixtures again require their child's TERM marker. Separate backup pipes
+already deliver TERM after primary-keeper loss. When every keeper is gone,
+the ownership recorder now sends TERM to known unreaped direct groups before
+forcing cleanup. Its default signal exit waits for child exit or a bounded
+one-second fallback, then kills any remaining owned group. This finishes before
+the controller's existing two-second escalation; explicit target exit still
+performs synchronous owned cleanup. No process-table lookup is needed to stop
+these known direct leaders. The two CLI coverage tests ensure SIGKILL alone
+cannot silently satisfy either fixture again.
+
+The complete invocation on committed source
+`21a195601f6760ec4d1c02f2ee11b2c0393a9c33` passed all 82 cases with zero
+failures, cancellations or skips. The fixtures phase returned status 0 in
+77763 ms, leaving 42237 ms of observed margin under its unchanged 120000 ms
+boundary. All 23 generated runner cases also passed independently. This is the
+latest diagnostic checkpoint; the earlier 80-case checkpoint remains historical
+evidence. The receipt-only successor changes no tested source.
+
+`cooperative-fix-evidence.tar.gz` retains the reviewed predecessor verdict,
+red/green logs, committed source anchor and complete invocation. It also includes
+the exact public predecessor scripts and newly added coverage probe used for
+those CLI replays; no production or private input was used. Its SHA manifest
+verifies every member. The final full repository check and exact pushed-head CI
+are separate PR evidence, after the final review.
