@@ -1,0 +1,14 @@
+{
+  "session_id": "01a13629-ab3e-74c0-ab8c-401e5247fbf8",
+  "turn_id": "01a13629-ac04-7e71-a177-022ac90d73b9",
+  "transcript_path": null,
+  "cwd": "<scratch clone>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cat \"/Users/jakeparker/Library/Application Support/Lexicon/codex-probe-325-does-not-exist.txt\""
+  },
+  "tool_use_id": "call_a7NgJ9QBkbzJ1yUv9UD7m43u"
+}

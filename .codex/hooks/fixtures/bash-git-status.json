@@ -1,0 +1,14 @@
+{
+  "session_id": "01a13629-ab3e-74c0-ab8c-401e5247fbf8",
+  "turn_id": "01a13629-ac04-7e71-a177-022ac90d73b9",
+  "transcript_path": null,
+  "cwd": "<scratch clone>",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git status --short"
+  },
+  "tool_use_id": "call_fEoAiNW6H4ANnsw0qi80A6eH"
+}

@@ -239,10 +239,15 @@ final class CaptureCore: @unchecked Sendable {
         do {
             try writer.close()
         } catch {
-            let repaired = (try? CAFFile.finalize(fileURL)) != nil
+            let header = switch try? CAFFile.finalize(fileURL) {
+            case .wroteSize: "header repaired"
+            case .wasWhole: "header already whole"
+            case .noSample: "no sample to repair"
+            case nil: "header not repaired"
+            }
             Self.log.error("""
                 audio file \(error.step, privacy: .public) failed (\(error.status, privacy: .public)), \
-                \(repaired ? "header repaired" : "header not repaired", privacy: .public)
+                \(header, privacy: .public)
                 """)
         }
     }

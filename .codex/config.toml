@@ -1,0 +1,12 @@
+# Overridable defaults from DECISIONS.md item 95. CLI flags and session choices win.
+# Trust Lexicon guard before working in this project (docs/agents/codex.md).
+model = "gpt-6.1-sol"
+model_reasoning_effort = "high"
+service_tier = "fast"
+
+[features]
+fast_mode = true
+
+[agents]
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "xhigh"
