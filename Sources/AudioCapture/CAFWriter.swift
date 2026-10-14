@@ -7,6 +7,8 @@ struct FileCalls: Sendable {
     var close: @Sendable (AudioFileID) -> OSStatus = { AudioFileClose($0) }
     /// F_FULLFSYNC, or fsync where unsupported: true when either worked.
     var sync: @Sendable (Int32) -> Bool = { CAFWriter.fullSync($0) }
+    /// The floor lets the cheap read decide whether purgeable space needs a look.
+    var freeBytes: @Sendable (URL, Int64) -> Int64? = { FreeSpace.availableBytes(at: $0, minimum: $1) }
 }
 
 /// One open `audio/<id>.caf` of 16 kHz mono Int16, written with

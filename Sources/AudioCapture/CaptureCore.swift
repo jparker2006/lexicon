@@ -96,7 +96,14 @@ final class CaptureCore: @unchecked Sendable {
     func begin() {
         defer {
             let (first, end) = (signals.first, signals.end)
-            source.start(SourceEvents(firstAudio: { first.settle($0) }, ended: { end.settle($0) },
+            source.start(SourceEvents(firstAudio: { [weak self] at in
+                first.settle(at)
+                guard let self else { return }
+                self.queue.async { [self] in
+                    guard take == nil else { return }
+                    drain()
+                }
+            }, ended: { end.settle($0) },
                                       switched: { [weak self] in self?.switchSegment(to: $0) }))
         }
         queue.async { [self] in
@@ -304,7 +311,7 @@ final class CaptureCore: @unchecked Sendable {
         while !FileManager.default.fileExists(atPath: folder.path), folder.pathComponents.count > 1 {
             folder.deleteLastPathComponent()
         }
-        return FreeSpace.hasRoom(at: folder, minimum: policy.minimumFreeBytes)
+        return (policy.files.freeBytes(folder, policy.minimumFreeBytes) ?? .max) >= policy.minimumFreeBytes
     }
 
     /// Under 1 GB free or a write failed: continue in RAM only (#4). What is

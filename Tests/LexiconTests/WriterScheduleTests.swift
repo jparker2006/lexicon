@@ -221,3 +221,104 @@ private final class WriterScheduleSyncGate: Sendable {
 
     func release() { gate.signal() }
 }
+
+@Test(.timeLimit(.minutes(1)))
+func writerScheduleSpaceFloorKeepsDiskPrefixAndWholeTake() async throws {
+    let dir = try scratchDirectory()
+    let source = syntheticSamples(count: 16_000)
+    let wav = try writeWAV(source, rate: 16_000, in: dir)
+    let caf = dir.appending(path: "audio/space.caf")
+    let space = WriterScheduleSpace()
+    var policy = FlushPolicy()
+    policy.fullSyncEvery = .zero
+    policy.files.freeBytes = { [space] _, floor in space.bytes(floor: floor) }
+    policy.files.sync = { _ in true }
+
+    let recorder = Recorder(policy: policy)
+    let capture = try await recorder.start(.file(wav, pace: .realtime), writingTo: caf)
+    var feed = capture.feed.makeAsyncIterator()
+    _ = try #require(await feed.next())
+    space.dropBelowFloor()
+    let problem = await writerScheduleNext(from: capture.signals.problems, before: .seconds(5))
+    let prefixAtProblem = try CAFFile.read(caf).samples
+    #expect(problem == .diskTrouble)
+    #expect(!prefixAtProblem.isEmpty)
+
+    let ended = try #require(await capture.signals.inputEnded())
+    let take = await capture.stop(.released(at: ended))
+    await recorder.settle()
+    #expect(take.summary.storage == .ramOnly)
+    #expect(take.clip.samples == source)
+    #expect(CAFFile.state(of: caf) == .closed)
+    #expect(try CAFFile.read(caf).samples == prefixAtProblem)
+    #expect(prefixAtProblem == Array(source.prefix(prefixAtProblem.count)))
+}
+
+private final class WriterScheduleSpace: Sendable {
+    private let below = Mutex(false)
+    func dropBelowFloor() { below.withLock { $0 = true } }
+    func bytes(floor: Int64) -> Int64 { below.withLock { $0 ? floor - 1 : floor + 1 } }
+}
+
+
+@Test(.timeLimit(.minutes(1)))
+func writerScheduleRoomGuardKeepsCaptureOnDiskAboveFloor() async throws {
+    let dir = try scratchDirectory()
+    let source = syntheticSamples(count: 8_000)
+    let wav = try writeWAV(source, rate: 16_000, in: dir)
+    let caf = dir.appending(path: "audio/room.caf")
+
+    let floor: Int64 = 64_000
+    let probe = FreeBytesProbe()
+    let (syncs, syncSignal) = AsyncStream<Void>.makeStream()
+    var policy = FlushPolicy()
+    policy.minimumFreeBytes = floor
+    policy.fullSyncEvery = .zero
+    policy.files.freeBytes = { [probe] url, minimum in
+        probe.read(url, floor: minimum)
+    }
+    policy.files.sync = { _ in
+        syncSignal.yield(())
+        return true
+    }
+
+    let recorder = Recorder(policy: policy)
+    let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: caf)
+    let problems = capture.signals.problems
+
+    // The successful sync is an explicit signal that a drain cadence passed.
+    var syncIterator = syncs.makeAsyncIterator()
+    _ = await syncIterator.next()
+    let ended = try #require(await capture.signals.inputEnded())
+    let take = await capture.stop(.released(at: ended))
+    await recorder.settle()
+
+    var seen: [CaptureProblem] = []
+    for await problem in problems { seen.append(problem) }
+
+    let reads = probe.snapshot()
+    #expect(reads.count >= 2)  // start plus a free-space check during a drain cadence
+    #expect(reads.allSatisfy { $0.floor == floor })
+    #expect(seen.isEmpty)
+    #expect(take.summary.storage == .onDisk)
+    #expect(take.clip.samples == source)
+    #expect(try CAFFile.read(caf).samples == source)
+}
+
+private struct FreeBytesRead: Sendable {
+    let url: URL
+    let floor: Int64
+}
+
+private final class FreeBytesProbe: Sendable {
+    private let reads = Mutex<[FreeBytesRead]>([])
+
+    func read(_ url: URL, floor: Int64) -> Int64? {
+        reads.withLock { $0.append(FreeBytesRead(url: url, floor: floor)) }
+        return floor + 1
+    }
+
+    func snapshot() -> [FreeBytesRead] {
+        reads.withLock { $0 }
+    }
+}

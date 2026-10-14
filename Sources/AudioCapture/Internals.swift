@@ -232,8 +232,15 @@ enum FreeSpace {
     }
 
     static func hasRoom(at folder: URL, minimum: Int64, readers: Readers = Readers()) -> Bool {
-        if let blocks = readers.blocks(folder), bytes(blocks.available, blocks.size) >= minimum { return true }
-        return (readers.thorough(folder) ?? .max) >= minimum
+        (availableBytes(at: folder, minimum: minimum, readers: readers) ?? .max) >= minimum
+    }
+
+    static func availableBytes(at folder: URL, minimum: Int64, readers: Readers = Readers()) -> Int64? {
+        if let blocks = readers.blocks(folder) {
+            let free = bytes(blocks.available, blocks.size)
+            if free >= minimum { return free }
+        }
+        return readers.thorough(folder)
     }
 
     /// Never traps: a volume that reports "unlimited" (UInt64.max blocks, from
