@@ -3,7 +3,7 @@
 // the table scripts/merge-pr.mjs accepts. No model, no network. Run by 45-codex.sh.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -23,7 +23,14 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 const prompt = fs.readFileSync(0, 'utf8');
 const log = process.env.FAKE_CODEX_LOG;
-if (process.env.FAKE_CODEX_HANG && prompt.includes('one lens: ' + process.env.FAKE_CODEX_HANG)) setInterval(() => {}, 1000);
+if (process.env.FAKE_CODEX_HANG && prompt.includes('one lens: ' + process.env.FAKE_CODEX_HANG)) {
+if (process.env.FAKE_CODEX_GRANDCHILD_PIDS) {
+  const { spawn } = require('node:child_process');
+  const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'ignore', 2] });
+  fs.appendFileSync(process.env.FAKE_CODEX_GRANDCHILD_PIDS, grandchild.pid + '\\n');
+}
+setInterval(() => {}, 1000);
+}
 else {
 // Named by pid: helpers run in parallel, so a count of the folder could repeat.
 fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
@@ -65,22 +72,37 @@ function fixture(t) {
   return { dir, repo, bin, log, sha: git(repo, 'rev-parse', 'HEAD') };
 }
 
-function review({ dir, repo, bin, log }, args, env = {}) {
+function runReview({ dir, repo, bin, log }, args, env = {}, options = {}) {
   const out = path.join(dir, 'result.json');
   const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/codex-review.mjs'), JSON.stringify(args), '--out', out], {
     cwd: repo,
     encoding: 'utf8',
     env: { ...process.env, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir, ...env },
-    timeout: 60_000,
+    timeout: options.timeout ?? 60_000,
+    detached: options.detached ?? false,
   });
+  return { run, out };
+}
+
+function review(f, args, env = {}) {
+  const { run, out } = runReview(f, args, env);
   assert.equal(run.status, 0, run.stderr);
-  const calls = readdirSync(log).sort((a, b) => parseInt(a) - parseInt(b)).map((f) => JSON.parse(readFileSync(path.join(log, f), 'utf8')));
+  const calls = readdirSync(f.log).sort((a, b) => parseInt(a) - parseInt(b)).map((file) => JSON.parse(readFileSync(path.join(f.log, file), 'utf8')));
   return { markdown: run.stdout, result: JSON.parse(readFileSync(out, 'utf8')), calls };
+}
+
+function stopGrandchildren(pidFile) {
+  if (!existsSync(pidFile)) return;
+  for (const pid of readFileSync(pidFile, 'utf8').trim().split(/\s+/).filter(Boolean)) {
+    try { process.kill(Number(pid), 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; }
+  }
 }
 
 test('a reviewer-mode run prints the Review table merge-pr.mjs accepts, with Codex models in its Helpers line', (t) => {
   const f = fixture(t);
   const { markdown, result, calls } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' });
+  assert.equal(MODEL, 'gpt-6-luna');
+  assert.deepEqual(EFFORTS, { haiku: 'xhigh', sonnet: 'xhigh', opus: 'xhigh' });
   const map = JSON.parse(readFileSync(path.join(REPO, '.claude/workflows/review-map.json'), 'utf8'));
   const pr = { files: [{ path: 'Sources/History/a.swift' }], body: markdown, comments: [] };
   assert.deepEqual(tierGate(pr, f.sha, 'jparker2006', map).filter((r) => !r.includes('blast-radius')), []);
@@ -114,6 +136,26 @@ test('each helper runs as codex exec with its role prompt, model, effort and a s
   assert.equal(verifiers.length, 1, "the one finding gets one verifier");
   assert.ok(verifiers[0].prompt.startsWith(verifier), 'the verifier role prompt leads');
   assert.equal(verifiers[0].args[verifiers[0].args.indexOf('-m') + 1], MODEL);
+  for (const { args } of calls) {
+    assert.equal(args[args.indexOf('-s') + 1], 'read-only', 'review helpers run in a read-only sandbox');
+    assert.ok(args.includes(`model_reasoning_effort="${EFFORTS.haiku}"`));
+  }
+});
+
+test('model and effort environment overrides appear in helper flags and the Helpers line', (t) => {
+  const f = fixture(t);
+  const model = 'gpt-6.1-sol';
+  const effort = 'high';
+  const { markdown, calls } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' }, {
+    CODEX_REVIEW_MODEL: model,
+    CODEX_REVIEW_EFFORT: effort,
+  });
+  assert.match(markdown, new RegExp(`^Helpers: 1 snapshot \\(script, no model\\), .*Codex ${model.replace(/\./g, '\\.')} ${effort}`, 'm'));
+  for (const { args } of calls) {
+    assert.equal(args[args.indexOf('-m') + 1], model);
+    assert.ok(args.includes(`model_reasoning_effort="${effort}"`));
+    assert.equal(args[args.indexOf('-s') + 1], 'read-only');
+  }
 });
 
 test('strict closes every object and requires every property, nested ones too', () => {
@@ -124,10 +166,21 @@ test('strict closes every object and requires every property, nested ones too', 
   assert.equal(s.properties.a.items.additionalProperties, false);
 });
 
-test('a helper that never answers is stopped at its deadline and leaves the run unstamped, never hung', (t) => {
+test('a timed-out helper with a stderr-holding grandchild leaves the run unstamped without hanging', (t) => {
   const f = fixture(t);
-  // The deadline only bounds a hang: the hung helper never answers, whatever the machine's speed.
-  const { markdown, result } = review(f, { issue: 1, sha: f.sha }, { FAKE_CODEX_HANG: 'Never lose', CODEX_REVIEW_HELPER_TIMEOUT_MS: '3000' });
-  assert.match(markdown, /^Not stamped \(INCOMPLETE below\)/m);
-  assert.equal(result.reviewedSha, null);
+  const pidFile = path.join(f.dir, 'grandchild-pids');
+  const { run, out } = runReview(f, { issue: 1, sha: f.sha }, {
+    FAKE_CODEX_HANG: 'Never lose',
+    FAKE_CODEX_GRANDCHILD_PIDS: pidFile,
+    CODEX_REVIEW_HELPER_TIMEOUT_MS: '2000',
+  }, { timeout: 15_000, detached: true });
+  try {
+    assert.equal(run.error, undefined, `review exceeded the outer watchdog: ${run.error?.message}`);
+    assert.equal(run.status, 0, run.stderr);
+    const result = JSON.parse(readFileSync(out, 'utf8'));
+    assert.match(run.stdout, /^Not stamped \(INCOMPLETE below\)/m);
+    assert.equal(result.reviewedSha, null);
+  } finally {
+    stopGrandchildren(pidFile);
+  }
 });
