@@ -58,7 +58,7 @@ function killRecordedPID(file) {
   }
 }
 
-async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM, nativeShellLeader = false, filteredFork = false }) {
+async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM, nativeShellLeader = false, filteredFork = false, prematureFailure = false }) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'codex-check-inspection-'));
   const fakeBin = path.join(dir, 'bin');
   const flag = path.join(dir, 'fail-ps');
@@ -172,7 +172,9 @@ descendant.on('message', message => {
 });
 setInterval(() => {}, 1000);
 `;
-  writeFileSync(phasePath, phaseSource);
+  writeFileSync(phasePath, prematureFailure
+    ? `process.stderr.write('synthetic-phase-error=fixture-entry-failed-before-pid\\n'); process.exit(23);`
+    : phaseSource);
 
   t.after(() => {
     killRecordedPID(phasePIDPath);
@@ -268,6 +270,7 @@ for (const scenario of [
   { name: 'failed inspection reaps leaderless stubborn child', detachedChild: false, ignoreSIGTERM: true },
   { name: 'failed inspection reaps native-shell orphan', detachedChild: false, ignoreSIGTERM: false, nativeShellLeader: true },
   { name: 'failed inspection reaps filtered detached fork', detachedChild: true, ignoreSIGTERM: false, filteredFork: true },
+  { name: 'premature fixture startup reports diagnostics', prematureFailure: true },
 ]) {
   test(scenario.name, { timeout: TEST_WATCHDOG_MS }, async t => failedInspectionCleanup(t, scenario));
 }
