@@ -205,3 +205,18 @@ The native launcher keeps reservation input/error handles off the target streams
 These red/green runs and the preceding complete review are retained in
 `native-fix-evidence.tar.gz` with its SHA manifest. The full repository check
 and exact pushed-head CI remain separate evidence supplied by the PR.
+
+A subsequent review confirmed two cleanup safety gaps. The public CLI signal probe
+first recorded a SIGKILL attempt on an exited native leader. Fixture teardown now
+checks a cached kernel birth identity before signalling any PID from a file.
+The dead-keeper fixture first left its detached child alive; failed control-pipe
+operations now fall back to signalling verified owned PIDs. The existing poll
+interval has the disclosure allowed by DECISIONS item 67. Both safety regressions
+failed first, then passed, along with the inspection matrix. The complete fixed
+invocation then passed all 76 cases with no failures, cancellations or skips
+in 67326 ms, leaving 52674 ms of observed phase margin. These are
+current diagnostic outcomes, with full-check/CI still reported separately in the
+PR. `safety-fix-evidence.tar.gz` retains the valid red/green and full-invocation
+logs plus the preceding review, with its SHA manifest. That prior review is
+explicitly incomplete because its archive-marker scan hit the guard; it is not
+the final code-review receipt.

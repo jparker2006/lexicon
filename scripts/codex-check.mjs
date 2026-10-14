@@ -73,13 +73,13 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
   const stopOwned = value => {
     const reserved = new Set();
     for (const entry of groups()) {
-      reserved.add(entry.group);
       // The live keeper signals its own group. A dead keeper has no pipe
       // reader, so a stale record cannot target a reused numeric group ID.
       let descriptor;
       try {
         descriptor = openSync(entry.control, constants.O_WRONLY | constants.O_NONBLOCK);
         writeSync(descriptor, `${value}\n`);
+        reserved.add(entry.group);
       } catch (error) {
         if (!['ENXIO', 'ENOENT', 'EPIPE'].includes(error.code)) throw error;
       } finally { if (descriptor !== undefined) closeSync(descriptor); }
@@ -175,7 +175,8 @@ export const PHASES = Object.freeze([
   { name: 'fixtures', args: ['--test', '--test-reporter', './scripts/codex-check-reporter.mjs',
     '.codex/hooks/guard.test.mjs', 'scripts/codex-probe.test.mjs', 'scripts/codex-review.test.mjs',
     'scripts/codex-skills.test.mjs', 'scripts/codex-agents.test.mjs', 'scripts/codex-check.test.mjs',
-    'scripts/codex-check-lifecycle.test.mjs', 'scripts/codex-check-inspection.test.mjs'], deadlineMs: 120_000 },
+    'scripts/codex-check-lifecycle.test.mjs', 'scripts/codex-check-inspection.test.mjs',
+    'scripts/codex-check-safety.test.mjs'], deadlineMs: 120_000 },
 ]);
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

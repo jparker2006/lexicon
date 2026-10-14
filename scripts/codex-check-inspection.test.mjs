@@ -46,9 +46,11 @@ function isAlive(pid) {
 }
 
 function killRecordedPID(file) {
-  if (!existsSync(file)) return;
+  if (!existsSync(file) || !existsSync(`${file}.start`)) return;
   const pid = Number(readFileSync(file, 'utf8'));
   if (!Number.isInteger(pid) || pid <= 1) return;
+  const current = spawnSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000 });
+  if (current.error || current.status !== 0 || current.stdout.trim().replace(/\s+/g, ' ') !== readFileSync(`${file}.start`, 'utf8')) return;
   try {
     process.kill(pid, 'SIGKILL');
   } catch (error) {
@@ -73,6 +75,13 @@ async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM, native
   const resultPath = path.join(dir, 'result.json');
   const psPath = path.join(fakeBin, 'ps');
   const readyLine = 'phase=inspection-ready ready=1';
+  const recordPID = `
+const recordPID = (file, pid) => {
+  const current = spawnSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000 });
+  if (!current.error && current.status === 0) writeFileSync(file + '.start', current.stdout.trim().replace(/\\s+/g, ' '));
+  writeFileSync(file, String(pid));
+};
+`;
 
   mkdirSync(fakeBin);
   writeFileSync(psPath, `#!/bin/sh
@@ -82,13 +91,15 @@ exec /bin/ps "$@"
   const descendantReadyScript = nativeShellLeader
     ? `const waitForLeaderExit = () => {
   if (existsSync(${JSON.stringify(nativeReadyGate)})) process.stdout.write('native-descendant-ready=1\\n');
-  else setTimeout(waitForLeaderExit, 10);
+  else setTimeout(waitForLeaderExit, 10); // timing-ok: poll the explicit leader-exit gate, never elapsed performance.
 };
 waitForLeaderExit();`
     : `process.send('ready');`;
   writeFileSync(descendantPath, `
 import { existsSync, writeFileSync } from 'node:fs';
-writeFileSync(${JSON.stringify(descendantPIDPath)}, String(process.pid));
+import { spawnSync } from 'node:child_process';
+${recordPID}
+recordPID(${JSON.stringify(descendantPIDPath)}, process.pid);
 process.on('SIGTERM', () => {
   writeFileSync(${JSON.stringify(descendantStopped)}, 'stopped');
   if (!${ignoreSIGTERM}) process.exit(0);
@@ -102,9 +113,10 @@ delete helperEnv.NODE_OPTIONS;
 delete helperEnv.LEXICON_CODEX_CHECK_LEDGER;` : '';
   const forkEnvironmentOption = filteredFork ? 'env: helperEnv,' : '';
   const phaseSource = nativeShellLeader ? `
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { writeFileSync, writeSync } from 'node:fs';
-writeFileSync(${JSON.stringify(phasePIDPath)}, String(process.pid));
+${recordPID}
+recordPID(${JSON.stringify(phasePIDPath)}, process.pid);
 process.on('SIGTERM', () => {
   writeFileSync(${JSON.stringify(phaseStopped)}, 'stopped');
   process.exit(0);
@@ -117,7 +129,7 @@ const leader = spawn('/bin/sh', ['-c', ${JSON.stringify(`${shellQuote(NODE)} ${s
   env: helperEnv,
   stdio: ['ignore', 'pipe', 'ignore'],
 });
-writeFileSync(${JSON.stringify(nativeLeaderPIDPath)}, String(leader.pid));
+recordPID(${JSON.stringify(nativeLeaderPIDPath)}, leader.pid);
 let leaderExited = false;
 let descendantReady = false;
 let announced = false;
@@ -141,9 +153,10 @@ leader.once('exit', () => {
 });
 setInterval(() => {}, 1000);
 ` : `
-import { fork } from 'node:child_process';
+import { fork, spawnSync } from 'node:child_process';
 import { writeFileSync, writeSync } from 'node:fs';
-writeFileSync(${JSON.stringify(phasePIDPath)}, String(process.pid));
+${recordPID}
+recordPID(${JSON.stringify(phasePIDPath)}, process.pid);
 process.on('SIGTERM', () => {
   writeFileSync(${JSON.stringify(phaseStopped)}, 'stopped');
   process.exit(0);
