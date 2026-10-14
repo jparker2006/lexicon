@@ -14,6 +14,7 @@
 // markdown; --out also writes the Workflow's whole result as JSON. CODEX_BIN names the
 // codex binary (default: codex on PATH); CODEX_REVIEW_HELPER_TIMEOUT_MS a helper's deadline.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -124,10 +125,16 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
   const fetch = (argv) => JSON.parse(execFileSync('gh', argv, { encoding: 'utf8', timeout: 60_000, maxBuffer: 8 << 20 }));
   const cacheContext = () => {
     const git = argv => execFileSync('git', argv, { encoding: 'utf8', timeout: 60_000 }).trim();
-    // The shared snapshot tolerates a failed fetch. This current-main proof must
-    // fail closed instead; FETCH_HEAD names exactly the main this fetch obtained.
-    git(['fetch', '-q', 'origin', 'main']);
-    const main = git(['rev-parse', 'FETCH_HEAD']);
+    // Parallel reviews can fetch in this checkout. Own a unique ref rather than
+    // reading FETCH_HEAD, and fail closed if obtaining current main fails.
+    const mainRef = `refs/lexicon-review/${randomUUID()}/main`;
+    let main;
+    try {
+      git(['fetch', '-q', '--no-write-fetch-head', 'origin', `refs/heads/main:${mainRef}`]);
+      main = git(['rev-parse', mainRef]);
+    } finally {
+      git(['update-ref', '-d', mainRef]);
+    }
     const own = new Set(git(['diff', '--name-only', git(['merge-base', args.sha, main]), args.sha]).split('\n'));
     const mergeTree = head => {
       const result = spawnSync('git', ['merge-tree', '--write-tree', '--name-only', '--no-messages', args.sha, head], { encoding: 'utf8', timeout: 60_000 });
