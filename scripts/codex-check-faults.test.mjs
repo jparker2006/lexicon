@@ -347,6 +347,7 @@ test('timeout survives loss of the main keeper while fallback watchers remain',
 
     assert.equal(result.status, 1, 'a timed-out phase returns failure after escalation');
     assert.equal(result.timedOut, true);
+    assert.equal(readFileSync(fx.termMarker, 'utf8'), 'term', 'the owned child receives cooperative TERM after keeper loss');
     assert.equal(sameProcess(identity, processIdentity(identity.pid)), false,
       'the owned child is gone before runPhase returns');
     assert.equal(sameProcess(controlIdentity, processIdentity(control.pid)), true,
