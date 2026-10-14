@@ -151,7 +151,7 @@ function testCommand(cwd, filter) {
     chmodSync(swift, 0o755);
     env.PATH = `${runtime}${path.delimiter}${env.PATH || ''}`;
     // The reviewed test code is executable input too. Keep it away from home data
-    // and the network while allowing SwiftPM's shared cache and the build slot.
+    // and the network while allowing SwiftPM's shared cache and slot reads.
     const canonical = file => existsSync(file) ? realpathSync(file) : path.join(canonical(path.dirname(file)), path.basename(file));
     const homes = [...new Set([os.userInfo().homedir, os.homedir()].map(canonical))];
     const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8' }).trim();
@@ -160,9 +160,9 @@ function testCommand(cwd, filter) {
       path.join(home, 'Library/org.swift.swiftpm/cache'),
       path.join(home, '.cache/org.swift.swiftpm'),
       path.join(home, '.swiftpm/cache'),
-      path.join(home, 'Library/Application Support/Lexicon Dev/heavy'),
     ])];
-    const readable = [...writable, common, process.execPath];
+    const scheduler = homes.map(home => path.join(home, 'Library/Application Support/Lexicon Dev/heavy'));
+    const readable = [...writable, ...scheduler, common, process.execPath];
     const restriction = exceptions => `(require-all (require-any ${homes.map(home => `(subpath ${JSON.stringify(home)})`).join(' ')}) ${exceptions.map(dir => `(require-not (subpath ${JSON.stringify(canonical(dir))}))`).join(' ')})`;
     const profile = `(version 1)(allow default)(deny network*)
       (deny file-read-data ${restriction(readable)})
@@ -216,21 +216,28 @@ export async function runProof({ proofId, factId, sha }, { cwd = process.cwd(), 
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'lexicon-proof-'));
   const tree = path.join(scratch, 'tree');
   const git = (args, at = cwd) => execFileSync('git', args, { cwd: at, encoding: 'utf8', timeout: 60_000 }).trim();
+  // HEAD alone cannot identify executed source when a reviewed script edits it.
+  // Compare tracked inputs to the pinned commit; generated build files are fine.
+  const unchanged = () => spawnSync('git', ['diff', '--no-ext-diff', '--quiet', sha, '--'], {
+    cwd: tree, timeout: 60_000, stdio: 'ignore',
+  }).status === 0;
   let added = false;
   try {
     git(['worktree', 'add', '--detach', '--quiet', tree, sha]);
     added = true;
     const before = git(['rev-parse', 'HEAD'], tree);
     if (before !== sha) throw new Error('proof worktree SHA differs from pass SHA');
+    if (!unchanged()) throw new Error('proof tracked inputs differ from pass SHA');
     const result = await testCommand(tree, proof.filter);
     if (result.exitStatus !== 0 || result.timedOut) log(result.output.slice(-8192));
     const measuredSha = git(['rev-parse', 'HEAD'], tree);
+    const trackedInputsUnchanged = unchanged();
     const testResult = result.output.split('\n').find(line => line.includes(`Test ${proof.filter}() passed`)) || '';
     return {
       proofId, factId, sha, measuredSha, fact: proof.fact,
       command: `scripts/test.sh --filter ${proof.filter}`,
-      exitStatus: result.exitStatus, timedOut: result.timedOut, testResult,
-      complete: result.exitStatus === 0 && !result.timedOut && measuredSha === sha && Boolean(testResult),
+      exitStatus: result.exitStatus, timedOut: result.timedOut, testResult, trackedInputsUnchanged,
+      complete: result.exitStatus === 0 && !result.timedOut && measuredSha === sha && trackedInputsUnchanged && Boolean(testResult),
     };
   } finally {
     // Worktrees created here contain only committed public source and generated build files.
