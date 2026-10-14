@@ -56,7 +56,7 @@ function killRecordedPID(file) {
   }
 }
 
-async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM }) {
+async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM, nativeShellLeader = false, filteredFork = false }) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'codex-check-inspection-'));
   const fakeBin = path.join(dir, 'bin');
   const flag = path.join(dir, 'fail-ps');
@@ -64,6 +64,9 @@ async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM }) {
   const descendantPath = path.join(dir, 'descendant.mjs');
   const phasePIDPath = path.join(dir, 'phase.pid');
   const descendantPIDPath = path.join(dir, 'descendant.pid');
+  const nativeReadyGate = path.join(dir, 'native-ready.gate');
+  const nativeLeaderPIDPath = path.join(dir, 'native-leader.pid');
+  const nativeLeaderExited = path.join(dir, 'native-leader.exited');
   const phaseStopped = path.join(dir, 'phase.stopped');
   const descendantStopped = path.join(dir, 'descendant.stopped');
   const successStamp = path.join(dir, 'success.stamp');
@@ -76,18 +79,68 @@ async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM }) {
 if [ -e ${shellQuote(flag)} ]; then exit 2; fi
 exec /bin/ps "$@"
 `, { mode: 0o755 });
+  const descendantReadyScript = nativeShellLeader
+    ? `const waitForLeaderExit = () => {
+  if (existsSync(${JSON.stringify(nativeReadyGate)})) process.stdout.write('native-descendant-ready=1\\n');
+  else setTimeout(waitForLeaderExit, 10);
+};
+waitForLeaderExit();`
+    : `process.send('ready');`;
   writeFileSync(descendantPath, `
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 writeFileSync(${JSON.stringify(descendantPIDPath)}, String(process.pid));
 process.on('SIGTERM', () => {
   writeFileSync(${JSON.stringify(descendantStopped)}, 'stopped');
   if (!${ignoreSIGTERM}) process.exit(0);
 });
-process.send('ready');
+${descendantReadyScript}
 setInterval(() => {}, 1000);
 `);
   const detached = detachedChild ? 'true' : 'false';
-  writeFileSync(phasePath, `
+  const forkEnvironment = filteredFork ? `const helperEnv = { ...process.env };
+delete helperEnv.NODE_OPTIONS;
+delete helperEnv.LEXICON_CODEX_CHECK_LEDGER;` : '';
+  const forkEnvironmentOption = filteredFork ? 'env: helperEnv,' : '';
+  const phaseSource = nativeShellLeader ? `
+import { spawn } from 'node:child_process';
+import { writeFileSync, writeSync } from 'node:fs';
+writeFileSync(${JSON.stringify(phasePIDPath)}, String(process.pid));
+process.on('SIGTERM', () => {
+  writeFileSync(${JSON.stringify(phaseStopped)}, 'stopped');
+  process.exit(0);
+});
+const helperEnv = { ...process.env };
+delete helperEnv.NODE_OPTIONS;
+delete helperEnv.LEXICON_CODEX_CHECK_LEDGER;
+const leader = spawn('/bin/sh', ['-c', ${JSON.stringify(`${shellQuote(NODE)} ${shellQuote(descendantPath)} &`)}], {
+  detached: true,
+  env: helperEnv,
+  stdio: ['ignore', 'pipe', 'ignore'],
+});
+writeFileSync(${JSON.stringify(nativeLeaderPIDPath)}, String(leader.pid));
+let leaderExited = false;
+let descendantReady = false;
+let announced = false;
+function reportReady() {
+  if (!leaderExited || !descendantReady || announced) return;
+  announced = true;
+  writeSync(1, ${JSON.stringify(`${readyLine}\n`)});
+}
+leader.stdout.setEncoding('utf8');
+leader.stdout.on('data', chunk => {
+  if (chunk.includes('native-descendant-ready=1')) {
+    descendantReady = true;
+    reportReady();
+  }
+});
+leader.once('exit', () => {
+  writeFileSync(${JSON.stringify(nativeLeaderExited)}, 'exited');
+  writeFileSync(${JSON.stringify(nativeReadyGate)}, 'leader exited');
+  leaderExited = true;
+  reportReady();
+});
+setInterval(() => {}, 1000);
+` : `
 import { fork } from 'node:child_process';
 import { writeFileSync, writeSync } from 'node:fs';
 writeFileSync(${JSON.stringify(phasePIDPath)}, String(process.pid));
@@ -95,18 +148,22 @@ process.on('SIGTERM', () => {
   writeFileSync(${JSON.stringify(phaseStopped)}, 'stopped');
   process.exit(0);
 });
+${forkEnvironment}
 const descendant = fork(${JSON.stringify(descendantPath)}, [], {
   detached: ${detached},
+  ${forkEnvironmentOption}
   stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
 });
 descendant.on('message', message => {
   if (message === 'ready') writeSync(1, ${JSON.stringify(`${readyLine}\n`)});
 });
 setInterval(() => {}, 1000);
-`);
+`;
+  writeFileSync(phasePath, phaseSource);
 
   t.after(() => {
     killRecordedPID(phasePIDPath);
+    killRecordedPID(nativeLeaderPIDPath);
     killRecordedPID(descendantPIDPath);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -165,14 +222,19 @@ process.exitCode = result.status;
   const phasePID = Number(readFileSync(phasePIDPath, 'utf8'));
   const descendantPID = Number(readFileSync(descendantPIDPath, 'utf8'));
   // The process-table snapshot may fail, but the owned process group remains the safety boundary.
+  const nativeLeaderPID = existsSync(nativeLeaderPIDPath) ? Number(readFileSync(nativeLeaderPIDPath, 'utf8')) : null;
   const census = spawnSync('/bin/ps', [
-    '-o', 'pid=,ppid=,pgid=,stat=', '-p', `${phasePID},${descendantPID},${control.pid}`,
+    '-o', 'pid=,ppid=,pgid=,stat=', '-p', [phasePID, nativeLeaderPID, descendantPID, control.pid].filter(Boolean).join(','),
   ], { encoding: 'utf8' });
   t.diagnostic(`cleanup actor census before assertions:\n${census.stdout ?? ''}${census.stderr ?? ''}control alive=${isAlive(control.pid)}`);
 
   assert.deepEqual(outcome, { code: 1, signal: null }, 'inspection failure exits the harness unsuccessfully');
   assert.equal(existsSync(phasePIDPath), true, 'the phase started before inspection failed');
   assert.equal(existsSync(descendantPIDPath), true, 'the descendant became ready before inspection failed');
+  if (nativeShellLeader) {
+    assert.equal(existsSync(nativeLeaderExited), true, 'the detached native leader exited before phase readiness');
+    assert.equal(existsSync(nativeLeaderPIDPath), true, 'the detached native leader started');
+  }
   assert.equal(existsSync(phaseStopped), true, 'the root phase receives cleanup');
   assert.equal(existsSync(descendantStopped), true, 'the owned descendant receives cleanup');
   assert.equal(existsSync(successStamp), false, 'a failed phase never records success');
@@ -191,6 +253,8 @@ for (const scenario of [
   { name: 'failed inspection reaps same-group child', detachedChild: false, ignoreSIGTERM: false },
   { name: 'failed inspection reaps detached child', detachedChild: true, ignoreSIGTERM: false },
   { name: 'failed inspection reaps leaderless stubborn child', detachedChild: false, ignoreSIGTERM: true },
+  { name: 'failed inspection reaps native-shell orphan', detachedChild: false, ignoreSIGTERM: false, nativeShellLeader: true },
+  { name: 'failed inspection reaps filtered detached fork', detachedChild: true, ignoreSIGTERM: false, filteredFork: true },
 ]) {
   test(scenario.name, { timeout: TEST_WATCHDOG_MS }, async t => failedInspectionCleanup(t, scenario));
 }

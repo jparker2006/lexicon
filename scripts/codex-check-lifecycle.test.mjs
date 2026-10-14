@@ -1,6 +1,6 @@
 // Real deadline expiry, escalation and interruption using generated local children.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -367,9 +367,12 @@ test('the phase deadline still stops a detached inherited-pipe child after root 
 
 test('the group keeper kills only its reserved process group',
   { timeout: TEST_WATCHDOG_MS }, async t => {
+    const fx = fixture(t);
     const keeperPath = path.join(REPO, 'scripts/codex-check-group.sh');
+    const controlPipe = path.join(fx.dir, 'keeper-control');
+    execFileSync('mkfifo', [controlPipe], { timeout: 2000 });
     const keeper = spawn('/bin/sh', [
-      '-c', 'exec /bin/sh "$1" "$$" 1', 'codex-check-group-test', keeperPath,
+      '-c', 'exec /bin/sh "$1" "$$" 1 "$2"', 'codex-check-group-test', keeperPath, controlPipe,
     ], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const keeperOutput = capture(keeper, 'reserved\n');
     const keeperClosed = new Promise(resolve => keeper.once('close', (code, signal) => resolve({ code, signal })));
@@ -404,4 +407,111 @@ test('the group keeper kills only its reserved process group',
     assert.deepEqual(outcome, { code: null, signal: 'SIGKILL' },
       'the keeper ends by killing its reserved process group');
     assert.equal(isAlive(control.pid), true, 'the unrelated control process remains alive');
+  });
+
+test('an externally stopped reserved group leaves a harmless control record',
+  { timeout: TEST_WATCHDOG_MS }, async t => {
+    const fx = fixture(t);
+    const readyLine = 'phase=external-group-ready ready=1';
+    const groupGoneLine = 'phase=external-group group-gone=1';
+    const groupScriptPath = path.join(fx.dir, 'reserved-group.sh');
+    writeFileSync(groupScriptPath, `#!/bin/sh
+printf 'reserved-group-ready=1\\n'
+exec /bin/sleep 60
+`, { mode: 0o755 });
+    writeFileSync(fx.childPath, `
+import { spawn } from 'node:child_process';
+import { writeSync } from 'node:fs';
+const target = spawn('/bin/sh', [${JSON.stringify(groupScriptPath)}], {
+  detached: true,
+  stdio: ['ignore', 'pipe', 'ignore'],
+});
+let stopping = false;
+target.stdout.setEncoding('utf8');
+target.stdout.on('data', chunk => {
+  if (stopping || !chunk.includes('reserved-group-ready=1')) return;
+  stopping = true;
+  writeSync(1, ${JSON.stringify(`${readyLine}\n`)});
+  process.kill(-target.pid, 'SIGKILL');
+});
+target.once('exit', (_code, signal) => {
+  if (!stopping || signal !== 'SIGKILL') {
+    process.exitCode = 1;
+    return;
+  }
+  writeSync(1, ${JSON.stringify(`${groupGoneLine}\n`)});
+});
+`);
+
+    const control = spawn(NODE, ['-e', "process.stdout.write('control ready=1\\n'); setInterval(() => {}, 1000)"], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const controlReady = capture(control, 'control ready=1');
+    t.after(async () => {
+      if (control.exitCode === null && control.signalCode === null) {
+        control.kill('SIGTERM');
+        await new Promise(resolve => control.once('close', resolve));
+      }
+    });
+    await Promise.all([
+      controlReady.seen,
+      new Promise((resolve, reject) => {
+        control.once('spawn', resolve);
+        control.once('error', reject);
+      }),
+    ]);
+
+    const ready = deferred();
+    const groupGone = deferred();
+    let sawReady = false;
+    let sawGroupGone = false;
+    const ended = deferred();
+    const running = runPhase({
+      name: 'external-group',
+      command: NODE,
+      args: [fx.childPath],
+      deadlineMs: 10_000,
+      onProgress(line) {
+        if (line === readyLine) {
+          sawReady = true;
+          ready.resolve();
+        }
+        if (line === groupGoneLine) {
+          sawGroupGone = true;
+          groupGone.resolve();
+        }
+      },
+    }).then(result => {
+      const outcome = { result };
+      ended.resolve(outcome);
+      return outcome;
+    }, error => {
+      const outcome = { error };
+      ended.resolve(outcome);
+      return outcome;
+    });
+
+    await Promise.race([
+      ready.promise,
+      ended.promise.then(outcome => {
+        if (outcome.error) throw outcome.error;
+        if (!sawReady) throw new Error(`phase ended before group readiness with status ${outcome.result.status}`);
+      }),
+    ]);
+    await Promise.race([
+      groupGone.promise,
+      ended.promise.then(outcome => {
+        if (outcome.error) throw outcome.error;
+        if (!sawGroupGone) throw new Error(`phase ended before group stop with status ${outcome.result.status}`);
+      }),
+    ]);
+    const outcome = await running;
+    if (outcome.error) throw outcome.error;
+    const result = outcome.result;
+
+    assert.equal(sawReady, true, 'the detached group reports readiness before it is stopped');
+    assert.equal(sawGroupGone, true, 'the phase reports the complete group stopped before exiting');
+    assert.equal(result.status, 0, 'external group shutdown preserves phase success');
+    assert.equal(result.timedOut, false, 'external group shutdown is not a timeout');
+    assert.equal(isAlive(control.pid), true, 'a stale group-control record cannot stop unrelated work');
   });

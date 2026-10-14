@@ -97,16 +97,19 @@ a TERM-ignoring child after its group leader exited. The unrelated control
 remained alive in both failing cases. This earlier red/green evidence and verdict
 are retained in `inspection-fix-evidence.tar.gz` with its SHA manifest.
 
-The finished runner reserves every owned Node process group before fixture
-code runs. A tiny native shell keeper ignores TERM, keeping that group's kernel
-identity reserved through escalation even after its leader exits. The controller
-can therefore kill the reserved group without a fresh process-table read and
-never signals that group again after releasing it. Inspection still attributes
+The finished runner reserves owned Node and detached native process groups before
+fixture code runs. A tiny native shell keeper ignores TERM, keeping that group's
+kernel identity reserved through escalation even after its leader exits. The
+controller sends termination commands through a private nonblocking control pipe;
+the keeper signals its own group. If another actor has already killed that group,
+the closed pipe cannot target a reused numeric group ID. Inspection still attributes
 additional descendants and validates their kernel birth identities. A failed
 inspection still fails the check, rather than emitting a successful stamp.
-Filtered helper environments remain unchanged: their unreserved direct child
-groups are stopped through the parent's live ChildProcess handles on exit.
-Nested runners retain their own cooperative signal cleanup.
+Detached native helpers start through a shell that reserves their group and then
+execs the original target with its existing arguments, streams and filtered
+environment. This also covers a shell that exits before its background child.
+Nested runners retain their own cooperative signal cleanup. Unreserved live
+direct leaders remain eligible for owned teardown on parent exit.
 
 Each keeper has a fallback that kills only its own group after the phase's
 120-second deadline plus 20 seconds. This reserve covers the bounded inspection,
@@ -176,12 +179,29 @@ fixtures status 0 in 60923 ms. Its working content preceded the additional
 detached-child regression; it is retained as intermediate evidence, not an
 exact-head receipt. The final check also runs that additional case, both parent-exit regressions
 and the subsequent inspection-failure regression.
-The subsequent complete fixed check passed all 67 cases, with no skips, and
+An intermediate complete fixed check passed all 67 cases, with no skips, and
 reported fixtures status 0 in 57769 ms. It retains the original 120000 ms
 boundary, leaving 62231 ms of observed margin. This is diagnostic evidence,
 not a machine-speed test contract or a claim about every future host.
+
+The later group repair passed 71 cases with no failures or skips, reporting
+fixtures status 0 in 64405 ms. That run is retained in `group-fix-evidence.tar.gz`
+as `groups-45-green.log`; it preceded the native-shell orphan regression. These
+intermediate outcomes are distinct from the finished-content full check and
+exact-head CI evidence reported in the PR.
 
 The useful-work margin is established by the complete final phase result,
 reported in the PR, after removing duplicate interpreter work. The historical
 93-second local success is not used to grant a larger limit. If exact-head CI
 still reaches a cutoff, the repair is incomplete and must be diagnosed again.
+
+The completed native repair passed all 74 cases, with zero failures, cancellations
+or skips, and reported fixtures status 0 in 63813 ms, leaving 56187 ms of
+observed margin inside the unchanged 120000 ms boundary. The 15 synthetic runner
+cases also passed independently. Native-shell and filtered-fork ownership first
+failed, then passed. The unchanged strict proof-environment test caught shell-added
+exports; the repair restores the original environment before target execution.
+The native launcher keeps reservation input/error handles off the target streams.
+These red/green runs and the preceding complete review are retained in
+`native-fix-evidence.tar.gz` with its SHA manifest. The full repository check
+and exact pushed-head CI remain separate evidence supplied by the PR.

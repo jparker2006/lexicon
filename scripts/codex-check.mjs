@@ -3,7 +3,7 @@
 // before Node's file-level test output can be buffered behind a slow fixture.
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -47,8 +47,7 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
   });
   const rootAlive = () => child.pid && child.exitCode === null && child.signalCode === null;
   const entries = () => readFileSync(ledger, 'utf8').split('\n').slice(0, -1).map(JSON.parse);
-  const groups = () => entries().filter(entry => entry.kind === 'group' && !killedGroups.has(entry.group)
-    && BigInt(entry.expires) > process.hrtime.bigint());
+  const groups = () => entries().filter(entry => entry.kind === 'group' && !killedGroups.has(entry.control));
   const collect = () => {
     const snapshot = processSnapshot();
     const recorded = new Map();
@@ -75,16 +74,24 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
     const reserved = new Set();
     for (const entry of groups()) {
       reserved.add(entry.group);
-      signal(-entry.group, value);
-      if (value === 'SIGKILL') killedGroups.add(entry.group);
+      // The live keeper signals its own group. A dead keeper has no pipe
+      // reader, so a stale record cannot target a reused numeric group ID.
+      let descriptor;
+      try {
+        descriptor = openSync(entry.control, constants.O_WRONLY | constants.O_NONBLOCK);
+        writeSync(descriptor, `${value}\n`);
+      } catch (error) {
+        if (!['ENXIO', 'ENOENT', 'EPIPE'].includes(error.code)) throw error;
+      } finally { if (descriptor !== undefined) closeSync(descriptor); }
+      if (value === 'SIGKILL') killedGroups.add(entry.control);
     }
     try {
       owned = collect();
-      for (const entry of owned) if (!reserved.has(entry.group) && !killedGroups.has(entry.group)) signal(entry.pid, value);
+      for (const entry of owned) if (!reserved.has(entry.group)) signal(entry.pid, value);
     } catch (error) { inspectionFailure(error); }
     // This group is ours while its unreaped leader is alive. Inspection of
     // detached children must never prevent stopping that known root group.
-    if (rootAlive() && !reserved.has(child.pid) && !killedGroups.has(child.pid)) signal(-child.pid, value);
+    if (rootAlive() && !reserved.has(child.pid)) signal(-child.pid, value);
   };
   process.stdout.write(`codex-check: start phase=${name} pid=${child.pid} deadline=${deadlineMs}ms\n`);
   const stop = () => {
