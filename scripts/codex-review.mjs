@@ -121,12 +121,13 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
   const context = path.join(scratch, 'github-context.json');
   // Fetch once in the parent. A failure stops the run instead of letting a critic
   // review acceptance criteria or decisions it could not read.
-  const suppliedContext = process.env.CODEX_REVIEW_CONTEXT_FILE;
   const fetch = (argv) => JSON.parse(execFileSync('gh', argv, { encoding: 'utf8', timeout: 60_000, maxBuffer: 8 << 20 }));
   const cacheContext = () => {
-    if (suppliedContext) { writeFileSync(context, readFileSync(suppliedContext, 'utf8')); return; }
     const git = argv => execFileSync('git', argv, { encoding: 'utf8', timeout: 60_000 }).trim();
-    const main = git(['rev-parse', 'origin/main']);
+    // The shared snapshot tolerates a failed fetch. This current-main proof must
+    // fail closed instead; FETCH_HEAD names exactly the main this fetch obtained.
+    git(['fetch', '-q', 'origin', 'main']);
+    const main = git(['rev-parse', 'FETCH_HEAD']);
     const own = new Set(git(['diff', '--name-only', git(['merge-base', args.sha, main]), args.sha]).split('\n'));
     const mergeTree = head => {
       const result = spawnSync('git', ['merge-tree', '--write-tree', '--name-only', '--no-messages', args.sha, head], { encoding: 'utf8', timeout: 60_000 });
