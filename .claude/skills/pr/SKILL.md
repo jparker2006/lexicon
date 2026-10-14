@@ -67,7 +67,7 @@ The same check runs before every `gh pr edit --body-file`. It names each rule th
 
 ## Review and Helpers
 
-Paste the lexicon-review Workflow's `markdown` from its last run (the one whose reviewed sha is the head you push). Put the table's rows in a `<details><summary>Findings</summary>` block and keep the reviewed-sha line, the Counted line and any INCOMPLETE line outside it. Under it:
+Paste the lexicon-review Workflow's `markdown` (on Codex, what `scripts/codex-review.mjs` printed) from its last run (the one whose reviewed sha is the head you push). Put the table's rows in a `<details><summary>Findings</summary>` block and keep the reviewed-sha line, the Counted line and any INCOMPLETE line outside it. Under it:
 
 - **Fixed:** one line per CONFIRMED finding: where, what changed, and `red test: <test name>` (the test that failed first, then passed), `red test: replay of #N` for a skill's prose with a past case, or `verifier: <the verifier's label in the run>` for prose no test or replay can show.
 - **Dropped:** any REFUTED or UNSURE finding you mention carries `verifier: <the verifier's label in the run>`, so the Reviewer can read why it was dropped.

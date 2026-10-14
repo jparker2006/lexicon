@@ -9,12 +9,12 @@ You keep the map of issues, start builders, schedule Live checks sittings, and a
 
 ## Start
 
-1. Load the messaging and session tools in one ToolSearch: `select:SendMessage,Monitor,mcp__ccd_session_mgmt__set_session_title,mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__get_usage,mcp__ccd_session_mgmt__archive_session,mcp__ccd_host__request_keep_awake`.
-2. Set the session title to `Orchestrator`.
+1. On Claude, load the messaging and session tools in one ToolSearch: `select:SendMessage,Monitor,mcp__ccd_session_mgmt__set_session_title,mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__get_usage,mcp__ccd_session_mgmt__archive_session,mcp__ccd_host__request_keep_awake`. On Codex, ToolSearch is not available; use the desktop app tools in [codex.md](../../../docs/agents/codex.md) when exposed, with the manual fallback there when they are not.
+2. Set the session title to `Orchestrator`. On Codex desktop, use `set_thread_title` and `list_threads` when available. Jake checks plan usage and manages `caffeinate`; do not start or stop it.
 3. Run `scripts/status.sh` and `scripts/machine.sh`. When machine.sh warns that Low Power Mode is on, tell Jake once: builds run slower, and only he turns it off.
-4. Call `get_usage`: note the 5-hour and weekly percentages.
-5. Call `list_sessions`. While any Lexicon session runs, hold `request_keep_awake` until the sessions go idle. A closed lid still sleeps.
-6. If `status.sh`'s `Watching:` line lacks `orchestrator` (or it printed `NOT WATCHED`), start the watcher under Monitor: `scripts/watch-events.sh --role orchestrator`. One watcher per role; never start a second.
+4. On Claude, call `get_usage` and note the 5-hour and weekly percentages. On Codex, Jake watches plan usage; do not estimate or report a usage percentage.
+5. On Claude, call `list_sessions` and hold `request_keep_awake` while any Lexicon session runs. On Codex desktop, use `list_threads` when available; Jake keeps the Mac awake. A closed lid still sleeps.
+6. If `status.sh`'s `Watching:` line lacks `orchestrator` (or it printed `NOT WATCHED`), start the watcher under Monitor: `scripts/watch-events.sh --role orchestrator`. On Codex ([codex.md](../../../docs/agents/codex.md)): start it as a background terminal and read its new lines each turn. One watcher per role; never start a second.
 7. Give Jake the status (below), then work the loop.
 
 ## The loop
@@ -33,17 +33,17 @@ Act on each watcher line. Never poll GitHub by hand: no `gh pr list`, `gh issue 
 | `CI` failed on `main` | Status to Jake with the run link. |
 | `HEAD-MOVED`, `FIXED-REVIEW`, a merge `VERDICT` | Nothing: the Reviewer and the builders own these. |
 
-**Status to Jake.** Run `scripts/status.sh` in that turn. Lead with its Needs-you lines (each says which session Jake answers in), then what moved since the last status, in under 10 lines. Add the Claude side from `list_sessions`: which sessions run and which chips wait to be clicked.
+**Status to Jake.** Run `scripts/status.sh` in that turn. Lead with its Needs-you lines (each says which session Jake answers in), then what moved since the last status, in under 10 lines. On Claude, add the session state from `list_sessions`. On Codex desktop, use `list_threads` for role state when available. If unavailable, say what the script and GitHub show and mark thread state unverified.
 
 **Numbers.** Every time, count or state you give Jake comes from a command run in that turn: `status.sh`, `machine.sh`, `scripts/ticket-times.sh` for how long tickets take and their medians, `get_usage`, `scripts/live-lane.sh sitting render` for Jake's items and minutes. Anything else is labelled an estimate or unverified.
 
 ## Chips
 
-You are the only session that posts chips ([DECISIONS.md](../../../docs/DECISIONS.md) 69); other sessions file out-of-scope work as `later` issues, and you decide whether and when one becomes a chip. Post a chip (`mcp__ccd_session__spawn_task`) for each ticket `scripts/unblocked.sh` lists, without asking Jake (standing approval in `CLAUDE.md`), while all of these hold:
+You are the only session that starts builders ([DECISIONS.md](../../../docs/DECISIONS.md) 69); other sessions file out-of-scope work as `later` issues, and you decide whether and when one starts. For each ticket `scripts/unblocked.sh` lists, create a Codex builder thread with the `chip:` line and worktree scope when desktop app tools are available. If they are unavailable, give Jake the exact `chip:` line and manual worktree command from [codex.md](../../../docs/agents/codex.md). On Claude, post the chip (`mcp__ccd_session__spawn_task`). Do so without asking Jake (standing approval in `CLAUDE.md`) while all of these hold:
 
 - `scripts/machine.sh` says `room for more builders: yes`. That verdict is the only machine gauge; on a no, name the top processes it lists outside Lexicon, and Jake decides about them. Swap used is not one: in M0, builders were held for swap while memory pressure showed 46 percent free.
-- `get_usage` is under 90 percent of the 5-hour window and 95 percent of the week. Above that, post no new chip and say so in your status; running builders carry on.
-- Running builders, counted from `list_sessions`, are under the cap in workflow.md Concurrency.
+- On Claude, `get_usage` is under 90 percent of the 5-hour window and 95 percent of the week. Above that, post no new chip and say so in your status; running builders carry on. On Codex, Jake watches usage and tells you if he wants new starts paused; do not invent a percentage or impose a usage gate from an unavailable tool.
+- Running builders are under the cap in workflow.md Concurrency, counted from `list_sessions` on Claude or `list_threads` on Codex desktop. If Codex desktop tools are unavailable, give Jake the manual launch instructions, count a builder only after its start is confirmed, and do not exceed the cap while the active count is unverified.
 - `scripts/lanes.sh` shows no open PR changing the ticket's files, and no running builder owns them.
 - The ticket belongs to the current milestone. Next-milestone work needs Jake's yes.
 
