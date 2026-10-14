@@ -1108,3 +1108,47 @@ test('transient tracked-source proof edits cannot stamp a full or advance a delt
     'the transient delta failure preserves the earlier verified stamp');
   assert.doesNotMatch(delta.markdown, /^Reviewed sha:|Blast radius \(delta\):/m);
 });
+
+function commitBuildSymlinkToTrackedFixture(f) {
+  assert.equal(existsSync(path.join(f.repo, '.build')), false);
+  // Git records the relative symlink itself; following it reaches tracked source.
+  execFileSync('ln', ['-s', 'fixture', '.build'], { cwd: f.repo });
+  git(f.repo, 'add', '-f', '.build');
+  git(f.repo, 'commit', '-q', '-m', 'fixture build symlink to tracked source');
+  f.sha = git(f.repo, 'rev-parse', 'HEAD');
+  assert.equal(realpathSync(path.join(f.repo, '.build')), realpathSync(path.join(f.repo, 'fixture')));
+}
+
+test('a .build symlink cannot authorize transient writes to tracked sources', (t) => {
+  const fullFixture = fixture(t);
+  commitBuildSymlinkToTrackedFixture(fullFixture);
+  writeFileSync(path.join(fullFixture.dir, 'proof-mode'), 'transient-source');
+  const full = review(fullFixture, { issue: 354, sha: fullFixture.sha, mode: 'reviewer' });
+  const fullReceipts = readFileSync(fullFixture.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  const fullReceipt = fullReceipts.at(-1);
+  assertTransientProofReceipt(fullFixture, fullReceipt, fullFixture.sha);
+  assert.equal(full.result.complete, false,
+    'a restored source mutation stays incomplete even when its path passes through .build');
+  assert.equal(full.result.reviewedSha, null, 'a transient source execution cannot stamp a full review');
+  assert.match(full.markdown, /^Not stamped \(INCOMPLETE below\)/m);
+
+  const deltaFixture = fixture(t);
+  commitBuildSymlinkToTrackedFixture(deltaFixture);
+  const prior = review(deltaFixture, { issue: 354, sha: deltaFixture.sha, mode: 'reviewer' });
+  assert.equal(prior.result.reviewedSha, deltaFixture.sha, 'the delta starts with a genuine earlier stamp');
+  appendFileSync(path.join(deltaFixture.repo, 'Sources/History/a.swift'), 'delta after symlink proof stamp\n');
+  git(deltaFixture.repo, 'add', 'Sources/History/a.swift');
+  git(deltaFixture.repo, 'commit', '-q', '-m', 'delta after symlink proof stamp');
+  const deltaSHA = git(deltaFixture.repo, 'rev-parse', 'HEAD');
+  writeFileSync(path.join(deltaFixture.dir, 'proof-mode'), 'transient-source');
+  const delta = review(deltaFixture, { issue: 354, sha: deltaSHA, reviewed: deltaFixture.sha, mode: 'reviewer' });
+  const deltaReceipts = readFileSync(deltaFixture.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  const transientReceipt = deltaReceipts.at(-1);
+  assertTransientProofReceipt(deltaFixture, transientReceipt, deltaSHA);
+  assert.equal(delta.result.complete, false,
+    'a restored source mutation keeps the delta incomplete through the .build symlink');
+  assert.equal(delta.result.reviewedSha, deltaFixture.sha,
+    'the transient source execution cannot advance the earlier verified stamp');
+  assert.doesNotMatch(delta.markdown, /^Reviewed sha:|Blast radius \(delta\):/m);
+});
+
