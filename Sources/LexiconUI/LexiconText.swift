@@ -15,6 +15,11 @@ struct DictionaryEntry {
 
 /// The words the Lexicon page draws, apart from AppKit so tests can read them.
 enum LexiconText {
+    static let importFailure = (
+        message: "Couldn't import that file",
+        detail: "Import reads one spelling or heard-as form per line, heard -> written. Nothing was added."
+    )
+
     static func title(for entry: DictionaryEntry) -> String {
         let forms = entry.forms.map { ($0.source == .learned ? "✨ " : "") + $0.heard }
         return entry.spelling + (forms.isEmpty ? "" : " (heard as: \(forms.joined(separator: ", ")))")

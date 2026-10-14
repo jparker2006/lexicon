@@ -133,6 +133,16 @@ import WordStore
     #expect(two.detail == "2 lines not read: a heard-as form needs both sides, heard -> written.")
 }
 
+@Test func importFailureExplainsSpellingsAndHeardAsForms() {
+    let failure = LexiconText.importFailure
+    #expect(failure.message == "Couldn't import that file")
+    #expect(failure.detail == "Import reads one spelling or heard-as form per line, heard -> written. Nothing was added.")
+
+    let copy = failure.message + " " + failure.detail
+    #expect(!copy.localizedCaseInsensitiveContains("term"))
+    #expect(!copy.localizedCaseInsensitiveContains("rule"))
+}
+
 @Test func theAddFieldTakesOneTermOrOneRuleTypedEitherWay() {
     #expect(LexiconText.entry(typed: "  Zorblax ") == .term(Term(text: "Zorblax")))
     #expect(LexiconText.entry(typed: "frob nicate -> Frobnicate") == .rule(Rule(heard: "frob nicate", written: "Frobnicate")))

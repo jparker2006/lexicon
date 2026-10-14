@@ -293,8 +293,7 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
                     """)
             } catch {
                 alert.alertStyle = .warning
-                alert.messageText = "Couldn't import that file"
-                alert.informativeText = "Import reads a plain text file, one entry per line. Nothing was added."
+                (alert.messageText, alert.informativeText) = LexiconText.importFailure
                 log.error("import failed: \(String(describing: error), privacy: .private)")
             }
             await reload()
