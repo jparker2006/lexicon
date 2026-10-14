@@ -54,6 +54,7 @@ public final class Recorder: Sendable {
     private let broadcaster = LevelBroadcaster()
     let microphone: Microphone
     let policy: FlushPolicy
+    private let warmedFiles = Atomic(false)
     #if DEBUG
     private let silenceNext = Atomic(false)
     private let dropNext = Atomic(false)
@@ -70,15 +71,21 @@ public final class Recorder: Sendable {
     }
 
     /// At launch, so the first `start` only has to start hardware. After every
-    /// stop the microphone prepares the next engine itself. A file has nothing to warm up.
+    /// stop the microphone prepares the next engine itself. A file input's engine
+    /// has nothing to warm up. The first `prepare` also makes and removes a
+    /// scratch CAF on the writer queue (`CAFWriter.warmUp`), since every
+    /// capture's file is made on fn-down's path.
     public func prepare(_ input: AudioInput) {
+        if !warmedFiles.exchange(true, ordering: .relaxed) { writerQueue.async { CAFWriter.warmUp() } }
         guard case .microphone(let uid) = input else { return }
         microphone.prepare(deviceUID: uid)
     }
 
-    /// fn-down at `keyDown`. Starts the engine, then (on the writer queue, not in
-    /// front of the hardware start) creates `file`. Returns as soon as capture is
-    /// running. The summary's start gap counts from `keyDown`.
+    /// fn-down at `keyDown`. Starts the engine, then creates `file` (after the
+    /// hardware start, never in front of it), so the file exists once this
+    /// returns, unless it could not be made (the capture is then RAM-only).
+    /// Returns as soon as capture is running. The summary's start gap counts
+    /// from `keyDown`.
     ///
     /// Ownership handoff: while the LiveCapture is open, this module is the only
     /// writer of `file`. After `stop`, the file belongs to History (#4).
