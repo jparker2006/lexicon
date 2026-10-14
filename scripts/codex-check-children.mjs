@@ -61,15 +61,29 @@ if (ledger) {
   function readGroups(file = ledger) {
     if (!file || !fs.existsSync(file)) return new Set();
     return new Set(fs.readFileSync(file, 'utf8').split('\n').slice(0, -1).map(JSON.parse)
-      .filter(entry => entry.kind === 'group').map(entry => entry.group));
+      .filter(entry => {
+        if (entry.kind !== 'group') return false;
+        return [entry.control, `${entry.control}-backup`].some(control => {
+          let descriptor;
+          try {
+            descriptor = fs.openSync(control, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
+            return true;
+          } catch (error) {
+            if (!['ENXIO', 'ENOENT', 'EPIPE'].includes(error.code)) throw error;
+            return false;
+          } finally { if (descriptor !== undefined) fs.closeSync(descriptor); }
+        });
+      }).map(entry => entry.group));
   }
   const stopUnreserved = (allowNestedCleanup = false) => {
-    for (const { child, entry, childLedger } of direct) {
+    for (const tracked of direct) {
+      const { child, entry, childLedger } = tracked;
       // An unreaped direct leader still pins its group. Filtered helper
       // environments do not load this preloader, so their parent owns teardown.
       if (entry.group !== entry.pid || readGroups().has(entry.group) || child.exitCode !== null || child.signalCode !== null) continue;
       if (allowNestedCleanup && readGroups(childLedger).has(entry.group)) continue;
       try { process.kill(-entry.group, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      direct.delete(tracked);
     }
   };
   process.once('exit', () => { stopUnreserved(); record({ ...self, live: false }); });

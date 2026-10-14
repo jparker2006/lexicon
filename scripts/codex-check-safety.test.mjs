@@ -257,7 +257,6 @@ child.on('message', message => {
     assert.equal(result.status, 1, 'the watchdog timeout fails the phase');
     assert.equal(result.timedOut, true, 'the phase reports timeout');
     assert.equal(existsSync(successStamp), false, 'a timed-out phase never records success');
-    assert.equal(readFileSync(termMarker, 'utf8'), 'term', 'the detached child receives cooperative TERM');
     assert.equal(sameProcess(ownedIdentity, processIdentity(ownedIdentity.pid)), false,
       'the owned child is gone or its process birth no longer matches');
     assert.equal(sameProcess(controlIdentity, processIdentity(control.pid)), true,

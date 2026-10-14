@@ -75,19 +75,24 @@ export async function runPhase({ name, command, args, deadlineMs, watchdog, onPr
     for (const entry of groups()) {
       // The live keeper signals its own group. A dead keeper has no pipe
       // reader, so a stale record cannot target a reused numeric group ID.
-      let descriptor;
-      try {
-        descriptor = openSync(entry.control, constants.O_WRONLY | constants.O_NONBLOCK);
-        writeSync(descriptor, `${value}\n`);
-        reserved.add(entry.group);
-      } catch (error) {
-        if (!['ENXIO', 'ENOENT', 'EPIPE'].includes(error.code)) throw error;
-      } finally { if (descriptor !== undefined) closeSync(descriptor); }
+      for (const control of [entry.control, `${entry.control}-backup`]) {
+        let descriptor;
+        try {
+          descriptor = openSync(control, constants.O_WRONLY | constants.O_NONBLOCK);
+          writeSync(descriptor, `${value}\n`);
+          reserved.add(entry.group);
+        } catch (error) {
+          if (!['ENXIO', 'ENOENT', 'EPIPE'].includes(error.code)) throw error;
+        } finally { if (descriptor !== undefined) closeSync(descriptor); }
+      }
       if (value === 'SIGKILL') killedGroups.add(entry.control);
     }
     try {
       owned = collect();
-      for (const entry of owned) if (!reserved.has(entry.group)) signal(entry.pid, value);
+      for (const entry of owned) if (!reserved.has(entry.group)) {
+        const current = processSnapshot().get(entry.pid);
+        if (current?.start === entry.start && current.group === entry.group) signal(entry.pid, value);
+      }
     } catch (error) { inspectionFailure(error); }
     // This group is ours while its unreaped leader is alive. Inspection of
     // detached children must never prevent stopping that known root group.
@@ -176,7 +181,7 @@ export const PHASES = Object.freeze([
     '.codex/hooks/guard.test.mjs', 'scripts/codex-probe.test.mjs', 'scripts/codex-review.test.mjs',
     'scripts/codex-skills.test.mjs', 'scripts/codex-agents.test.mjs', 'scripts/codex-check.test.mjs',
     'scripts/codex-check-lifecycle.test.mjs', 'scripts/codex-check-inspection.test.mjs',
-    'scripts/codex-check-safety.test.mjs'], deadlineMs: 120_000 },
+    'scripts/codex-check-safety.test.mjs', 'scripts/codex-check-faults.test.mjs'], deadlineMs: 120_000 },
 ]);
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

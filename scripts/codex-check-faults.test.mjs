@@ -212,7 +212,6 @@ setInterval(() => {}, 1000);
 }
 
 function runWithEvents(t, { name, phasePath, readyPrefix, termLine, stoppedLine, onReady }) {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
   const ready = deferred();
   const term = deferred();
   const stopped = deferred();
@@ -246,7 +245,6 @@ function runWithEvents(t, { name, phasePath, readyPrefix, termLine, stoppedLine,
   const cleanup = async () => {
     if (!settled && expire) {
       expire();
-      t.mock.timers.tick(2000);
       await running.catch(() => {});
     }
   };
@@ -305,7 +303,6 @@ test('a changed PID birth is not signaled during timeout cleanup',
       setCleanup(() => phase.cleanup());
       await phase.ready.promise;
       await phase.stopped.promise;
-      t.mock.timers.tick(2000);
       const result = await phase.running;
       assert.equal(result.status, 1, 'the expired runPhase reports failure');
       assert.equal(result.timedOut, true);
@@ -346,7 +343,6 @@ test('timeout survives loss of the main keeper while fallback watchers remain',
     assert.ok(guards.remaining.some(row => !row.state.startsWith('Z')),
       'at least one fallback or watcher remains alive in the owned group');
     await phase.stopped.promise;
-    t.mock.timers.tick(2000);
     const result = await phase.running;
 
     assert.equal(result.status, 1, 'a timed-out phase returns failure after escalation');
@@ -447,7 +443,6 @@ test('timeout still reaps a child after every group actor and ps are lost',
       assert.ok(guards.killed > 0, 'all helper actors were removed before inspection failed');
       assert.deepEqual(guards.remaining, [], 'no live keeper or watcher remains in the child group');
       await phase.stopped.promise;
-      t.mock.timers.tick(2000);
       const result = await phase.running;
       if (result.status === 0) writeFileSync(successStamp, 'success');
 

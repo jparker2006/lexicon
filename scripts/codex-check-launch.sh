@@ -10,7 +10,7 @@ shift
 /bin/sh "$keeper" "$$" "$seconds" "$control" < /dev/null > "$ready" 2>/dev/null &
 IFS= read -r reserved < "$ready"
 [ "$reserved" = reserved ]
-rm "$ready"
+/bin/rm "$ready"
 printf '%s%s}\n' "$prefix" "$$" >> "$ledger"
 # The reservation shell adds these exports. Restore the target's exact inputs.
 case "$pwd_mode:$level_mode" in
