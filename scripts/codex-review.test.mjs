@@ -223,17 +223,33 @@ console.log(stdout);
   const binDir = path.join(dir, 'bin');
   mkdirSync(binDir);
   const gitWrapper = path.join(binDir, 'git');
-  writeFileSync(gitWrapper, GIT_FETCH_RACE_WRAPPER);
+  const interceptor = path.join(binDir, 'git-interceptor.cjs');
+  const shellQuote = value => `'${value.replaceAll("'", "'\\''")}'`;
+  writeFileSync(interceptor, GIT_FETCH_RACE_WRAPPER);
+  // Ordinary metadata calls need only Git. Start the fake interpreter solely
+  // for the fixtures that actually change or record that command's behavior.
+  writeFileSync(gitWrapper, `#!/bin/sh
+intercept=
+[ -z "\${FAKE_GIT_COMMAND_LOG:-}" ] || intercept=1
+case "$1" in
+fetch) [ -z "\${FAKE_GIT_FETCH_LOG:-}\${FAKE_GIT_COMPETE_SHA:-}" ] || intercept=1 ;;
+archive) [ ! -f "\${FAKE_CODEX_LOG%/*}/snapshot-mode" ] || intercept=1 ;;
+esac
+if [ -n "$intercept" ]; then exec ${shellQuote(process.execPath)} ${shellQuote(interceptor)} "$@"; fi
+exec "$FAKE_REAL_GIT" "$@"
+`);
   chmodSync(gitWrapper, 0o755);
   const gh = path.join(binDir, 'gh');
   writeFileSync(gh, FAKE_GH);
   chmodSync(gh, 0o755);
   const log = path.join(dir, 'log');
   mkdirSync(log);
-  return { dir, repo, bin, binDir, log, proofLog, sha: git(repo, 'rev-parse', 'HEAD') };
+  return { dir, repo, bin, binDir, log, proofLog, name: t.name, sha: git(repo, 'rev-parse', 'HEAD') };
 }
 
-function runReview({ dir, repo, bin, binDir, log }, args, env = {}, options = {}) {
+function runReview({ dir, repo, bin, binDir, log, name }, args, env = {}, options = {}) {
+  const started = Date.now();
+  process.stderr.write(`codex-fixture: begin test=${name} operation=review child-deadline=${options.timeout ?? 60_000}ms\n`);
   const out = path.join(dir, 'result.json');
   const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/codex-review.mjs'), JSON.stringify(args), '--out', out], {
     cwd: repo,
@@ -242,6 +258,7 @@ function runReview({ dir, repo, bin, binDir, log }, args, env = {}, options = {}
     timeout: options.timeout ?? 60_000,
     detached: options.detached ?? false,
   });
+  process.stderr.write(`codex-fixture: end test=${name} status=${run.status} elapsed=${Date.now() - started}ms\n`);
   return { run, out };
 }
 

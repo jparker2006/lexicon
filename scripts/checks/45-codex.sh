@@ -5,7 +5,4 @@
 # and linked.
 set -eu
 cd "$(dirname "$0")/../.."
-. scripts/lib/limits.sh
-trap limits_cleanup EXIT
-limited 120 node scripts/check-codex.mjs
-limited 120 node --test .codex/hooks/guard.test.mjs scripts/codex-probe.test.mjs scripts/codex-review.test.mjs scripts/codex-skills.test.mjs scripts/codex-agents.test.mjs
+exec node scripts/codex-check.mjs
