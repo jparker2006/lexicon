@@ -37,7 +37,24 @@ else {
 const cachedContext = /is cached at ([^\\n]+?)\\. Read it/.exec(prompt)?.[1];
 const hasSyntheticContextMarker = Boolean(cachedContext && fs.readFileSync(cachedContext, 'utf8').includes('LEXICON_REVIEW_FIXTURE_CONTEXT_MARKER_ONLY'));
 const cachedMain = cachedContext ? JSON.parse(fs.readFileSync(cachedContext, 'utf8')).main ?? null : null;
-fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, cachedMain, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), hasSyntheticContextMarker, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
+const pinnedSnapshotsLine = prompt.split(/\\r?\\n/).find(line => line.startsWith('Pinned source snapshots: '));
+const pinnedSnapshots = pinnedSnapshotsLine
+  ? JSON.parse(pinnedSnapshotsLine.slice('Pinned source snapshots: '.length))
+  : null;
+let snapshotContents = null;
+let snapshotReadError = null;
+if (pinnedSnapshots) {
+  try {
+    const snapshotFile = source => path.join(source.path, 'Sources/Review/snapshot.swift');
+    snapshotContents = {
+      pr: fs.readFileSync(snapshotFile(pinnedSnapshots.pr), 'utf8'),
+      main: fs.readFileSync(snapshotFile(pinnedSnapshots.main), 'utf8'),
+    };
+  } catch (error) {
+    snapshotReadError = String(error);
+  }
+}
+fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, cachedMain, pinnedSnapshots, snapshotContents, snapshotReadError, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), hasSyntheticContextMarker, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
 const finding = { path: 'Sources/History/a.swift', line: 1, claim: 'a dictation can be lost', scenario: 'X, so Y', severity: 'blocker', confidence: 'high', cite: { kind: 'rule', source: 'review.md', quote: 'q' } };
 let reply;
 if (prompt.includes('Try to disprove')) reply = { verdict: 'CONFIRMED', citationHolds: true, evidence: 'e', trigger: 't', decider: '', headless: true, test: '' };
@@ -285,4 +302,69 @@ test('a timed-out helper with a stderr-holding grandchild leaves the run unstamp
   } finally {
     stopGrandchildren(pidFile);
   }
+});
+
+test('Combining with main reads separate snapshots at the pinned PR and cached main SHAs', (t) => {
+  const f = fixture(t);
+  const shared = 'Sources/Review/snapshot.swift';
+  const baseMarker = 'LEXICON_REVIEW_BASE_SNAPSHOT';
+  const prMarker = 'LEXICON_REVIEW_PR_SNAPSHOT_ONLY';
+  const mainMarker = 'LEXICON_REVIEW_MAIN_SNAPSHOT_ONLY';
+
+  git(f.repo, 'checkout', '-q', 'main');
+  mkdirSync(path.dirname(path.join(f.repo, shared)), { recursive: true });
+  writeFileSync(path.join(f.repo, shared), `${baseMarker}\n`);
+  git(f.repo, 'add', shared);
+  git(f.repo, 'commit', '-q', '-m', 'shared snapshot base');
+  git(f.repo, 'checkout', '-q', 'claude/issue-1');
+  git(f.repo, 'rebase', '-q', 'main');
+
+  writeFileSync(path.join(f.repo, shared), `${prMarker}\n`);
+  git(f.repo, 'add', shared);
+  git(f.repo, 'commit', '-q', '-m', 'PR snapshot marker');
+  const prSha = git(f.repo, 'rev-parse', 'HEAD');
+
+  git(f.repo, 'checkout', '-q', 'main');
+  mkdirSync(path.dirname(path.join(f.repo, shared)), { recursive: true });
+  writeFileSync(path.join(f.repo, shared), `${mainMarker}\n`);
+  git(f.repo, 'add', shared);
+  git(f.repo, 'commit', '-q', '-m', 'main snapshot marker');
+  const pinnedMainSha = git(f.repo, 'rev-parse', 'HEAD');
+
+  // The wrapper replaces FETCH_HEAD after the successful local fetch. Give it a
+  // distinct full SHA with the same tree so a wrong archive source is observable
+  // even though the generated main marker remains present.
+  const mainTree = git(f.repo, 'rev-parse', 'HEAD^{tree}');
+  const competingFetchSha = execFileSync(REAL_GIT, [
+    'commit-tree', mainTree, '-p', pinnedMainSha, '-m', 'competing fixture fetch',
+  ], { cwd: f.repo, encoding: 'utf8' }).trim();
+
+  git(f.repo, 'checkout', '-q', 'claude/issue-1');
+  const { markdown, result, calls } = review(f, {
+    issue: 1, sha: prSha, mode: 'reviewer',
+  }, { FAKE_GIT_COMPETE_SHA: competingFetchSha });
+
+  const combining = calls.find(call => call.prompt.includes('Combining with main'));
+  assert.ok(combining, 'the public review driver ran the Combining with main lens');
+  assert.equal(combining.snapshotReadError, null, combining.snapshotReadError ?? '');
+  assert.ok(combining.pinnedSnapshots, 'the lens received the parent pinned-snapshot JSON line');
+  assert.match(combining.pinnedSnapshots.pr.sha, /^[0-9a-f]{40}$/);
+  assert.match(combining.pinnedSnapshots.main.sha, /^[0-9a-f]{40}$/);
+  assert.equal(combining.pinnedSnapshots.pr.sha, prSha, 'the PR snapshot is at this pass SHA');
+  assert.equal(combining.pinnedSnapshots.main.sha, combining.cachedMain,
+    'the archived main snapshot uses the exact SHA in this helper\'s cached GitHub context');
+  assert.equal(combining.pinnedSnapshots.main.sha, pinnedMainSha,
+    'a later competing FETCH_HEAD does not move the main snapshot');
+  assert.notEqual(path.resolve(combining.pinnedSnapshots.pr.path), path.resolve(combining.pinnedSnapshots.main.path),
+    'PR and main are separate materialized snapshots');
+  assert.notEqual(path.resolve(combining.pinnedSnapshots.pr.path), path.resolve(f.repo),
+    'the PR lens does not read the mutable checkout');
+  assert.notEqual(path.resolve(combining.pinnedSnapshots.main.path), path.resolve(f.repo),
+    'the main lens does not read the mutable checkout');
+  assert.deepEqual(combining.snapshotContents, {
+    pr: `${prMarker}\n`,
+    main: `${mainMarker}\n`,
+  }, 'the fake Codex read each generated snapshot while the temporary run was alive');
+  assert.equal(result.reviewedSha, prSha, 'the completed review records the exact PR pass SHA');
+  assert.ok(markdown.includes('Reviewed sha: `' + prSha.slice(0, 7) + '`'));
 });
