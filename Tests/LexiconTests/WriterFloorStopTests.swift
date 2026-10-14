@@ -325,7 +325,7 @@ private final class WriterPendingSpace: Sendable {
         }
         guard read == 2 else { return floor + 1 }
         readContinuation.yield(())
-        readGate.wait()
+        readGate.wait()  // timing-ok: the test releases the pending space read after stop returns
         return floor - 1
     }
 
@@ -353,7 +353,7 @@ private final class WriterPendingSync: Sendable {
         }
         if call == 1 {
             enteredContinuation.yield(())
-            syncGate.wait()
+            syncGate.wait()  // timing-ok: the test releases the pending failed sync after stop returns
             return false
         }
         laterContinuation.yield(())

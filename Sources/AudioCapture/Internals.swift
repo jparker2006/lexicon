@@ -123,6 +123,43 @@ final class OneShot<Value: Sendable>: Sendable {
     }
 }
 
+/// One periodic disk check and its stop cutoff. Packet writes share this lock
+/// with publication so a known failure cannot race another write to the file.
+final class DiskResult: Sendable {
+    private struct State: Sendable {
+        var outcome: Bool?
+        var finished = false
+    }
+
+    private let state = Mutex(State())
+
+    /// Publishes a result unless stop has already taken its snapshot.
+    func publish(_ outcome: Bool) -> Bool {
+        state.withLock { state in
+            guard !state.finished else { return false }
+            state.outcome = outcome
+            return true
+        }
+    }
+
+    /// Marks the stop cutoff and returns the latest result already published.
+    func finish() -> Bool? {
+        state.withLock { state in
+            state.finished = true
+            return state.outcome
+        }
+    }
+
+    /// Holds publication and stop at the same boundary as a packet write.
+    func write(_ body: () throws(CAFWriter.Failure) -> Void) throws(CAFWriter.Failure) -> Bool {
+        try state.withLock { state throws(CAFWriter.Failure) -> Bool in
+            guard state.outcome != false else { return false }
+            try body()
+            return true
+        }
+    }
+}
+
 /// Fans each chunk's level out to every `Recorder.levels` observer. Observers
 /// stay subscribed across captures until their stream goes away.
 final class LevelBroadcaster: Sendable {

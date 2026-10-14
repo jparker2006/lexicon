@@ -41,7 +41,7 @@ final class CaptureCore: @unchecked Sendable {
     private var samples: [Int16] = []
     private var chunkIndex = 0
     private var lastFullSync = DispatchTime.now()
-    private var syncResult: OneShot<Bool>?
+    private var syncResult: DiskResult?
     private var timer: (any DispatchSourceTimer)?
     private var tailTimer: (any DispatchSourceTimer)?
     private var tail = Tail()
@@ -154,7 +154,7 @@ final class CaptureCore: @unchecked Sendable {
         drain()
         guard writer != nil, syncResult == nil,
               DispatchTime.now() >= lastFullSync + policy.fullSyncEvery.dispatch else { return }
-        let result = OneShot<Bool>()
+        let result = DiskResult()
         syncResult = result
         let file = writer?.syncFile
         syncQueue.async { [self] in
@@ -169,11 +169,14 @@ final class CaptureCore: @unchecked Sendable {
             } catch {
                 succeeded = false
             }
-            result.settle(succeeded)
+            let accepted = result.publish(succeeded)
+            if !accepted, !succeeded {
+                Self.log.error("audio disk check failed after Dictation stopped")
+            }
             queue.async { [self] in
-                syncResult = nil
+                if syncResult === result { syncResult = nil }
                 lastFullSync = .now()
-                guard take == nil, writer != nil else { return }
+                guard accepted, take == nil, writer != nil else { return }
                 if !succeeded { diskTrouble() }
             }
         }
@@ -215,9 +218,9 @@ final class CaptureCore: @unchecked Sendable {
         source.stop()  // whatever it writes after this is never read
         drain()
         lostEarlier += resampler.flush(emit: emit)
-        // A completed disk result can have its callback queued behind this stop.
-        // Apply it before ending notices and snapshotting the Take, without waiting on a sync.
-        if syncResult?.current == false { diskTrouble() }
+        // Snapshot only a result already published; an unfinished check logs a
+        // later failure without changing this Take or holding up its text.
+        if let syncResult, syncResult.finish() == false { diskTrouble() }
         feedContinuation.finish()
         problems.finish()
         signals.first.settle(nil)
@@ -334,8 +337,13 @@ final class CaptureCore: @unchecked Sendable {
         onLevel(AudioLevel(rms: Self.rms(of: chunk)))
         samples.append(contentsOf: chunk)
         if let writer {
-            do {
-                try writer.write(chunk)
+            do throws(CAFWriter.Failure) {
+                if let syncResult {
+                    let wrote = try syncResult.write { () throws(CAFWriter.Failure) in try writer.write(chunk) }
+                    if !wrote { diskTrouble() }
+                } else {
+                    try writer.write(chunk)
+                }
             } catch {
                 diskTrouble()
             }
