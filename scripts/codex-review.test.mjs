@@ -192,7 +192,7 @@ function runReview({ dir, repo, bin, binDir, log }, args, env = {}, options = {}
   const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/codex-review.mjs'), JSON.stringify(args), '--out', out], {
     cwd: repo,
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`, FAKE_REAL_GIT: REAL_GIT, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir, ...env },
+    env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`, FAKE_REAL_GIT: REAL_GIT, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir, HEAVY_SLOT: process.env.HEAVY_SLOT || 'fixture', HEAVY_JOBS: '1', ...env },
     timeout: options.timeout ?? 60_000,
     detached: options.detached ?? false,
   });

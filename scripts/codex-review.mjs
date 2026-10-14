@@ -138,7 +138,7 @@ export const PROOFS = Object.freeze({
 // also bounds waiting for a slot, and stops only this runner's own process group.
 function testCommand(cwd, filter) {
   return new Promise((resolve, reject) => {
-    const allowed = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'NO_COLOR', 'FAKE_REAL_GIT'];
+    const allowed = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'NO_COLOR', 'FAKE_REAL_GIT', 'HEAVY_SLOT', 'HEAVY_JOBS'];
     const env = Object.fromEntries(allowed.filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]));
     // The reviewed test code is executable input too. Keep it away from home data
     // and the network while allowing SwiftPM's shared cache and the build slot.
@@ -161,8 +161,13 @@ function testCommand(cwd, filter) {
     env.GIT_CONFIG_GLOBAL = '/dev/null';
     env.GIT_CONFIG_NOSYSTEM = '1';
     env.GIT_TERMINAL_PROMPT = '0';
-    const child = spawn('/usr/bin/sandbox-exec', ['-p', profile, './scripts/test.sh', '--filter', filter], {
-      cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+    // Queue coordination inspects other sessions' PIDs, so the trusted parent
+    // takes the slot before entering the sandbox. test.sh reuses that slot.
+    const child = spawn('/bin/sh', [path.join(REPO, 'scripts/lib/heavy.sh'),
+      '/usr/bin/sandbox-exec', '-p', profile, '/bin/sh', '-c',
+      'cd "$1" && exec ./scripts/test.sh --filter "$2"', 'proof', cwd, filter,
+    ], {
+      cwd: REPO, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '', timedOut = false;
     const collect = data => { output = (output + data).slice(-(8 << 20)); };
@@ -258,7 +263,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
         throw new Error('INCOMPLETE: named PR body or reported head metadata is missing or invalid');
       }
     }
-    const openPRs = fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,body,files,headRefOid']).map(pr => {
+    const openPRs = fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,files,headRefOid']).map(pr => {
       const shared = pr.files.map(f => f.path).filter(p => own.has(p));
       if (!shared.length) return { ...pr, shared, mergeTree: null };
       git(['fetch', '-q', 'origin', `pull/${pr.number}/head`]);
