@@ -144,10 +144,11 @@ function testCommand(cwd, filter) {
     mkdirSync(runtime);
     const swift = path.join(runtime, 'swift');
     // SwiftPM cannot nest its manifest sandbox inside ours. The outer sandbox
-    // still confines the compiler, manifests, plugins and tests. Its config and
-    // security stores are scratch data; the shared dependency cache stays enabled.
+    // still confines the compiler, manifests, plugins and tests. Generated build,
+    // config and security data stay outside the pinned source tree; the shared
+    // dependency cache stays enabled.
     const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
-    writeFileSync(swift, `#!/bin/sh\ncase "$1" in\nbuild|test) exec /usr/bin/swift "$@" --disable-sandbox --config-path ${quote(path.join(runtime, 'configuration'))} --security-path ${quote(path.join(runtime, 'security'))} ;;\n*) exec /usr/bin/swift "$@" ;;\nesac\n`);
+    writeFileSync(swift, `#!/bin/sh\ncase "$1" in\nbuild|test) exec /usr/bin/swift "$@" --scratch-path ${quote(path.join(runtime, 'build'))} --disable-sandbox --config-path ${quote(path.join(runtime, 'configuration'))} --security-path ${quote(path.join(runtime, 'security'))} ;;\n*) exec /usr/bin/swift "$@" ;;\nesac\n`);
     chmodSync(swift, 0o755);
     env.PATH = `${runtime}${path.delimiter}${env.PATH || ''}`;
     // The reviewed test code is executable input too. Keep it away from home data
@@ -155,22 +156,21 @@ function testCommand(cwd, filter) {
     const canonical = file => existsSync(file) ? realpathSync(file) : path.join(canonical(path.dirname(file)), path.basename(file));
     const homes = [...new Set([os.userInfo().homedir, os.homedir()].map(canonical))];
     const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8' }).trim();
-    const writable = [cwd, runtime, ...homes.flatMap(home => [
+    const writable = [runtime, ...homes.flatMap(home => [
       path.join(home, 'Library/Caches/org.swift.swiftpm'),
       path.join(home, 'Library/org.swift.swiftpm/cache'),
       path.join(home, '.cache/org.swift.swiftpm'),
       path.join(home, '.swiftpm/cache'),
     ])];
     const scheduler = homes.map(home => path.join(home, 'Library/Application Support/Lexicon Dev/heavy'));
-    const readable = [...writable, ...scheduler, common, process.execPath];
+    const readable = [cwd, ...writable, ...scheduler, common, process.execPath];
     const restriction = exceptions => `(require-all (require-any ${homes.map(home => `(subpath ${JSON.stringify(home)})`).join(' ')}) ${exceptions.map(dir => `(require-not (subpath ${JSON.stringify(canonical(dir))}))`).join(' ')})`;
-    // Source must stay pinned throughout execution, including edits restored
-    // before the final comparison. Only generated build products are writable.
+    // No in-tree exception: a committed build symlink could point into source.
+    // Keep the whole source tree pinned throughout execution.
     const profile = `(version 1)(allow default)(deny network*)
       (deny file-read-data ${restriction(readable)})
       (deny file-write* ${restriction(writable)})
-      (deny file-write* (require-all (subpath ${JSON.stringify(canonical(cwd))})
-        (require-not (subpath ${JSON.stringify(canonical(path.join(cwd, '.build')))}))))
+      (deny file-write* (subpath ${JSON.stringify(canonical(cwd))}))
       (deny file-write* (subpath ${JSON.stringify(canonical(common))}))
       (deny mach-lookup (global-name "com.apple.securityd"))`;
     env.GIT_CONFIG_GLOBAL = '/dev/null';
