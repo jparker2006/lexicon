@@ -152,14 +152,22 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
       issue: fetch(['issue', 'view', String(args.issue), '--json', 'body,comments']),
       spec: fetch(['issue', 'view', '36', '--json', 'body,comments']),
     }));
+    const mainPath = path.join(scratch, 'main-source');
+    const archive = path.join(scratch, 'main.tar');
+    execFileSync('git', ['archive', '-o', archive, main], { timeout: SNAPSHOT_TIMEOUT_MS });
+    execFileSync('mkdir', ['-p', mainPath]);
+    execFileSync('tar', ['-x', '-f', archive, '-C', mainPath], { timeout: SNAPSHOT_TIMEOUT_MS });
+    return { sha: main, path: mainPath };
   };
+  let mainSource;
   let n = 0;
   const agent = async (prompt, opts = {}) => {
     if (opts.label === 'snapshot') {
       const command = prompt.slice(prompt.indexOf('node --input-type=module'));
       const out = execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8', maxBuffer: 1 << 28, timeout: SNAPSHOT_TIMEOUT_MS });
-      cacheContext();
-      return { out };
+      const info = JSON.parse(out);
+      info.mainSource = mainSource;
+      return { out: JSON.stringify(info) };
     }
     n += 1;
     log(`codex: ${opts.label} (${modelOf(opts.model)})`);
@@ -173,7 +181,8 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
     return v;
   }));
   try {
-    const result = await script(args, agent, pipeline, parallel, (p) => log(`phase: ${p}`), log);
+    mainSource = cacheContext();
+    const result = await script({ ...args, mainSha: mainSource.sha }, agent, pipeline, parallel, (p) => log(`phase: ${p}`), log);
     return { ...result, markdown: codexHelpers(result.markdown) };
   } finally {
     rmSync(scratch, { recursive: true, force: true });

@@ -137,6 +137,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 const a = ${JSON.stringify(input)}
+const mainSha = a.mainSha || 'origin/main'
 const sh = (cmd, args) => run(cmd, args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 const git = (...args) => sh('git', args)
 const have = s => { try { git('cat-file', '-e', s + '^{commit}'); return true } catch { return false } }
@@ -188,7 +189,7 @@ const delta = (from, to) => {
   const commits = lines(git('rev-list', '--first-parent', '--no-merges', '--reverse', from + '..' + to))
   const files = new Set(commits.flatMap(c => lines(git('diff-tree', '--no-commit-id', '--name-only', '--no-renames', '-r', c))))
   const merges = lines(git('rev-list', '--first-parent', '--merges', from + '..' + to))
-  const touched = new Set([...files, ...changed(git('merge-base', 'origin/main', from), from)])
+  const touched = new Set([...files, ...changed(git('merge-base', mainSha, from), from)])
   for (const m of merges) {
     for (const f of lines(git('diff-tree', '--cc', '--no-commit-id', '--name-only', '-r', m))) files.add(f)
     for (const f of changed(m + '^1', m)) if (touched.has(f)) files.add(f)
@@ -199,7 +200,7 @@ let main = null, later = null, note = null
 if (a.reviewed) {
   later = delta(git('rev-parse', a.reviewed), sha)
 } else {
-  let base = a.base ? git('rev-parse', a.base) : git('merge-base', 'origin/main', sha)
+  let base = a.base ? git('rev-parse', a.base) : git('merge-base', mainSha, sha)
   if (base === sha) base = git('rev-parse', sha + '^')
   main = pass(base, sha, changed(base, sha), [])
   head = head ? git('rev-parse', head) : sha
@@ -225,7 +226,7 @@ PREP`
 phase('Snapshot')
 const prepPrompt = `Run this one Bash command exactly as written, from the repository root, and put its complete stdout, unchanged, in \`out\`. Run nothing else and edit nothing. If it fails, put "ERROR: " and the error text in \`out\`.
 
-${prepCommand({ issue: a.issue, sha: a.sha, base: a.base, pr: a.pr, head: a.head, reviewed: a.reviewed })}`
+${prepCommand({ issue: a.issue, sha: a.sha, base: a.base, pr: a.pr, head: a.head, reviewed: a.reviewed, mainSha: a.mainSha })}`
 const prep = await hire('prep', 'haiku', 'xhigh', prepPrompt, { label: 'snapshot', phase: 'Snapshot', schema: OUT })
 // The helper sometimes hands the JSON back escaped once more, as a string's contents.
 const parsed = text => {
@@ -310,6 +311,9 @@ function where(pass) {
 }
 
 function criticPrompt(lens, pass, isDelta) {
+  const combining = info.mainSource
+    ? `Pinned source snapshots: ${JSON.stringify({ pr: { sha: pass.to, path: pass.snapshot }, main: info.mainSource })}\nCompare only these two immutable source snapshots and the parent's cached GitHub metadata. Never read source from the live checkout or a moving branch name. Name the merge order.\n`
+    : 'Also compare against the newest origin/main and every open PR (gh pr list --state open --limit 1000 --json number,title; gh pr diff N --name-only): same files, same dependency lists, same status list. Name the merge order.\n'
   const standard = lens.rule
     ? `the "## ${lens.name}" section of ${info.rules}`
     : lens.name.startsWith('Acceptance criteria')
@@ -319,7 +323,7 @@ function criticPrompt(lens, pass, isDelta) {
 
 ${where(pass)}
 ${isDelta ? `This is a delta pass: these commits landed after ${pass.from.slice(0, 12)} was reviewed, so review only what they changed:\n${pass.commits.map(c => '- ' + c).join('\n')}\n` : ''}Files in your slice: ${lens.files.join(', ')}.
-${lens.name === 'Combining with main' ? 'Also compare against the newest origin/main and every open PR (gh pr list --state open --limit 1000 --json number,title; gh pr diff N --name-only): same files, same dependency lists, same status list. Name the merge order.\n' : ''}
+${lens.name === 'Combining with main' ? combining : ''}
 The standard is ${standard}. Settled decisions are never findings: the spec #36 and its first comment (its supersessions)${info.decisions ? `, and ${info.decisions}` : ''}.
 
 A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes (at most 5), never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.
