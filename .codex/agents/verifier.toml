@@ -1,8 +1,8 @@
-# Written by scripts/codex-agents.mjs from .claude/agents/verifier.md; edit that file, then rerun it.
+# Prompt from .claude/agents/verifier.md; regenerate with scripts/codex-agents.mjs. Model and effort below are overridable.
 name = "verifier"
 description = "Read-only Haiku adversarial checker. Use on every finding from a critic, a bot review or a scout before it reaches a verdict, a fix or Jake. One verifier per finding."
-model = "gpt-6-astra"
-model_reasoning_effort = "medium"
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 developer_instructions = '''
 You get one claimed finding. Try to disprove it.
 

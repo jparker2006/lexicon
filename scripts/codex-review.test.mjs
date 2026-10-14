@@ -37,7 +37,7 @@ fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, p
 const finding = { path: 'Sources/History/a.swift', line: 1, claim: 'a dictation can be lost', scenario: 'X, so Y', severity: 'blocker', confidence: 'high', cite: { kind: 'rule', source: 'review.md', quote: 'q' } };
 let reply;
 if (prompt.includes('Try to disprove')) reply = { verdict: 'CONFIRMED', citationHolds: true, evidence: 'e', trigger: 't', decider: '', headless: true, test: '' };
-else if (prompt.startsWith('Blast radius') || prompt.includes('---\\n\\nBlast radius')) reply = { safetyFact: 'fact', proofCommand: 'true', proofResult: 'ok', findings: [] };
+else if (prompt.includes('Blast radius for issue')) reply = { safetyFact: 'fact', proofCommand: 'true', proofResult: 'ok', findings: [] };
 else reply = { findings: /one lens: Never lose/.test(prompt) ? [finding] : [], notes: [], checked: 'looked', incomplete: '' };
 fs.writeFileSync(args[args.indexOf('-o') + 1], JSON.stringify(reply));
 }
@@ -69,6 +69,7 @@ function fixture(t) {
   chmodSync(bin, 0o755);
   const log = path.join(dir, 'log');
   mkdirSync(log);
+  writeFileSync(path.join(dir, 'context.json'), JSON.stringify({ issue: { body: 'fixture', comments: [] }, spec: { body: 'fixture', comments: [] }, openPRs: [] }));
   return { dir, repo, bin, log, sha: git(repo, 'rev-parse', 'HEAD') };
 }
 
@@ -77,7 +78,7 @@ function runReview({ dir, repo, bin, log }, args, env = {}, options = {}) {
   const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/codex-review.mjs'), JSON.stringify(args), '--out', out], {
     cwd: repo,
     encoding: 'utf8',
-    env: { ...process.env, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir, ...env },
+    env: { ...process.env, CODEX_BIN: bin, FAKE_CODEX_LOG: log, CODEX_REVIEW_CONTEXT_FILE: path.join(dir, 'context.json'), TMPDIR: dir, ...env },
     timeout: options.timeout ?? 60_000,
     detached: options.detached ?? false,
   });
@@ -124,6 +125,7 @@ test('each helper runs as codex exec with its role prompt, model, effort and a s
   for (const { args, prompt, schema } of critics) {
     assert.equal(args[0], 'exec');
     assert.ok(prompt.startsWith(role), 'the critic role prompt leads');
+    assert.ok(prompt.includes('github-context.json'), 'the parent supplies issue/spec and PR context without helper network');
     assert.equal(args[args.indexOf('-m') + 1], MODEL);
     assert.ok(args.includes(`model_reasoning_effort="${EFFORTS.haiku}"`));
     assert.ok(args.includes('--ephemeral'));

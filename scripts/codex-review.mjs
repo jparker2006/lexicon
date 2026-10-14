@@ -22,10 +22,10 @@ import { trustEntries, trustFlag } from '../.codex/hooks/trust.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// review.js names Claude tiers and efforts. Jake's plan has one current Codex model, so the
-// tier sets the effort, as scripts/codex-agents.mjs does for the typed helpers.
-export const MODEL = 'gpt-6-astra';
-export const EFFORTS = { haiku: 'medium', sonnet: 'high', opus: 'high' };
+// Defaults from DECISIONS.md item 95. Explicit choices apply to this run only.
+export const MODEL = process.env.CODEX_REVIEW_MODEL || 'gpt-6-luna';
+const effort = process.env.CODEX_REVIEW_EFFORT || 'xhigh';
+export const EFFORTS = { haiku: effort, sonnet: effort, opus: effort };
 const modelOf = (tier) => `${MODEL} ${EFFORTS[tier] ?? 'high'}`;
 // Deadlines that only bound a hang: a helper past its deadline is stopped and counts as one
 // that died, which review.js reports as incomplete. A real critic takes minutes, not half an hour.
@@ -69,27 +69,40 @@ export function guardFlags(cwd) {
 }
 
 /** Runs one helper as a codex exec and returns its JSON answer. */
-async function codex(prompt, opts, scratch, n) {
+async function codex(prompt, opts, scratch, n, context) {
   const schemaFile = path.join(scratch, `${n}.schema.json`);
   const outFile = path.join(scratch, `${n}.out.json`);
   writeFileSync(schemaFile, JSON.stringify(strict(opts.schema || { type: 'object', properties: { out: { type: 'string' } } })));
-  const full = opts.agentType ? `${rolePrompt(opts.agentType)}\n---\n\n${prompt}` : prompt;
+  const instructions = `GitHub context (issue and spec with every comment, open PRs with changed paths) is cached at ${context}. Read that file instead of running the prompt's gh commands; this helper runs in a read-only sandbox.\n\n${prompt}`;
+  const full = opts.agentType ? `${rolePrompt(opts.agentType)}\n---\n\n${instructions}` : instructions;
   const args = [
     'exec', '--ephemeral', '--color', 'never',
     '-C', process.cwd(), ...guardFlags(process.cwd()),
-    // gh reads the issue and open PRs, so the sandbox keeps the network.
-    '-s', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true',
+    // The snapshot carries the issue, decisions and diff. Critics only read it.
+    '-s', 'read-only',
     '-m', MODEL,
     '-c', `model_reasoning_effort="${EFFORTS[opts.model] ?? 'high'}"`,
     '--output-schema', schemaFile, '-o', outFile, '-',
   ];
-  const child = spawn(process.env.CODEX_BIN || 'codex', args, { stdio: ['pipe', 'ignore', 'pipe'] });
+  const child = spawn(process.env.CODEX_BIN || 'codex', args, { detached: true, stdio: ['pipe', 'ignore', 'pipe'] });
   let err = '';
-  child.stderr.on('data', (d) => { err += d; });
+  child.stderr.on('data', (d) => { err = (err + d).slice(-8192); });
+  child.stdin.on('error', () => {}); // A failed spawn or early exit is reported below.
   child.stdin.end(full);
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, HELPER_TIMEOUT_MS);
-  const status = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); }).finally(() => clearTimeout(timer));
+  const stopTree = () => {
+    if (!child.pid) return;
+    try { process.kill(-child.pid, 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; }
+  };
+  const timer = setTimeout(() => { timedOut = true; stopTree(); }, HELPER_TIMEOUT_MS);
+  // exit is independent of inherited pipes. Stop descendants and destroy our pipe
+  // handles so a grandchild retaining stderr cannot hold either the result or Node open.
+  const status = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); }).finally(() => {
+    clearTimeout(timer);
+    stopTree();
+    child.stderr.destroy();
+    child.stdin.destroy();
+  });
   if (timedOut) throw new Error(`codex exec for ${opts.label} gave no answer in ${HELPER_TIMEOUT_MS / 60_000} minutes; stopped`);
   if (status !== 0) throw new Error(`codex exec for ${opts.label} exited ${status}: ${err.trim().split('\n').pop()}`);
   return JSON.parse(readFileSync(outFile, 'utf8'));
@@ -101,6 +114,21 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   const script = new AsyncFunction('args', 'agent', 'pipeline', 'parallel', 'phase', 'log', source);
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'codex-review-'));
+  const context = path.join(scratch, 'github-context.json');
+  // Fetch once in the parent. A failure stops the run instead of letting a critic
+  // review acceptance criteria or decisions it could not read.
+  const suppliedContext = process.env.CODEX_REVIEW_CONTEXT_FILE;
+  const fetch = (argv) => JSON.parse(execFileSync('gh', argv, { encoding: 'utf8', timeout: 60_000, maxBuffer: 8 << 20 }));
+  try {
+    writeFileSync(context, suppliedContext ? readFileSync(suppliedContext, 'utf8') : JSON.stringify({
+      issue: fetch(['issue', 'view', String(args.issue), '--json', 'body,comments']),
+      spec: fetch(['issue', 'view', '36', '--json', 'body,comments']),
+      openPRs: fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,files']),
+    }));
+  } catch (e) {
+    rmSync(scratch, { recursive: true, force: true });
+    throw e;
+  }
   let n = 0;
   const agent = async (prompt, opts = {}) => {
     if (opts.label === 'snapshot') {
@@ -109,7 +137,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
     }
     n += 1;
     log(`codex: ${opts.label} (${modelOf(opts.model)})`);
-    return codex(prompt, opts, scratch, n);
+    return codex(prompt, opts, scratch, n, context);
   };
   // The Workflow runtime's semantics: a helper that throws leaves null, which review.js reports as incomplete.
   const parallel = (thunks) => Promise.all(thunks.map((t) => Promise.resolve().then(t).catch((e) => { log(`codex: ${e.message}`); return null; })));

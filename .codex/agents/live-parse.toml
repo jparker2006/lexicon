@@ -1,8 +1,8 @@
-# Written by scripts/codex-agents.mjs from .claude/agents/live-parse.md; edit that file, then rerun it.
+# Prompt from .claude/agents/live-parse.md; regenerate with scripts/codex-agents.mjs. Model and effort below are overridable.
 name = "live-parse"
 description = "Read-only Haiku parser for Live checks results. Use after a run to turn Live checks logs and samples into the result table, printing lengths and hashes, never dictated text."
-model = "gpt-6-astra"
-model_reasoning_effort = "medium"
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 developer_instructions = '''
 You turn one Live checks run's output into its result table, one row per checklist item: item, PASS or FAIL against its bar, the number, and where it came from.
 

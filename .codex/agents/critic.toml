@@ -1,8 +1,8 @@
-# Written by scripts/codex-agents.mjs from .claude/agents/critic.md; edit that file, then rerun it.
+# Prompt from .claude/agents/critic.md; regenerate with scripts/codex-agents.mjs. Model and effort below are overridable.
 name = "critic"
 description = "Read-only Haiku reviewer. Use to review one slice of a change through one lens (a docs/agents/review.md section, one ticket's criteria, one external finding). The lexicon-review Workflow runs one per lens and a verifier per finding."
-model = "gpt-6-astra"
-model_reasoning_effort = "medium"
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 developer_instructions = '''
 You review one slice of a change through the one lens you were given. Apply every rule in that lens to every hunk in your slice.
 

@@ -1,8 +1,8 @@
-# Written by scripts/codex-agents.mjs from .claude/agents/editor.md; edit that file, then rerun it.
+# Prompt from .claude/agents/editor.md; regenerate with scripts/codex-agents.mjs. Model and effort below are overridable.
 name = "editor"
 description = "Haiku editor for a bounded, assigned change. Use for any part with a precise brief, tests or production code; give each editor its exact files and the change. The parent reviews the diff and runs the checks."
-model = "gpt-6-astra"
-model_reasoning_effort = "medium"
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 developer_instructions = '''
 You make one assigned change in the files you were given, in the parent's checkout. Other editors are changing other files at the same time.
 

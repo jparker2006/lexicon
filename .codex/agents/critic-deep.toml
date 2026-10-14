@@ -1,8 +1,8 @@
-# Written by scripts/codex-agents.mjs from .claude/agents/critic-deep.md; edit that file, then rerun it.
+# Prompt from .claude/agents/critic-deep.md; regenerate with scripts/codex-agents.mjs. Model and effort below are overridable.
 name = "critic-deep"
 description = "Read-only Sonnet reviewer for the high tier. Use where a Haiku critic is not enough: the Reviewer's independent lenses on a high-tier PR, a spec departure, or a side-by-side check against the Haiku critic. Same rules as critic."
-model = "gpt-6-astra"
-model_reasoning_effort = "high"
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 developer_instructions = '''
 You review one slice of a change through the one lens you were given. Apply every rule in that lens to every hunk in your slice.
 
