@@ -61,15 +61,17 @@ const CONFIRMED = { verdict: 'CONFIRMED', citationHolds: true, evidence: 'e', tr
 
 // Runs review.js once. `reply(prompt, opts)` answers every helper but the snapshot; a
 // thrown error stands for a helper that died. Returns the result plus every call made.
-async function run(dir, args, reply = () => CLEAN) {
+async function run(dir, args, reply = () => CLEAN, adapter = {}) {
   const calls = []
   const logs = []
   const agent = async (prompt, opts = {}) => {
     calls.push({ prompt, ...opts })
     if (opts.label === 'snapshot') {
       const cmd = prompt.slice(prompt.indexOf('node --input-type=module'))
-      return { out: execFileSync('/bin/sh', ['-c', cmd], { cwd: dir, encoding: 'utf8', env: process.env }) }
+      const out = execFileSync('/bin/sh', ['-c', cmd], { cwd: dir, encoding: 'utf8', env: process.env })
+      return { out: adapter.info ? JSON.stringify({ ...JSON.parse(out), ...adapter.info }) : out }
     }
+    if (opts.label === 'proof' && adapter.proof) return adapter.proof(prompt, opts)
     return reply(prompt, opts)
   }
   const parallel = thunks => Promise.all(thunks.map(t => Promise.resolve().then(t).catch(() => null)))
@@ -337,6 +339,123 @@ for (const [file, want] of mapCases) {
     }
   })
 }
+
+const WORKFLOW_PROOF_CATALOGUE = {
+  'headless-public-wav': {
+    factId: 'scripted-wav-text-and-history',
+    filter: 'aShortWavIsTypedAndSavedInHistory',
+    fact: 'A generated file WAV using ScriptedTranscriber delivers its text and saves its History row',
+  },
+  'capture-file-before-return': {
+    factId: 'file-created-before-start-returns',
+    filter: 'theAudioFileExistsWhenStartReturnsEvenWhileTheWriterQueueIsBusy',
+    fact: 'File-input capture creates its audio file before start returns even with the synthetic busy writer queue',
+  },
+  'capture-warmup-cleanup': {
+    factId: 'warmup-leaves-no-file',
+    filter: 'warmingAudioFileAtLaunchLeavesNoFileBehind',
+    fact: 'The public synthetic CAF warm-up leaves no scratch audio file behind',
+  },
+}
+
+function proofWorkflowAdapter(dir, proof = () => null) {
+  const mainSource = {
+    sha: git(dir, 'rev-parse', 'refs/remotes/origin/main'),
+    path: path.join(dir, 'pinned-main-source'),
+  }
+  // A real generated snapshot path lets the Combining lens receive ordinary
+  // adapter data, without giving the fake reviewer private or live source.
+  fs.mkdirSync(mainSource.path, { recursive: true })
+  fs.writeFileSync(path.join(mainSource.path, 'fixture-marker.txt'), 'synthetic main snapshot\n')
+  return {
+    info: { proofCatalogue: WORKFLOW_PROOF_CATALOGUE, mainSource },
+    proof,
+    mainSource,
+  }
+}
+
+function blastReply(proofId = 'headless-public-wav', factId = 'scripted-wav-text-and-history') {
+  return (prompt, opts) => opts.label === 'blast radius'
+    ? { proofId, factId, findings: [] }
+    : CLEAN
+}
+
+function validProofReceipt(opts) {
+  const proof = WORKFLOW_PROOF_CATALOGUE[opts.proofId]
+  return {
+    complete: true,
+    sha: opts.sha,
+    measuredSha: opts.sha,
+    proofId: opts.proofId,
+    factId: opts.factId,
+    fact: proof.fact,
+    command: `scripts/test.sh --filter ${proof.filter}`,
+    exitStatus: 0,
+    testResult: '1 matching synthetic test passed',
+  }
+}
+
+// 2. Append these cases beside the other blast-radius fixtures.
+
+test('the high-tier adapter supplies closed proof ids and prints a valid parent receipt', async () => {
+  const { dir, sha } = fixtureRepo('proof-adapter-valid', ['Sources/History/a.swift'])
+  const adapter = proofWorkflowAdapter(dir, (_prompt, opts) => validProofReceipt(opts))
+  const r = await run(dir, { issue: 1, sha, mode: 'reviewer' }, blastReply(), adapter)
+
+  const combining = r.calls.find(c => c.label && c.label.includes('Combining with main'))
+  assert(combining?.prompt.includes(`Pinned source snapshots: ${JSON.stringify({
+    pr: { sha, path: r.result.snapshots[0] }, main: adapter.mainSource,
+  })}`), 'the Workflow adapter mainSource and pass snapshot should reach Combining with main')
+
+  const blast = r.calls.find(c => c.label === 'blast radius')
+  assert(blast, 'the high-tier reviewer should call blast radius')
+  assert(JSON.stringify(blast.schema.properties.proofId.enum) === JSON.stringify(Object.keys(WORKFLOW_PROOF_CATALOGUE)),
+    'the helper schema should close proofId to the parent catalogue')
+  assert(JSON.stringify(blast.schema.properties.factId.enum) === JSON.stringify(Object.values(WORKFLOW_PROOF_CATALOGUE).map(p => p.factId)),
+    'the helper schema should close factId to the parent catalogue')
+  assert(JSON.stringify(blast.schema.required) === JSON.stringify(['proofId', 'factId', 'findings']),
+    'the helper schema should require only the closed proof pair and findings')
+
+  const proofCalls = r.calls.filter(c => c.label === 'proof')
+  assert(proofCalls.length === 1, `parent proof should be intercepted once, got ${proofCalls.length}`)
+  const proof = WORKFLOW_PROOF_CATALOGUE['headless-public-wav']
+  assert(r.result.markdown.includes(
+    `Blast radius (main): ${proof.fact}. Proof: \`headless-public-wav/${proof.factId}\` at \`${sha}\`, \`scripts/test.sh --filter ${proof.filter}\`, exit 0: 1 matching synthetic test passed`,
+  ), 'the output should print the catalogue fact and the matching parent execution receipt')
+  assert(r.result.proofs.length === 1, 'the valid receipt should be retained as proof')
+})
+
+test('an unsupported proof/fact pair is incomplete and never reaches the parent proof adapter', async () => {
+  const { dir, sha } = fixtureRepo('proof-pair-mismatch', ['Sources/History/a.swift'])
+  let proofCalls = 0
+  const adapter = proofWorkflowAdapter(dir, () => { proofCalls++; return null })
+  const r = await run(dir, { issue: 1, sha, mode: 'reviewer' },
+    blastReply('headless-public-wav', 'warmup-leaves-no-file'), adapter)
+
+  assert(proofCalls === 0, 'the parent should not execute an unsupported proof/fact pair')
+  assert(r.result.complete === false, 'the mismatched pair should leave the review incomplete')
+  assert(r.result.reviewedSha === null, 'the mismatched pair should not stamp a full review')
+  assert(r.result.markdown.includes('INCOMPLETE: blast radius: unsupported proof/fact pair'),
+    'the output should explain that the proof/fact pair was unsupported')
+  assert(!r.result.markdown.includes('Blast radius (main):'), 'the output should not print helper prose as executed evidence')
+})
+
+test('an invalid parent proof receipt leaves the high-tier review incomplete', async () => {
+  const { dir, sha } = fixtureRepo('proof-invalid-receipt', ['Sources/History/a.swift'])
+  const adapter = proofWorkflowAdapter(dir, (_prompt, opts) => ({
+    ...validProofReceipt(opts),
+    measuredSha: '0'.repeat(40),
+  }))
+  const r = await run(dir, { issue: 1, sha, mode: 'reviewer' }, blastReply(), adapter)
+
+  assert(r.calls.some(c => c.label === 'proof'), 'the parent proof call should be intercepted')
+  assert(r.result.complete === false, 'a receipt measured at another SHA should leave the review incomplete')
+  assert(r.result.reviewedSha === null, 'an invalid proof receipt should not stamp a full review')
+  assert(r.result.markdown.includes('INCOMPLETE: blast radius: parent proof failed or did not measure the pinned pass SHA'),
+    'the output should identify the invalid execution receipt')
+  assert(!r.result.markdown.includes('Blast radius (main):'), 'an invalid receipt should not appear as executed evidence')
+  assert(r.result.proofs.length === 0, 'an invalid receipt should not be retained')
+})
 
 let failed = 0
 for (const c of cases) {

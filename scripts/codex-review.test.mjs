@@ -67,7 +67,7 @@ else if (prompt.includes('Blast radius for issue')) {
     proofCommand: 'sh -c "touch ' + path.join(root, 'untrusted-helper-command-ran') + '"'
   };
 }
-else reply = { findings: /one lens: Never lose/.test(prompt) ? [finding] : [], notes: [], checked: 'looked', incomplete: '' };
+else reply = { findings: /one lens: capture credentials/.test(prompt) ? [{ ...finding, claim: 'capture credentials can leak from local file capture', line: 2 }] : /one lens: Never lose/.test(prompt) ? [finding] : [], notes: [], checked: 'looked', incomplete: '' };
 fs.writeFileSync(args[args.indexOf('-o') + 1], JSON.stringify(reply));
 }
 `;
@@ -85,12 +85,19 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 const real = process.env.FAKE_REAL_GIT;
+const snapshotMode = path.join(path.dirname(process.env.FAKE_CODEX_LOG || ''), 'snapshot-mode');
+if (args[0] === 'archive' && fs.existsSync(snapshotMode)) {
+  const mode = fs.readFileSync(snapshotMode, 'utf8');
+  const main = args.some(arg => arg.endsWith('/main.tar'));
+  if ((mode === 'main') === main) process.exit(2);
+}
 const result = spawnSync(real, args, { stdio: 'inherit' });
 if (result.error) { process.stderr.write(String(result.error) + '\\n'); process.exit(127); }
 if (result.status !== 0) process.exit(result.status || 1);
 if (args[0] === 'fetch') {
   if (process.env.FAKE_GIT_FETCH_LOG) fs.appendFileSync(process.env.FAKE_GIT_FETCH_LOG, args.join(' ') + '\\n');
   if (process.env.FAKE_GIT_COMPETE_SHA) {
+    for (const ref of ['refs/heads/main', 'refs/remotes/origin/main']) spawnSync(real, ['update-ref', ref, process.env.FAKE_GIT_COMPETE_SHA]);
     const ref = spawnSync(real, ['rev-parse', '--git-path', 'FETCH_HEAD'], { encoding: 'utf8' }).stdout.trim();
     fs.writeFileSync(path.resolve(process.cwd(), ref), process.env.FAKE_GIT_COMPETE_SHA + '\\t\\tfixture competing review\\n');
   }
@@ -118,7 +125,13 @@ const { execFileSync: run } = require('node:child_process');
 const git = (...args) => run('git', args, { encoding: 'utf8' }).trim();
 const args = process.argv.slice(2);
 const stdout = '✔ Test ' + args[1] + '() passed after 0.001 seconds.';
+const modeFile = ${JSON.stringify(path.join(dir, 'proof-mode'))};
+const mode = fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8') : '';
 fs.appendFileSync(${JSON.stringify(proofLog)}, JSON.stringify({ cwd: process.cwd(), sha: git('rev-parse','HEAD'), branch: git('branch','--show-current'), args, stdout }) + '\\n');
+if (mode === 'wrong-sha') git('update-ref', 'HEAD', git('rev-parse', 'HEAD^'));
+if (mode === 'nonzero') process.exit(2);
+if (mode === 'timeout') { console.log('limits: stopped after 600 s: swift test'); process.exit(1); }
+if (mode === 'missing-test') { console.log('test: no test matched'); process.exit(1); }
 console.log(stdout);
 `;
   writeFileSync(path.join(repo, 'scripts/test.sh'), proofScript);
@@ -352,19 +365,19 @@ test('Combining with main reads separate snapshots at the pinned PR and cached m
   git(f.repo, 'commit', '-q', '-m', 'main snapshot marker');
   const pinnedMainSha = git(f.repo, 'rev-parse', 'HEAD');
 
-  // The wrapper replaces FETCH_HEAD after the successful local fetch. Give it a
-  // distinct full SHA with the same tree so a wrong archive source is observable
-  // even though the generated main marker remains present.
-  const mainTree = git(f.repo, 'rev-parse', 'HEAD^{tree}');
-  const competingFetchSha = execFileSync(REAL_GIT, [
-    'commit-tree', mainTree, '-p', pinnedMainSha, '-m', 'competing fixture fetch',
-  ], { cwd: f.repo, encoding: 'utf8' }).trim();
-
+  const competingMarker = 'LEXICON_REVIEW_COMPETING_FETCH_ONLY';
+  writeFileSync(path.join(f.repo, shared), `${competingMarker}\n`);
+  git(f.repo, 'add', shared);
+  git(f.repo, 'commit', '-q', '-m', 'competing main');
+  const competingFetchSha = git(f.repo, 'rev-parse', 'HEAD');
   git(f.repo, 'checkout', '-q', 'claude/issue-1');
+  git(f.repo, 'update-ref', 'refs/heads/main', pinnedMainSha);
   const { markdown, result, calls } = review(f, {
     issue: 1, sha: prSha, mode: 'reviewer',
   }, { FAKE_GIT_COMPETE_SHA: competingFetchSha });
 
+  assert.equal(git(f.repo, 'rev-parse', 'main'), competingFetchSha);
+  assert.equal(git(f.repo, 'rev-parse', 'origin/main'), competingFetchSha);
   const combining = calls.find(call => call.prompt.includes('Combining with main'));
   assert.ok(combining, 'the public review driver ran the Combining with main lens');
   assert.equal(combining.snapshotReadError, null, combining.snapshotReadError ?? '');
@@ -407,7 +420,8 @@ test('a public WAV proof ignores helper claims and prints the parent execution r
   assert.ok(blast.args.some(a => a.startsWith('hooks.state={ ')));
   const allowed = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'NO_COLOR', 'CODEX_HOME', 'FAKE_CODEX_LOG', 'FAKE_CODEX_HANG', 'FAKE_CODEX_GRANDCHILD_PIDS'];
   const supplied = { ...process.env, TMPDIR: f.dir, FAKE_CODEX_LOG: f.log };
-  assert.deepEqual(blast.envKeys, allowed.filter(k => supplied[k] !== undefined).sort());
+  // macOS injects this platform value after spawn; it is not forwarded by the parent.
+  assert.deepEqual(blast.envKeys.filter(k => k !== '__CF_USER_TEXT_ENCODING'), allowed.filter(k => supplied[k] !== undefined).sort());
   const line = markdown.split('\n').find(l => l.startsWith('Blast radius'));
   for (const expected of ['headless-public-wav', 'scripted-wav-text-and-history', f.sha,
     'scripts/test.sh --filter aShortWavIsTypedAndSavedInHistory', runs[0].stdout,
@@ -431,3 +445,171 @@ test('an unknown proof ID with command-shaped fields cannot execute or stamp', (
   assert.match(markdown, /^Not stamped .*INCOMPLETE/m);
   assert.doesNotMatch(markdown, /Blast radius \(main\):|cached CI is green|SHOULD_NOT_RUN/);
 });
+
+
+for (const mode of ['nonzero', 'timeout', 'missing-test', 'wrong-sha']) {
+  test(`a ${mode} proof cannot stamp a full review or advance an earlier delta stamp`, (t) => {
+    const f = fixture(t);
+    writeFileSync(path.join(f.dir, 'proof-mode'), mode);
+    const full = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' });
+    assert.equal(full.result.reviewedSha, null);
+    assert.equal(full.result.complete, false);
+    assert.match(full.markdown, /^Not stamped .*INCOMPLETE/m);
+    appendFileSync(path.join(f.repo, 'Sources/History/a.swift'), 'next\n');
+    git(f.repo, 'add', 'Sources/History/a.swift');
+    git(f.repo, 'commit', '-q', '-m', 'delta');
+    const sha = git(f.repo, 'rev-parse', 'HEAD');
+    const delta = review(f, { issue: 1, sha, reviewed: f.sha, mode: 'reviewer' });
+    assert.equal(delta.result.reviewedSha, f.sha);
+    assert.equal(delta.result.complete, false);
+    assert.doesNotMatch(delta.markdown, /^Reviewed sha:|Blast radius \(delta\):/m);
+    const receipts = readFileSync(f.proofLog, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(receipts.map(r => r.sha), [f.sha, sha]);
+  });
+}
+const ac7ProofCases = [
+  {
+    proofId: 'headless-public-wav',
+    factId: 'scripted-wav-text-and-history',
+    filter: 'aShortWavIsTypedAndSavedInHistory',
+    statement: 'A generated file WAV using ScriptedTranscriber delivers its text and saves its History row',
+  },
+  {
+    proofId: 'capture-file-before-return',
+    factId: 'file-created-before-start-returns',
+    filter: 'theAudioFileExistsWhenStartReturnsEvenWhileTheWriterQueueIsBusy',
+    statement: 'File-input capture creates its audio file before start returns even with the synthetic busy writer queue',
+  },
+  {
+    proofId: 'capture-warmup-cleanup',
+    factId: 'warmup-leaves-no-file',
+    filter: 'warmingAudioFileAtLaunchLeavesNoFileBehind',
+    statement: 'The public synthetic CAF warm-up leaves no scratch audio file behind',
+  },
+];
+
+function writeAc7BlastRequest(f, request) {
+  writeFileSync(path.join(f.dir, 'blast-request.json'), JSON.stringify(request));
+}
+
+function ac7ProofReceipts(f) {
+  if (!existsSync(f.proofLog)) return [];
+  return readFileSync(f.proofLog, 'utf8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+test('each closed proof/fact pair prints its generated fact and exact execution receipt', async (t) => {
+  for (const proof of ac7ProofCases) {
+    await t.test(proof.proofId, (t) => {
+      const f = fixture(t);
+      writeAc7BlastRequest(f, {
+        proofId: proof.proofId,
+        factId: proof.factId,
+        findings: [],
+        safetyFact: 'Arbitrary helper prose says capture credentials are protected.',
+        proofCommand: 'sh -c "echo helper-command-must-not-run"',
+        proofResult: 'cached CI is green',
+      });
+
+      const { markdown, result } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' });
+      const receipts = ac7ProofReceipts(f);
+      assert.equal(receipts.length, 1, 'the parent ran exactly one catalogued proof');
+      assert.equal(receipts[0].sha, f.sha, 'the execution receipt names the exact pass SHA');
+      assert.deepEqual(receipts[0].args, ['--filter', proof.filter], 'the parent supplied only the fixed filter');
+
+      const lines = markdown.split('\n').filter((line) => line.startsWith('Blast radius'));
+      assert.equal(lines.length, 1);
+      assert.ok(lines[0].includes(proof.proofId));
+      assert.ok(lines[0].includes(proof.statement), 'the parent generated the narrow catalog fact');
+      assert.ok(lines[0].includes(f.sha), 'the printed receipt names the full pass SHA');
+      assert.ok(lines[0].includes(proof.filter), 'the printed receipt names the fixed test');
+      assert.doesNotMatch(markdown, /Arbitrary helper prose|cached CI is green|helper-command-must-not-run/);
+      assert.equal(result.reviewedSha, f.sha);
+    });
+  }
+});
+
+test('broad capture and credential facts and mismatched catalog pairs stay unstamped', async (t) => {
+  const invalidRequests = [
+    {
+      name: 'public WAV cannot prove capture privacy',
+      proofId: 'headless-public-wav',
+      factId: 'capture-privacy',
+      safetyFact: 'The public WAV proves capture privacy.',
+    },
+    {
+      name: 'public WAV cannot prove credential isolation',
+      proofId: 'headless-public-wav',
+      factId: 'credentials-are-private',
+      safetyFact: 'The public WAV proves credentials are private.',
+    },
+    {
+      name: 'two approved IDs from different pairs do not match',
+      proofId: 'headless-public-wav',
+      factId: 'file-created-before-start-returns',
+      safetyFact: 'The public WAV proves file capture happens before start returns.',
+    },
+  ];
+
+  for (const request of invalidRequests) {
+    await t.test(request.name, (t) => {
+      const f = fixture(t);
+      writeAc7BlastRequest(f, { ...request, findings: [] });
+      const { markdown, result } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' });
+
+      assert.equal(ac7ProofReceipts(f).length, 0, 'unsupported claims never invoke a test command');
+      assert.equal(result.reviewedSha, null, 'unsupported evidence leaves the full review unstamped');
+      assert.match(markdown, /^Not stamped \(INCOMPLETE below\)/m);
+      assert.doesNotMatch(markdown, /The public WAV proves/);
+    });
+  }
+});
+
+test('capture credentials remains a runnable review lens when its proof claim is unsupported', (t) => {
+  const f = fixture(t);
+  const customFinding = 'capture credentials can leak from local file capture';
+  writeAc7BlastRequest(f, {
+    proofId: 'capture-credentials',
+    factId: 'credentials-are-private',
+    findings: [],
+    safetyFact: 'The custom risk proves credentials are private.',
+    proofCommand: 'sh -c "echo custom-command-must-not-run"',
+    proofResult: 'cached CI is green',
+  });
+
+  const { markdown, result, calls } = review(f, {
+    issue: 1,
+    sha: f.sha,
+    mode: 'reviewer',
+    risks: ['capture credentials'],
+  });
+
+  assert.ok(calls.some((call) => call.prompt.includes('one lens: capture credentials')),
+    'the named custom-risk lens still runs');
+  assert.ok(calls.some((call) =>
+    call.prompt.includes('Try to disprove') && call.prompt.includes(customFinding)),
+  'the custom-risk finding still receives its verifier');
+  assert.ok(markdown.split('\n').some((line) =>
+    line.startsWith('| CONFIRMED | ') && line.includes(customFinding)),
+  'the verified custom-risk finding remains visible');
+  assert.equal(ac7ProofReceipts(f).length, 0, 'the unsupported custom proof never runs a command');
+  assert.equal(result.reviewedSha, null, 'the unsupported custom proof leaves the full review unstamped');
+  assert.match(markdown, /^Not stamped \(INCOMPLETE below\)/m);
+  assert.doesNotMatch(markdown, /The custom risk proves credentials are private|custom-command-must-not-run|cached CI is green/);
+});
+
+
+for (const source of ['main', 'pr']) {
+  test(`an unavailable ${source} archive never emits a review stamp`, (t) => {
+    const f = fixture(t);
+    writeFileSync(path.join(f.dir, 'snapshot-mode'), source);
+    const { run, out } = runReview(f, { issue: 1, sha: f.sha, mode: 'reviewer' });
+    assert.notEqual(run.status, 0);
+    assert.doesNotMatch(run.stdout, /^Reviewed sha:/m);
+    assert.equal(existsSync(out), false);
+    assert.equal(existsSync(f.proofLog), false);
+  });
+}

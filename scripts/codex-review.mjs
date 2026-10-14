@@ -15,11 +15,12 @@
 // codex binary (default: codex on PATH); CODEX_REVIEW_HELPER_TIMEOUT_MS a helper's deadline.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { trustEntries, trustFlag } from '../.codex/hooks/trust.mjs';
+import { PROOFS, runProof } from './review-proofs.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -155,7 +156,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
     const mainPath = path.join(scratch, 'main-source');
     const archive = path.join(scratch, 'main.tar');
     execFileSync('git', ['archive', '-o', archive, main], { timeout: SNAPSHOT_TIMEOUT_MS });
-    execFileSync('mkdir', ['-p', mainPath]);
+    mkdirSync(mainPath);
     execFileSync('tar', ['-x', '-f', archive, '-C', mainPath], { timeout: SNAPSHOT_TIMEOUT_MS });
     return { sha: main, path: mainPath };
   };
@@ -167,8 +168,10 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
       const out = execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8', maxBuffer: 1 << 28, timeout: SNAPSHOT_TIMEOUT_MS });
       const info = JSON.parse(out);
       info.mainSource = mainSource;
+      info.proofCatalogue = PROOFS;
       return { out: JSON.stringify(info) };
     }
+    if (opts.label === 'proof') return runProof({ proofId: opts.proofId, factId: opts.factId, sha: opts.sha });
     n += 1;
     log(`codex: ${opts.label} (${modelOf(opts.model)})`);
     return codex(prompt, opts, scratch, n, context);
