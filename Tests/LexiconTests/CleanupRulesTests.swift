@@ -618,3 +618,7 @@ func cleanupPreservesProtectedTextAroundOrdinaryStutters(_ c: Case) {
     #expect(result.cleanup == .rulesOnly(.off))
     #expect(await engine.heard.count == 1)
 }
+
+@Test func commaAfterCanPreservesTheNextClauseModal() {
+    #expect(TextPass.run("We can, can you send that?", rules: .empty) == "We can, can you send that?")
+}

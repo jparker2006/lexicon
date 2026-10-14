@@ -272,8 +272,8 @@ enum Fillers {
         keptWords.last == "like" && (sentenceKept == 1 || kept[kept.count - 2].last.map { ",;:".contains($0) } == true)
     }
 
-    /// Match spelling forms without rewriting the retained word. Commas on words
-    /// that can end a clause stay boundaries ("Add it, it should pass").
+    /// Match spelling forms without rewriting the retained word. Only "the" and
+    /// an opening "I" match across a comma; other words may end a real clause.
     private static func stutterCount(_ tokens: [Token], at i: Int, kept: [String], words: [String],
                                      sentenceKept: Int, rules: RuleSet) -> Int {
         guard sentenceKept > 0 else { return 0 }
@@ -294,8 +294,8 @@ enum Fillers {
             }
         }
 
-        guard previous.word == word,
-              previous.trailing.isEmpty || (previous.trailing == "," && glue.contains(word)) else { return 0 }
+        let commaStutter = previous.trailing == "," && (word == "the" || (word == "i" && sentenceKept == 1))
+        guard previous.word == word, previous.trailing.isEmpty || commaStutter else { return 0 }
         if word == "will", previous.isName { return 0 }
         // The predicate after "what it was" needs its own "was"; an ordinary
         // "the build was was broken" still loses the stutter.
