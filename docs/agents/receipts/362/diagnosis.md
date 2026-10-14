@@ -215,8 +215,53 @@ interval has the disclosure allowed by DECISIONS item 67. Both safety regression
 failed first, then passed, along with the inspection matrix. The complete fixed
 invocation then passed all 76 cases with no failures, cancellations or skips
 in 67326 ms, leaving 52674 ms of observed phase margin. These are
-current diagnostic outcomes, with full-check/CI still reported separately in the
+intermediate diagnostic outcomes, with full-check/CI still reported separately in the
 PR. `safety-fix-evidence.tar.gz` retains the valid red/green and full-invocation
 logs plus the preceding review, with its SHA manifest. That prior review is
 explicitly incomplete because its archive-marker scan hit the guard; it is not
 the final code-review receipt.
+
+
+## Committed checkpoints and final fault repair
+
+The complete 76-case invocation was repeated on clean committed source
+`395e43bdcb9aa80ae070d00bacf9d376e9dda550`. It passed with no failures,
+cancellations or skips, reporting fixtures status 0 in 66140 ms.
+`checkpoint-source-sha.txt` and `checkpoint-395e43b.log` name that exact source
+and result. This establishes the missing source provenance for the preceding
+intermediate safety repair.
+
+The complete review at that checkpoint found four further boundary faults:
+a PID could change birth between census and signal; a killed primary keeper
+left its dormant fallback holding the command pipe; the native launcher's
+internal removal command depended on the target PATH; and losing all group
+actors plus process inspection left a known detached child alive. Each generated
+regression failed before repair. The valid red log records the intended signal,
+exit-status and child-completion assertions, with unrelated controls retained.
+
+The fallback now reads a separate backup pipe, so neither owner can split the
+other's command or leave a dormant reader after death. The deadline child holds
+no command descriptor. Direct unreaped detached leaders are cleaned through
+their ChildProcess ownership when neither pipe has a live reader, without
+requiring process inspection. Successful direct cleanup retires that handle.
+Positive-PID fallback checks the current kernel birth and group immediately
+before each signal. Internal launch commands use system paths; finite commands
+with a restricted PATH retain both zero and exit-23 outcomes. Every inspection
+is bounded; the keeper deadline remains the phase deadline plus 20 seconds.
+
+The complete fixed invocation ran on committed source
+`46068079684804bfaf6491909591ec36004cf949` with all 80 cases passing,
+zero failures, cancellations or skips, and fixtures status 0 in 70305 ms.
+The observed phase margin is 49695 ms within the unchanged 120000 ms limit.
+This diagnostic observation is not a performance assertion or a guarantee for
+other hosts. All five original files and their coverage remain in the same
+combined invocation; the four fault cases bring generated runner coverage to
+21 cases. That matrix also passed independently. The existing 300-second
+outer check and 45-minute CI boundaries remain unchanged.
+
+`fault-fix-evidence.tar.gz` retains both committed checkpoint source files,
+complete invocation logs, the valid fault red run, the 21-case green run and
+the preceding complete Workflow verdict. Its SHA manifest verifies every
+uncompressed member. The subsequent receipt-only commit changes no tested
+runner or fixture source. Finished-content repository-check and exact pushed
+head CI results remain separately reported in the PR.
