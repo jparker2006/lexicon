@@ -7,6 +7,7 @@
 //     and .env files, in Bash, in Read, Grep and Glob, and in the edit and write tools; a recursive search of a folder
 //     above the private one counts too. The permissions.deny rules come first; this is the
 //     backstop for the forms they miss;
+//   - Codex's login file (~/.codex/auth.json), a key like the .env files;
 //   - Keychain secret reads (`security find-generic-password` and kin) and scratch scripts
 //     that call SecItem's reader: a step that needs a key goes on the Live checks checklist;
 //   - osascript, open or kill aimed at Jake's daily Lexicon; scripts/install.sh and
@@ -68,6 +69,8 @@
 //     search with no path from a folder above the private one, and anything a script opens itself are
 //     not seen. gh, echo, printf and git commit, tag and notes only name paths, so only gh's body files are judged;
 //   - a SecItem reader is seen only in the source swift, swiftc, python or osascript is given;
+//   - Codex's login file is seen in a command's words (any command but echo, printf, git and gh) only where they name
+//     auth.json with .codex, or from ~/.codex; a script file that opens it is not read;
 //   - a recursive search is judged by its roots and one folder below them, and by the main checkout's .env;
 //   - deliberate hiding: a word built by a substitution (`$(echo icon)`), git and gh aliases, `security -i` on
 //     stdin, and a path inside a script or a heredoc body the guard doesn't parse. It is a seatbelt against honest
@@ -100,6 +103,7 @@ const REASONS = {
   handsFree: "Refused: a hands-free sitting has no step for Jake's Allow click after a reset of Lexicon Dev's permissions; put the reset on the next sitting's checklist.",
   private: "Refused: ~/Library/Application Support/Lexicon/ holds Jake's private data; agents never open it or search a folder above it (AGENTS.md). Lexicon Dev's folder is fine.",
   env: "Refused: .env files hold Jake's keys; agents never read or write them (AGENTS.md).",
+  codexLogin: "Refused: ~/.codex/auth.json holds Codex's login to Jake's ChatGPT plan, a key; agents never read or write it (AGENTS.md).",
   keychain: 'Refused: agents never read Keychain items (AGENTS.md); put the step that needs a key on the Live checks checklist.',
   daily: "Refused: Jake's daily Lexicon is his; only scripts/install.sh and scripts/live-lane.sh daily quit, open or kill it.",
   mergeScript: 'Refused: only the Reviewer merges, and only with scripts/merge-pr.mjs from the main checkout.',
@@ -148,7 +152,9 @@ const DAILY_ID = 'dev.jparker.lexicon';
 const DEV_ID = 'dev.jparker.lexicon.dev';
 const DAILY_APP = /\bdev\.jparker\.lexicon\b(?![.\w-])|\b(?:application|app|process)\s+"Lexicon(?:\.app)?"|(?:^|[\s/"'])Lexicon\.app\b/i;
 // Jake's private folder, as any home writes it. "Lexicon Dev" never matches: a space follows.
-const PRIVATE_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon(?:\/|$)/i;
+// Codex's login token, under any home, also inside a word such as an interpreter's script.
+const CODEX_LOGIN = /(?:^|\/)\.codex\/auth\.json(?![\w.-])/i;
+const PRIVATE_TEXT =/(?:^|\/)Library\/Application Support\/Lexicon(?:\/|$)/i;
 // Its models folder holds model weights, not private data, and Lexicon Dev's models folder links to it.
 const MODELS_TEXT = /(?:^|\/)Library\/Application Support\/Lexicon\/models(?:\/|$)/i;
 // A .env file, but not the templates that hold no keys.
@@ -941,6 +947,12 @@ function inModels(file, dir) {
 function pathRefusal(resolved, recursiveRead, write = false) {
   if (resolved === null) return null;
   const files = unique([resolved, realOrSelf(resolved)]);
+  // reach reads globs and ignores case, so `~/.codex/*` and `AUTH.JSON` count, and so does a recursive read of a folder above it.
+  const login = path.join(homedir(), '.codex/auth.json');
+  const reachesLogin = (file) => {
+    const reached = reach(file, login);
+    return reached === 'inside' || (recursiveRead && reached === 'above');
+  };
   for (const file of files) {
     if (namesPrivate(file) || (write && PRIVATE_TEXT.test(file))) return REASONS.private;
     for (const dir of privateDirs()) {
@@ -949,6 +961,7 @@ function pathRefusal(resolved, recursiveRead, write = false) {
       if (reached === 'inside' || (recursiveRead && reached === 'above')) return REASONS.private;
     }
   }
+  if (files.some((file) => CODEX_LOGIN.test(file) || reachesLogin(file))) return REASONS.codexLogin;
   return files.some((file) => envName(path.basename(file))) ? REASONS.env : null;
 }
 
@@ -1053,6 +1066,23 @@ function envSearchRefusal(name, args, cwd) {
   return null;
 }
 
+// Commands that only carry text: a commit message, a PR body or an echo may name Codex's login file freely.
+const LOGIN_TEXT_ONLY = new Set([...NAMES_ONLY, 'git', 'gh']);
+
+/**
+ * Why a command is refused for opening Codex's login file, or null: its words name auth.json together with .codex, or
+ * name auth.json while the shell sits in ~/.codex. Any command that runs code counts, not a list of interpreters, so a
+ * path an inline script builds from parts is seen under any interpreter, version or runner. Script files are not
+ * read: the guard and its tests name the file.
+ */
+function codexLoginScriptRefusal(name, command, cwd) {
+  if (LOGIN_TEXT_ONLY.has(name)) return null;
+  const source = text(command);
+  if (!/auth\.json/i.test(source)) return null;
+  const inCodexHome = typeof cwd === 'string' && reach(cwd, path.join(homedir(), '.codex')) === 'inside';
+  return inCodexHome || /\.codex\b/i.test(source) ? REASONS.codexLogin : null;
+}
+
 /**
  * Why a command is refused for reading a Keychain secret, or null: security's secret reads, gh's token, git's credential
  * helpers, or a script that calls SecItem's reader or shells out to security.
@@ -1118,6 +1148,7 @@ function check(command, cwd) {
     dataRefusal(name, args, gh, cwd) ??
     envSearchRefusal(name, args, cwd) ??
     keychainRefusal(name, args, gh, command, cwd) ??
+    codexLoginScriptRefusal(name, command, cwd) ??
     dailyRefusal(name, args, command, cwd) ??
     buildRefusal(name, args);
   if (ruled) return ruled;

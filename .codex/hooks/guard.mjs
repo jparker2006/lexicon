@@ -19,7 +19,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const GUARD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.claude/hooks/guard.mjs');
-const PATCH_FILE = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm;
+// Indented or oddly spaced headers too: a header the adapter can't see is a file it never judges.
+const PATCH_FILE = /^[ \t]*\*\*\* (?:Add File|Update File|Delete File|Move to):[ \t]*(.+?)[ \t]*$/gim;
 
 /** The guard-shaped calls one Codex tool call stands for. */
 export function guardCalls(toolName, toolInput) {

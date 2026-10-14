@@ -711,6 +711,54 @@ test("refuses Edit, Write, MultiEdit and NotebookEdit in Jake's private folder o
   ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
 });
 
+test("refuses reading or writing Codex's login file, in every tool", (t) => {
+  const home = fakeHome(t);
+  const options = { home };
+  const auth = path.join(home, '.codex/auth.json');
+  mkdirSync(path.join(home, '.codex'));
+  for (const [tool, input] of [
+    ['Read', { file_path: auth }],
+    ['Write', { file_path: auth, content: '{}' }],
+    ['Bash', { command: 'cat ~/.codex/auth.json' }],
+    ['Bash', { command: `jq . ${auth}` }],
+    ['Read', { file_path: path.join(home, '.codex/AUTH.JSON') }],
+    ['Bash', { command: 'cat ~/.codex/*' }],
+    ['Bash', { command: 'cat ~/.codex/auth.*' }],
+    ['Bash', { command: 'grep -r token ~/.codex' }],
+    ['Bash', { command: 'cd ~/.codex && grep -rn token .' }],
+    ['Grep', { pattern: 'token', path: path.join(home, '.codex') }],
+    ['Edit', { file_path: auth, old_string: 'a', new_string: 'b' }],
+    ['Bash', { command: `python3 -c "print(open('/Users/someone/.codex/auth.json').read())"` }],
+    ['Bash', { command: `node -e "console.log(require('fs').readFileSync('${auth}', 'utf8'))"` }],
+    ['Bash', { command: `python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `node -e "const p = require('path'); console.log(require('fs').readFileSync(p.join(require('os').homedir(), '.codex/auth.json'), 'utf8'))"` }],
+    ['Bash', { command: `cd ~/.codex && python3 -c "print(open('auth.json').read())"` }],
+    ['Bash', { command: `python3.13 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `uv run python -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `ruby -e "puts File.read(File.join(Dir.home, '.codex', 'auth.json'))"` }],
+    ['Bash', { command: `python3.13t -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `arch -arm64 python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `echo x | xargs python3 -c "import os; print(open(os.path.join(os.path.expanduser('~'), '.codex', 'auth.json')).read())"` }],
+    ['Bash', { command: `lua -e "print(io.open(os.getenv('HOME') .. '/.codex/' .. 'auth.json'):read('a'))"` }],
+  ]) {
+    const verdict = runTool(tool, input, options);
+    assert.equal(verdict.allowed, false, `expected a refusal: ${tool} ${JSON.stringify(input)}`);
+    assert.match(verdict.reason, /Codex's login/);
+  }
+  for (const [tool, input] of [
+    ['Read', { file_path: path.join(home, '.codex/config.toml') }],
+    ['Bash', { command: 'codex --version' }],
+    ['Bash', { command: 'cat ~/.codex/config.toml' }],
+    ['Bash', { command: `python3 -c "import json; print(json.load(open('package.json')))"` }],
+    ['Bash', { command: `cd ~/.codex && python3 -c "print(open('config.toml').read())"` }],
+    ['Bash', { command: 'git log --grep "auth.json" -- .codex' }],
+    ['Bash', { command: 'git commit -m "guard: refuse ~/.codex/auth.json"' }],
+    ['Bash', { command: 'echo "Codex keeps its login in ~/.codex/auth.json"' }],
+    ['Bash', { command: 'gh issue comment 1 --body "the guard refuses .codex/auth.json"' }],
+    ['Glob', { pattern: '*', path: path.join(home, '.codex') }],
+  ]) assert.deepEqual(runTool(tool, input, options), { allowed: true }, `expected it allowed: ${tool} ${JSON.stringify(input)}`);
+});
+
 test('refuses Keychain secret reads and scratch SecItem readers, naming the Live checks checklist', (t) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'guard-secitem-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
