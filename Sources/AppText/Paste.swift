@@ -47,16 +47,27 @@ import KeyInput
     /// ⌃⌘V: returns once no modifier and neither the hotkey's key nor the layout's "v"
     /// is down (polled every 10 ms), or after `keysWait`, and logs how long it took.
     func keysReleased() async {
-        let start = ContinuousClock.now
-        while Self.keysDown(), ContinuousClock.now - start < Self.keysWait {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        let waited = (ContinuousClock.now - start) / .milliseconds(1)
-        if Self.keysDown() {
-            log.notice("paste-last: keys still down after \(Int(waited), privacy: .public) ms; pasting anyway")
+        let result = await Self.waitForKeysReleased(clock: ContinuousClock(), keysDown: Self.keysDown)
+        let waited = Int(result.waited / .milliseconds(1))
+        if result.stillDown {
+            log.notice("paste-last: keys still down after \(waited, privacy: .public) ms; pasting anyway")
         } else {
-            log.notice("paste-last: keys up after \(Int(waited), privacy: .public) ms")
+            log.notice("paste-last: keys up after \(waited, privacy: .public) ms")
         }
+    }
+
+    /// The same bounded poll on a real clock or a test clock, with key state read
+    /// afresh after every sleep. Cancellation ends the wait without busy polling.
+    static func waitForKeysReleased<C: Clock>(clock: C, keysDown: @MainActor () -> Bool) async
+        -> (waited: Duration, stillDown: Bool) where C.Duration == Duration {
+        let start = clock.now
+        let deadline = start.advanced(by: keysWait)
+        while keysDown(), clock.now < deadline {
+            do {
+                try await clock.sleep(until: min(deadline, clock.now.advanced(by: .milliseconds(10))), tolerance: .zero)
+            } catch { break }
+        }
+        return (start.duration(to: clock.now), keysDown())
     }
 
     private static func keysDown() -> Bool {

@@ -13,6 +13,9 @@ extension Conductor {
             log.notice("paste-last: nothing to paste")
             return emit(.notice(.nothingToPaste))
         }
+        // The hotkey can repeat while held. Its repeats precede this paste's mark,
+        // and waiting for release does not spend the fieldless paste window.
+        await destination.prepareForPasteLast()
         guard let target = await destination.target() else {
             log.notice("paste-last \(newest.id, privacy: .public): no target")
             return emit(.notice(.noFieldToPaste))

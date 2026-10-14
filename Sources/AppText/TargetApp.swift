@@ -114,8 +114,12 @@ public actor TargetApp: TextDestination {
 
     private static let log = Logger(subsystem: "Lexicon", category: "paste")
 
+    public func prepareForPasteLast() async {
+        await Paster.shared.keysReleased()
+    }
+
     public func target() async -> Target? {
-        // Both name the moment the target is taken (fn-up, or the ⌃⌘V press): the mark
+        // Both name the moment the target is taken (fn-up, or after ⌃⌘V releases): the mark
         // for typing since, the time for the fieldless window.
         let mark = input.mark(), capturedAt = ContinuousClock.now
         guard let focus = Focus.now() else {

@@ -14,9 +14,6 @@ import WordStore
 // Paste-last prepares the held hotkey before taking the focus and InputClock mark.
 // The synthetic wait drives the real guard and clock without keys, sleeps, or a live app.
 private let preparationSpeech = "Please rename the fetchUser hook."
-private let preparationModel = SpeechModel.local(.parakeetUnified)
-private let preparationAudio = AudioSummary(duration: .milliseconds(1_200), startGap: .milliseconds(40),
-                                            deviceName: "Mic", storage: .onDisk, gaps: [])
 private let preparationFocus = FocusSnapshot(pid: 42, fieldFingerprint: nil)
 
 private actor PreparationDestination: TextDestination {
@@ -42,8 +39,7 @@ private actor PreparationDestination: TextDestination {
     func context() -> AppContext { .unknown }
     func appChanges() -> AsyncStream<AppContext> { AsyncStream { $0.yield(.unknown) } }
 
-    // This extra method compiles before it becomes a TextDestination requirement.
-    // Once Conductor calls it, the simulated key repeat and wait finish before target().
+    // The simulated key repeat and wait finish before target().
     func prepareForPasteLast() async {
         calls.append("prepare")
         advanceThroughKeyWait()

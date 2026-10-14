@@ -10,8 +10,6 @@ protocol PasteLane: Sendable {
     func idle() async
     /// Puts the text up and sends Cmd-V now, without waiting.
     func paste(_ text: String, as kind: PasteKind) async -> PasteAttempt
-    /// Returns once no key Jake is holding could join or swallow Lexicon's Cmd-V.
-    func keysReleased() async
 }
 
 enum PasteAttempt: Equatable {
@@ -41,9 +39,6 @@ enum PasteOrder {
                           check: () -> (InsertDecision, Seen)) async -> Result<Seen> {
         // Cmd-V of nothing still replaces whatever Jake has selected.
         guard !text.isBlank else { return .failed }
-        // ⌃⌘V: Jake's fingers are still on the keys he pressed. A Cmd-V posted while they
-        // are down never reaches the app as Cmd-V, so the paste waits for them first.
-        if kind == .pasteLast { await lane.keysReleased() }
         while true {
             await lane.idle()
             let checkedAt = ContinuousClock.now

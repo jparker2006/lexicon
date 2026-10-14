@@ -4,7 +4,6 @@ import LexiconDomain
 
 /// A lane whose earlier paste stays unread until the test says so.
 private actor SlowLane: PasteLane {
-    func keysReleased() {}
     private var unread = true
     private var waiting: [CheckedContinuation<Void, Never>] = []
     private(set) var pasted: [String] = []
@@ -65,7 +64,6 @@ private actor Desk {
 
 /// A lane on a Mac where Jake denied Lexicon "Paste from Other Apps".
 private struct DeniedLane: PasteLane {
-    func keysReleased() {}
     func idle() async {}
     func paste(_ text: String, as kind: PasteKind) -> PasteAttempt { .denied }
 }
@@ -94,10 +92,9 @@ func blankTextIsNeverPasted(_ text: String) async {
     #expect(await lane.pasted.isEmpty)
 }
 
-/// Records the lane calls in order: ⌃⌘V's own keys must be up before its check and Cmd-V.
+/// Records the calls once a paste has a prepared target.
 private actor RecordingLane: PasteLane {
     private(set) var calls: [String] = []
-    func keysReleased() { calls.append("keysReleased") }
     func idle() { calls.append("idle") }
     func paste(_ text: String, as kind: PasteKind) -> PasteAttempt {
         calls.append("paste")
@@ -105,15 +102,13 @@ private actor RecordingLane: PasteLane {
     }
 }
 
-@Test func aPasteLastWaitsForJakesKeysToBeUpBeforeItsCheckAndCmdV() async {
-    // Jake's real ⌃⌘V: his fingers are still on ⌃, ⌘ and V when the paste is ready.
-    // A Cmd-V posted then is not read by the app; it waits for the keys first.
+@Test func aPreparedPasteLastWaitsForEarlierPastesBeforeItsCheckAndCmdV() async {
     let lane = RecordingLane()
     let field = FocusSnapshot(pid: 7, fieldFingerprint: "notes#1")
     _ = await PasteOrder.run("pasted", as: .pasteLast, lane: lane) {
         (InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false, sinceCapture: .zero), field)
     }
-    #expect(await lane.calls == ["keysReleased", "idle", "paste"])
+    #expect(await lane.calls == ["idle", "paste"])
 }
 
 @Test func aDictationNeverWaitsForKeys() async {

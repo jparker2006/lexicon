@@ -109,6 +109,7 @@ No test target depends on an executable target: every test target links into one
 - A capture is stopped, and an attempt finished, at most once: both are `~Copyable` with `consuming` methods.
 - One list each, compiler-checked: providers, statuses (index predicates and retention derive from the enum), key commands, inbox messages, History events.
 - The late-text rule runs on every insert: `InsertGuard.decide` is a pure function with no grace window.
+- A ⌃⌘V paste waits up to 1 s for its keys to be released before capturing its target and input mark. Holding V into autorepeat cannot invalidate its own paste, and the key wait does not consume the 5 s fieldless window. The late-text check still runs after any earlier unread paste.
 - Text is never typed twice: a row left in `ready` after a crash becomes `notInserted` (reason `interrupted`) at launch; paste-last still reaches it.
 
 ### One push-to-talk Dictation

@@ -19,7 +19,12 @@ public protocol TextDestination: Sendable {
     /// focus moves into an always-private app (#5).
     func appChanges() async -> AsyncStream<AppContext>
 
-    /// At stop: the focused field plus an input mark. nil when nothing can take text.
+    /// ⌃⌘V: waits for the initiating keys to be released before capturing a fresh target.
+    /// Headless destinations have no physical keys to wait for.
+    func prepareForPasteLast() async
+
+    /// At stop, or after ⌃⌘V releases: the focused field and an input mark.
+    /// nil when nothing can take text.
     func target() async -> Target?
 
     /// Quit: returns once the last paste no longer holds Jake's clipboard.
@@ -37,6 +42,8 @@ public protocol TextDestination: Sendable {
 }
 
 extension TextDestination {
+    public func prepareForPasteLast() async {}
+
     /// A destination that never pastes holds no clipboard.
     public func finishClipboard() async {}
 
