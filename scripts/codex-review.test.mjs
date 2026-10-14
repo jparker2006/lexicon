@@ -259,6 +259,23 @@ function stopGrandchildren(pidFile) {
   }
 }
 
+test('ordinary fixture Git calls exec Git directly and preserve its output and failure', t => {
+  const f = fixture(t);
+  const marker = path.join(f.dir, 'unneeded-node-launch');
+  const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+  const wrapper = path.join(f.binDir, 'git');
+  writeFileSync(path.join(f.binDir, 'node'), `#!/bin/sh\nif [ "$1" = ${quote(wrapper)} ]; then : > ${quote(marker)}; fi\nexec ${quote(process.execPath)} "$@"\n`);
+  chmodSync(path.join(f.binDir, 'node'), 0o755);
+  const env = { ...process.env, PATH: `${f.binDir}:${process.env.PATH}`, FAKE_REAL_GIT: REAL_GIT };
+  const success = spawnSync(wrapper, ['rev-parse', 'HEAD'], { cwd: f.repo, env, encoding: 'utf8' });
+  assert.equal(success.status, 0, success.stderr);
+  assert.equal(success.stdout.trim(), f.sha);
+  const failure = spawnSync(wrapper, ['rev-parse', '--verify', 'missing-ref'], { cwd: f.repo, env, encoding: 'utf8' });
+  assert.notEqual(failure.status, 0);
+  assert.match(failure.stderr, /fatal:/);
+  assert.equal(existsSync(marker), false, 'ordinary Git operations need no fake Node interpreter');
+});
+
 test('a reviewer-mode run prints the Review table merge-pr.mjs accepts, with Codex models in its Helpers line', (t) => {
   const f = fixture(t);
   const { markdown, result, calls } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' });
