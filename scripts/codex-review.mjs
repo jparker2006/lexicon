@@ -13,7 +13,7 @@
 // risks?, findings?, sideBySide?}). Run it from the checkout under review. It prints the
 // markdown; --out also writes the Workflow's whole result as JSON. CODEX_BIN names the
 // codex binary (default: codex on PATH); CODEX_REVIEW_HELPER_TIMEOUT_MS a helper's deadline.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -73,7 +73,7 @@ async function codex(prompt, opts, scratch, n, context) {
   const schemaFile = path.join(scratch, `${n}.schema.json`);
   const outFile = path.join(scratch, `${n}.out.json`);
   writeFileSync(schemaFile, JSON.stringify(strict(opts.schema || { type: 'object', properties: { out: { type: 'string' } } })));
-  const instructions = `GitHub context (issue and spec with every comment, open PRs with changed paths) is cached at ${context}. Read that file instead of running the prompt's gh commands; this helper runs in a read-only sandbox.\n\n${prompt}`;
+  const instructions = `GitHub context (issue/spec with every comment, open PRs, current main and merge-tree checks) is cached at ${context}. Read it instead of running the prompt's gh commands. Repository metadata is at ${process.cwd()}: use git -C with that path and explicit shas for history, while reading code only from the supplied snapshot. This helper runs in a read-only sandbox; use the parent's cached merge-tree results rather than writing Git objects.\n\n${prompt}`;
   const full = opts.agentType ? `${rolePrompt(opts.agentType)}\n---\n\n${instructions}` : instructions;
   const args = [
     'exec', '--ephemeral', '--color', 'never',
@@ -84,7 +84,11 @@ async function codex(prompt, opts, scratch, n, context) {
     '-c', `model_reasoning_effort="${EFFORTS[opts.model] ?? 'high'}"`,
     '--output-schema', schemaFile, '-o', outFile, '-',
   ];
-  const child = spawn(process.env.CODEX_BIN || 'codex', args, { detached: true, stdio: ['pipe', 'ignore', 'pipe'] });
+  // Helpers need runtime paths and locale, not arbitrary caller secrets. Fixture
+  // controls are explicit too; no credential or provider-key variables pass through.
+  const allowed = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'NO_COLOR', 'CODEX_HOME', 'FAKE_CODEX_LOG', 'FAKE_CODEX_HANG', 'FAKE_CODEX_GRANDCHILD_PIDS'];
+  const env = Object.fromEntries(allowed.filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]));
+  const child = spawn(process.env.CODEX_BIN || 'codex', args, { env, detached: true, stdio: ['pipe', 'ignore', 'pipe'] });
   let err = '';
   child.stderr.on('data', (d) => { err = (err + d).slice(-8192); });
   child.stdin.on('error', () => {}); // A failed spawn or early exit is reported below.
@@ -119,21 +123,35 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
   // review acceptance criteria or decisions it could not read.
   const suppliedContext = process.env.CODEX_REVIEW_CONTEXT_FILE;
   const fetch = (argv) => JSON.parse(execFileSync('gh', argv, { encoding: 'utf8', timeout: 60_000, maxBuffer: 8 << 20 }));
-  try {
-    writeFileSync(context, suppliedContext ? readFileSync(suppliedContext, 'utf8') : JSON.stringify({
+  const cacheContext = () => {
+    if (suppliedContext) { writeFileSync(context, readFileSync(suppliedContext, 'utf8')); return; }
+    const git = argv => execFileSync('git', argv, { encoding: 'utf8', timeout: 60_000 }).trim();
+    const main = git(['rev-parse', 'origin/main']);
+    const own = new Set(git(['diff', '--name-only', git(['merge-base', args.sha, main]), args.sha]).split('\n'));
+    const mergeTree = head => {
+      const result = spawnSync('git', ['merge-tree', '--write-tree', '--name-only', '--no-messages', args.sha, head], { encoding: 'utf8', timeout: 60_000 });
+      if (result.error || ![0, 1].includes(result.status)) throw result.error || new Error(result.stderr);
+      return { status: result.status, output: result.stdout.trim() };
+    };
+    const openPRs = fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,files,headRefOid']).map(pr => {
+      const shared = pr.files.map(f => f.path).filter(p => own.has(p));
+      if (!shared.length) return { ...pr, shared, mergeTree: null };
+      git(['fetch', '-q', 'origin', `pull/${pr.number}/head`]);
+      return { ...pr, shared, mergeTree: mergeTree(pr.headRefOid) };
+    });
+    writeFileSync(context, JSON.stringify({
+      repository: process.cwd(), main, mainMergeTree: mergeTree(main), openPRs,
       issue: fetch(['issue', 'view', String(args.issue), '--json', 'body,comments']),
       spec: fetch(['issue', 'view', '36', '--json', 'body,comments']),
-      openPRs: fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,files']),
     }));
-  } catch (e) {
-    rmSync(scratch, { recursive: true, force: true });
-    throw e;
-  }
+  };
   let n = 0;
   const agent = async (prompt, opts = {}) => {
     if (opts.label === 'snapshot') {
       const command = prompt.slice(prompt.indexOf('node --input-type=module'));
-      return { out: execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8', maxBuffer: 1 << 28, timeout: SNAPSHOT_TIMEOUT_MS }) };
+      const out = execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8', maxBuffer: 1 << 28, timeout: SNAPSHOT_TIMEOUT_MS });
+      cacheContext();
+      return { out };
     }
     n += 1;
     log(`codex: ${opts.label} (${modelOf(opts.model)})`);

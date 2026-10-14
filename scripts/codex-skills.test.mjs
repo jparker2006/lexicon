@@ -2,12 +2,12 @@
 // with no dependence on Jake's installed skill folders or a Codex installation.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { audit, requiredSkills, workflowSkills } from './codex-skills.mjs';
+import { audit, requiredSkills, workflowSkills, skillInventory } from './codex-skills.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(REPO, 'scripts/codex-skills.mjs');
@@ -49,13 +49,13 @@ test('workflowSkills extracts active pstack and Matt Pocock entries from the Too
     '| pstack architect | Invoke `/pstack:architect`. |',
     '| pstack swarm | Invoke `/pstack:swarm`. |',
     '| pstack correct | Invoke `/pstack:correct`. |',
-    '| pstack retro | Invoke `/pstack:retro`. |',
+    '| Matt Pocock retro | Invoke `/mattpocock-skills:retro`. |',
     '| Deliberately not used | Never invoke `/pstack:babysit`. |',
     '| Matt Pocock `tdd` skill | Use `tdd` from `~/.agents/skills`. |',
   ].join('\n');
 
   assert.deepEqual(workflowSkills(markdown).sort(), [
-    'pstack:architect', 'pstack:swarm', 'pstack:correct', 'pstack:retro', 'tdd',
+    'pstack:architect', 'pstack:swarm', 'pstack:correct', 'retro', 'tdd',
   ].sort());
 });
 
@@ -63,7 +63,7 @@ test('requiredSkills returns path descriptors and includes workflow pstack skill
   const skills = requiredSkills();
   assert.ok(skills.every((skill) => typeof skill.name === 'string' && typeof skill.path === 'string' && typeof skill.explicitOnly === 'boolean'));
   const names = new Set(skills.map((skill) => skill.name));
-  for (const name of ['pstack:architect', 'pstack:swarm', 'pstack:correct', 'pstack:retro', 'tdd']) {
+  for (const name of ['pstack:architect', 'pstack:swarm', 'pstack:correct', 'retro', 'tdd']) {
     assert.ok(names.has(name), `workflow skill ${name} is required`);
   }
   assert.deepEqual(skills.find((skill) => skill.name === 'implement-ticket'), {
@@ -107,12 +107,12 @@ test('a global skill with the same name cannot satisfy a repo skill path require
 
 test('an explicit-only skill absent from prompt input is satisfied by an enabled inventory path', () => {
   const expected = [{
-    name: 'pstack:retro',
-    path: '/fixture/pstack/skills/retro/SKILL.md',
+    name: 'retro',
+    path: '/fixture/mattpocock/skills/retro/SKILL.md',
     explicitOnly: true,
   }];
   const inventory = [{
-    skills: [{ name: 'pstack:retro', path: expected[0].path, enabled: true }],
+    skills: [{ name: 'retro', path: expected[0].path, enabled: true }],
     errors: [],
   }];
 
@@ -121,16 +121,16 @@ test('an explicit-only skill absent from prompt input is satisfied by an enabled
 
 test('explicit-only inventory entries fail when disabled or at a different path', () => {
   const expected = [{
-    name: 'pstack:retro',
-    path: '/fixture/pstack/skills/retro/SKILL.md',
+    name: 'retro',
+    path: '/fixture/mattpocock/skills/retro/SKILL.md',
     explicitOnly: true,
   }];
   const inventories = [
-    [{ skills: [{ name: 'pstack:retro', path: expected[0].path, enabled: false }], errors: [] }],
-    [{ skills: [{ name: 'pstack:retro', path: '/fixture/other/retro/SKILL.md', enabled: true }], errors: [] }],
+    [{ skills: [{ name: 'retro', path: expected[0].path, enabled: false }], errors: [] }],
+    [{ skills: [{ name: 'retro', path: '/fixture/other/retro/SKILL.md', enabled: true }], errors: [] }],
   ];
 
-  for (const inventory of inventories) assert.deepEqual(audit('[]', expected, inventory), ['pstack:retro']);
+  for (const inventory of inventories) assert.deepEqual(audit('[]', expected, inventory), ['retro']);
 });
 
 function runAudit(t, promptText, expected) {
@@ -146,6 +146,31 @@ function runAudit(t, promptText, expected) {
     timeout: 10_000,
   });
 }
+
+test('local inventory uses only initialize and skills/list RPCs with the selected cwd', async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'codex-inventory-test-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const log = path.join(dir, 'requests.json');
+  const bin = path.join(dir, 'codex');
+  writeFileSync(bin, `#!/usr/bin/env node
+const fs = require('node:fs');
+const readline = require('node:readline');
+const requests = [];
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  requests.push(request);
+  fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify(requests));
+  const result = request.method === 'initialize' ? {} : { data: [{ skills: [{ name: 'retro', path: '/fixture/retro/SKILL.md', enabled: true }], errors: [] }] };
+  process.stdout.write(JSON.stringify({ id: request.id, result }) + '\\n');
+});
+`);
+  chmodSync(bin, 0o755);
+  const result = await skillInventory(bin, dir);
+  assert.equal(result[0].skills[0].name, 'retro');
+  const requests = JSON.parse(readFileSync(log, 'utf8'));
+  assert.deepEqual(requests.map(r => r.method), ['initialize', 'skills/list']);
+  assert.deepEqual(requests[1].params.cwds, [dir]);
+});
 
 test('CLI exits zero and reports every required skill visible in a fake positive prompt-input', (t) => {
   const expected = ['implement-ticket', 'grilling', 'pstack:swarm'];

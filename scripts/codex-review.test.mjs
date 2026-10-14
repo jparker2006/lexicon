@@ -200,7 +200,7 @@ test('a timed-out helper with a stderr-holding grandchild leaves the run unstamp
     // Wait for the process-death signal, not a machine-speed threshold. The
     // deadline only bounds a leaked descendant before the fallback cleanup.
     const deadline = Date.now() + 10_000;
-    while (pids.some(alive) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+    while (pids.some(alive) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20)); // timing-ok: poll for the explicit process-death signal
     assert.ok(pids.every(pid => !alive(pid)), 'production cleanup stopped each grandchild before test cleanup');
   } finally {
     stopGrandchildren(pidFile);
