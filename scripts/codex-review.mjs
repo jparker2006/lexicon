@@ -164,9 +164,14 @@ function testCommand(cwd, filter) {
     const scheduler = homes.map(home => path.join(home, 'Library/Application Support/Lexicon Dev/heavy'));
     const readable = [...writable, ...scheduler, common, process.execPath];
     const restriction = exceptions => `(require-all (require-any ${homes.map(home => `(subpath ${JSON.stringify(home)})`).join(' ')}) ${exceptions.map(dir => `(require-not (subpath ${JSON.stringify(canonical(dir))}))`).join(' ')})`;
+    // Source must stay pinned throughout execution, including edits restored
+    // before the final comparison. Only generated build products are writable.
     const profile = `(version 1)(allow default)(deny network*)
       (deny file-read-data ${restriction(readable)})
       (deny file-write* ${restriction(writable)})
+      (deny file-write* (require-all (subpath ${JSON.stringify(canonical(cwd))})
+        (require-not (subpath ${JSON.stringify(canonical(path.join(cwd, '.build')))}))))
+      (deny file-write* (subpath ${JSON.stringify(canonical(common))}))
       (deny mach-lookup (global-name "com.apple.securityd"))`;
     env.GIT_CONFIG_GLOBAL = '/dev/null';
     env.GIT_CONFIG_NOSYSTEM = '1';
