@@ -168,7 +168,7 @@ test('strict closes every object and requires every property, nested ones too', 
   assert.equal(s.properties.a.items.additionalProperties, false);
 });
 
-test('a timed-out helper with a stderr-holding grandchild leaves the run unstamped without hanging', (t) => {
+test('a timed-out helper with a stderr-holding grandchild leaves the run unstamped without hanging', async (t) => {
   const f = fixture(t);
   const pidFile = path.join(f.dir, 'grandchild-pids');
   const { run, out } = runReview(f, { issue: 1, sha: f.sha }, {
@@ -182,6 +182,16 @@ test('a timed-out helper with a stderr-holding grandchild leaves the run unstamp
     const result = JSON.parse(readFileSync(out, 'utf8'));
     assert.match(run.stdout, /^Not stamped \(INCOMPLETE below\)/m);
     assert.equal(result.reviewedSha, null);
+    const pids = readFileSync(pidFile, 'utf8').trim().split('\n').map(Number);
+    assert.ok(pids.length > 0 && pids.every(pid => Number.isInteger(pid) && pid > 0), 'the fixture started and recorded a grandchild');
+    const alive = pid => {
+      try { process.kill(pid, 0); return true; } catch (e) { if (e.code === 'ESRCH') return false; throw e; }
+    };
+    // Wait for the process-death signal, not a machine-speed threshold. The
+    // deadline only bounds a leaked descendant before the fallback cleanup.
+    const deadline = Date.now() + 10_000;
+    while (pids.some(alive) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(pids.every(pid => !alive(pid)), 'production cleanup stopped each grandchild before test cleanup');
   } finally {
     stopGrandchildren(pidFile);
   }

@@ -5,7 +5,7 @@ description: "Build one Lexicon issue end to end as a builder, from claim to a P
 
 # Implement one ticket
 
-Every builder follows this once per ticket; a builder given a sequence runs it for each in order. Builders are local Claude Code sessions, each in its own worktree. Each step ends on its **done** line. The scripts named here refuse what M0 builders got wrong, so use them rather than the `gh` commands they wrap.
+Every builder follows this once per ticket; a builder given a sequence runs it for each in order. Builders use their own worktree. On Codex, follow [codex.md](../../../docs/agents/codex.md) for the role setup and tool mappings. Each step ends on its **done** line. The scripts named here refuse what M0 builders got wrong, so use them rather than the `gh` commands they wrap.
 
 ## 1. Read
 
@@ -20,21 +20,21 @@ Every builder follows this once per ticket; a builder given a sequence runs it f
 ## 2. Claim
 
 - `scripts/ticket.sh claim N` comments the claim and swaps the labels. It refuses another builder's claim (stop and say so), a blocker not merged, and a ticket that changes `.claude/settings.json` with no recorded Jake yes (ask him: Need Jake). Your own earlier claim, on a continuation, means go on.
-- When the ticket's Modules line names 3 or more modules under `Sources/`, run `/pstack:architect` (call the Skill tool with "pstack:architect") with Opus or Sonnet runners before any code. On Codex ([codex.md](../../../docs/agents/codex.md)): pstack is Claude-only; sketch the types and signatures yourself, or with two `spawn_agent` helpers, and post the same `Sketch:`. Post the sketch on the issue as one comment headed `Sketch:`; a `Sketch:` line in the PR's Summary links it, and `pr-body-check` refuses the body without one.
+- When the ticket's Modules line names 3 or more modules under `Sources/`, run `/pstack:architect` (call the Skill tool with "pstack:architect") with Opus or Sonnet runners before any code. On Codex ([codex.md](../../../docs/agents/codex.md)), invoke the installed `pstack:architect` skill by name and follow its Codex tool mapping. A missing skill is a setup failure. Post the sketch on the issue as one comment headed `Sketch:`; a `Sketch:` line in the PR's Summary links it, and `pr-body-check` refuses the body without one.
 
 **Done:** the issue shows your claim and `building`, and a sketch when the ticket needed one.
 
 ## 3. Build test-first
 
 - `git fetch origin`, then branch from `origin/main` as `claude/issue-N` in your own worktree. A continuation fetches its branch and carries on from it.
-- **Tests first.** Before any code, start one `test-writer` per acceptance criterion of a code ticket. Run its tests red (`scripts/test.sh --filter <name>`) and commit them as your first commit: they are the starting point, and the red run goes in the PR's Before line. Then call the Skill tool with "mattpocock-skills:tdd" and build one vertical slice at a time, red before green, at the seam the issue names. Test through the highest public seam (the headless pipeline on a WAV, then the pure seams), never by reading source. A bug fix starts with a test that fails before the fix. Docs-only work needs no test.
-- On Codex ([codex.md](../../../docs/agents/codex.md)): a typed helper is `spawn_agent` with `agent_type` set to its name (`.codex/agents/<name>.toml`), at most 6 at once; a swarm is the same, in waves of 6.
-- **Helpers.** CLAUDE.md's sizing table says how many by ticket type, and its Swarms list says when to run `/pstack:swarm` (10 or more same-shape pieces, every flake or hang fix, any change to Cleanup, StructuralCheck, Terms or folding, Code Terms or the scorer). Go by the job type, not by how small the job feels.
+- **Tests first.** Before any code, start one `test-writer` per acceptance criterion of a code ticket. Run its tests red (`scripts/test.sh --filter <name>`) and commit them as your first commit: they are the starting point, and the red run goes in the PR's Before line. Then call the Skill tool with "mattpocock-skills:tdd" and build one vertical slice at a time, red before green, at the seam the issue names. On Codex, invoke the installed `tdd` skill from `~/.agents/skills` by its discovered name. Test through the highest public seam (the headless pipeline on a WAV, then the pure seams), never by reading source. A bug fix starts with a test that fails before the fix. Docs-only work needs no test.
+- On Codex ([codex.md](../../../docs/agents/codex.md)): a typed helper uses `spawn_agent` with `agent_type` set to its name (`.codex/agents/<name>.toml`), at most 6 concurrent helpers. Its role file's model and effort override explicit spawn values. To honor Jake's different model choice, use the default agent with the helper prompt and explicit model and effort, or update the role file. Defaults are not a model policy.
+- **Helpers.** CLAUDE.md's sizing table says how many by ticket type, and its Swarms list says when to run `/pstack:swarm` (10 or more same-shape pieces, every flake or hang fix, any change to Cleanup, StructuralCheck, Terms or folding, Code Terms or the scorer). On Codex, invoke the installed `pstack:swarm` skill and follow its Codex mapping. Go by the job type, not by how small the job feels.
   - Scouts (`Explore`) fetch only what you won't read yourself: other PRs and their overlap, upstream code and its license, platform facts, CI logs. Each brief lists the files you have already read as do-not-read. Write tests while scouts run; don't wait on them.
   - Editors (`editor`) take any part with a precise brief, tests or production, each in its own files. You review every editor's diff.
   - An untyped helper always gets a model and an effort, as CLAUDE.md says. At most 20 run at once.
   - Keep each helper's one-line disposition for the PR's Helpers line.
-- **Numbers.** A lag, memory or speed number comes from `bench-runner`'s table over samples the Live checks session saved, never from a run you timed by hand, and goes through `/pstack:benchmark-checklist` before it is reported.
+- **Numbers.** A lag, memory or speed number comes from `bench-runner`'s table over samples the Live checks session saved, never from a run you timed by hand, and goes through `/pstack:benchmark-checklist` before it is reported. On Codex, invoke the installed `pstack:benchmark-checklist` skill by name.
 - **The live app is not yours.** You never drive it (fn, the mic, paste, Accessibility, the indicator); `scripts/dev-run.sh` and `scripts/harness.sh` refuse you. Write down the criteria that need it; you ask for them in step 6, once the head is reviewed and checked.
 - Run every commit, push, GitHub write and heavy command (the check script, `lexicon-eval`, the bundle script) yourself, once. Commit small, only your own files, with explicit paths: `type(scope): what changed (#N)`, with `Refs #N` in the body.
 
