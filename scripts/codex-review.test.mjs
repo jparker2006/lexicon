@@ -12,6 +12,7 @@ import { EFFORTS, MODEL, strict } from './codex-review.mjs';
 import { tierGate } from './merge-pr.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
 // A fake codex: it saves each call's arguments and prompt, and writes the reply its
@@ -35,7 +36,8 @@ else {
 // Named by pid: helpers run in parallel, so a count of the folder could repeat.
 const cachedContext = /is cached at ([^\\n]+?)\\. Read it/.exec(prompt)?.[1];
 const hasSyntheticContextMarker = Boolean(cachedContext && fs.readFileSync(cachedContext, 'utf8').includes('LEXICON_REVIEW_FIXTURE_CONTEXT_MARKER_ONLY'));
-fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), hasSyntheticContextMarker, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
+const cachedMain = cachedContext ? JSON.parse(fs.readFileSync(cachedContext, 'utf8')).main ?? null : null;
+fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, cachedMain, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), hasSyntheticContextMarker, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
 const finding = { path: 'Sources/History/a.swift', line: 1, claim: 'a dictation can be lost', scenario: 'X, so Y', severity: 'blocker', confidence: 'high', cite: { kind: 'rule', source: 'review.md', quote: 'q' } };
 let reply;
 if (prompt.includes('Try to disprove')) reply = { verdict: 'CONFIRMED', citationHolds: true, evidence: 'e', trigger: 't', decider: '', headless: true, test: '' };
@@ -50,6 +52,24 @@ const args = process.argv.slice(2);
 if (args[0] === 'pr' && args[1] === 'list') process.stdout.write('[]\\n');
 else if (args[0] === 'issue' && args[1] === 'view') process.stdout.write(JSON.stringify({ body: 'fixture issue', comments: [] }) + '\\n');
 else { process.stderr.write('unexpected fake gh command\\n'); process.exit(64); }
+`;
+
+const GIT_FETCH_RACE_WRAPPER = `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+const real = process.env.FAKE_REAL_GIT;
+const result = spawnSync(real, args, { stdio: 'inherit' });
+if (result.error) { process.stderr.write(String(result.error) + '\\n'); process.exit(127); }
+if (result.status !== 0) process.exit(result.status || 1);
+if (args[0] === 'fetch') {
+  if (process.env.FAKE_GIT_FETCH_LOG) fs.appendFileSync(process.env.FAKE_GIT_FETCH_LOG, args.join(' ') + '\\n');
+  if (process.env.FAKE_GIT_COMPETE_SHA) {
+    const ref = spawnSync(real, ['rev-parse', '--git-path', 'FETCH_HEAD'], { encoding: 'utf8' }).stdout.trim();
+    fs.writeFileSync(path.resolve(process.cwd(), ref), process.env.FAKE_GIT_COMPETE_SHA + '\\t\\tfixture competing review\\n');
+  }
+}
 `;
 
 function fixture(t) {
@@ -79,6 +99,9 @@ function fixture(t) {
   chmodSync(bin, 0o755);
   const binDir = path.join(dir, 'bin');
   mkdirSync(binDir);
+  const gitWrapper = path.join(binDir, 'git');
+  writeFileSync(gitWrapper, GIT_FETCH_RACE_WRAPPER);
+  chmodSync(gitWrapper, 0o755);
   const gh = path.join(binDir, 'gh');
   writeFileSync(gh, FAKE_GH);
   chmodSync(gh, 0o755);
@@ -92,7 +115,7 @@ function runReview({ dir, repo, bin, binDir, log }, args, env = {}, options = {}
   const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/codex-review.mjs'), JSON.stringify(args), '--out', out], {
     cwd: repo,
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir, ...env },
+    env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`, FAKE_REAL_GIT: REAL_GIT, CODEX_BIN: bin, FAKE_CODEX_LOG: log, TMPDIR: dir, ...env },
     timeout: options.timeout ?? 60_000,
     detached: options.detached ?? false,
   });
@@ -204,6 +227,27 @@ test('a caller-selected context file is not exposed to review helpers', (t) => {
 
   assert.ok(calls.length > 0, 'the fixture exercised Codex helper processes');
   assert.ok(calls.every((call) => call.hasSyntheticContextMarker === false), 'helpers cannot read an arbitrary caller-selected context file');
+});
+
+test('review caches the fetched main SHA despite a competing fetch replacing FETCH_HEAD', (t) => {
+  const f = fixture(t);
+  const staleMain = git(f.repo, 'rev-parse', 'main');
+  const mainTree = git(f.repo, 'rev-parse', 'main^{tree}');
+  const currentMain = execFileSync(REAL_GIT, ['commit-tree', mainTree, '-p', staleMain, '-m', 'advance fixture main'], {
+    cwd: f.repo,
+    encoding: 'utf8',
+  }).trim();
+  git(f.repo, 'update-ref', 'refs/heads/main', currentMain);
+  const fetchLog = path.join(f.dir, 'fetch-log');
+
+  const { calls } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' }, {
+    FAKE_GIT_COMPETE_SHA: f.sha,
+    FAKE_GIT_FETCH_LOG: fetchLog,
+  });
+
+  assert.ok(calls.length > 0);
+  assert.ok(calls.every((call) => call.cachedMain === currentMain), 'every helper receives context pinned to the fetched main commit');
+  assert.ok(readFileSync(fetchLog, 'utf8').trim().length > 0, 'the fixture performed a real local fetch before simulating a competing fetch');
 });
 
 test('strict closes every object and requires every property, nested ones too', () => {
