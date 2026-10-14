@@ -68,13 +68,15 @@ enum Fillers {
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some", "many",
         "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice", "thrice", "double",
         "triple", "doubled", "tripled", "quadrupled", "halved", "quarter", "quarters", "halves", "once", "teens",
-        "lots", "more", "less", "between", "upwards", "somewhere",
+        "lots", "more", "less", "between", "upwards", "somewhere", "double-digit", "triple-digit", "scores", "zillions",
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
-    /// Only without a comma between: "uh, huh?" is a filler and then "huh". "uh uh" and
-    /// "um hmm" are left out: written that way they are as likely two fillers as a word.
-    static let interjections: Set<String> = ["uh huh", "uh oh", "mm hmm", "mm hm", "ah ha", "ah hah"]
+    /// Only without a comma between: "uh, huh?" is a filler and then "huh".
+    /// Ambiguous answers stay, including inside a number-like phrase.
+    static let interjections: Set<String> = [
+        "uh huh", "uh oh", "mm hmm", "mm hm", "ah ha", "ah hah", "uh uh", "um hmm", "hmm hmm", "hm hm",
+    ]
 
     /// Hedges, negations and constraints. Never deleted, not even as a repeat
     /// ("it's not not working" means it works).
@@ -93,13 +95,13 @@ enum Fillers {
     /// ("sorry sorry", "still still").
     static let meantDoubles: Set<String> = [
         "that", "had", "is", "do", "very", "too", "sorry", "scratch", "still", "already", "again", "also", "once",
-        "own",
+        "own", "her", "you",
     ]
 
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".
     static let glue: Set<String> = [
         "and", "but", "or", "so", "to", "you", "it's", "is", "the", "a", "an", "of", "for", "that", "i", "we", "can",
-        "just", "if", "because", "like",
+        "just", "if", "because", "like", "at",
     ]
 
     /// Capitalized, but naming nobody.
@@ -124,7 +126,9 @@ enum Fillers {
         // The speech model capitalizes after a sentence end, so "etc. Um, ship it"
         // ends a sentence and "etc. um, then ship it" does not.
         for i in tokens.indices.dropLast() where tokens[i].isAbbreviation && !titles.contains(tokens[i].word) {
+            // At a sentence start, "No." is an answer; "bin No." is an abbreviation.
             tokens[i].endsSentence = tokens[i + 1].isCapitalized
+                || (tokens[i].word == "no" && (i == 0 || tokens[i - 1].endsSentence))
         }
         for k in tokens.indices where tokens[k].isHardFiller {
             tokens[k].isInNumber = soundInNumber(tokens, at: k)
@@ -155,8 +159,7 @@ enum Fillers {
             // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
                                  after: i + 2 < tokens.count ? tokens[i + 2] : nil, hedge: hedge,
-                                 dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
-                                 previous: sentenceKept > 0 ? (kept.last!, keptWords.last!, sentenceKept == 1) : nil)
+                                 dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore)
             if drop > 0 {
                 let last = tokens[i + drop - 1]
                 if sentenceKept > 0 {
@@ -172,6 +175,22 @@ enum Fillers {
                 if last.endsSentence { sentenceKept = 0; droppedOpener = false }
                 setOffBefore = setOffBefore || last.setsOffNext
                 i += drop
+                continue
+            }
+
+            let stutter = stutterCount(tokens, at: i, kept: kept, words: keptWords, sentenceKept: sentenceKept, rules: rules)
+            if stutter > 0 {
+                let last = tokens[i + stutter - 1]
+                let previous = Token(Substring(kept[kept.count - 1]))
+                var text = kept[kept.count - 1]
+                if previous.trailing == "," { text.removeLast() }
+                if sentenceKept == 1, token.isCapitalized || previous.trailing == "," {
+                    text = Token.capitalized(text)
+                }
+                kept[kept.count - 1] = Token.merge(text, last.trailing)
+                if last.endsSentence { sentenceKept = 0 }
+                setOffBefore = last.setsOffNext
+                i += stutter
                 continue
             }
 
@@ -253,16 +272,47 @@ enum Fillers {
         keptWords.last == "like" && (sentenceKept == 1 || kept[kept.count - 2].last.map { ",;:".contains($0) } == true)
     }
 
+    /// Match spelling forms without rewriting the retained word. Commas on words
+    /// that can end a clause stay boundaries ("Add it, it should pass").
+    private static func stutterCount(_ tokens: [Token], at i: Int, kept: [String], words: [String],
+                                     sentenceKept: Int, rules: RuleSet) -> Int {
+        guard sentenceKept > 0 else { return 0 }
+        let token = tokens[i]
+        let word = token.word
+        guard StructuralCheck.stop.contains(word), !protected.contains(word), !meantDoubles.contains(word),
+              !token.isQuoted, !rules.isWritten(token.text) else { return 0 }
+        let previous = Token(Substring(kept[kept.count - 1]))
+        guard !previous.isQuoted, !rules.isWritten(previous.text) else { return 0 }
+
+        if sentenceKept >= 2, token.word == "in", token.trailing.isEmpty, i + 1 < tokens.count {
+            let next = tokens[i + 1]
+            let before = Token(Substring(kept[kept.count - 2]))
+            if before.word == "in", before.trailing.isEmpty, !before.isQuoted,
+               previous.word == "the", previous.trailing.isEmpty,
+               next.word == "the", !next.isQuoted, !rules.isWritten(next.text), !rules.isWritten(before.text) {
+                return 2
+            }
+        }
+
+        guard previous.word == word,
+              previous.trailing.isEmpty || (previous.trailing == "," && glue.contains(word)) else { return 0 }
+        if word == "will", previous.isName { return 0 }
+        // The predicate after "what it was" needs its own "was"; an ordinary
+        // "the build was was broken" still loses the stutter.
+        if word == "was", sentenceKept >= 3, words.suffix(3).elementsEqual(["what", "it", "was"]) { return 0 }
+        return 1
+    }
+
     /// How many tokens from `token` on are fillers to delete: 0, 1 or 2.
     /// `prior`: the token just before, kept or not. `hedge`: a "like" before a number, a name or a Term.
-    /// `previous`: the last kept token in this sentence, its word, and whether it opened the sentence.
     /// `dictationStart`: nothing kept yet in the Dictation. `afterOpener`: a filler already went from this sentence's start.
     private static func dropCount(_ token: Token, prior: Token?, next: Token?, after: Token?, hedge: Bool,
                                   dictationStart: Bool, afterOpener: Bool,
-                                  setOffBefore: Bool, previous: (text: String, word: String, opensSentence: Bool)?)
+                                  setOffBefore: Bool)
         -> Int {
         let word = token.word
         if protected.contains(word) || token.isQuoted { return 0 }
+        if word == "i-", let next, next.word == "i", !next.isQuoted { return 1 }
         if token.isHardFiller {
             // A sound of "uh huh" or "mm hmm" is a word, unless it sits inside a number ("five uh oh seven").
             if let next, token.trailing.isEmpty, !token.isInNumber, interjections.contains(word + " " + next.word) {
@@ -295,11 +345,6 @@ enum Fillers {
             return 1
         }
 
-        if let previous, StructuralCheck.stop.contains(word), !meantDoubles.contains(word),
-           !previous.text.last!.isPunctuation, previous.word == word,
-           previous.text == token.text || previous.opensSentence {
-            return 1
-        }
         return 0
     }
 }
