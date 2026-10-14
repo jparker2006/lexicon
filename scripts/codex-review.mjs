@@ -15,7 +15,7 @@
 // codex binary (default: codex on PATH); CODEX_REVIEW_HELPER_TIMEOUT_MS a helper's deadline.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,11 +70,14 @@ export function guardFlags(cwd) {
 }
 
 /** Runs one helper as a codex exec and returns its JSON answer. */
-async function codex(prompt, opts, scratch, n, context) {
+async function codex(prompt, opts, scratch, n, context, reviewedPR) {
   const schemaFile = path.join(scratch, `${n}.schema.json`);
   const outFile = path.join(scratch, `${n}.out.json`);
   writeFileSync(schemaFile, JSON.stringify(strict(opts.schema || { type: 'object', properties: { out: { type: 'string' } } })));
-  const instructions = `GitHub context (issue/spec with every comment, open PRs, current main and merge-tree checks) is cached at ${context}. Read it instead of running the prompt's gh commands. Repository metadata is at ${process.cwd()}: use git -C with that path and explicit shas for history, while reading code only from the supplied snapshot. This helper runs in a read-only sandbox; use the parent's cached merge-tree results rather than writing Git objects.\n\n${prompt}`;
+  const prContext = reviewedPR
+    ? `The cached reviewedPR body belongs to fetched remote PR #${reviewedPR.number} at ${reviewedPR.headRefOid}. The full source pass SHA is named separately in the prompt and may be newer locally. Keep those SHAs distinct; do not require an early push or treat that difference as missing metadata.`
+    : 'This is a pre-PR run with no named PR; the absence of a reviewedPR body is not incomplete.';
+  const instructions = `GitHub context (issue/spec with every comment, open PRs, current main and merge-tree checks) is cached at ${context}. Read it instead of running the prompt's gh commands. ${prContext} Repository metadata is at ${process.cwd()}: use git -C with that path and explicit shas for history, while reading code only from the supplied snapshot. This helper runs in a read-only sandbox; use the parent's cached merge-tree results rather than writing Git objects.\n\n${prompt}`;
   const full = opts.agentType ? `${rolePrompt(opts.agentType)}\n---\n\n${instructions}` : instructions;
   const args = [
     'exec', '--ephemeral', '--color', 'never',
@@ -137,7 +140,28 @@ function testCommand(cwd, filter) {
   return new Promise((resolve, reject) => {
     const allowed = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'NO_COLOR', 'FAKE_REAL_GIT'];
     const env = Object.fromEntries(allowed.filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]));
-    const child = spawn('./scripts/test.sh', ['--filter', filter], {
+    // The reviewed test code is executable input too. Keep it away from home data
+    // and the network while allowing SwiftPM's shared cache and the build slot.
+    const canonical = file => existsSync(file) ? realpathSync(file) : path.join(canonical(path.dirname(file)), path.basename(file));
+    const homes = [...new Set([os.userInfo().homedir, os.homedir()].map(canonical))];
+    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8' }).trim();
+    const writable = [cwd, ...homes.flatMap(home => [
+      path.join(home, 'Library/Caches/org.swift.swiftpm'),
+      path.join(home, 'Library/org.swift.swiftpm/cache'),
+      path.join(home, '.cache/org.swift.swiftpm'),
+      path.join(home, '.swiftpm/cache'),
+      path.join(home, 'Library/Application Support/Lexicon Dev/heavy'),
+    ])];
+    const readable = [...writable, common, process.execPath];
+    const restriction = exceptions => `(require-all (require-any ${homes.map(home => `(subpath ${JSON.stringify(home)})`).join(' ')}) ${exceptions.map(dir => `(require-not (subpath ${JSON.stringify(canonical(dir))}))`).join(' ')})`;
+    const profile = `(version 1)(allow default)(deny network*)
+      (deny file-read-data ${restriction(readable)})
+      (deny file-write* ${restriction(writable)})
+      (deny mach-lookup (global-name "com.apple.securityd"))`;
+    env.GIT_CONFIG_GLOBAL = '/dev/null';
+    env.GIT_CONFIG_NOSYSTEM = '1';
+    env.GIT_TERMINAL_PROMPT = '0';
+    const child = spawn('/usr/bin/sandbox-exec', ['-p', profile, './scripts/test.sh', '--filter', filter], {
       cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '', timedOut = false;
@@ -206,6 +230,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
   const script = new AsyncFunction('args', 'agent', 'pipeline', 'parallel', 'phase', 'log', source);
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'codex-review-'));
   const context = path.join(scratch, 'github-context.json');
+  let reviewedPR = null;
   // Fetch once in the parent. A failure stops the run instead of letting a critic
   // review acceptance criteria or decisions it could not read.
   const fetch = (argv) => JSON.parse(execFileSync('gh', argv, { encoding: 'utf8', timeout: 60_000, maxBuffer: 8 << 20 }));
@@ -227,14 +252,20 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
       if (result.error || ![0, 1].includes(result.status)) throw result.error || new Error(result.stderr);
       return { status: result.status, output: result.stdout.trim() };
     };
-    const openPRs = fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,files,headRefOid']).map(pr => {
+    if (args.pr) {
+      reviewedPR = fetch(['pr', 'view', String(args.pr), '--json', 'number,body,headRefOid']);
+      if (reviewedPR.number !== Number(args.pr) || typeof reviewedPR.body !== 'string' || !reviewedPR.body.trim() || !/^[0-9a-f]{40}$/.test(reviewedPR.headRefOid)) {
+        throw new Error('INCOMPLETE: named PR body or reported head metadata is missing or invalid');
+      }
+    }
+    const openPRs = fetch(['pr', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,title,body,files,headRefOid']).map(pr => {
       const shared = pr.files.map(f => f.path).filter(p => own.has(p));
       if (!shared.length) return { ...pr, shared, mergeTree: null };
       git(['fetch', '-q', 'origin', `pull/${pr.number}/head`]);
       return { ...pr, shared, mergeTree: mergeTree(pr.headRefOid) };
     });
     writeFileSync(context, JSON.stringify({
-      repository: process.cwd(), main, mainMergeTree: mergeTree(main), openPRs,
+      repository: process.cwd(), main, mainMergeTree: mergeTree(main), openPRs, reviewedPR,
       issue: fetch(['issue', 'view', String(args.issue), '--json', 'body,comments']),
       spec: fetch(['issue', 'view', '36', '--json', 'body,comments']),
     }));
@@ -259,7 +290,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
     if (opts.label === 'proof') return runProof({ proofId: opts.proofId, factId: opts.factId, sha: opts.sha });
     n += 1;
     log(`codex: ${opts.label} (${modelOf(opts.model)})`);
-    return codex(prompt, opts, scratch, n, context);
+    return codex(prompt, opts, scratch, n, context, reviewedPR);
   };
   // The Workflow runtime's semantics: a helper that throws leaves null, which review.js reports as incomplete.
   const parallel = (thunks) => Promise.all(thunks.map((t) => Promise.resolve().then(t).catch((e) => { log(`codex: ${e.message}`); return null; })));
@@ -270,7 +301,7 @@ export async function review(args, { log = (m) => process.stderr.write(`${m}\n`)
   }));
   try {
     mainSource = cacheContext();
-    const result = await script({ ...args, mainSha: mainSource.sha }, agent, pipeline, parallel, (p) => log(`phase: ${p}`), log);
+    const result = await script({ ...args, head: args.head || reviewedPR?.headRefOid, mainSha: mainSource.sha }, agent, pipeline, parallel, (p) => log(`phase: ${p}`), log);
     return { ...result, markdown: codexHelpers(result.markdown) };
   } finally {
     rmSync(scratch, { recursive: true, force: true });

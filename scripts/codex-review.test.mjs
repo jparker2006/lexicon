@@ -36,11 +36,18 @@ else {
 // Named by pid: helpers run in parallel, so a count of the folder could repeat.
 const cachedContext = /is cached at ([^\\n]+?)\\. Read it/.exec(prompt)?.[1];
 const hasSyntheticContextMarker = Boolean(cachedContext && fs.readFileSync(cachedContext, 'utf8').includes('LEXICON_REVIEW_FIXTURE_CONTEXT_MARKER_ONLY'));
-const cachedMain = cachedContext ? JSON.parse(fs.readFileSync(cachedContext, 'utf8')).main ?? null : null;
+const cachedData = cachedContext ? JSON.parse(fs.readFileSync(cachedContext, 'utf8')) : null;
+const cachedMain = cachedData?.main ?? null;
+const reviewedPR = cachedData?.reviewedPR ?? null;
+const cachedOpenPRs = cachedData?.openPRs ?? null;
+const cachedIssueComments = cachedData?.issue?.comments ?? null;
+const cachedSpecComments = cachedData?.spec?.comments ?? null;
 const pinnedSnapshotsLine = prompt.split(/\\r?\\n/).find(line => line.startsWith('Pinned source snapshots: '));
 const pinnedSnapshots = pinnedSnapshotsLine
   ? JSON.parse(pinnedSnapshotsLine.slice('Pinned source snapshots: '.length))
   : null;
+const pinnedPassSHA = pinnedSnapshots?.pr?.sha ?? null;
+const hasInstallBodyMarker = Boolean(reviewedPR?.body?.includes('LEXICON_REVIEW_INSTALL_BODY_ONLY'));
 let snapshotContents = null;
 let snapshotReadError = null;
 if (pinnedSnapshots) {
@@ -54,7 +61,7 @@ if (pinnedSnapshots) {
     snapshotReadError = String(error);
   }
 }
-fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, envKeys: Object.keys(process.env).sort(), cachedMain, pinnedSnapshots, snapshotContents, snapshotReadError, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), hasSyntheticContextMarker, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
+fs.writeFileSync(path.join(log, process.pid + '.json'), JSON.stringify({ args, prompt, reviewedPR, cachedOpenPRs, cachedIssueComments, cachedSpecComments, pinnedPassSHA, hasInstallBodyMarker, envKeys: Object.keys(process.env).sort(), cachedMain, pinnedSnapshots, snapshotContents, snapshotReadError, hasSyntheticSecret: Boolean(process.env.LEXICON_REVIEW_SYNTHETIC_SECRET), hasSyntheticContextMarker, schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }));
 const finding = { path: 'Sources/History/a.swift', line: 1, claim: 'a dictation can be lost', scenario: 'X, so Y', severity: 'blocker', confidence: 'high', cite: { kind: 'rule', source: 'review.md', quote: 'q' } };
 let reply;
 if (prompt.includes('Try to disprove')) reply = { verdict: 'CONFIRMED', citationHolds: true, evidence: 'e', trigger: 't', decider: '', headless: true, test: '' };
@@ -73,10 +80,28 @@ fs.writeFileSync(args[args.indexOf('-o') + 1], JSON.stringify(reply));
 `;
 
 const FAKE_GH = `#!/usr/bin/env node
+const fs = require('node:fs');
 const args = process.argv.slice(2);
-if (args[0] === 'pr' && args[1] === 'list') process.stdout.write('[]\\n');
-else if (args[0] === 'issue' && args[1] === 'view') process.stdout.write(JSON.stringify({ body: 'fixture issue', comments: [] }) + '\\n');
-else { process.stderr.write('unexpected fake gh command\\n'); process.exit(64); }
+if (process.env.FAKE_GH_LOG) fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(args) + '\\n');
+if (args[0] === 'pr' && args[1] === 'list') {
+  process.stdout.write((process.env.FAKE_GH_OPEN_PRS || '[]') + '\\n');
+} else if (args[0] === 'pr' && args[1] === 'view') {
+  const result = {
+    number: Number(process.env.FAKE_GH_PR_NUMBER),
+    headRefOid: process.env.FAKE_GH_PR_HEAD,
+  };
+  if (process.env.FAKE_GH_OMIT_PR_BODY !== '1') result.body = process.env.FAKE_GH_PR_BODY;
+  process.stdout.write(args.includes('-q') ? result.headRefOid + '\\n' : JSON.stringify(result) + '\\n');
+} else if (args[0] === 'issue' && args[1] === 'view') {
+  const result = { body: 'fixture issue', comments: [] };
+  if (process.env.FAKE_GH_CONTEXT_COMMENTS === '1') {
+    result.comments = [{ body: args[2] === '36' ? 'LEXICON_REVIEW_SPEC_COMMENT_ONLY' : 'LEXICON_REVIEW_ISSUE_COMMENT_ONLY' }];
+  }
+  process.stdout.write(JSON.stringify(result) + '\\n');
+} else {
+  process.stderr.write('unexpected fake gh command\\n');
+  process.exit(64);
+}
 `;
 
 const GIT_FETCH_RACE_WRAPPER = `#!/usr/bin/env node
@@ -91,6 +116,7 @@ if (args[0] === 'archive' && fs.existsSync(snapshotMode)) {
   const main = args.some(arg => arg.endsWith('/main.tar'));
   if ((mode === 'main') === main) process.exit(2);
 }
+if (process.env.FAKE_GIT_COMMAND_LOG) fs.appendFileSync(process.env.FAKE_GIT_COMMAND_LOG, JSON.stringify(args) + '\\n');
 const result = spawnSync(real, args, { stdio: 'inherit' });
 if (result.error) { process.stderr.write(String(result.error) + '\\n'); process.exit(127); }
 if (result.status !== 0) process.exit(result.status || 1);
@@ -613,3 +639,181 @@ for (const source of ['main', 'pr']) {
     assert.equal(existsSync(f.proofLog), false);
   });
 }
+// It opens only a generated synthetic HOME file, never a real user path.
+
+test('proof runner denies reads from a synthetic HOME before stamping the exact pass', (t) => {
+  const realSandbox = '/usr/bin/sandbox-exec';
+  if (process.platform !== 'darwin' || !existsSync(realSandbox)) {
+    t.skip('the effective sandbox denial check runs on macOS CI');
+    return;
+  }
+
+  const f = fixture(t);
+  const syntheticHome = mkdtempSync(path.join(os.tmpdir(), 'codex-review-synthetic-home-'));
+  t.after(() => rmSync(syntheticHome, { recursive: true, force: true }));
+  const syntheticPrivateFile = path.join(syntheticHome, 'unrelated', 'synthetic-private.txt');
+  mkdirSync(path.dirname(syntheticPrivateFile), { recursive: true });
+  writeFileSync(syntheticPrivateFile, 'SYNTHETIC_LEXICON_SANDBOX_SENTINEL_ONLY', { mode: 0o644 });
+  assert.ok(existsSync(syntheticPrivateFile));
+  assert.notEqual(syntheticHome, f.repo);
+  assert.notEqual(syntheticHome, f.dir);
+
+  // This throwaway test runner tries to read the generated HOME file before it
+  // prints the fixed selected-test pass. It exits nonzero if the sandbox lets it.
+  const proofScript = [
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const { execFileSync: run } = require('node:child_process');",
+    "const git = (...args) => run('git', args, { encoding: 'utf8' }).trim();",
+    'const args = process.argv.slice(2);',
+    "const target = path.join(process.env.HOME, 'unrelated', 'synthetic-private.txt');",
+    'let privateReadDenied = false;',
+    'let denialCode = null;',
+    "try { fs.readFileSync(target, 'utf8'); } catch (error) { privateReadDenied = true; denialCode = error.code || 'denied'; }",
+    "const testLine = '✔ Test ' + args[1] + '() passed after 0.001 seconds.';",
+    "const stdout = privateReadDenied ? 'synthetic HOME read denied (' + denialCode + ')\\n' + testLine : 'synthetic HOME read unexpectedly succeeded';",
+    "fs.appendFileSync(" + JSON.stringify(f.proofLog) + ", JSON.stringify({ cwd: process.cwd(), sha: git('rev-parse', 'HEAD'), args, privateReadDenied, denialCode, stdout }) + '\\n');",
+    "process.stdout.write(stdout + '\\n');",
+    'if (!privateReadDenied) process.exit(3);',
+  ].join('\n');
+  writeFileSync(path.join(f.repo, 'scripts/test.sh'), proofScript);
+  chmodSync(path.join(f.repo, 'scripts/test.sh'), 0o755);
+  git(f.repo, 'add', 'scripts/test.sh');
+  git(f.repo, 'commit', '-q', '-m', 'synthetic HOME denial fixture');
+  f.sha = git(f.repo, 'rev-parse', 'HEAD');
+
+  const { markdown, result } = review(f, { issue: 1, sha: f.sha, mode: 'reviewer' }, {
+    HOME: syntheticHome,
+  });
+
+  const receipts = readFileSync(f.proofLog, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(receipts.length, 1);
+  const receipt = receipts[0];
+  assert.ok(receipt.cwd, 'the fixture records the executed checkout path');
+  assert.equal(receipt.sha, f.sha);
+  assert.deepEqual(receipt.args, ['--filter', 'aShortWavIsTypedAndSavedInHistory']);
+  assert.equal(receipt.privateReadDenied, true, 'the OS sandbox blocked the generated HOME file');
+  assert.ok(receipt.stdout.indexOf('synthetic HOME read denied') < receipt.stdout.indexOf('✔ Test aShortWavIsTypedAndSavedInHistory() passed'),
+    'the runner observes denial before the selected test pass line');
+  assert.doesNotMatch(receipt.stdout, /SYNTHETIC_LEXICON_SANDBOX_SENTINEL_ONLY/);
+  assert.equal(result.reviewedSha, f.sha, 'the exact pass SHA is stamped only after sandboxed test output succeeds');
+  assert.match(markdown, /scripts\/test\.sh --filter aShortWavIsTypedAndSavedInHistory/);
+  assert.doesNotMatch(markdown, /SYNTHETIC_LEXICON_SANDBOX_SENTINEL_ONLY/);
+});
+
+const INSTALL_BODY = [
+  '## Install',
+  '',
+  'LEXICON_REVIEW_INSTALL_BODY_ONLY',
+  '',
+  'Install the reviewed build only after the Reviewer authorizes it.',
+].join('\n');
+
+function namedPRFixture(f, { number = 41, body = INSTALL_BODY, head = f.sha, omitBody = false } = {}) {
+  const ghLog = path.join(f.dir, `gh-${number}.log`);
+  return {
+    ghLog,
+    env: {
+      FAKE_GH_LOG: ghLog,
+      FAKE_GH_PR_NUMBER: String(number),
+      FAKE_GH_PR_BODY: body,
+      FAKE_GH_PR_HEAD: head,
+      ...(omitBody ? { FAKE_GH_OMIT_PR_BODY: '1' } : {}),
+    },
+  };
+}
+
+function combiningCall(calls) {
+  return calls.find(call => call.prompt.includes('Combining with main'));
+}
+
+test('a named PR caches its exact body and fetched head alongside the pass snapshot SHA', (t) => {
+  const f = fixture(t);
+  const prNumber = 41;
+  const remoteHead = f.sha;
+  const { ghLog, env } = namedPRFixture(f, { number: prNumber, head: remoteHead });
+  const { calls } = review(f, { issue: 1, sha: f.sha, pr: prNumber, mode: 'reviewer', risks: ['Tests and copy'] }, env);
+
+  const combining = combiningCall(calls);
+  assert.ok(combining, 'the Combining with main lens ran');
+  assert.deepEqual(combining.reviewedPR, { number: prNumber, body: INSTALL_BODY, headRefOid: remoteHead },
+    'the lens reads the complete reviewed PR body and its reported head from cached context');
+  assert.equal(combining.pinnedPassSHA, f.sha, 'the pass SHA comes from the PR source snapshot');
+  assert.equal(combining.reviewedPR.headRefOid, remoteHead, 'the fetched PR head is recorded separately');
+  assert.ok(combining.hasInstallBodyMarker, 'the distinctive Install section reached the helper context');
+  const testsLens = calls.find(call => call.prompt.includes('one lens: Tests and copy'));
+  assert.ok(testsLens, 'the public Tests and copy lens ran for the changed file');
+  assert.deepEqual(testsLens.reviewedPR, { number: prNumber, body: INSTALL_BODY, headRefOid: remoteHead },
+    'the read-only Tests and copy lens receives the same reviewed PR context');
+  assert.ok(testsLens.hasInstallBodyMarker, 'the Tests and copy lens can inspect the Install section');
+  const ghCalls = readFileSync(ghLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  assert.ok(ghCalls.some(argv => argv[0] === 'pr' && argv[1] === 'view' && argv.includes(String(prNumber))),
+    'the public driver fetched the named PR body through fake gh pr view');
+});
+
+test('a named PR without a body response is incomplete and unstamped', (t) => {
+  const f = fixture(t);
+  const prNumber = 42;
+  const { ghLog, env } = namedPRFixture(f, { number: prNumber, head: f.sha, omitBody: true });
+  const { run, out } = runReview(f, { issue: 1, sha: f.sha, pr: prNumber, mode: 'reviewer' }, env);
+
+  assert.ok(readFileSync(ghLog, 'utf8').includes('view'), 'the driver requested the named PR');
+  assert.doesNotMatch(run.stdout, /^Reviewed sha:/m, 'a missing body must not print a review stamp');
+  if (existsSync(out)) {
+    const result = JSON.parse(readFileSync(out, 'utf8'));
+    assert.equal(result.complete, false, 'a structured result must be incomplete');
+    assert.equal(result.reviewedSha, null, 'a full review with missing PR body must not stamp');
+  } else {
+    assert.notEqual(run.status, 0, 'a missing-body failure without a result must fail the driver');
+  }
+});
+
+test('a newer local delta preserves its pass SHA, remote PR head, Install body and collision context', (t) => {
+  const f = fixture(t);
+  const prNumber = 43;
+  const collisionNumber = 900;
+  const remoteHead = f.sha;
+  const file = path.join(f.repo, 'Sources/History/a.swift');
+  appendFileSync(file, 'local unpushed delta\n');
+  git(f.repo, 'add', 'Sources/History/a.swift');
+  git(f.repo, 'commit', '-q', '-m', 'local delta after fetched PR head');
+  const passSHA = git(f.repo, 'rev-parse', 'HEAD');
+  assert.notEqual(passSHA, remoteHead, 'the test has a newer local pass than the fetched PR head');
+
+  // Give the preserved openPRs collision record a real local fetch target.
+  git(f.repo, 'update-ref', `refs/pull/${collisionNumber}/head`, remoteHead);
+  const collisionPRs = [{
+    number: collisionNumber,
+    title: 'fixture collision metadata',
+    files: [{ path: 'Sources/History/a.swift' }],
+    headRefOid: remoteHead,
+  }];
+  const gitLog = path.join(f.dir, 'git-commands.log');
+  const { env } = namedPRFixture(f, { number: prNumber, head: remoteHead });
+  const { calls, result } = review(f, { issue: 1, sha: passSHA, reviewed: remoteHead, pr: prNumber, mode: 'reviewer' }, {
+    ...env,
+    FAKE_GH_OPEN_PRS: JSON.stringify(collisionPRs),
+    FAKE_GH_CONTEXT_COMMENTS: '1',
+    FAKE_GIT_COMMAND_LOG: gitLog,
+  });
+
+  const combining = combiningCall(calls);
+  assert.ok(combining, 'the local delta reached Combining with main');
+  assert.equal(combining.pinnedPassSHA, passSHA, 'the PR source snapshot uses the newer local pass SHA');
+  assert.deepEqual(combining.reviewedPR, { number: prNumber, body: INSTALL_BODY, headRefOid: remoteHead },
+    'the older remote head and complete Install body remain cached separately');
+  assert.notEqual(combining.reviewedPR.headRefOid, combining.pinnedPassSHA,
+    'the driver exposes the legitimate remote/local SHA difference without rejecting it');
+  assert.equal(combining.cachedIssueComments[0].body, 'LEXICON_REVIEW_ISSUE_COMMENT_ONLY',
+    'adding reviewedPR preserves cached issue comments');
+  assert.equal(combining.cachedSpecComments[0].body, 'LEXICON_REVIEW_SPEC_COMMENT_ONLY',
+    'adding reviewedPR preserves cached spec comments');
+  const collision = combining.cachedOpenPRs.find(pr => pr.number === collisionNumber);
+  assert.ok(collision, 'adding reviewedPR preserves the existing open-PR collision entry');
+  assert.deepEqual(collision.shared, ['Sources/History/a.swift'], 'collision metadata still identifies the shared file');
+  assert.ok(collision.mergeTree && typeof collision.mergeTree.status === 'number', 'collision merge-tree metadata remains cached');
+  const gitCommands = readFileSync(gitLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  assert.ok(!gitCommands.some(argv => argv[0] === 'push'), 'the local delta review does not push before review');
+  assert.equal(result.reviewedSha, passSHA, 'the local pass is stamped at its own exact SHA');
+});

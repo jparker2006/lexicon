@@ -316,7 +316,7 @@ function critics() {
 }
 
 function where(pass) {
-  return `Read only the snapshot, never the live checkout: the code at ${pass.to.slice(0, 12)} is a copy at ${pass.snapshot}, and the change is the diff ${pass.diff} (${pass.from.slice(0, 12)}..${pass.to.slice(0, 12)}). For history, run git with these explicit shas.`
+  return `Read only the snapshot, never the live checkout: the code at ${pass.to.slice(0, 12)} is a copy at ${pass.snapshot}, and the change is the diff ${pass.diff} (${pass.from.slice(0, 12)}..${pass.to.slice(0, 12)}). Full reviewed pass SHA: ${pass.to}. For history, run git with these explicit shas.`
 }
 
 function criticPrompt(lens, pass, isDelta) {
