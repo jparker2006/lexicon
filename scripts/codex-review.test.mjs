@@ -152,6 +152,7 @@ function fixture(t) {
   const proofLog = path.join(dir, 'proof-log');
   mkdirSync(path.join(repo, 'fixture'), { recursive: true });
   writeFileSync(path.join(repo, 'fixture/TrackedProofSource.txt'), 'committed fixture baseline\n');
+  writeFileSync(path.join(repo, 'fixture/TransientProofSource.cjs'), "module.exports = 'committed baseline';\n");
   mkdirSync(path.join(repo, 'scripts'), { recursive: true });
   const proofScript = `#!/usr/bin/env node
 const fs = require('node:fs');
@@ -161,8 +162,44 @@ const args = process.argv.slice(2);
 const stdout = '✔ Test ' + args[1] + '() passed after 0.001 seconds.';
 const modeFile = ${JSON.stringify(path.join(dir, 'proof-mode'))};
 const mode = fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8') : '';
-if (mode === 'dirty-tracked') fs.appendFileSync(process.cwd() + '/fixture/TrackedProofSource.txt', 'dirtied during proof');
-fs.appendFileSync(${JSON.stringify(proofLog)}, JSON.stringify({ cwd: process.cwd(), sha: git('rev-parse','HEAD'), fixtureStatus: git('status','--porcelain'), branch: git('branch','--show-current'), slot: process.env.HEAVY_SLOT ?? null, args, stdout }) + '\\n');
+let mutation = null;
+if (mode === 'dirty-tracked') {
+  const target = process.cwd() + '/fixture/TrackedProofSource.txt';
+  try {
+    fs.appendFileSync(target, 'dirtied during proof');
+    mutation = { attempted: true, denied: false, executed: false, restored: false, denialCode: null };
+  } catch (error) {
+    mutation = { attempted: true, denied: true, executed: false, restored: fs.readFileSync(target, 'utf8').trim() === 'committed fixture baseline', denialCode: error.code || String(error) };
+  }
+}
+if (mode === 'transient-source') {
+  const target = process.cwd() + '/fixture/TransientProofSource.cjs';
+  const originalContents = fs.readFileSync(target, 'utf8');
+  const changedContents = "require('node:fs').appendFileSync(process.env.TMPDIR + '/transient-executions.log', 'ran'); console.log('LEXICON_TRANSIENT_SOURCE_RAN');";
+  let denied = false;
+  let denialCode = null;
+  let executed = false;
+  let restored = false;
+  let output = '';
+  let executionError = null;
+  try { fs.writeFileSync(target, changedContents); }
+  catch (error) { denied = true; denialCode = error.code || String(error); }
+  if (!denied) {
+    try {
+      output = run(process.execPath, [target], { encoding: 'utf8', cwd: process.cwd() });
+      executed = output.includes('LEXICON_TRANSIENT_SOURCE_RAN');
+    } catch (error) { executionError = error.code || String(error); }
+    try {
+      fs.writeFileSync(target, originalContents);
+      restored = fs.readFileSync(target, 'utf8') === originalContents;
+    } catch (error) { denied = true; denialCode = error.code || String(error); }
+  } else {
+    try { restored = fs.readFileSync(target, 'utf8') === originalContents; } catch {}
+  }
+  mutation = { attempted: true, denied, denialCode, executed, restored, output, executionError };
+}
+fs.appendFileSync(${JSON.stringify(proofLog)}, JSON.stringify({ cwd: process.cwd(), sha: git('rev-parse','HEAD'), fixtureStatus: git('status','--porcelain'), measuredSha: git('rev-parse','HEAD'), mutation, branch: git('branch','--show-current'), slot: process.env.HEAVY_SLOT ?? null, args, stdout }) + '\\n');
+if (mutation && (mutation.denied || mutation.executionError || (mode === 'transient-source' && !mutation.executed))) process.exit(2);
 if (mode === 'wrong-sha') git('update-ref', 'HEAD', git('rev-parse', 'HEAD^'));
 if (mode === 'nonzero') process.exit(2);
 if (mode === 'timeout') { console.log('limits: stopped after 600 s: swift test'); process.exit(1); }
@@ -913,8 +950,8 @@ test('a dirty tracked fixture proof cannot stamp or advance an earlier delta sta
   const receipts = readFileSync(f.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.equal(receipts.length, 1, 'the public driver subprocess ran the fake proof test');
   assert.equal(receipts[0].sha, f.sha, 'the fixture proof measured the pinned HEAD');
-  assert.match(receipts[0].fixtureStatus, /fixture\/TrackedProofSource\.txt/,
-    'the approved test pass left a tracked fixture source modified');
+  assert.ok(receipts[0].mutation.denied || /fixture\/TrackedProofSource\.txt/.test(receipts[0].fixtureStatus),
+    'the source edit was denied or left tracked fixture input modified');
   assert.equal(full.result.complete, false,
     'a dirty tracked worktree makes the proof incomplete despite matching HEAD');
   assert.equal(full.result.reviewedSha, null, 'the dirty proof does not stamp the full review');
@@ -935,8 +972,8 @@ test('a dirty tracked fixture proof cannot stamp or advance an earlier delta sta
   const allReceipts = readFileSync(f.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.deepEqual(allReceipts.map(receipt => receipt.sha), [f.sha, deltaSHA],
     'each proof executes at its own pinned local pass SHA');
-  assert.ok(allReceipts.every(receipt => /fixture\/TrackedProofSource\.txt/.test(receipt.fixtureStatus)),
-    'both fake proof runs dirtied only the generated tracked fixture source');
+  assert.ok(allReceipts.every(receipt => receipt.mutation.denied || /fixture\/TrackedProofSource\.txt/.test(receipt.fixtureStatus)),
+    'both source-edit attempts were denied or left tracked fixture input modified');
   const commands = readFileSync(gitLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.ok(!commands.some(argv => argv[0] === 'push'), 'proof rejection does not push the local delta');
 });
@@ -1021,3 +1058,53 @@ if (!safe) process.exit(3);
   assert.match(markdown, /scripts\/test\.sh --filter aShortWavIsTypedAndSavedInHistory/);
 });
 
+
+
+function assertTransientProofReceipt(f, receipt, expectedSHA) {
+  assert.equal(receipt.sha, expectedSHA, 'the fake proof ran at its pinned pass SHA');
+  assert.equal(receipt.measuredSha, expectedSHA, 'the transient edit left HEAD at the pinned pass SHA');
+  assert.equal(receipt.fixtureStatus, '', 'the fixture worktree is clean after the fake command');
+  assert.equal(receipt.mutation.attempted, true, 'the fixed-filter runner attempted the transient source edit');
+  assert.equal(receipt.mutation.restored, true, 'the committed fixture source is unchanged after the attempt');
+  if (receipt.mutation.denied) {
+    assert.ok(['EPERM', 'EACCES'].includes(receipt.mutation.denialCode), 'the OS denied the source write');
+    assert.equal(receipt.mutation.executed, false, 'denied changed contents never execute');
+    assert.equal(existsSync(path.join(f.dir, 'transient-executions.log')), false,
+      'a denied source write leaves no changed-code execution receipt');
+  } else {
+    assert.equal(receipt.mutation.executed, true, 'the changed fixture source executed before restoration');
+    assert.equal(receipt.mutation.executionError, null);
+    assert.match(receipt.mutation.output, /LEXICON_TRANSIENT_SOURCE_RAN/);
+    assert.equal(readFileSync(path.join(f.dir, 'transient-executions.log'), 'utf8'), 'ran',
+      'the changed source recorded execution outside the throwaway worktree');
+  }
+}
+
+test('transient tracked-source proof edits cannot stamp a full or advance a delta review', (t) => {
+  const fullFixture = fixture(t);
+  writeFileSync(path.join(fullFixture.dir, 'proof-mode'), 'transient-source');
+  const full = review(fullFixture, { issue: 354, sha: fullFixture.sha, mode: 'reviewer' });
+  const fullReceipt = readFileSync(fullFixture.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)[0];
+  assertTransientProofReceipt(fullFixture, fullReceipt, fullFixture.sha);
+  assert.equal(full.result.complete, false,
+    'temporarily executed and restored tracked contents make the full proof incomplete');
+  assert.equal(full.result.reviewedSha, null);
+  assert.match(full.markdown, /^Not stamped \(INCOMPLETE below\)/m);
+
+  const deltaFixture = fixture(t);
+  const prior = review(deltaFixture, { issue: 354, sha: deltaFixture.sha, mode: 'reviewer' });
+  assert.equal(prior.result.reviewedSha, deltaFixture.sha, 'the delta case starts from a real earlier stamp');
+  appendFileSync(path.join(deltaFixture.repo, 'Sources/History/a.swift'), 'local delta after prior stamp\n');
+  git(deltaFixture.repo, 'add', 'Sources/History/a.swift');
+  git(deltaFixture.repo, 'commit', '-q', '-m', 'delta after transient proof stamp');
+  const deltaSHA = git(deltaFixture.repo, 'rev-parse', 'HEAD');
+  writeFileSync(path.join(deltaFixture.dir, 'proof-mode'), 'transient-source');
+  const delta = review(deltaFixture, { issue: 354, sha: deltaSHA, reviewed: deltaFixture.sha, mode: 'reviewer' });
+  const deltaReceipts = readFileSync(deltaFixture.proofLog, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  const transientReceipt = deltaReceipts.at(-1);
+  assertTransientProofReceipt(deltaFixture, transientReceipt, deltaSHA);
+  assert.equal(delta.result.complete, false);
+  assert.equal(delta.result.reviewedSha, deltaFixture.sha,
+    'the transient delta failure preserves the earlier verified stamp');
+  assert.doesNotMatch(delta.markdown, /^Reviewed sha:|Blast radius \(delta\):/m);
+});
