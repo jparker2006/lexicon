@@ -101,14 +101,41 @@ private func isRemove(_ edit: CredentialEdit, for id: CredentialID) -> Bool {
     return actual == id
 }
 
+// AppKit needs an application loop outside the main dispatch queue. Starting
+// it from a run-loop block leaves MainActor free to run the asynchronous check.
+private func runNativeCheck(_ body: @escaping @MainActor () async throws -> Void) async -> Never {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        let runLoop = CFRunLoopGetMain()
+        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) {
+            MainActor.assumeIsolated {
+                let application = NSApplication.shared
+                application.setActivationPolicy(.prohibited)
+                Task { @MainActor in
+                    do {
+                        try await body()
+                        exit(73)
+                    } catch {
+                        Issue.record(error)
+                        exit(74)
+                    }
+                }
+                application.run()
+                Issue.record("Native application loop returned before the check completed")
+                continuation.resume()
+            }
+        }
+        CFRunLoopWakeUp(runLoop)
+    }
+    exit(74)
+}
+
 @Suite(.serialized)
 struct SettingsWindowTests {
 // AppKit state is process-global, so every native check runs in its own child.
 // Exit 73 is reached only after the full body completes; expectation issues are forwarded.
 @Test(.timeLimit(.minutes(1))) func pendingCredentialCallbacksLeaveTheNativeGridUsable() async throws {
     await #expect(processExitsWith: .exitCode(73)) {
-        try await Self.pendingCredentialCallbacksLeaveTheNativeGridUsableBody()
-        exit(73)
+        await runNativeCheck { try await Self.pendingCredentialCallbacksLeaveTheNativeGridUsableBody() }
     }
 }
 
@@ -176,8 +203,7 @@ private static func pendingCredentialCallbacksLeaveTheNativeGridUsableBody() asy
 
 @Test(.timeLimit(.minutes(1))) func oneSettingsWindowIsReusedAndReopeningStartsWithBlankFields() async throws {
     await #expect(processExitsWith: .exitCode(73)) {
-        try await Self.oneSettingsWindowIsReusedAndReopeningStartsWithBlankFieldsBody()
-        exit(73)
+        await runNativeCheck { try await Self.oneSettingsWindowIsReusedAndReopeningStartsWithBlankFieldsBody() }
     }
 }
 
@@ -228,8 +254,7 @@ private static func oneSettingsWindowIsReusedAndReopeningStartsWithBlankFieldsBo
 
 @Test(.timeLimit(.minutes(1))) func savingClearsTheActiveSecureFieldEditorSynchronously() async throws {
     await #expect(processExitsWith: .exitCode(73)) {
-        try await Self.savingClearsTheActiveSecureFieldEditorSynchronouslyBody()
-        exit(73)
+        await runNativeCheck { try await Self.savingClearsTheActiveSecureFieldEditorSynchronouslyBody() }
     }
 }
 
@@ -270,8 +295,7 @@ private static func savingClearsTheActiveSecureFieldEditorSynchronouslyBody() as
 
 @Test(.timeLimit(.minutes(1))) func oldCredentialResultsCannotReplaceNewerResultsAfterReopen() async throws {
     await #expect(processExitsWith: .exitCode(73)) {
-        try await Self.oldCredentialResultsCannotReplaceNewerResultsAfterReopenBody()
-        exit(73)
+        await runNativeCheck { try await Self.oldCredentialResultsCannotReplaceNewerResultsAfterReopenBody() }
     }
 }
 
