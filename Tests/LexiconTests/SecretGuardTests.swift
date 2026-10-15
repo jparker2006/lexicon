@@ -31,6 +31,16 @@ func knownKeyShapesMatch(_ secret: String) {
 }
 
 @Test(arguments: [
+    "qjvmxkztbdrphwnslfygcauo",
+    "mzrkwxjtpvhdqgcfnblyaose",
+    "vndqrxjklpwmztbfhgcyaose",
+])
+func lowercaseRandomShapedSecretsMatch(_ secret: String) {
+    #expect(SecretGuard.matches(secret))
+    #expect(SecretGuard.matches("Please add \(secret) to the private config."))
+}
+
+@Test(arguments: [
     "my password is hunter2",
     "The password is purple monkey dishwasher.",
     "OK so the passcode's 4821, write that down",
@@ -64,8 +74,10 @@ func passwordPhrasesMatch(_ text: String) {
     "The password is not in the repo, so use the Keychain.",
     "The password is read from the environment and is no longer valid after a day.",
     "let password = keychain.read()",
+    "let cloudcredential = secrets.lookup(model)",
     "Add a password: String field to the User struct, and if password == null return early.",
     "The secret is to keep the token short, about 3 words.",
+    "the secret is to keep the token short, about 3 words",
     "Reset my password. It is 2026 after all.",
     "Rename AVAudioEngineInputNodeTap16kHz and NSURLSessionDataTaskV2Request.",
     "Try sk-architecture-review-2026, xai-grok-code-fast-1 and hf_whisper_large_v3_turbo_mlx.",
