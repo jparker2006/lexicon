@@ -25,6 +25,7 @@ private final class ReadGate: Sendable {
     private let started = DispatchSemaphore(value: 0)
     private let releaseRead = DispatchSemaphore(value: 0)
     private let firstRead = Mutex(true)
+    private let releaseOutcome = Mutex<DispatchTimeoutResult?>(nil)
 
     func blockRead() {
         let shouldBlock = firstRead.withLock { first -> Bool in
@@ -34,18 +35,23 @@ private final class ReadGate: Sendable {
         guard shouldBlock else { return }
         started.signal()
         let released = releaseRead.wait(timeout: .now() + 5) // timing-ok: deadline bounds a missing explicit release
-        #expect(released == .success)
+        releaseOutcome.withLock { $0 = released }
     }
 
-    func waitUntilReadStarts(until deadline: DispatchTime = .now() + 5) -> DispatchTimeoutResult {
-        started.wait(timeout: deadline) // timing-ok: deadline bounds a missing explicit read-start signal
+    func waitUntilReadStarts(until deadline: DispatchTime = .now() + 5) async -> DispatchTimeoutResult {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { [self] in
+                continuation.resume(returning: started.wait(timeout: deadline)) // timing-ok: deadline bounds a missing explicit read-start signal
+            }
+        }
     }
+    var readWasReleased: Bool { releaseOutcome.withLock { $0 == .success } }
     func release() { releaseRead.signal() }
 }
 
-@Test func readGateReportsAnExpiredStartDeadline() {
+@Test func readGateReportsAnExpiredStartDeadline() async {
     let gate = ReadGate()
-    let result = gate.waitUntilReadStarts(until: .now())
+    let result = await gate.waitUntilReadStarts(until: .now())
 
     #expect(result == .timedOut)
 }
@@ -419,18 +425,26 @@ private final class ScriptedSecurity: Sendable {
         return
     }
 
-    let lookup = Task.detached { secrets.lookup(.jev) }
+    // Blocking the injected Security read must not occupy Swift's cooperative pool.
+    let lookup = AsyncStream<Bool>.makeStream()
+    DispatchQueue.global().async {
+        lookup.continuation.yield(secrets.lookup(.jev) == nil)
+        lookup.continuation.finish()
+    }
     defer { gate.release() }
-    try #require(gate.waitUntilReadStarts() == .success)
+    let readStarted = await gate.waitUntilReadStarts()
+    try #require(readStarted == .success)
     let began = await fixtureObservation(from: secrets, .begin)
     let ended = await fixtureObservation(from: secrets, .end)
     gate.release()
-    let staleResultWasDiscarded = await lookup.value == nil
+    var result = lookup.stream.makeAsyncIterator()
+    let staleResultWasDiscarded = await result.next()
     let nextLookupWasStillMissing = secrets.lookup(.jev) == nil
 
     #expect(began.phase == .reserved)
     #expect(ended.phase == .idle)
-    #expect(staleResultWasDiscarded)
+    #expect(staleResultWasDiscarded == true)
+    #expect(gate.readWasReleased)
     #expect(nextLookupWasStillMissing)
     #expect(script.counts().reads == 2)
 }
