@@ -14,14 +14,15 @@ import LexiconDomain
     }
 
     @Test func sessionStartUsesPublicModelAndExactPushToTalkFields() throws {
-        let message = try #require(provider.sessionStart(terms: [Term(text: "gstack"), Term(text: "Xcode")]))
+        let message = try #require(provider.sessionStart(key: "synthetic-key", terms: [Term(text: "gstack"), Term(text: "Xcode")]))
         guard case .text(let payload) = message else {
             Issue.record("Muse session start must be a text frame")
             return
         }
         let object = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
 
-        #expect(Set(object.keys) == Set(["model", "audioEncoding", "mode", "partialMode", "keywords"]))
+        #expect(Set(object.keys) == Set(["authorization", "model", "audioEncoding", "mode", "partialMode", "keywords"]))
+        #expect(object["authorization"] as? [String: String] == ["accessToken": "Bearer synthetic-key"])
         #expect(object["model"] as? String == "muse-voice-transcribe-1.0")
         #expect(CloudModel.museVoice.rawValue == "meta.muse-voice-transcribe-1.0")
         #expect(object["audioEncoding"] as? String == "PCM_16KHZ")
@@ -65,7 +66,7 @@ import LexiconDomain
         let object = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
 
         #expect(Set(object.keys) == Set(["sessionId"]))
-        #expect(provider.parse(.text(payload)) != .ignore)
+        #expect(provider.parse(.text(payload)) == .acknowledged)
     }
 
     @Test func transcriptFinalFlagControlsPartialAndFinalEvents() throws {
@@ -73,7 +74,7 @@ import LexiconDomain
         let final = try jsonText(["type": "transcript", "transcript": "Ship the release.", "final": true])
 
         #expect(provider.parse(.text(partial)) == .partial("ship the"))
-        #expect(provider.parse(.text(final)) == .final("Ship the release."))
+        #expect(provider.parse(.text(final)) == .completed("Ship the release."))
     }
 
     @Test func speechEndDoesNotEndTheSession() throws {
