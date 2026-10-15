@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import LexiconCore
 import LexiconDomain
 import LexiconUI
@@ -102,8 +103,17 @@ private func isRemove(_ edit: CredentialEdit, for id: CredentialID) -> Bool {
 
 @Suite(.serialized)
 struct SettingsWindowTests {
-@MainActor
+// AppKit state is process-global, so every native check runs in its own child.
+// Exit 73 is reached only after the full body completes; expectation issues are forwarded.
 @Test(.timeLimit(.minutes(1))) func pendingCredentialCallbacksLeaveTheNativeGridUsable() async throws {
+    await #expect(processExitsWith: .exitCode(73)) {
+        try await Self.pendingCredentialCallbacksLeaveTheNativeGridUsableBody()
+        exit(73)
+    }
+}
+
+@MainActor
+private static func pendingCredentialCallbacksLeaveTheNativeGridUsableBody() async throws {
     NSApplication.shared.setActivationPolicy(.prohibited)
     let probe = CredentialCommandProbe()
     let presenter = SettingsWindowPresenter(credentials: { edit, reply in
@@ -141,7 +151,8 @@ struct SettingsWindowTests {
     let save = try #require(view(withID: AccessibilityID.settingsSave(id), in: window) as? NSButton)
     save.performClick(nil)
     let saveRequest = await probe.request { isSave($0, for: id, value: "synthetic-settings-key") }
-    #expect(isSave(saveRequest.edit, for: id, value: "synthetic-settings-key"))
+    let saveRequestMatches = isSave(saveRequest.edit, for: id, value: "synthetic-settings-key")
+    #expect(saveRequestMatches)
     let entryWasCleared1 = field.stringValue.isEmpty
     #expect(entryWasCleared1)
     #if DEBUG
@@ -156,14 +167,22 @@ struct SettingsWindowTests {
     // An empty Save remains a Save request; it cannot silently become Remove.
     save.performClick(nil)
     let emptySave = await probe.request { isSave($0, for: id, value: "") }
-    #expect(isSave(emptySave.edit, for: id, value: ""))
+    let emptySaveRemainsSave = isSave(emptySave.edit, for: id, value: "")
+    #expect(emptySaveRemainsSave)
     #expect(!isRemove(emptySave.edit, for: id))
 
     window.performClose(nil)
 }
 
+@Test(.timeLimit(.minutes(1))) func oneSettingsWindowIsReusedAndReopeningStartsWithBlankFields() async throws {
+    await #expect(processExitsWith: .exitCode(73)) {
+        try await Self.oneSettingsWindowIsReusedAndReopeningStartsWithBlankFieldsBody()
+        exit(73)
+    }
+}
+
 @MainActor
-@Test(.timeLimit(.minutes(1))) func oneSettingsWindowIsReusedAndReopeningStartsWithBlankFields() throws {
+private static func oneSettingsWindowIsReusedAndReopeningStartsWithBlankFieldsBody() async throws {
     NSApplication.shared.setActivationPolicy(.prohibited)
     let probe = CredentialCommandProbe()
     let presenter = SettingsWindowPresenter(credentials: { edit, reply in
@@ -207,8 +226,15 @@ struct SettingsWindowTests {
     reopenedWindow.performClose(nil)
 }
 
-@MainActor
 @Test(.timeLimit(.minutes(1))) func savingClearsTheActiveSecureFieldEditorSynchronously() async throws {
+    await #expect(processExitsWith: .exitCode(73)) {
+        try await Self.savingClearsTheActiveSecureFieldEditorSynchronouslyBody()
+        exit(73)
+    }
+}
+
+@MainActor
+private static func savingClearsTheActiveSecureFieldEditorSynchronouslyBody() async throws {
     NSApplication.shared.setActivationPolicy(.prohibited)
     let probe = CredentialCommandProbe()
     let presenter = SettingsWindowPresenter(credentials: { edit, reply in
@@ -237,12 +263,20 @@ struct SettingsWindowTests {
     #expect(presenter.credentialFieldsAreEmpty)
     #endif
     let submitted = await probe.request { isSave($0, for: id, value: "synthetic-settings-key") }
-    #expect(isSave(submitted.edit, for: id, value: "synthetic-settings-key"))
+    let submittedValueMatches = isSave(submitted.edit, for: id, value: "synthetic-settings-key")
+    #expect(submittedValueMatches)
     window.performClose(nil)
 }
 
-@MainActor
 @Test(.timeLimit(.minutes(1))) func oldCredentialResultsCannotReplaceNewerResultsAfterReopen() async throws {
+    await #expect(processExitsWith: .exitCode(73)) {
+        try await Self.oldCredentialResultsCannotReplaceNewerResultsAfterReopenBody()
+        exit(73)
+    }
+}
+
+@MainActor
+private static func oldCredentialResultsCannotReplaceNewerResultsAfterReopenBody() async throws {
     NSApplication.shared.setActivationPolicy(.prohibited)
     let probe = CredentialCommandProbe()
     let presenter = SettingsWindowPresenter(credentials: { edit, reply in
@@ -280,7 +314,8 @@ struct SettingsWindowTests {
     await drainMainQueue()
     let statusAfterSave = status.stringValue
     #expect(statusAfterSave != statusBeforeSave)
-    #expect(!statusAfterSave.contains("newer-synthetic-key"))
+    let statusDoesNotExposeSubmittedText = !statusAfterSave.contains("newer-synthetic-key")
+    #expect(statusDoesNotExposeSubmittedText)
 
     // Deliver old-form and pre-save availability replies after the newer save.
     firstSave.reply(.refused)

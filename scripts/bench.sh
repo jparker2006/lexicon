@@ -127,11 +127,15 @@ report_settings_open() {
     a_n=$1 a50=$2 a95=$3 b_n=$4 b50=$5 b95=$6 lmin=$7 lmed=$8 lmax=$9
     first=$(settings_numbers "$a_file" | sed -n '1p')
     echo "A (Settings (Keys only)): $a_n samples, p50 $a50 ms, p95 $a95 ms"
-    echo "B (main History control): $b_n samples, p50 $b50 ms, p95 $b95 ms"
+    if [ "$b_n" -gt 0 ]; then
+        echo "B (main History control): $b_n samples, p50 $b50 ms, p95 $b95 ms"
+    else
+        echo "B (main History control): unavailable, no samples"
+    fi
     echo "first Settings (Keys only) show: ${first:-unavailable} ms; must be $TARGET ms or less"
     echo "load: min $lmin, median $lmed, max $lmax"
     sed -n '/^# power:/p' "$load_file"
-    [ "$a_n" -gt 0 ] && [ "$b_n" -gt 0 ] || { echo "FAIL: no samples on one side"; return 1; }
+    [ "$a_n" -ge 2 ] || { echo "FAIL: Settings needs first and repeated show samples"; return 1; }
     case "$first" in ''|*[!0-9]*) echo "FAIL: no first Settings sample"; return 1 ;; esac
     provisional=
     if [ -s "$BACKGROUND" ]; then

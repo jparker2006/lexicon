@@ -73,6 +73,33 @@ func settingsOpenReportLabelsSettingsAndHistoryWithoutComparingThem() async thro
 }
 
 @Test(.timeLimit(.minutes(1)))
+func settingsOpenReportPassesWhenHistoryControlSamplesAreMissing() async throws {
+    let report = try await settingsBenchReport(
+        budget: "settings-open",
+        a: [90, 10, 20, 30, 40, 50],
+        b: []
+    )
+
+    #expect(report.status == 0)
+    #expect(report.output.contains("Settings (Keys only)"))
+    #expect(report.output.contains("PASS"))
+    #expect(containsNoComparativeResult(report.output))
+}
+
+@Test(.timeLimit(.minutes(1)))
+func settingsOpenReportRequiresFirstAndRepeatedShowEvidence() async throws {
+    let report = try await settingsBenchReport(
+        budget: "settings-open",
+        a: [20],
+        b: [25, 30, 35, 40, 45]
+    )
+
+    #expect(report.status != 0)
+    #expect(report.output.localizedCaseInsensitiveContains("repeat"))
+    #expect(!report.output.contains("PASS"))
+}
+
+@Test(.timeLimit(.minutes(1)))
 func settingsOpenReportChecksTheFirstShowSeparately() async throws {
     let report = try await settingsBenchReport(
         budget: "settings-open",

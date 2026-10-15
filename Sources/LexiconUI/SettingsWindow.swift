@@ -80,6 +80,7 @@ private final class KeysWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
 
         window.title = "Settings"
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.setAccessibilityIdentifier(AccessibilityID.settingsWindow)
         window.delegate = self

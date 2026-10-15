@@ -33,11 +33,21 @@ private final class ReadGate: Sendable {
         }
         guard shouldBlock else { return }
         started.signal()
-        releaseRead.wait() // timing-ok: the test releases this explicit read barrier
+        let released = releaseRead.wait(timeout: .now() + 5) // timing-ok: deadline bounds a missing explicit release
+        #expect(released == .success)
     }
 
-    func waitUntilReadStarts() { started.wait() } // timing-ok: the blocked read signals this explicit barrier
+    func waitUntilReadStarts(until deadline: DispatchTime = .now() + 5) -> DispatchTimeoutResult {
+        started.wait(timeout: deadline) // timing-ok: deadline bounds a missing explicit read-start signal
+    }
     func release() { releaseRead.signal() }
+}
+
+@Test func readGateReportsAnExpiredStartDeadline() {
+    let gate = ReadGate()
+    let result = gate.waitUntilReadStarts(until: .now())
+
+    #expect(result == .timedOut)
 }
 
 private final class ScriptedSecurity: Sendable {
@@ -400,7 +410,7 @@ private final class ScriptedSecurity: Sendable {
     #expect(ended.phase == .idle)
 }
 
-@Test func readStartedBeforeACompleteFixtureCycleCannotRestoreItsOldValue() async {
+@Test func readStartedBeforeACompleteFixtureCycleCannotRestoreItsOldValue() async throws {
     let gate = ReadGate()
     let script = ScriptedSecurity(readGate: gate)
     script.enqueueReads([.found("stale-synthetic-key"), .missing])
@@ -410,7 +420,8 @@ private final class ScriptedSecurity: Sendable {
     }
 
     let lookup = Task.detached { secrets.lookup(.jev) }
-    gate.waitUntilReadStarts()
+    defer { gate.release() }
+    try #require(gate.waitUntilReadStarts() == .success)
     let began = await fixtureObservation(from: secrets, .begin)
     let ended = await fixtureObservation(from: secrets, .end)
     gate.release()
