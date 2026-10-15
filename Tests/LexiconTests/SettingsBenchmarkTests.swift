@@ -6,7 +6,20 @@ private struct BenchReport {
     let output: String
 }
 
-private func settingsBenchReport(budget: String, a: [Int], b: [Int]) async throws -> BenchReport {
+private let completeSyntheticLoadReceipt = """
+# power: synthetic source, low power mode 0
+# synthetic load
+1 0.25
+2 0.25
+3 0.25
+"""
+
+private func settingsBenchReport(
+    budget: String,
+    a: [Int],
+    b: [Int],
+    loadReceipt: String? = completeSyntheticLoadReceipt
+) async throws -> BenchReport {
     let home = try scratchDirectory()
     let fakeBin = home.appending(path: "fake-bin")
     let fileManager = FileManager.default
@@ -27,7 +40,7 @@ private func settingsBenchReport(budget: String, a: [Int], b: [Int]) async throw
         .write(to: aFile, atomically: true, encoding: .utf8)
     try b.map { String($0) }.joined(separator: "\n").appending("\n")
         .write(to: bFile, atomically: true, encoding: .utf8)
-    try "# synthetic load\n1 0.25\n2 0.25\n3 0.25\n".write(to: loadFile, atomically: true, encoding: .utf8)
+    try (loadReceipt ?? "").write(to: loadFile, atomically: true, encoding: .utf8)
 
     let repository = URL(filePath: #filePath)
         .deletingLastPathComponent()
@@ -54,6 +67,16 @@ private func containsNoComparativeResult(_ output: String) -> Bool {
         && !output.localizedCaseInsensitiveContains("delta")
         && !output.localizedCaseInsensitiveContains("ratio")
         && !output.localizedCaseInsensitiveContains("speedup")
+}
+
+private func expectProvisionalWithoutPass(_ report: BenchReport, mentioning terms: [String]) {
+    let provisionalLine = report.output.components(separatedBy: "\n").first { $0.hasPrefix("PROVISIONAL") } ?? ""
+
+    #expect(!provisionalLine.isEmpty)
+    #expect(!report.output.contains("PASS"))
+    for term in terms {
+        #expect(provisionalLine.localizedCaseInsensitiveContains(term))
+    }
 }
 
 @Test(.timeLimit(.minutes(1)))
@@ -128,6 +151,42 @@ func settingsOpenReportGatesOnSettingsP95EvenWhenHistoryIsFaster() async throws 
     #expect(report.output.contains("p95"))
     #expect(report.output.contains("FAIL"))
     #expect(containsNoComparativeResult(report.output))
+}
+
+@Test(.timeLimit(.minutes(1)))
+func settingsOpenReportStaysProvisionalWhenPowerAndLoadReceiptsAreMissing() async throws {
+    let report = try await settingsBenchReport(
+        budget: "settings-open",
+        a: [90, 10, 20, 30, 40, 50],
+        b: [],
+        loadReceipt: nil
+    )
+
+    expectProvisionalWithoutPass(report, mentioning: ["power", "load"])
+}
+
+@Test(.timeLimit(.minutes(1)))
+func settingsOpenReportStaysProvisionalWhenPowerExistsButLoadSamplesAreMissing() async throws {
+    let report = try await settingsBenchReport(
+        budget: "settings-open",
+        a: [90, 10, 20, 30, 40, 50],
+        b: [],
+        loadReceipt: "# power: synthetic source, low power mode 0\n"
+    )
+
+    expectProvisionalWithoutPass(report, mentioning: ["load"])
+}
+
+@Test(.timeLimit(.minutes(1)))
+func settingsOpenReportStaysProvisionalWhenLoadSamplesHaveNoPowerReceipt() async throws {
+    let report = try await settingsBenchReport(
+        budget: "settings-open",
+        a: [90, 10, 20, 30, 40, 50],
+        b: [],
+        loadReceipt: "# synthetic load\n1 0.25\n2 0.25\n3 0.25\n"
+    )
+
+    expectProvisionalWithoutPass(report, mentioning: ["power"])
 }
 
 @Test(.timeLimit(.minutes(1)))
