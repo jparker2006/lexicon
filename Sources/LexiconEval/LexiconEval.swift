@@ -71,12 +71,6 @@ struct Line: Encodable {
 /// Runs `lexicon-eval` with these arguments (the first is the tool's own path)
 /// and returns its exit code.
 public func runEval(arguments: [String]) async -> Int32 {
-    if arguments.dropFirst().contains("--guard-scan") {
-        guard arguments.count == 3, arguments[1] == "--guard-scan", !arguments[2].hasPrefix("--") else {
-            return usage()
-        }
-        return guardScan(URL(filePath: arguments[2]))
-    }
     var options: [String: String] = [:]
     var scriptedGold = false
     var files: [String] = []
@@ -85,13 +79,17 @@ public func runEval(arguments: [String]) async -> Int32 {
         switch argument {
         case "--scripted-gold": scriptedGold = true
         case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model", "--transcribe", "--lexicon",
-             "--import-lexicon", "--into", "--sample", "--pace":
+             "--import-lexicon", "--into", "--sample", "--pace", "--guard-scan":
             guard let value = rest.popFirst(), options[argument] == nil else { return usage() }
             options[argument] = value
         default:
             guard !argument.hasPrefix("--") else { return usage() }
             files.append(argument)
         }
+    }
+    if let manifest = options["--guard-scan"] {
+        guard options.count == 1, files.isEmpty, !scriptedGold, !manifest.hasPrefix("--") else { return usage() }
+        return guardScan(URL(filePath: manifest))
     }
     if let bundleID = options["--install-model"] {
         guard options.count == 1, files.isEmpty, !scriptedGold, bundleID.contains("."), !bundleID.hasPrefix("."), !bundleID.contains("/")

@@ -148,3 +148,19 @@ private func runGuardScanExecutable(on manifest: URL) async throws -> (status: I
         #expect(result.output == "lexicon-eval: cannot scan manifest\n")
     }
 }
+
+@Test func scriptedTextEqualToGuardScanFlagRemainsAOneShotDictation() async throws {
+    let directory = try scratchDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let wav = try writeWAV(syntheticSamples(count: 1_600), rate: 16_000, in: directory)
+    let wavPath = wav.path(percentEncoded: false)
+
+    #expect(await runEval(arguments: ["lexicon-eval", wavPath, "--scripted", "--guard-scan"]) == 0)
+
+    let result = try await runChild(guardScanExecutable, [wavPath, "--scripted", "--guard-scan"])
+    #expect(result.status == 0)
+    let output = try #require(JSONSerialization.jsonObject(with: Data(result.output.utf8)) as? [String: Any])
+    #expect(output["status"] as? String == "inserted")
+    let text = try #require(output["text"] as? String)
+    #expect(!text.isEmpty)
+}
