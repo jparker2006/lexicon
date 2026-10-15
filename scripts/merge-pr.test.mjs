@@ -3,8 +3,8 @@
 // reaches GitHub, merges, or touches a real worktree. Time is a fake clock.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -781,4 +781,139 @@ test('install.sh installs only a clean main checkout, and refuses before it buil
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+function stubCli(state) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'stub-gh-cli-'));
+  const file = path.join(dir, 'state.json');
+  const log = path.join(dir, 'calls.log');
+  writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+  writeFileSync(log, '');
+  const command = path.join(FIXTURES, 'bin/gh');
+  const options = { encoding: 'utf8', timeout: 60_000,
+    env: { ...process.env, STUB_GH_STATE: file, STUB_GH_LOG: log } };
+  return {
+    file, log,
+    call: (args, input) => spawnSync(command, args, { ...options, input }),
+    parallelCall: (args) => new Promise((resolve) => execFile(command, args, options,
+      (error, stdout, stderr) => resolve({ status: error ? error.code ?? -1 : 0, stdout, stderr }))),
+    bytes: () => readFileSync(file, 'utf8'),
+    state: () => JSON.parse(readFileSync(file, 'utf8')),
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
+function assertStubSuccess(result) {
+  assert.deepEqual([result.status, result.stdout, result.stderr], [0, '', '']);
+}
+
+test('stub gh CLI read-only requests preserve exact state bytes and log their calls', async (t) => {
+  const state = fixture('0643');
+  const cases = [
+    ['repo view', ['repo', 'view', '--json', 'owner'], { owner: { login: OWNER } }],
+    ['PR view', ['pr', 'view', '95', '--json', 'headRefOid,state'], { headRefOid: D3C, state: 'OPEN' }],
+    ['issue view', ['issue', 'view', '43', '--json', 'number,state'], { number: 43, state: 'OPEN' }],
+    ['API compare', ['api', `repos/{owner}/{repo}/compare/main...${D3C}`],
+      { behind_by: 1, base_commit: { sha: state.main } }],
+  ];
+  for (const [name, args, expected] of cases) await t.test(name, () => {
+    const cli = stubCli(state);
+    try {
+      const before = cli.bytes();
+      chmodSync(cli.file, 0o444);
+      const result = cli.call(args);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stderr, '');
+      assert.deepEqual(JSON.parse(result.stdout), expected);
+      assert.equal(cli.bytes(), before);
+      assert.equal(readFileSync(cli.log, 'utf8'), `gh ${args.join(' ')}\n`);
+    } finally { cli.cleanup(); }
+  });
+});
+
+test('stub gh CLI parallel CI reads preserve exact state bytes and separate logs', async () => {
+  const state = fixture('0643');
+  const status = { context: 'synthetic CI', state: 'success' };
+  state.statuses = { [D3C]: [status] };
+  const calls = [
+    ['api', `repos/{owner}/{repo}/actions/runs?head_sha=${D3C}&per_page=100`],
+    ['api', `repos/{owner}/{repo}/commits/${D3C}/status?per_page=100`],
+  ];
+  const cli = stubCli(state);
+  try {
+    const before = cli.bytes();
+    chmodSync(cli.file, 0o444);
+    const results = await Promise.all(calls.map(cli.parallelCall));
+    for (const result of results) {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stderr, '');
+    }
+    assert.deepEqual(JSON.parse(results[0].stdout), { total_count: 1, workflow_runs: state.runs });
+    assert.deepEqual(JSON.parse(results[1].stdout), { total_count: 1, statuses: [status] });
+    assert.equal(cli.bytes(), before);
+    assert.deepEqual(readFileSync(cli.log, 'utf8').trimEnd().split('\n').sort(),
+      calls.map((args) => `gh ${args.join(' ')}`).sort());
+  } finally { cli.cleanup(); }
+});
+
+test('stub gh CLI persists update, merge, comment, close and branch deletion effects', () => {
+  const initial = fixture('0643');
+  const base = initial.main;
+  const otherHead = 'f'.repeat(40);
+  initial.pulls.push({ ...initial.pulls[0], number: 96, headRefOid: otherHead,
+    headRefName: 'claude/issue-44', comments: [] });
+  initial.behind[otherHead] = 0;
+  const cli = stubCli(initial);
+  try {
+    const nextHead = updatedHead(95);
+    assertStubSuccess(cli.call(['pr', 'update-branch', '95']));
+    const afterUpdate = cli.state();
+    assert.equal(afterUpdate.pulls.find((p) => p.number === 95).headRefOid, nextHead);
+    assert.deepEqual(afterUpdate.parents[nextHead], [D3C, base]);
+    assert.equal(afterUpdate.trees[nextHead], 'tree-d3c9530-1cc9e6e');
+    assert.equal(afterUpdate.behind[nextHead], 0);
+
+    assertStubSuccess(cli.call(['pr', 'merge', '95', '--squash', '--match-head-commit', nextHead]));
+    const afterMerge = cli.state();
+    assert.equal(afterMerge.pulls.find((p) => p.number === 95).state, 'MERGED');
+    assert.equal(afterMerge.pulls.find((p) => p.number === 95).mergeCommit.oid, squashOf(95));
+    assert.equal(afterMerge.main, squashOf(95));
+    assert.equal(afterMerge.behind[otherHead], 1);
+
+    const body = 'Synthetic comment through stdin\nsecond line\n';
+    assertStubSuccess(cli.call(['pr', 'comment', '96', '--body-file', '-'], body));
+    assert.equal(cli.state().pulls.find((p) => p.number === 96).comments.at(-1).body, body);
+
+    const closeNote = 'Closed by the synthetic CLI test';
+    assertStubSuccess(cli.call(['issue', 'close', '43', '--comment', closeNote]));
+    const issue = cli.state().issues.find((i) => i.number === 43);
+    assert.equal(issue.state, 'CLOSED');
+    assert.equal(issue.comments.at(-1).body, closeNote);
+
+    assertStubSuccess(cli.call(['api', '-X', 'DELETE',
+      'repos/{owner}/{repo}/git/refs/heads/fixture-382']));
+    assert.deepEqual(cli.state().deleted, ['fixture-382']);
+  } finally { cli.cleanup(); }
+});
+
+test('stub gh CLI failures preserve exit, stderr and saved state', () => {
+  const unsupported = stubCli(fixture('0643'));
+  try {
+    const before = unsupported.bytes();
+    const result = unsupported.call(['pr', 'unsupported-fixture-command', '95']);
+    assert.deepEqual([result.status, result.stdout, result.stderr], [
+      1, '', 'stub gh: unexpected call: gh pr unsupported-fixture-command 95\n',
+    ]);
+    assert.equal(unsupported.bytes(), before);
+  } finally { unsupported.cleanup(); }
+
+  const state = fixture('0643');
+  state.updateLost = true;
+  const cli = stubCli(state);
+  try {
+    const before = cli.bytes();
+    const result = cli.call(['pr', 'update-branch', '95']);
+    assert.deepEqual([result.status, result.stdout, result.stderr], [1, '', 'HTTP 502: Bad Gateway\n']);
+    assert.equal(cli.bytes(), before);
+  } finally { cli.cleanup(); }
 });
