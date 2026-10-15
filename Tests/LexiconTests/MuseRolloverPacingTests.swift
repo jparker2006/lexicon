@@ -30,10 +30,10 @@ private enum PacingObservation: Sendable, Equatable {
 /// The losing wait is cancelled once the first observable event wins. Both
 /// sides are driven by test signals, so the old immediate-send path cannot hang.
 private func firstPacingObservation(clock: TestClock, socket: MuseSocket,
-                                    deadline: Duration) async -> PacingObservation {
+                                    endingAt offset: Duration) async -> PacingObservation {
     await withTaskGroup(of: PacingObservation.self) { group in
         group.addTask {
-            await clock.waitForSleep(endingAt: deadline)
+            await clock.waitForSleep(endingAt: offset)
             return .deadline
         }
         group.addTask {
@@ -81,7 +81,7 @@ private func firstPacingObservation(clock: TestClock, socket: MuseSocket,
     secondSocket.post(MuseServerFrame.acknowledgement)
 
     let secondPacing = await firstPacingObservation(clock: clock, socket: secondSocket,
-                                                    deadline: .milliseconds(10))
+                                                    endingAt: .milliseconds(10))
     #expect(secondPacing == .deadline)
     guard secondPacing == .deadline else {
         session.close()
@@ -102,7 +102,7 @@ private func firstPacingObservation(clock: TestClock, socket: MuseSocket,
     thirdSocket.post(MuseServerFrame.acknowledgement)
 
     let thirdPacing = await firstPacingObservation(clock: clock, socket: thirdSocket,
-                                                   deadline: .milliseconds(30))
+                                                   endingAt: .milliseconds(30))
     #expect(thirdPacing == .deadline)
     guard thirdPacing == .deadline else {
         session.close()
