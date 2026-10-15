@@ -203,6 +203,7 @@ final class CloudSession: Sendable {
                                 previous: [String]) async throws -> [String] {
         var finals: [String] = []
         while let message = try await socket.receive() {
+            try permitted(access, control: control)
             let event = provider.parse(message)
             switch event {
             case .partial(let text):

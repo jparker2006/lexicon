@@ -42,7 +42,7 @@ struct MuseVoice: StreamingProvider {
             return .ignore
         }
         guard let type = object["type"] as? String else {
-            return object["sessionId"] is String ? .acknowledged : .ignore
+            return object["type"] == nil && object["sessionId"] is String ? .acknowledged : .ignore
         }
         switch type {
         case "transcript":

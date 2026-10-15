@@ -44,6 +44,17 @@ TestClock. No mic, live app, actual provider, environment credential lookup or
 private input is used by these transport tests. The quick-eval script alone uses
 the existing Test set exception, strips provider keys and performs local eval.
 
+Review regressions also cover malformed acknowledgment frames with
+`nonStringTypeDoesNotReleaseQueuedPCM` and revocation while a socket read is
+suspended with `revocationDuringPendingReceiveSuppressesFinal`. Both failed at
+3d2513c before their fixes. `unexpectedCutWhileDrainingFirstRolloverSessionDoesNotReconnect`
+failed before abnormal rollover cleanup was changed to stop cloud.
+
+The captured-process logging check runs the synthetic Muse tests with output
+redirected to a temporary file, then checks that synthetic credential strings,
+the provider error echo and Dictation text are absent. This checks test process
+output, including the real adapter path; it does not inspect the daily app's logs.
+
 ## Parent gates still open
 
 All parent acceptance remains on #67 until its integrated evidence is accepted.
