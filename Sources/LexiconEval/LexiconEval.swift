@@ -71,6 +71,12 @@ struct Line: Encodable {
 /// Runs `lexicon-eval` with these arguments (the first is the tool's own path)
 /// and returns its exit code.
 public func runEval(arguments: [String]) async -> Int32 {
+    if arguments.dropFirst().contains("--guard-scan") {
+        guard arguments.count == 3, arguments[1] == "--guard-scan", !arguments[2].hasPrefix("--") else {
+            return usage()
+        }
+        return guardScan(URL(filePath: arguments[2]))
+    }
     var options: [String: String] = [:]
     var scriptedGold = false
     var files: [String] = []
@@ -268,6 +274,7 @@ func usage() -> Int32 {
                lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
                lexicon-eval --install-model <bundle id>
                lexicon-eval --import-lexicon <file> --into <data folder>
+               lexicon-eval --guard-scan <manifest.jsonl>
 
         """.utf8))
     return 2
