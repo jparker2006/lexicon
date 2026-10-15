@@ -30,6 +30,7 @@ let soleOwners: [String: Set<String>] = [
 
 struct Package: Decodable {
     struct Target: Decodable {
+        let type: String
         let name: String
         let c99name: String
         let path: String
@@ -87,7 +88,13 @@ for target in package.targets.sorted(by: { $0.name < $1.name }) {
             guard let match = line.firstMatch(of: importLine) else { continue }
             let imported = String(match.1)
             let at = "\(file):\(index + 1)"
-            if let owners = soleOwners[imported], !owners.contains(module) {
+            // Native form tests need AppKit types without opening that boundary to other tests.
+            let nativeSettingsTest = imported == "AppKit"
+                && target.type == "test"
+                && target.name == "LexiconTests"
+                && module == "LexiconTests"
+                && file == "Tests/LexiconTests/SettingsWindowTests.swift"
+            if let owners = soleOwners[imported], !owners.contains(module), !nativeSettingsTest {
                 let allowed = owners.isEmpty ? "no module may import it" : "only \(owners.sorted().joined(separator: ", ")) may"
                 violations.append("\(at): \(module) imports \(imported); \(allowed)")
             } else if packageModules.contains(imported), imported != module, !declaredTargets.contains(imported) {
