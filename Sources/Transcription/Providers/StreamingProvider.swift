@@ -9,9 +9,10 @@ import LexiconDomain
 ///
 /// Internal: a provider's wire types can never leak out of Transcription.
 protocol StreamingProvider: Sendable {
+    var requiresAcknowledgment: Bool { get }
     func connectRequest(key: String) -> URLRequest
     /// Sent right after connect. Keywords (up to `Preferences.speechTerms` Lexicon Terms) go here.
-    func sessionStart(terms: [Term]) -> ProviderMessage?
+    func sessionStart(key: String, terms: [Term]) -> ProviderMessage?
     func audio(_ chunk: PCMChunk) -> ProviderMessage
     /// Sent the instant the feed ends (manual finalize mode; never server VAD).
     func finalize() -> ProviderMessage
@@ -23,13 +24,15 @@ enum ProviderMessage: Sendable {
     case binary(Data)
 }
 
-/// `.partial` and `.final` become `SpeechSegment`s on `SpeechAttempt.segments`
-/// (isFinal false / true). The cloud's model text is every final joined in order,
-/// complete once the provider ends the session after `finalize()`: a final is one
-/// finished stretch of speech, never a running total.
+/// Partials replace the previous hypothesis. Finals are finished stretches;
+/// `.completed` also ends this connection's answer without waiting for close.
+/// CloudSession joins only finals, and keeps rollover answers intermediate.
 enum ProviderEvent: Sendable, Equatable {
+    case acknowledged
     case partial(String)
     case final(String)
+    /// The complete answer for this connection, before its normal socket close.
+    case completed(String)
     /// No more finals will come. Before `finalize()` this means the provider cut the session short.
     case sessionEnded
     case error(String)
