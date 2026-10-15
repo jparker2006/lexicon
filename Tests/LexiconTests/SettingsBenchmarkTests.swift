@@ -190,6 +190,20 @@ func settingsOpenReportStaysProvisionalWhenLoadSamplesHaveNoPowerReceipt() async
 }
 
 @Test(.timeLimit(.minutes(1)))
+func settingsOpenReportRejectsMalformedLoadReceipts() async throws {
+    for rows in ["1\n", "1 unavailable\n", "1 -0.25\n", "1 0.25\n2\n"] {
+        let report = try await settingsBenchReport(
+            budget: "settings-open",
+            a: [90, 90],
+            b: [],
+            loadReceipt: "# power: synthetic source, low power mode 0\n" + rows
+        )
+
+        expectProvisionalWithoutPass(report, mentioning: ["load"])
+    }
+}
+
+@Test(.timeLimit(.minutes(1)))
 func historyAndLaunchReportsKeepTheirExistingLabelsAndComparison() async throws {
     for (budget, samples) in [("history-open", [60, 65, 70, 75, 80]), ("launch", [60, 65, 70, 75, 80])] {
         let report = try await settingsBenchReport(budget: budget, a: samples, b: samples)
