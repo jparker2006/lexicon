@@ -35,7 +35,7 @@ final class CloudSession: Sendable {
                     group.addTask {
                         do {
                             try await Self.connections(model: model, access: access, terms: terms,
-                                                       link: link, control: control)
+                                                       link: link, clock: link.clock, control: control)
                         } catch {
                             control.stop(.failed(Self.describe(error)))
                         }
@@ -75,11 +75,13 @@ final class CloudSession: Sendable {
         run.cancel()
     }
 
-    private static func connections(model: CloudModel, access: CloudAccess, terms: [Term],
-                                    link: CloudLink, control: Control) async throws {
+    private static func connections<C: Clock>(model: CloudModel, access: CloudAccess, terms: [Term],
+                                              link: CloudLink, clock: C, control: Control) async throws
+        where C.Duration == Duration {
         let provider = link.adapter(model)
         var pending: PCMChunk?
         var finals: [String] = []
+        var nextSend = clock.now
         while true {
             try permitted(access, control: control)
             guard let key = access.key(.speech(model)) else { throw Failure("no key") }
@@ -99,7 +101,8 @@ final class CloudSession: Sendable {
                 try await acknowledge(socket, provider: provider, access: access, control: control)
             }
             pending = try await exchange(pending: pending, socket: socket, provider: provider,
-                                         access: access, link: link, control: control, finals: &finals)
+                                         access: access, link: link, clock: clock, control: control,
+                                         nextSend: &nextSend, finals: &finals)
             // A healthy socket gets its normal close. The injected deadline also
             // bounds an intermediate rollover connection that never closes.
             if provider.requiresAcknowledgment {
@@ -129,8 +132,8 @@ final class CloudSession: Sendable {
         throw Failure("closed before acknowledgment")
     }
 
-    private enum Step: Sendable {
-        case sent(PCMChunk?)
+    private enum Step<Instant: InstantProtocol>: Sendable {
+        case sent(PCMChunk?, Instant)
         case received([String])
     }
 
@@ -138,15 +141,19 @@ final class CloudSession: Sendable {
         let sent = Atomic(false)
     }
 
-    private static func exchange(pending: PCMChunk?, socket: any CloudSocket, provider: any StreamingProvider,
-                                 access: CloudAccess, link: CloudLink, control: Control,
-                                 finals: inout [String]) async throws -> PCMChunk? {
+    private static func exchange<C: Clock>(pending: PCMChunk?, socket: any CloudSocket, provider: any StreamingProvider,
+                                           access: CloudAccess, link: CloudLink, clock: C, control: Control,
+                                           nextSend: inout C.Instant, finals: inout [String]) async throws -> PCMChunk?
+        where C.Duration == Duration {
         let finalizing = Finalizing()
         let previous = finals
-        return try await withThrowingTaskGroup(of: Step.self) { group in
+        let firstSend = nextSend
+        return try await withThrowingTaskGroup(of: Step<C.Instant>.self) { group in
             group.addTask {
-                .sent(try await transmit(pending: pending, socket: socket, provider: provider,
-                                         access: access, link: link, control: control, finalizing: finalizing))
+                let sent = try await transmit(pending: pending, socket: socket, provider: provider,
+                                               access: access, link: link, clock: clock, control: control,
+                                               firstSend: firstSend, finalizing: finalizing)
+                return .sent(sent.chunk, sent.nextSend)
             }
             group.addTask {
                 .received(try await receive(socket, provider: provider, access: access, control: control,
@@ -158,7 +165,7 @@ final class CloudSession: Sendable {
             do {
                 while let step = try await group.next() {
                     switch step {
-                    case .sent(let chunk): next = chunk; sent = true
+                    case .sent(let chunk, let deadline): next = chunk; nextSend = deadline; sent = true
                     case .received(let text): finals.append(contentsOf: text); received = true
                     }
                     if sent && received { return next }
@@ -172,30 +179,37 @@ final class CloudSession: Sendable {
         }
     }
 
-    private static func transmit(pending: PCMChunk?, socket: any CloudSocket, provider: any StreamingProvider,
-                                 access: CloudAccess, link: CloudLink, control: Control,
-                                 finalizing: Finalizing) async throws -> PCMChunk? {
+    private static func transmit<C: Clock>(pending: PCMChunk?, socket: any CloudSocket, provider: any StreamingProvider,
+                                           access: CloudAccess, link: CloudLink, clock: C, control: Control,
+                                           firstSend: C.Instant, finalizing: Finalizing) async throws
+        -> (chunk: PCMChunk?, nextSend: C.Instant) where C.Duration == Duration {
         var chunk = pending
         var samples = 0
-        var previousDuration: Duration = .zero
+        var nextSend = firstSend
         while true {
             if chunk == nil { chunk = await control.audio.next() }
             guard let current = chunk else { break }
             if samples > 0 && current.samples.count > max(0, link.policy.rolloverSamples - samples) { break }
-            if provider.requiresAcknowledgment && link.policy.paceAudio && previousDuration > .zero {
-                try await link.clock.sleep(for: previousDuration)
+            if provider.requiresAcknowledgment && link.policy.paceAudio {
+                // Capture and socket work already consume the interval. Carry
+                // this absolute deadline across rollover rather than restarting it.
+                try await clock.sleep(until: nextSend, tolerance: nil)
             }
             try permitted(access, control: control)
-            try await socket.send(provider.audio(current))
+            let frame = provider.audio(current)
+            let sentAt = clock.now
+            try permitted(access, control: control)
+            try await socket.send(frame)
             control.audio.release(current.samples.count * 2)
             samples += current.samples.count
-            previousDuration = .seconds(Double(current.samples.count) / Double(PCM16k.sampleRate))
+            nextSend = sentAt.advanced(by: .seconds(Double(current.samples.count) / Double(PCM16k.sampleRate)))
             chunk = nil
         }
+        let end = provider.finalize()
         try permitted(access, control: control)
         finalizing.sent.store(true, ordering: .releasing)
-        try await socket.send(provider.finalize())
-        return chunk
+        try await socket.send(end)
+        return (chunk, nextSend)
     }
 
     private static func receive(_ socket: any CloudSocket, provider: any StreamingProvider,

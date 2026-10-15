@@ -179,3 +179,53 @@ private func lifecycleMorePCM(_ samples: [Int16]) -> Data {
     await session.waitUntilClosed()
     #expect(clock.sleepers == 0)
 }
+
+@Test(.timeLimit(.minutes(1))) func lateMuseChunkDoesNotWaitAnotherChunkDuration() async throws {
+    let clock = TestClock()
+    let socket = MuseSocket()
+    let cloud = MuseScriptedCloud(clock: clock, sockets: [socket], paceAudio: true)
+    let preferences = lifecycleMorePreferences(local: false)
+    let access = try lifecycleMoreAccess(preferences)
+    let session = CloudSession(model: .museVoice, access: access, terms: [], link: cloud.link)
+    let samples = Array(repeating: Int16(1), count: 160) // 10 ms at 16 kHz.
+
+    session.send(PCMChunk(index: 0, samples: samples))
+    await cloud.wait { $0.connects == 1 }
+    await socket.wait { $0.textMessages.count == 1 }
+    socket.post(MuseServerFrame.acknowledgement)
+    await socket.wait { $0.binaryMessages.count == 1 }
+
+    // Model the next real-time chunk arriving after the first chunk's duration.
+    await clock.advance(by: .milliseconds(10))
+    session.send(PCMChunk(index: 1, samples: samples))
+    session.audioEnded()
+
+    let delayed = await withTaskGroup(of: Bool.self) { group in
+        group.addTask {
+            await clock.waitForSleep(endingAt: .milliseconds(20))
+            return true
+        }
+        group.addTask {
+            await socket.wait { $0.binaryMessages.count == 2 }
+            return false
+        }
+        let event = await group.next() ?? true
+        group.cancelAll()
+        return event
+    }
+    #expect(!delayed)
+
+    // Let the buggy version finish so the test can clean up after recording failure.
+    if delayed { await clock.advance(by: .milliseconds(10)) }
+    await socket.wait { $0.binaryMessages.count == 2 && $0.endStreamSent }
+    socket.post(MuseServerFrame.transcript("Paced final."))
+    let result = await session.result
+    guard case .text(let heard) = result else {
+        Issue.record("expected completed cloud text, got \(result)")
+        return
+    }
+    #expect(heard == "Paced final.")
+    await socket.wait { $0.pendingReceives > 0 }
+    socket.finishNormally()
+    await session.waitUntilClosed()
+}

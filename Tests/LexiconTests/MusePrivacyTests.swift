@@ -224,3 +224,70 @@ private struct RevokeDuringRequestProvider: StreamingProvider {
         #expect(secondSocket.log.clientCloseCalls == 1)
     }
 }
+
+private struct RevokeDuringAudioProvider: StreamingProvider {
+    enum Preparation { case audio, finalize }
+    let access: CloudAccess
+    var preparation: Preparation = .audio
+    let muse = MuseVoice()
+
+    var requiresAcknowledgment: Bool { muse.requiresAcknowledgment }
+    func connectRequest(key: String) -> URLRequest { muse.connectRequest(key: key) }
+    func sessionStart(key: String, terms: [Term]) -> ProviderMessage? {
+        muse.sessionStart(key: key, terms: terms)
+    }
+    func audio(_ chunk: PCMChunk) -> ProviderMessage {
+        let frame = muse.audio(chunk)
+        if preparation == .audio { access.revoke(.privateModeOn) }
+        return frame
+    }
+    func finalize() -> ProviderMessage {
+        let frame = muse.finalize()
+        if preparation == .finalize { access.revoke(.privateModeOn) }
+        return frame
+    }
+    func parse(_ message: ProviderMessage) -> ProviderEvent { muse.parse(message) }
+}
+
+@Test(.timeLimit(.minutes(1)))
+func revocationDuringAudioEncodingPreventsSocketSend() async throws {
+    let access = try musePrivacyAccess()
+    let socket = MuseSocket()
+    let provider = RevokeDuringAudioProvider(access: access)
+    let link = CloudLink(
+        adapter: { _ in provider }, connect: { _ in socket },
+        path: NetworkPath(isUp: true), clock: TestClock()
+    )
+    let session = CloudSession(model: .museVoice, access: access, terms: [], link: link)
+
+    await socket.wait { !$0.textMessages.isEmpty }
+    socket.post(MuseServerFrame.acknowledgement)
+    session.send(PCMChunk(index: 0, samples: [11, 13]))
+    session.audioEnded()
+    await session.waitUntilClosed()
+
+    #expect(access.revoked == .privateModeOn)
+    #expect(socket.log.sendCalls == 1)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func revocationDuringFinalizePreparationPreventsSocketSend() async throws {
+    let access = try musePrivacyAccess()
+    let socket = MuseSocket()
+    let provider = RevokeDuringAudioProvider(access: access, preparation: .finalize)
+    let link = CloudLink(
+        adapter: { _ in provider }, connect: { _ in socket },
+        path: NetworkPath(isUp: true), clock: TestClock()
+    )
+    let session = CloudSession(model: .museVoice, access: access, terms: [], link: link)
+
+    await socket.wait { !$0.textMessages.isEmpty }
+    socket.post(MuseServerFrame.acknowledgement)
+    session.send(PCMChunk(index: 0, samples: [11, 13]))
+    session.audioEnded()
+    await session.waitUntilClosed()
+
+    #expect(access.revoked == .privateModeOn)
+    #expect(socket.log.sendCalls == 2)
+    #expect(!socket.log.endStreamSent)
+}

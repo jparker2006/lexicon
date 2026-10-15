@@ -55,6 +55,15 @@ redirected to a temporary file, then checks that synthetic credential strings,
 the provider error echo and Dictation text are absent. This checks test process
 output, including the real adapter path; it does not inspect the daily app's logs.
 
+Reviewer follow-up covers `lateMuseChunkDoesNotWaitAnotherChunkDuration`,
+`queuedMuseChunkPacingDeadlineCarriesAcrossRollover`,
+`revocationDuringAudioEncodingPreventsSocketSend` and
+`revocationDuringFinalizePreparationPreventsSocketSend`. Each ran red before its
+fix. Pacing carries an absolute next-send deadline across connections and waits
+only for the interval still remaining. Frame preparation is followed by another
+permission check immediately before audio or endStream reaches the socket.
+These are synthetic schedule checks, not provider performance measurements.
+
 ## Parent gates still open
 
 All parent acceptance remains on #67 until its integrated evidence is accepted.
