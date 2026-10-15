@@ -40,6 +40,13 @@ func lowercaseRandomShapedSecretsMatch(_ secret: String) {
     #expect(SecretGuard.matches("Please add \(secret) to the private config."))
 }
 
+@Test func lowercaseHuggingFaceKeyMatchesAloneAndInProse() {
+    let secret = "hf_" + "kqvxeimzjraupodl"
+
+    #expect(SecretGuard.matches(secret))
+    #expect(SecretGuard.matches("Keep this Hugging Face token private: \(secret)."))
+}
+
 @Test(arguments: [
     "my password is hunter2",
     "The password is purple monkey dishwasher.",

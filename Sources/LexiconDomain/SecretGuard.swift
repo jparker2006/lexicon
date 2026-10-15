@@ -40,19 +40,20 @@ public enum SecretGuard {
     private static func isKeyShaped(_ raw: String) -> Bool {
         let token = raw.trimmingDots
         for prefix in keyPrefixes where token.hasPrefix(prefix) {
-            if looksRandom(token.dropFirst(prefix.count), length: 16) { return true }
+            if looksRandom(token.dropFirst(prefix.count), length: 16, knownPrefix: true) { return true }
         }
         let parts = token.split(separator: ".")
         if token.hasPrefix("eyJ"), parts.count >= 3, parts.prefix(2).allSatisfy({ $0.count >= 10 }) { return true }  // JWT
         return parts.contains { looksRandom($0, length: randomRunLength) }
     }
 
-    private static func looksRandom(_ run: Substring, length: Int) -> Bool {
+    private static func looksRandom(_ run: Substring, length: Int, knownPrefix: Bool = false) -> Bool {
         guard run.count >= length else { return false }
         if run.allSatisfy(\.isLowercase) {
-            // Long words and identifiers can be lowercase too. Require both
-            // letter variety and a consonant stretch unlike ordinary words.
+            // A provider prefix already signals a key. Without one, ordinary
+            // lowercase words also need a consonant stretch to look random.
             guard Set(run).count >= 12 else { return false }
+            if knownPrefix { return true }
             var consonants = 0
             for letter in run {
                 consonants = "aeiouy".contains(letter) ? 0 : consonants + 1
