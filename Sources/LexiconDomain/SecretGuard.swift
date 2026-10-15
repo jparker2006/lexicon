@@ -29,9 +29,8 @@ public enum SecretGuard {
     ]
 
     /// Keys without a known prefix: a stretch between dots this long, with letters
-    /// and digits, that doesn't read as words. Catches about 95% of random base62
-    /// or base64 keys at 24 characters and 99% at 40; misses most all-lowercase
-    /// keys, which read like words to this check.
+    /// and digits, or varied lowercase letters with long consonant runs, that
+    /// doesn't read as words.
     static let randomRunLength = 24
 
     private static func isTokenScalar(_ s: Unicode.Scalar) -> Bool {
@@ -41,15 +40,28 @@ public enum SecretGuard {
     private static func isKeyShaped(_ raw: String) -> Bool {
         let token = raw.trimmingDots
         for prefix in keyPrefixes where token.hasPrefix(prefix) {
-            if looksRandom(token.dropFirst(prefix.count), length: 16) { return true }
+            if looksRandom(token.dropFirst(prefix.count), length: 16, knownPrefix: true) { return true }
         }
         let parts = token.split(separator: ".")
         if token.hasPrefix("eyJ"), parts.count >= 3, parts.prefix(2).allSatisfy({ $0.count >= 10 }) { return true }  // JWT
         return parts.contains { looksRandom($0, length: randomRunLength) }
     }
 
-    private static func looksRandom(_ run: Substring, length: Int) -> Bool {
-        run.count >= length && run.contains(where: \.isNumber) && run.contains(where: \.isLetter) && !readsAsWords(run)
+    private static func looksRandom(_ run: Substring, length: Int, knownPrefix: Bool = false) -> Bool {
+        guard run.count >= length else { return false }
+        if run.allSatisfy(\.isLowercase) {
+            // A provider prefix already signals a key. Without one, ordinary
+            // lowercase words also need a consonant stretch to look random.
+            guard Set(run).count >= 12 else { return false }
+            if knownPrefix { return true }
+            var consonants = 0
+            for letter in run {
+                consonants = "aeiouy".contains(letter) ? 0 : consonants + 1
+                if consonants >= 6 { return true }
+            }
+            return false
+        }
+        return run.contains(where: \.isNumber) && run.contains(where: \.isLetter) && !readsAsWords(run)
     }
 
     /// Half or more of the run is words: three or more lowercase letters, with the
