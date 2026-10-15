@@ -116,11 +116,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   const file = process.env.STUB_GH_STATE;
   const state = JSON.parse(readFileSync(file, 'utf8'));
   const { gh } = stubGh(state);
+  // Constructor defaults stay in memory; only command mutations need persistence.
+  const before = JSON.stringify(state);
   const args = process.argv.slice(2);
   appendFileSync(process.env.STUB_GH_LOG ?? '/dev/null', `gh ${args.join(' ')}\n`);
   try {
     process.stdout.write(await gh(args, args.includes('--body-file') ? readFileSync(0, 'utf8') : undefined));
-    writeFileSync(file, JSON.stringify(state));
+    const after = JSON.stringify(state);
+    if (after !== before) writeFileSync(file, after);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
