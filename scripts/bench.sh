@@ -124,7 +124,7 @@ report_settings_open() {
     set -- $(settings_numbers "$a_file" | percentiles) \
         $(settings_numbers "$b_file" | percentiles) \
         $(load_stats < "$load_file")
-    a_n=$1 a50=$2 a95=$3 b_n=$4 b50=$5 b95=$6 lmin=$7 lmed=$8 lmax=$9
+    a_n=$1 a50=$2 a95=$3 b_n=$4 b50=$5 b95=$6 lmin=$7 lmed=$8 lmax=$9 l_n=${10}
     first=$(settings_numbers "$a_file" | sed -n '1p')
     echo "A (Settings (Keys only)): $a_n samples, p50 $a50 ms, p95 $a95 ms"
     if [ "$b_n" -gt 0 ]; then
@@ -138,13 +138,17 @@ report_settings_open() {
     [ "$a_n" -ge 2 ] || { echo "FAIL: Settings needs first and repeated show samples"; return 1; }
     case "$first" in ''|*[!0-9]*) echo "FAIL: no first Settings sample"; return 1 ;; esac
     provisional=
+    [ "$l_n" -gt 0 ] || provisional="no load samples retained"
+    if ! grep -q '^# power:' "$load_file"; then
+        provisional="${provisional:+$provisional; }no power receipt retained"
+    fi
     if [ -s "$BACKGROUND" ]; then
         background=$(cat "$BACKGROUND")
-        if awk -v m="$lmed" -v b="$background" 'BEGIN { exit !(m > 1.5 * b) }'; then
-            provisional="median load $lmed is over 1.5 times the background $background"
+        if [ "$l_n" -gt 0 ] && awk -v m="$lmed" -v b="$background" 'BEGIN { exit !(m > 1.5 * b) }'; then
+            provisional="${provisional:+$provisional; }median load $lmed is over 1.5 times the background $background"
         fi
     else
-        provisional="no background load measured (scripts/bench.sh background on a quiet Mac)"
+        provisional="${provisional:+$provisional; }no background load measured (scripts/bench.sh background on a quiet Mac)"
     fi
     listeners=$(fn_listeners_line)
     [ "$listeners" = "fn listeners: none" ] || provisional="${provisional:+$provisional; }$listeners"

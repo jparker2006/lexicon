@@ -74,7 +74,7 @@ import Testing
 @Test func refusedFixtureObservationExplainsUnavailableEvidenceAndPreservesExistingItem() throws {
     // A successful inspect can report the already-refused fixture state.
     let observation = TestHookSettingsFixture(
-        phase: .refused, outcome: .ok, cache: .missing, item: .present, pid: 47, fieldsAreEmpty: true
+        phase: .refused, outcome: .ok, cache: .missing, item: .none, pid: 47, fieldsAreEmpty: true
     )
     let description = try #require(observation.unavailableDescription)
     let hasRequiredBoundedCopy = description ==

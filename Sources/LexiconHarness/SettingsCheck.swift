@@ -12,7 +12,8 @@ enum SettingsCheck {
         usage: lexicon-harness settings [inspect | --release --surface settings|history --head <SHA> --out <file> --runs <n>]
 
         With no options, Settings drives the fixed .jev fixture through Dev's
-        test hooks. `inspect` checks the reopened blank form without editing it.
+        test hooks. After a separate relaunch, `inspect` checks the blank form
+        without editing it.
         Release mode attaches to the running Lexicon Dev and saves one
         first-show sample followed by <n> repeated-show samples.
         """
@@ -364,7 +365,7 @@ enum SettingsCheck {
             ok("Settings fixture saved, replaced and removed the fixed .jev item; only owned-item metadata and empty-field state were observed")
         } catch {
             if fixtureMayBeActive {
-                throw HarnessError("Settings fixture failed at phase \(lastPhase); its lease is retained. Inspect before continuing. \(error)")
+                throw HarnessError("Settings fixture unavailable/unrun after phase \(lastPhase); its lease is retained. Inspect before continuing. \(error)")
             }
             throw error
         }
@@ -496,7 +497,9 @@ enum SettingsCheck {
             guard let status = elementIfPresent(AccessibilityID.settingsStatus(id), in: window),
                   let value = AX.string(status, kAXValueAttribute) else { return nil }
             if value == "Unavailable" || value == "Could not change key" {
-                throw HarnessError("Settings reported \(value.lowercased()); the .jev fixture lease is retained")
+                let observation = try await inspectFixture()
+                throw HarnessError(observation.unavailableDescription
+                    ?? "Unavailable/unrun: fixture operation unavailable; lease retained.")
             }
             guard value == expected else { return nil }
             return true

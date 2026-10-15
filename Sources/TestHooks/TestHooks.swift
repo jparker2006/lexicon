@@ -133,6 +133,20 @@ public struct TestHookSettingsFixture: Codable, Sendable, Equatable {
     public let pid: Int32
     public let fieldsAreEmpty: Bool
 
+    /// Local reporting only. The wire continues to carry closed state, not prose.
+    public var unavailableDescription: String? {
+        if phase == .refused {
+            return "Unavailable/unrun: refused; existing item preserved; lease retained."
+        }
+        if phase == .stranded {
+            return "Unavailable/unrun: stranded fixture; lease retained."
+        }
+        if outcome != .ok || item == .unavailable {
+            return "Unavailable/unrun: fixture observation unavailable."
+        }
+        return nil
+    }
+
     public init(phase: Phase, outcome: Outcome, cache: Cache, item: OwnedItem, pid: Int32, fieldsAreEmpty: Bool) {
         self.phase = phase
         self.outcome = outcome
