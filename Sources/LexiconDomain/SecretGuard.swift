@@ -29,9 +29,8 @@ public enum SecretGuard {
     ]
 
     /// Keys without a known prefix: a stretch between dots this long, with letters
-    /// and digits, that doesn't read as words. Catches about 95% of random base62
-    /// or base64 keys at 24 characters and 99% at 40; misses most all-lowercase
-    /// keys, which read like words to this check.
+    /// and digits, or varied lowercase letters with long consonant runs, that
+    /// doesn't read as words.
     static let randomRunLength = 24
 
     private static func isTokenScalar(_ s: Unicode.Scalar) -> Bool {
@@ -49,7 +48,19 @@ public enum SecretGuard {
     }
 
     private static func looksRandom(_ run: Substring, length: Int) -> Bool {
-        run.count >= length && run.contains(where: \.isNumber) && run.contains(where: \.isLetter) && !readsAsWords(run)
+        guard run.count >= length else { return false }
+        if run.allSatisfy(\.isLowercase) {
+            // Long words and identifiers can be lowercase too. Require both
+            // letter variety and a consonant stretch unlike ordinary words.
+            guard Set(run).count >= 12 else { return false }
+            var consonants = 0
+            for letter in run {
+                consonants = "aeiouy".contains(letter) ? 0 : consonants + 1
+                if consonants >= 6 { return true }
+            }
+            return false
+        }
+        return run.contains(where: \.isNumber) && run.contains(where: \.isLetter) && !readsAsWords(run)
     }
 
     /// Half or more of the run is words: three or more lowercase letters, with the
