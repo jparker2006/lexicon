@@ -31,7 +31,7 @@ private final class KeyMatchReceipt: Sendable {
     func link(clock: TestClock) -> CloudLink {
         let expectedKeys = self.expectedKeys
         let matches = self.matches
-        CloudLink(
+        return CloudLink(
             adapter: { _ in FakeProvider() },
             connect: { request in
                 matches.withLock { observations in
@@ -134,29 +134,24 @@ func oneConductorUsesCredentialCommandUpdatesWithoutRestart() async throws {
     let savedValueIsInTheConductorCache = secrets.lookup(id) == syntheticKey
     #expect(savedValueIsInTheConductorCache)
 
-    do {
-        let result = await cloudDictation(on: conductor, file: wav, clock: clock,
-                                          replyAt: .milliseconds(100), raceDeadline: .milliseconds(300))
-        await history.flush()
+    let result = await cloudDictation(on: conductor, file: wav, clock: clock,
+                                      replyAt: .milliseconds(100), raceDeadline: .milliseconds(300))
+    await history.flush()
 
-        #expect(result.model == .cloud(.museVoice))
-        let firstConnectionConsumedExpectedKey = receipt.connectionCount == 1 && receipt.allObservedKeysMatched
-        #expect(firstConnectionConsumedExpectedKey)
+    #expect(result.model == .cloud(.museVoice))
+    let firstConnectionConsumedExpectedKey = receipt.connectionCount == 1 && receipt.allObservedKeysMatched
+    #expect(firstConnectionConsumedExpectedKey)
 
-        let replace = await outcome(from: credentialCommand, for: .save(id, replacementKey))
-        #expect(replace == .saved)
-        let replacementReachedTheSameCache = secrets.lookup(id) == replacementKey
-        #expect(replacementReachedTheSameCache)
+    let replace = await outcome(from: credentialCommand, for: .save(id, replacementKey))
+    #expect(replace == .saved)
+    let replacementReachedTheSameCache = secrets.lookup(id) == replacementKey
+    #expect(replacementReachedTheSameCache)
 
-        let replacementResult = await cloudDictation(on: conductor, file: wav, clock: clock,
-                                                     replyAt: .milliseconds(200), raceDeadline: .milliseconds(400))
-        #expect(replacementResult.model == .cloud(.museVoice))
-        let replacementConnectionConsumedExpectedKey = receipt.connectionCount == 2 && receipt.allObservedKeysMatched
-        #expect(replacementConnectionConsumedExpectedKey)
-    } catch {
-        _ = await outcome(from: credentialCommand, for: .remove(id))
-        throw error
-    }
+    let replacementResult = await cloudDictation(on: conductor, file: wav, clock: clock,
+                                                 replyAt: .milliseconds(200), raceDeadline: .milliseconds(400))
+    #expect(replacementResult.model == .cloud(.museVoice))
+    let replacementConnectionConsumedExpectedKey = receipt.connectionCount == 2 && receipt.allObservedKeysMatched
+    #expect(replacementConnectionConsumedExpectedKey)
 
     let remove = await outcome(from: credentialCommand, for: .remove(id))
     #expect(remove == .removed)
