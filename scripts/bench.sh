@@ -118,12 +118,22 @@ settings_numbers() {
     awk '!/^#/ && NF { print $1 }' "$1"
 }
 
+# A partial or malformed receipt cannot establish the run's load.
+settings_load_stats() {
+    awk '
+        /^[[:space:]]*#/ || NF == 0 { next }
+        NF != 2 || $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+([.][0-9]+)?$/ { invalid = 1; next }
+        { rows = rows $1 " " $2 "\n" }
+        END { if (!invalid) printf "%s", rows }
+    ' "$1" | load_stats
+}
+
 report_settings_open() {
     budget settings-open
     a_file=$1 b_file=$2 load_file=$3
     set -- $(settings_numbers "$a_file" | percentiles) \
         $(settings_numbers "$b_file" | percentiles) \
-        $(load_stats < "$load_file")
+        $(settings_load_stats "$load_file")
     a_n=$1 a50=$2 a95=$3 b_n=$4 b50=$5 b95=$6 lmin=$7 lmed=$8 lmax=$9 l_n=${10}
     first=$(settings_numbers "$a_file" | sed -n '1p')
     echo "A (Settings (Keys only)): $a_n samples, p50 $a50 ms, p95 $a95 ms"
@@ -138,7 +148,7 @@ report_settings_open() {
     [ "$a_n" -ge 2 ] || { echo "FAIL: Settings needs first and repeated show samples"; return 1; }
     case "$first" in ''|*[!0-9]*) echo "FAIL: no first Settings sample"; return 1 ;; esac
     provisional=
-    [ "$l_n" -gt 0 ] || provisional="no load samples retained"
+    [ "$l_n" -gt 0 ] || provisional="no valid load samples retained"
     if ! grep -q '^# power:' "$load_file"; then
         provisional="${provisional:+$provisional; }no power receipt retained"
     fi
