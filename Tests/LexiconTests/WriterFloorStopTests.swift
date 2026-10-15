@@ -26,6 +26,7 @@ func writerFloorStopDoesNotWriteKnownBufferedFlushAfterLowSpaceResult() async th
     #expect(abs(result.take.clip.samples.count - 16_000) <= 16)
     #expect(result.take.clip.samples.count > result.beforeFlush.count)
     #expect(Array(result.take.clip.samples.prefix(result.beforeFlush.count)) == result.beforeFlush)
+    #expect(result.take.clip.samples == result.expectedSamples)
     #expect(result.onDisk == result.beforeFlush)
     #expect(CAFFile.state(of: result.file) == .closed)
 }
@@ -34,6 +35,7 @@ private struct WriterFloorStopResult: Sendable {
     let inputSamples: [Int16]
     let beforeFlush: [Int16]
     let onDisk: [Int16]
+    let expectedSamples: [Int16]
     let file: URL
     let take: Take
     let problems: [CaptureProblem]
@@ -100,6 +102,7 @@ private func writerFloorStopScenario(rate: Int) async throws -> WriterFloorStopR
 
     return WriterFloorStopResult(inputSamples: source, beforeFlush: beforeFlush,
                                  onDisk: try CAFFile.read(firstURL).samples,
+                                 expectedSamples: order.expectedSamples,
                                  file: firstURL, take: take, problems: problems)
 }
 
@@ -107,6 +110,7 @@ private final class WriterFloorStopOrder: Sendable {
     private let firstFolder: URL
     private let reads = Mutex(0)
     private let firstConverterID = Mutex<ObjectIdentifier?>(nil)
+    private let firstConverterSamples = Mutex<[Int16]>([])
     private let flushStarted = Mutex(false)
     private let readGate = DispatchSemaphore(value: 0)
     private let flushGate = DispatchSemaphore(value: 0)
@@ -133,6 +137,8 @@ private final class WriterFloorStopOrder: Sendable {
         (sync, syncContinuation) = AsyncStream.makeStream()
         (stopRequest, stopContinuation) = AsyncStream.makeStream()
     }
+
+    var expectedSamples: [Int16] { firstConverterSamples.withLock { $0 } }
 
     func firstCaptureStarted(_ signals: CaptureSignals) {
         firstCaptureContinuation.yield(signals)
@@ -166,7 +172,7 @@ private final class WriterFloorStopOrder: Sendable {
         }
         if newlyObserved { converterContinuation.yield(()) }
 
-        return Resampler.realConvert(converter, output) { [self] converter, status in
+        let answer = Resampler.realConvert(converter, output) { [self] converter, status in
             let buffer = input(converter, status)
             guard isFirst, status.pointee == .endOfStream else { return buffer }
             let shouldWait = flushStarted.withLock { started -> Bool in
@@ -180,6 +186,12 @@ private final class WriterFloorStopOrder: Sendable {
             }
             return buffer
         }
+        if isFirst, answer.0 != .error, output.frameLength > 0,
+           let channel = output.int16ChannelData {
+            let samples = Array(UnsafeBufferPointer(start: channel[0], count: Int(output.frameLength)))
+            firstConverterSamples.withLock { $0.append(contentsOf: samples) }
+        }
+        return answer
     }
 
     func syncEntered() { syncContinuation.yield(()) }
