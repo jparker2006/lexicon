@@ -30,10 +30,9 @@ private final class KeyMatchReceipt: Sendable {
 
     func link(clock: TestClock) -> CloudLink {
         let expectedKeys = self.expectedKeys
-        let matches = self.matches
         return CloudLink(
             adapter: { _ in FakeProvider() },
-            connect: { request in
+            connect: { [self] request in
                 matches.withLock { observations in
                     let index = observations.count
                     let matched = expectedKeys.indices.contains(index)
@@ -135,7 +134,7 @@ func oneConductorUsesCredentialCommandUpdatesWithoutRestart() async throws {
     #expect(savedValueIsInTheConductorCache)
 
     let result = await cloudDictation(on: conductor, file: wav, clock: clock,
-                                      replyAt: .milliseconds(100), raceDeadline: .milliseconds(300))
+                                          replyAt: .milliseconds(100), raceDeadline: .milliseconds(300)) // timing-ok: TestClock offsets, no wall-clock wait
     await history.flush()
 
     #expect(result.model == .cloud(.museVoice))
@@ -148,7 +147,7 @@ func oneConductorUsesCredentialCommandUpdatesWithoutRestart() async throws {
     #expect(replacementReachedTheSameCache)
 
     let replacementResult = await cloudDictation(on: conductor, file: wav, clock: clock,
-                                                 replyAt: .milliseconds(200), raceDeadline: .milliseconds(400))
+                                                     replyAt: .milliseconds(200), raceDeadline: .milliseconds(400)) // timing-ok: TestClock offsets, no wall-clock wait
     #expect(replacementResult.model == .cloud(.museVoice))
     let replacementConnectionConsumedExpectedKey = receipt.connectionCount == 2 && receipt.allObservedKeysMatched
     #expect(replacementConnectionConsumedExpectedKey)
@@ -210,3 +209,29 @@ func credentialCommandsKeepEmptySaveDistinctAndEnvironmentReadOnly() async {
     let removed = await outcome(from: command, for: .remove(id))
     #expect(removed == .removed)
 }
+
+#if DEBUG
+@Test func failedCredentialWritesPreserveThePreviouslyCachedValue() async {
+    let synthetic = "synthetic-cached-key"
+    let security = CredentialSecurity(
+        read: { _, _ in .found(synthetic) },
+        presence: { _, _ in .saved },
+        write: { _, _, _ in false },
+        addOwned: { _, _, _, _ in .failed },
+        ownedPresence: { _, _ in false },
+        replaceOwned: { _, _, _ in false },
+        removeOwned: { _, _ in false })
+    let secrets = Secrets(.keychain(service: settingsCredentialService()), security: security)
+    let wasPrimed = secrets.lookup(.jev) == synthetic
+    #expect(wasPrimed)
+    let save = await outcome(from: secrets.credentials, for: .save(.jev, "synthetic-replacement"))
+    let afterSaveWasPreserved = secrets.lookup(.jev) == synthetic
+    let removal = await outcome(from: secrets.credentials, for: .remove(.jev))
+    let afterRemovalWasPreserved = secrets.lookup(.jev) == synthetic
+    #expect(save == .unavailable)
+    #expect(removal == .unavailable)
+    #expect(afterSaveWasPreserved)
+    #expect(afterRemovalWasPreserved)
+}
+
+#endif

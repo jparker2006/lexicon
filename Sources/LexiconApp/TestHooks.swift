@@ -16,7 +16,7 @@ import TestHooks
 @MainActor
 enum AppTestHooks {
     static func isOn(bundleID: String) -> Bool {
-        bundleID == AppPaths.devBundleID && CommandLine.arguments.contains(TestHookChannel.launchArgument)
+        TestHookChannel.isEnabled(bundleID: bundleID, arguments: CommandLine.arguments)
     }
 
     /// The fn timing for this launch: with `--test-hooks --short-cap`, a 20 s cap
@@ -49,10 +49,10 @@ enum AppTestHooks {
     /// goes, so the harness finds it without knowing the run's flags.
     static func start(bundleID: String, dataRoot: AppPaths, indicator: DictationIndicator,
                       system: LexiconSystem?, preferences: PreferencesStore,
-                      slowModel: SlowedTranscriber?) -> TestHookServer? {
+                      slowModel: SlowedTranscriber?, settings: SettingsWindowPresenter?) -> TestHookServer? {
         guard isOn(bundleID: bundleID) else { return nil }
         let context = Context(dataRoot: dataRoot, indicator: indicator, system: system, preferences: preferences,
-                              slowModel: slowModel)
+                              slowModel: slowModel, settings: settings)
         do {
             return try TestHookServer(channel: TestHookChannel(paths: AppPaths.forBundle(id: bundleID))) {
                 await handle($0, in: context)
@@ -70,11 +70,18 @@ enum AppTestHooks {
         let system: LexiconSystem?
         let preferences: PreferencesStore
         let slowModel: SlowedTranscriber?
+        let settings: SettingsWindowPresenter?
     }
 
     static func handle(_ command: TestHookCommand, in context: Context) async -> TestHookReply {
         let (indicator, system, preferences) = (context.indicator, context.system, context.preferences)
         return switch command {
+        case .settingsFixtureBegin:
+            await settingsFixture(.begin, in: context)
+        case .settingsFixtureInspect:
+            await settingsFixture(.inspect, in: context)
+        case .settingsFixtureEnd:
+            await settingsFixture(.end, in: context)
         case .status:
             .status(currentStatus(preferences, dataRoot: context.dataRoot))
         case .privacy(let mode, let alwaysPrivateApps):
@@ -111,6 +118,41 @@ enum AppTestHooks {
         case .insert(let text, let delay):
             if let system { await insert(text, after: delay, into: system.text) } else { closed }
         }
+    }
+
+    private static func settingsFixture(_ action: SettingsFixtureAction, in context: Context) async -> TestHookReply {
+        guard isOn(bundleID: Bundle.main.bundleIdentifier ?? ""), let system = context.system else {
+            return .settingsFixture(.init(phase: .idle, outcome: .refused, cache: .unknown, item: .none,
+                                          pid: getpid(), fieldsAreEmpty: context.settings?.credentialFieldsAreEmpty ?? true))
+        }
+        let observation = await withCheckedContinuation { continuation in
+            system.settingsFixture(action) { continuation.resume(returning: $0) }
+        }
+        let phase: TestHookSettingsFixture.Phase = switch observation.phase {
+        case .idle: .idle
+        case .reserved: .reserved
+        case .refused: .refused
+        case .owned: .owned
+        case .removed: .removed
+        case .stranded: .stranded
+        }
+        let outcome: TestHookSettingsFixture.Outcome = switch observation.outcome {
+        case .ok: .ok
+        case .refused: .refused
+        case .unavailable: .unavailable
+        }
+        let cache: TestHookSettingsFixture.Cache = switch observation.cache {
+        case .unknown: .unknown
+        case .missing: .missing
+        case .available: .available
+        }
+        let item: TestHookSettingsFixture.OwnedItem = switch observation.item {
+        case .none: .none
+        case .present: .present
+        case .unavailable: .unavailable
+        }
+        return .settingsFixture(.init(phase: phase, outcome: outcome, cache: cache, item: item, pid: getpid(),
+                                      fieldsAreEmpty: context.settings?.credentialFieldsAreEmpty ?? true))
     }
 
     /// Off the main actor: the probe sleeps while the mic records.

@@ -26,7 +26,8 @@ import Testing
 
         var unknown = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         let knownCase = try #require(unknown.keys.first)
-        let encodedCase = try #require(unknown.removeValue(forKey: knownCase))
+        let removedCase = unknown.removeValue(forKey: knownCase)
+        let encodedCase = try #require(removedCase)
         unknown["settingsFixtureUnknown"] = encodedCase
         let unknownData = try JSONSerialization.data(withJSONObject: unknown)
         #expect(throws: DecodingError.self) { try decoder.decode(TestHookCommand.self, from: unknownData) }

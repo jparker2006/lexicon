@@ -9,6 +9,7 @@
 #   scripts/bench.sh sample <file>           the load sampler alone, until stopped
 #   scripts/bench.sh seed <history.sqlite>   add the synthetic year to a History
 #   scripts/bench.sh report <budget> <A numbers> <B numbers> <load file> [same]
+#   scripts/bench.sh report settings-open <Settings samples> <History samples> <load file>
 #
 # Budgets, each with one reading and its exclusion rule, fixed before the first run:
 #   history-open  History window, open to first rows, every open, p95 100 ms or less.
@@ -18,10 +19,14 @@
 #                 never Dev's own data. The harness's check scrolls to the oldest day.
 #   launch        process start to fn working, warm relaunch with `open`, p95 150 ms or less.
 #                 Excludes each install's first launch (macOS checks the new signature).
+#   settings-open Settings (Keys only), menu action to a usable grid, p95 100 ms or less.
+#                 Excludes nothing. B is a named main History control for context only.
 #
-# A and B are Lexicon Dev bundles from scripts/bundle.sh, each built at its own
-# commit. Each run installs one with scripts/lib/install-app.sh and reads the
-# app's own log lines, so only the live-app lane's holder runs this. The
+# History/launch A and B are Lexicon Dev bundles from scripts/bundle.sh, each
+# built at its own commit. Each run installs one with scripts/lib/install-app.sh
+# and reads the app's own log lines. Settings-open is report-only: SettingsCheck
+# saves its first/repeated samples and the main History control samples before
+# this script reports them. Only the live-app lane's holder runs live checks. The
 # verdict is PROVISIONAL, never PASS or FAIL, while the run's median load is
 # over 1.5 times the measured background, or another app answers fn. When A
 # and B build the same app code, the verdict is SAME APP CODE: their
@@ -68,7 +73,12 @@ budget() {
             READING="process start to fn working (the app's launch line), warm relaunch with open"
             EXCLUDES="each install's first launch"
             ;;
-        *) die "unknown budget '$1': history-open or launch" ;;
+        settings-open)
+            TARGET=100
+            READING="Settings (Keys only), menu action to a usable grid, first and repeated shows"
+            EXCLUDES="nothing"
+            ;;
+        *) die "unknown budget '$1': history-open, launch or settings-open" ;;
     esac
 }
 
@@ -104,7 +114,54 @@ load_stats() {
     }'
 }
 
+settings_numbers() {
+    awk '!/^#/ && NF { print $1 }' "$1"
+}
+
+report_settings_open() {
+    budget settings-open
+    a_file=$1 b_file=$2 load_file=$3
+    set -- $(settings_numbers "$a_file" | percentiles) \
+        $(settings_numbers "$b_file" | percentiles) \
+        $(load_stats < "$load_file")
+    a_n=$1 a50=$2 a95=$3 b_n=$4 b50=$5 b95=$6 lmin=$7 lmed=$8 lmax=$9
+    first=$(settings_numbers "$a_file" | sed -n '1p')
+    echo "A (Settings (Keys only)): $a_n samples, p50 $a50 ms, p95 $a95 ms"
+    echo "B (main History control): $b_n samples, p50 $b50 ms, p95 $b95 ms"
+    echo "first Settings (Keys only) show: ${first:-unavailable} ms; must be $TARGET ms or less"
+    echo "load: min $lmin, median $lmed, max $lmax"
+    sed -n '/^# power:/p' "$load_file"
+    [ "$a_n" -gt 0 ] && [ "$b_n" -gt 0 ] || { echo "FAIL: no samples on one side"; return 1; }
+    case "$first" in ''|*[!0-9]*) echo "FAIL: no first Settings sample"; return 1 ;; esac
+    provisional=
+    if [ -s "$BACKGROUND" ]; then
+        background=$(cat "$BACKGROUND")
+        if awk -v m="$lmed" -v b="$background" 'BEGIN { exit !(m > 1.5 * b) }'; then
+            provisional="median load $lmed is over 1.5 times the background $background"
+        fi
+    else
+        provisional="no background load measured (scripts/bench.sh background on a quiet Mac)"
+    fi
+    listeners=$(fn_listeners_line)
+    [ "$listeners" = "fn listeners: none" ] || provisional="${provisional:+$provisional; }$listeners"
+    if [ -n "$provisional" ]; then
+        echo "PROVISIONAL, no final verdict: $provisional. Settings p95 $a95 ms against the $TARGET ms budget."
+    elif [ "$first" -gt "$TARGET" ]; then
+        echo "FAIL: the first Settings show is $first ms, over the $TARGET ms budget."
+        return 1
+    elif [ "$a95" -le "$TARGET" ]; then
+        echo "PASS: Settings p95 $a95 ms and the first show $first ms are within the $TARGET ms budget."
+    else
+        echo "FAIL: Settings p95 $a95 ms is over the $TARGET ms budget."
+        return 1
+    fi
+}
+
 report() {
+    if [ "$1" = settings-open ]; then
+        report_settings_open "$2" "$3" "$4"
+        return
+    fi
     budget "$1"
     same=${5:-}
     set -- $(percentiles < "$2") $(percentiles < "$3") $(load_stats < "$4")

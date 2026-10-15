@@ -13,6 +13,7 @@ extension AppDelegate {
         let appName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lexicon"
         let statusItem = StatusItemController(appName: appName, version: Self.version(of: bundle)) { [weak self] in
             [history.menuItem()] + (self?.lexiconPage.map { [$0.menuItem()] } ?? [])
+                + (self?.settings.map { [$0.menuItem()] } ?? [])
                 + (self?.systemError.map { [Self.line($0)] } ?? [])
                 + (self?.setup?.menuItems() ?? [])
                 + (self?.indicator.map { [$0.privateModeMenuItem(), $0.soundsMenuItem()] } ?? [])

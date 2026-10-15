@@ -25,4 +25,24 @@ public enum AccessibilityID {
     /// First-run setup: its window, and the box the "Try it" step's Dictation lands in.
     public static let setupWindow = "lexicon.setup"
     public static let setupTryField = "lexicon.setup.tryField"
+    /// Settings menu item, window and the grid of working credential rows.
+    public static let settingsMenu = "lexicon.settings.menu"
+    public static let settingsWindow = "lexicon.settings"
+    public static let settingsGrid = "lexicon.settings.grid"
+
+    public static func settingsEntry(_ id: CredentialID) -> String {
+        "lexicon.settings.entry.\(id.account)"
+    }
+
+    public static func settingsSave(_ id: CredentialID) -> String {
+        "lexicon.settings.save.\(id.account)"
+    }
+
+    public static func settingsRemove(_ id: CredentialID) -> String {
+        "lexicon.settings.remove.\(id.account)"
+    }
+
+    public static func settingsStatus(_ id: CredentialID) -> String {
+        "lexicon.settings.status.\(id.account)"
+    }
 }

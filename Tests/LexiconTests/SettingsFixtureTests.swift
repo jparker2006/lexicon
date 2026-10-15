@@ -1,3 +1,4 @@
+#if DEBUG
 import Foundation
 import Synchronization
 import Testing
@@ -32,10 +33,10 @@ private final class ReadGate: Sendable {
         }
         guard shouldBlock else { return }
         started.signal()
-        releaseRead.wait()
+        releaseRead.wait() // timing-ok: the test releases this explicit read barrier
     }
 
-    func waitUntilReadStarts() { started.wait() }
+    func waitUntilReadStarts() { started.wait() } // timing-ok: the blocked read signals this explicit barrier
     func release() { releaseRead.signal() }
 }
 
@@ -43,7 +44,7 @@ private final class ScriptedSecurity: Sendable {
     private struct Item: Sendable {
         let service: String
         let account: String
-        let marker: Data?
+        var marker: Data?
         var value: String
     }
 
@@ -64,7 +65,7 @@ private final class ScriptedSecurity: Sendable {
         var removeCount = 0
         var ownedOperationsUsedIssuedReference = true
         var ownedOperationsUsedIssuedMarker = true
-        let issuedMarker = Data([0x73, 0x65, 0x74, 0x74, 0x69, 0x6e, 0x67, 0x73])
+        var issuedMarker: Data?
     }
 
     struct Counts: Sendable {
@@ -115,6 +116,15 @@ private final class ScriptedSecurity: Sendable {
 
     func hideOwnedReference() { state.withLock { $0.hideOwnedReference = true } }
     func failCleanup() { state.withLock { $0.failRemove = true } }
+    func failReplacement() { state.withLock { $0.failReplace = true } }
+
+    func changeOwnedMarker() {
+        state.withLock { state in
+            guard var item = state.ownedItems[issuedReference] else { return }
+            item.marker = Data([0x63, 0x68, 0x61, 0x6e, 0x67, 0x65, 0x64])
+            state.ownedItems[issuedReference] = item
+        }
+    }
 
     func counts() -> Counts {
         state.withLock {
@@ -165,6 +175,7 @@ private final class ScriptedSecurity: Sendable {
             case .failed: return .failed
             case .created(let reference):
                 if let reference {
+                    state.issuedMarker = marker
                     let item = Item(service: service, account: account, marker: marker, value: value)
                     state.ownedItems[reference] = item
                     state.normalItems[key(service, account)] = item
@@ -210,7 +221,8 @@ private final class ScriptedSecurity: Sendable {
 
     private func recordOwnershipArguments(_ reference: Data, _ marker: Data, state: inout State) {
         state.ownedOperationsUsedIssuedReference = state.ownedOperationsUsedIssuedReference && reference == issuedReference
-        state.ownedOperationsUsedIssuedMarker = state.ownedOperationsUsedIssuedMarker && marker == state.issuedMarker
+        let usedIssuedMarker = state.issuedMarker.map { $0 == marker } ?? false
+        state.ownedOperationsUsedIssuedMarker = state.ownedOperationsUsedIssuedMarker && usedIssuedMarker
     }
 }
 
@@ -345,6 +357,8 @@ private final class ScriptedSecurity: Sendable {
         return
     }
 
+    let initiallyMissing = secrets.lookup(.jev) == nil
+    #expect(initiallyMissing)
     _ = await fixtureObservation(from: secrets, .begin)
     let save = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-fixture-key"))
     let stranded = await fixtureObservation(from: secrets, .inspect)
@@ -454,6 +468,115 @@ private final class ScriptedSecurity: Sendable {
     #expect(script.counts().writes == 0)
 }
 
+@Test func repeatedBeginKeepsAnOwnedFixtureLeaseAndItsReference() async {
+    let script = ScriptedSecurity()
+    guard let secrets = Secrets.fixtureForTesting(service: fixtureService(), security: script.security) else {
+        Issue.record("A UUID-scoped fixture service should be accepted")
+        return
+    }
+
+    _ = await fixtureObservation(from: secrets, .begin)
+    _ = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-fixture-key"))
+    let before = await fixtureObservation(from: secrets, .inspect)
+    let repeatedBegin = await fixtureObservation(from: secrets, .begin)
+    let replacement = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-replacement-key"))
+    let after = await fixtureObservation(from: secrets, .inspect)
+    let ended = await fixtureObservation(from: secrets, .end)
+
+    #expect(before.phase == .owned)
+    #expect(before.item == .present)
+    #expect(before.cache == .available)
+    #expect(repeatedBegin.phase == .owned)
+    #expect(repeatedBegin.item == .present)
+    #expect(repeatedBegin.cache == .available)
+    #expect(replacement == .saved)
+    #expect(after.phase == .owned)
+    #expect(after.item == .present)
+    #expect(ended.phase == .idle)
+    #expect(script.counts().adds == 1)
+    #expect(script.counts().replacements == 1)
+    #expect(script.counts().removals == 1)
+    #expect(script.counts().usedIssuedReference)
+    #expect(script.counts().usedIssuedMarker)
+    #expect(script.counts().writes == 0)
+}
+
+@Test func failedOwnedReplacementRetainsLeaseAndAvailableCacheState() async {
+    let script = ScriptedSecurity()
+    guard let secrets = Secrets.fixtureForTesting(service: fixtureService(), security: script.security) else {
+        Issue.record("A UUID-scoped fixture service should be accepted")
+        return
+    }
+
+    _ = await fixtureObservation(from: secrets, .begin)
+    let firstSave = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-fixture-key"))
+    script.failReplacement()
+    let failedReplacement = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-replacement-key"))
+    let after = await fixtureObservation(from: secrets, .inspect)
+    let ended = await fixtureObservation(from: secrets, .end)
+
+    #expect(firstSave == .saved)
+    #expect(failedReplacement == .unavailable)
+    #expect(after.phase == .owned)
+    #expect(after.item == .present)
+    #expect(after.cache == .available)
+    #expect(ended.phase == .idle)
+    #expect(script.counts().adds == 1)
+    #expect(script.counts().replacements == 1)
+    #expect(script.counts().removals == 1)
+    #expect(script.counts().usedIssuedReference)
+    #expect(script.counts().usedIssuedMarker)
+    #expect(script.counts().writes == 0)
+}
+
+@Test func fixtureConstructorRejectsNonUUIDAndNoncanonicalServices() {
+    let prefix = "dev.jparker.lexicon.settings-fixture-tests."
+    let uuid = UUID().uuidString
+    let invalidServices = [
+        prefix + "not-a-uuid",
+        prefix + uuid.lowercased(),
+        prefix + uuid.replacingOccurrences(of: "-", with: ""),
+        "dev.jparker.lexicon.tests.\(uuid)"
+    ]
+
+    let allRejected = invalidServices.allSatisfy { service in
+        if case nil = Secrets.fixtureForTesting(service: service) { return true }
+        return false
+    }
+
+    #expect(allRejected)
+}
+
+@Test func changedOwnedMarkerRefusesMutationAndCleanupWithoutLosingLease() async {
+    let script = ScriptedSecurity()
+    guard let secrets = Secrets.fixtureForTesting(service: fixtureService(), security: script.security) else {
+        Issue.record("A UUID-scoped fixture service should be accepted")
+        return
+    }
+
+    _ = await fixtureObservation(from: secrets, .begin)
+    _ = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-fixture-key"))
+    script.changeOwnedMarker()
+    let replacement = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-replacement-key"))
+    let removal = await editOutcome(from: secrets.credentials, .remove(.jev))
+    let ending = await fixtureObservation(from: secrets, .end)
+    let retained = await fixtureObservation(from: secrets, .inspect)
+
+    #expect(replacement == .unavailable)
+    #expect(removal == .unavailable)
+    #expect(ending.phase == .owned)
+    #expect(ending.outcome == .unavailable)
+    #expect(retained.phase == .owned)
+    #expect(retained.item == .unavailable)
+    #expect(retained.cache == .available)
+    #expect(script.counts().adds == 1)
+    #expect(script.counts().replacements == 0)
+    #expect(script.counts().removals == 0)
+    #expect(script.counts().usedIssuedReference)
+    #expect(script.counts().usedIssuedMarker)
+    #expect(script.counts().writes == 0)
+}
+
 @Test func realThrowawayFixtureCreationAndEndDeleteOnlyItsPersistentReference() async {
     let service = fixtureService()
     guard let secrets = Secrets.fixtureForTesting(service: service) else {
@@ -515,3 +638,34 @@ private final class ScriptedSecurity: Sendable {
     #expect(removed == .removed)
     #expect(itemWasRemoved)
 }
+
+@Test func realThrowawayFixtureReplacementAndRemoveUseTheOwnedReference() async {
+    let service = fixtureService()
+    guard let secrets = Secrets.fixtureForTesting(service: service) else {
+        Issue.record("A UUID-scoped fixture service should be accepted")
+        return
+    }
+    let unrelated = "synthetic-unrelated-fixture-item"
+    let unrelatedSave = await editOutcome(from: secrets.credentials, .save(.cleanup, unrelated))
+    _ = await fixtureObservation(from: secrets, .begin)
+    let created = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-first-fixture-value"))
+    let replaced = await editOutcome(from: secrets.credentials, .save(.jev, "synthetic-second-fixture-value"))
+    let inspected = await fixtureObservation(from: secrets, .inspect)
+    let removed = await editOutcome(from: secrets.credentials, .remove(.jev))
+    let ended = await fixtureObservation(from: secrets, .end)
+    let fresh = Secrets(.keychain(service: service))
+    let fixtureIsGone = fresh.lookup(.jev) == nil
+    let unrelatedSurvived = fresh.lookup(.cleanup) == unrelated
+    let cleanup = await editOutcome(from: fresh.credentials, .remove(.cleanup))
+    #expect(unrelatedSave == .saved)
+    #expect(created == .saved)
+    #expect(replaced == .saved)
+    #expect(inspected.item == .present)
+    #expect(removed == .removed)
+    #expect(ended.phase == .idle)
+    #expect(fixtureIsGone)
+    #expect(unrelatedSurvived)
+    #expect(cleanup == .removed)
+}
+
+#endif

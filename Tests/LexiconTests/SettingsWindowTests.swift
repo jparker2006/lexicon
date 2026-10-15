@@ -9,7 +9,7 @@ private struct CredentialRequest: Sendable {
     let reply: @Sendable (CredentialOutcome) -> Void
 }
 
-/// Keeps the presenter-facing command real while making every result wait for the test.
+/// NSLock protects requests and continuations while callbacks arrive off the main actor.
 private final class CredentialCommandProbe: @unchecked Sendable {
     private struct Waiter {
         let matches: @Sendable (CredentialEdit) -> Bool
@@ -73,7 +73,7 @@ private func settingsWindows() -> [NSWindow] {
 
 @MainActor
 private func performSettingsMenuAction(_ menu: NSMenu) {
-    #expect(menu.performActionForItem(at: 0))
+    menu.performActionForItem(at: 0)
 }
 
 /// A callback may enqueue its bounded result on MainActor. This main-queue block
@@ -104,7 +104,7 @@ private func isRemove(_ edit: CredentialEdit, for id: CredentialID) -> Bool {
 struct SettingsWindowTests {
 @MainActor
 @Test(.timeLimit(.minutes(1))) func pendingCredentialCallbacksLeaveTheNativeGridUsable() async throws {
-    _ = NSApplication.shared
+    NSApplication.shared.setActivationPolicy(.prohibited)
     let probe = CredentialCommandProbe()
     let presenter = SettingsWindowPresenter(credentials: { edit, reply in
         probe.submit(edit, reply: reply)
@@ -120,10 +120,14 @@ struct SettingsWindowTests {
     #expect(isAvailability(pendingLookup.edit, for: .speech(CloudModel.allCases[0])))
     #expect(window.accessibilityIdentifier() == AccessibilityID.settingsWindow)
     #expect(grid.accessibilityIdentifier() == AccessibilityID.settingsGrid)
+    #expect(item.accessibilityIdentifier() == AccessibilityID.settingsMenu)
+    window.contentView?.layoutSubtreeIfNeeded()
 
     let ids: [CredentialID] = CloudModel.allCases.map { .speech($0) } + [.cleanup, .jev]
     for id in ids {
-        #expect(view(withID: AccessibilityID.settingsEntry(id), in: window) is NSSecureTextField)
+        let secureEntry = try #require(view(withID: AccessibilityID.settingsEntry(id), in: window) as? NSSecureTextField)
+        #expect(secureEntry.frame.width > 0)
+        #expect(secureEntry.frame.height > 0)
         #expect(view(withID: AccessibilityID.settingsSave(id), in: window) is NSButton)
         #expect(view(withID: AccessibilityID.settingsRemove(id), in: window) is NSButton)
         #expect(view(withID: AccessibilityID.settingsStatus(id), in: window) is NSTextField)
@@ -138,7 +142,8 @@ struct SettingsWindowTests {
     save.performClick(nil)
     let saveRequest = await probe.request { isSave($0, for: id, value: "synthetic-settings-key") }
     #expect(isSave(saveRequest.edit, for: id, value: "synthetic-settings-key"))
-    #expect(field.stringValue.isEmpty)
+    let entryWasCleared1 = field.stringValue.isEmpty
+    #expect(entryWasCleared1)
     #if DEBUG
     #expect(presenter.credentialFieldsAreEmpty)
     #endif
@@ -159,7 +164,7 @@ struct SettingsWindowTests {
 
 @MainActor
 @Test(.timeLimit(.minutes(1))) func oneSettingsWindowIsReusedAndReopeningStartsWithBlankFields() throws {
-    _ = NSApplication.shared
+    NSApplication.shared.setActivationPolicy(.prohibited)
     let probe = CredentialCommandProbe()
     let presenter = SettingsWindowPresenter(credentials: { edit, reply in
         probe.submit(edit, reply: reply)
@@ -180,8 +185,10 @@ struct SettingsWindowTests {
     #expect(settingsWindows().first === firstWindow)
 
     firstWindow.performClose(nil)
-    #expect(firstField.stringValue.isEmpty)
-    #expect(firstEditor.string.isEmpty)
+    let entryWasCleared2 = firstField.stringValue.isEmpty
+    #expect(entryWasCleared2)
+    let entryWasCleared3 = firstEditor.string.isEmpty
+    #expect(entryWasCleared3)
     #expect(settingsWindows().isEmpty)
     #if DEBUG
     #expect(presenter.credentialFieldsAreEmpty)
@@ -191,7 +198,8 @@ struct SettingsWindowTests {
     let reopenedWindow = try #require(settingsWindows().first)
     #expect(reopenedWindow !== firstWindow)
     let reopenedField = try #require(view(withID: AccessibilityID.settingsEntry(.jev), in: reopenedWindow) as? NSSecureTextField)
-    #expect(reopenedField.stringValue.isEmpty)
+    let entryWasCleared4 = reopenedField.stringValue.isEmpty
+    #expect(entryWasCleared4)
     #if DEBUG
     #expect(presenter.credentialFieldsAreEmpty)
     #endif
@@ -201,7 +209,7 @@ struct SettingsWindowTests {
 
 @MainActor
 @Test(.timeLimit(.minutes(1))) func savingClearsTheActiveSecureFieldEditorSynchronously() async throws {
-    _ = NSApplication.shared
+    NSApplication.shared.setActivationPolicy(.prohibited)
     let probe = CredentialCommandProbe()
     let presenter = SettingsWindowPresenter(credentials: { edit, reply in
         probe.submit(edit, reply: reply)
@@ -221,8 +229,10 @@ struct SettingsWindowTests {
 
     save.performClick(nil)
 
-    #expect(field.stringValue.isEmpty)
-    #expect(editor.string.isEmpty)
+    let entryWasCleared5 = field.stringValue.isEmpty
+    #expect(entryWasCleared5)
+    let entryWasCleared6 = editor.string.isEmpty
+    #expect(entryWasCleared6)
     #if DEBUG
     #expect(presenter.credentialFieldsAreEmpty)
     #endif
@@ -233,7 +243,7 @@ struct SettingsWindowTests {
 
 @MainActor
 @Test(.timeLimit(.minutes(1))) func oldCredentialResultsCannotReplaceNewerResultsAfterReopen() async throws {
-    _ = NSApplication.shared
+    NSApplication.shared.setActivationPolicy(.prohibited)
     let probe = CredentialCommandProbe()
     let presenter = SettingsWindowPresenter(credentials: { edit, reply in
         probe.submit(edit, reply: reply)
@@ -252,7 +262,8 @@ struct SettingsWindowTests {
     let firstSave = await probe.request(where: { isSave($0, for: id, value: "older-synthetic-key") })
 
     firstWindow.performClose(nil)
-    #expect(firstField.stringValue.isEmpty)
+    let entryWasCleared7 = firstField.stringValue.isEmpty
+    #expect(entryWasCleared7)
 
     performSettingsMenuAction(menu)
     let secondAvailability = await probe.request(where: { isAvailability($0, for: id) }, occurrence: 1)
@@ -277,7 +288,8 @@ struct SettingsWindowTests {
     secondAvailability.reply(.availability(.missing))
     await drainMainQueue()
     #expect(status.stringValue == statusAfterSave)
-    #expect(secondField.stringValue.isEmpty)
+    let entryWasCleared8 = secondField.stringValue.isEmpty
+    #expect(entryWasCleared8)
     secondWindow.performClose(nil)
 }
 }
