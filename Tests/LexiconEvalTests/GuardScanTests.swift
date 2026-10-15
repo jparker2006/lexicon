@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import LexiconEval
@@ -163,4 +164,30 @@ private func runGuardScanExecutable(on manifest: URL) async throws -> (status: I
     #expect(output["status"] as? String == "inserted")
     let text = try #require(output["text"] as? String)
     #expect(!text.isEmpty)
+}
+
+@Test(.timeLimit(.minutes(1))) func guardScanRejectsFIFOManifests() async throws {
+    let directory = try scratchDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appending(path: "manifest.fifo").path(percentEncoded: false)
+    guard path.withCString({ Darwin.mkfifo($0, mode_t(0o600)) }) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+
+    let writerDone = AsyncStream<Void>.makeStream()
+    Thread.detachNewThread {
+        defer { writerDone.continuation.finish() }
+        let descriptor = path.withCString { Darwin.open($0, O_WRONLY) }
+        if descriptor >= 0 { Darwin.close(descriptor) }
+    }
+
+    let status = await runEval(arguments: ["lexicon-eval", "--guard-scan", path])
+    let releaseReader = path.withCString { Darwin.open($0, O_RDONLY | O_NONBLOCK) }
+    for await _ in writerDone.stream {}
+    if releaseReader >= 0 { Darwin.close(releaseReader) }
+
+    #expect(status == 1)
+    let result = try await runGuardScanExecutable(on: URL(filePath: path))
+    #expect(result.status == 1)
+    #expect(result.output == "lexicon-eval: cannot scan manifest\n")
 }
