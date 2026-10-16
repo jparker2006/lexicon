@@ -212,15 +212,23 @@ public actor ParakeetTranscriber: LocalTranscriber {
         try await install(paths: paths, access: access, progress: progress) { models, progress in
             let manager = UnifiedAsrManager(encoderPrecision: .int8)
             try await manager.loadModels(to: models, progressHandler: { report in
-                // The CoreML compile after the last file (about 25 s on a new build) is not a download.
-                if case .compiling = report.phase {
-                    progress(.preparing)
-                } else {
-                    progress(.downloading(report.fractionCompleted))
+                switch report.phase {
+                case .listing: progress(.downloading(0))
+                case .downloading(let done, let total):
+                    progress(Self.installStep(fraction: report.fractionCompleted, filesDone: done, of: total))
+                case .compiling: progress(.preparing)
                 }
             })
             await manager.cleanup()
         }
+    }
+
+    /// FluidAudio's progress for this install, as setup shows it. Its repo load counts
+    /// the download as 0 to 0.5 of the whole and then compiles (about 25 s on a new
+    /// build) without a word, so the last file landing is where preparing starts; a
+    /// set it finds whole already (0 of 0 files) goes straight to preparing.
+    static func installStep(fraction: Double, filesDone: Int, of totalFiles: Int) -> ModelInstallProgress {
+        filesDone >= totalFiles ? .preparing : .downloading(min(1, fraction / 0.5))
     }
 
     /// `download` fetches and prepares the model into the `models` folder it is
