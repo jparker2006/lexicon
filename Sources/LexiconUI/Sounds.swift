@@ -102,8 +102,8 @@ extension Sounds {
         /// the engine stops. The size is per process (another process reads its own 512
         /// while one holds 256), so each Lexicon copy saves and restores only its own.
         private var saved: (device: AudioObjectID, frames: UInt32)?
-        /// Each change and its read-back, as this process sees the buffer: another
-        /// process can't, so the Live check of the restore reads these lines.
+        /// Each change, logged with its read-back: the HAL answers per process, so only
+        /// Lexicon itself can see the size it set.
         private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "sounds")
 
         init(voice: SynthVoice, output: any SoundOutput) {
@@ -121,15 +121,16 @@ extension Sounds {
                     if let saved, saved.device != device { restore() }
                     if saved == nil, let frames = output.bufferFrames(of: device) { saved = (device, frames) }
                     // Only a size that can be put back is changed: a device whose read failed keeps its own.
-                    if let saved, saved.device == device {
-                        output.setBufferFrames(Sounds.bufferFrames, of: device)
-                        let now = output.bufferFrames(of: device).map(String.init) ?? "unreadable"
-                        log.notice("output buffer \(now, privacy: .public) frames while sounding (device's own \(saved.frames, privacy: .public))")
-                    }
+                    if saved?.device == device { output.setBufferFrames(Sounds.bufferFrames, of: device) }
                 }
                 do {
                     try output.start()
                     voice.presentationLatency = output.presentationLatency
+                    // After the start, so the read-back never holds up a cold cue.
+                    if let saved, saved.device == output.device {
+                        let now = output.bufferFrames(of: saved.device).map(String.init) ?? "unreadable"
+                        log.notice("output buffer \(now, privacy: .public) frames while sounding (device's own \(saved.frames, privacy: .public))")
+                    }
                 } catch {
                     // No sound is better than a crash, and a late one is worse than none: the next use tries again.
                     voice.clear()
