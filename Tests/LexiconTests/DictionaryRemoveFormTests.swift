@@ -81,6 +81,24 @@ private func removeForm(_ heard: String, from spelling: String, in controller: L
         #expect(controller.shown.map(\.spelling) == ["Codex"])
     }
 
+    // Both presses land before the page rereads after the first, so a check made
+    // on the list as drawn would still see two forms and skip the confirmation.
+    @Test func twoFormPressesBeforeTheRereadDoNotRemoveTheLastFormWithoutAsking() async throws {
+        let store = try Lexicon(paths: .temporary())
+        try await store.add(Rule(heard: "codecs", written: "Codex"))
+        try await store.add(Rule(heard: "kodex", written: "Codex"))
+        let controller = await openedController(store)
+        let cell = try entryCell(controller, spelling: "Codex")
+        let codecs = try #require(cell.formButtons.first { $0.accessibilityLabel() == "Remove heard-as form codecs from Codex" })
+        let kodex = try #require(cell.formButtons.first { $0.accessibilityLabel() == "Remove heard-as form kodex from Codex" })
+
+        codecs.performClick(nil)
+        kodex.performClick(nil)
+        await controller.pending?.value
+
+        #expect(await store.rules == [Rule(heard: "kodex", written: "Codex")], "Codex's last form goes only after a confirmation")
+    }
+
     @Test func aPlainSpellingHasNoFormButtonsOrFormLabels() async throws {
         let store = try Lexicon(paths: .temporary())
         try await store.add(Term(text: "gstack"))
