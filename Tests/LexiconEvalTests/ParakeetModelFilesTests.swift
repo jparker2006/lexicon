@@ -287,3 +287,14 @@ private func fakeDownload(writingFor paths: AppPaths, recordingIn calls: Downloa
         #expect(ParakeetTranscriber.isInstalled(paths: paths))
     }
 }
+
+// FluidAudio spends the first half of its fraction on the download and reports nothing
+// while it compiles, so the last file landing is the only sign that the install is
+// preparing. Counting the download to 1 at that point keeps the bar from stopping at 50%.
+@Test func theInstallSaysPreparingOnceTheLastFileLandsAndCountsTheDownloadToAHundred() {
+    #expect(ParakeetTranscriber.installStep(fraction: 0, filesDone: 0, of: 4) == .downloading(0))
+    #expect(ParakeetTranscriber.installStep(fraction: 0.25, filesDone: 2, of: 4) == .downloading(0.5))
+    #expect(ParakeetTranscriber.installStep(fraction: 0.5, filesDone: 3, of: 4) == .downloading(1.0))
+    #expect(ParakeetTranscriber.installStep(fraction: 0.5, filesDone: 4, of: 4) == .preparing)
+    #expect(ParakeetTranscriber.installStep(fraction: 0.5, filesDone: 0, of: 0) == .preparing)
+}
