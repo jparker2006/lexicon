@@ -238,8 +238,10 @@ func aHoldAfterABurstOfDroppedTapsStillRecords() async throws {
     let rig = try HandsFreeRig()
     var events = await rig.conductor.events().makeAsyncIterator()
     var time = 0
+    var discardedTapIDs: [DictationID] = []
     for _ in 0..<7 {
         let tap = DictationID()
+        discardedTapIDs.append(tap)
         try #require(rig.feed(.fnDown(at(time), secureInput: false, id: tap)).commands == [.dictationBegan(tap, at: at(time))])
         rig.feed(.fnUp(at(time + 100)))
         try #require(rig.feed(.deadline(at(time + 400))).commands == [.dictationDiscarded(tap)])
@@ -256,6 +258,14 @@ func aHoldAfterABurstOfDroppedTapsStillRecords() async throws {
     #expect(row.status == .inserted)
     #expect(try CAFFile.read(rig.history.audioURL(for: hold)).samples.count > 0)
     #expect(try cafFiles(in: rig.history).count == 1)  // the dropped taps left no audio behind
+    #expect(await rig.destination.delivered[hold] == "Ship it")
+    #expect(await rig.destination.typedOrder == [hold])
+    for tap in discardedTapIDs {
+        #expect(await rig.destination.delivered[tap] == nil, "discarded tap \(tap) delivered text")
+        #expect(await rig.history.dictation(tap) == nil, "discarded tap \(tap) retained a History row")
+        #expect(!FileManager.default.fileExists(atPath: rig.history.audioURL(for: tap).path(percentEncoded: false)),
+                "discarded tap \(tap) retained an audio file")
+    }
 }
 
 /// The real Conductor following an open stream of commands from one recognizer, which the
@@ -267,6 +277,7 @@ private struct HandsFreeRig {
     let destination: HeadlessDestination
     let conductor: Conductor<HeadlessDestination>
     let recognizer: Recognizer
+    let commandFollower: Task<Void, Never>
 
     init(config: KeyboardConfig = KeyboardConfig(), local: any LocalTranscriber = ScriptedTranscriber(text: "Ship it"),
          hardware: MicHardware = FakeMic().hardware) throws {
@@ -286,21 +297,22 @@ private struct HandsFreeRig {
         self.destination = destination
         self.conductor = conductor
         let commands = recognizer.commands
-        Task { await conductor.follow(commands) }
+        self.commandFollower = Task { await conductor.follow(commands) }
     }
 
     /// Feeds one input to the recognizer. Returns what it did, including the deadline it asked for.
     @discardableResult
     func feed(_ input: KeyInput) -> FnGesture.Output { recognizer.feed(input) }
 
-    /// Every Dictation run has returned, its audio is closed and History has caught up. Then the
-    /// key stream ends, since nothing more is fed.
+    /// Ends the command stream and joins its follower before waiting for Dictation runs, closed
+    /// audio and flushed History.
     func settle() async {
+        recognizer.end()
+        await commandFollower.value
         let runs = await conductor.inFlight
         for run in runs.values { _ = await run.value }
         await recorder.settle()
         await history.flush()
-        recognizer.end()
     }
 }
 

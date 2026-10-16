@@ -13,6 +13,8 @@ public struct CloudLink: Sendable {
     /// else in Transcription opens a connection.
     let connect: @Sendable (URLRequest) async throws -> any CloudSocket
     let path: NetworkPath
+    var clock: any Clock<Duration> = ContinuousClock()
+    var policy = CloudSession.Policy()
 
     /// Real providers over URLSession WebSockets, reachability from NWPathMonitor.
     /// One path monitor for the process.
@@ -24,12 +26,12 @@ protocol CloudSocket: Sendable {
     func send(_ message: ProviderMessage) async throws
     /// The next server message; nil once the server closed the socket cleanly.
     func receive() async throws -> ProviderMessage?
-    /// Idempotent. A pending `receive` returns or throws at once.
+    /// Idempotent. Pending sends and receives return or throw at once.
     func close()
 }
 
-/// `URLSessionWebSocketTask`. Messages sent before the handshake completes are
-/// queued by URLSession, so audio captured while TLS opens is not lost.
+/// The socket boundary only. CloudSession retains bounded audio until the
+/// provider acknowledges its handshake, before handing binary frames here.
 final class WebSocket: CloudSocket {
     let task: URLSessionWebSocketTask
 
