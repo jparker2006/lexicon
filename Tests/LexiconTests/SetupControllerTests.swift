@@ -232,3 +232,29 @@ func theModelShowsPreparingBetweenTheDownloadAndTheInstall() async {
         #expect(!setup.menuItems().map(\.title).contains("Microphone is off: Set Up…"))
     }
 }
+
+// Criterion 5's "until installed": once preparing, a download report (a late one, or
+// FluidAudio downloading again after a failed first load) leaves the row on Preparing.
+// The reports are fed straight in, so their arrival order is the test's own.
+@MainActor
+@Test(.timeLimit(.minutes(1)))
+func preparingHoldsUntilInstalledWhateverReportFollows() async {
+    let machine = Machine()
+    machine.write { $0.trusted = true; $0.microphone = .granted }
+    let release = Gate()
+    let install: Install = { _, _ in await release.wait() }
+    await withSetup(machine, fnOn: true, install: install) { setup in
+        setup.makeWindow = { _, _ in FakeWindow() }
+        setup.show()
+        #expect(setup.facts.model == .downloading(0), "the download started inside show()")
+        setup.modelProgress(.downloading(0.4))
+        #expect(setup.facts.model == .downloading(0.4))
+        setup.modelProgress(.preparing)
+        #expect(setup.facts.model == .preparing)
+        setup.modelProgress(.downloading(0.2))
+        setup.modelProgress(.downloading(1))
+        #expect(setup.facts.model == .preparing, "a download report after preparing changes nothing")
+        #expect(SetupCopy.row(.model, setup.facts).detail == "Preparing the model.")
+        release.open()
+    }
+}
