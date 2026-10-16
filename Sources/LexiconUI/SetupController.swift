@@ -320,15 +320,12 @@ public final class Setup: NSObject {
     }
 
     private func downloaded(_ percent: Double) {
-        switch facts.model {
-        case .downloading(let shown) where percent > shown: setModel(.downloading(percent))
-        // A first load that failed is purged and downloaded again: the row follows.
-        case .preparing: setModel(.downloading(percent))
-        default: return
-        }
+        guard case .downloading(let shown) = facts.model, percent > shown else { return }
+        setModel(.downloading(percent))
     }
 
-    /// The files are down; only the compile is left.
+    /// The files are down; only the compile is left. Preparing holds until installed: a late
+    /// download report, or FluidAudio downloading again after a failed first load, never takes it back.
     private func preparing() {
         guard case .downloading = facts.model else { return }
         setModel(.preparing)

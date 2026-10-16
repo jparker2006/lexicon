@@ -231,7 +231,7 @@ public actor ParakeetTranscriber: LocalTranscriber {
     }
 
     /// FluidAudio's `DownloadPhase`, one for one, so the routing above is tested without FluidAudio.
-    enum InstallPhase: Sendable, Hashable {
+    enum InstallPhase: Sendable {
         case listing
         case downloading(done: Int, total: Int)
         case compiling
