@@ -300,6 +300,14 @@ Jake, in the orchestrator's session, 2026-10-16 (recorded 13:25:26Z): "1 a rec n
 
 Asked in the orchestrator's session, 2026-10-16 15:26:34Z, after the Reviewer's nondeterminism finding on PR #297. Jake, in that session, 2026-10-16 (recorded 15:27:47Z): "3A 4A" ([record](https://github.com/jparker2006/lexicon/issues/62#issuecomment-6218827499)); "4A" is this question, "3A" another ticket's. Decided: 12 alternating runs per side (24 in all) with item 101's bar. The rest of item 101's Proposed reading stays Proposed.
 
+> **Q5, in plain words:** #62's typing check compares paste-last against main over 12 runs each. Part of the pass bar says paste-last may have at most **1** more slow key than main. But macOS alone throws an occasional slow key, so over 12 runs paste-last would fail about 1 time in 4 by luck alone, even with nothing wrong.
+> - **A:** allow 1 extra slow key per 3 runs, so **4** at 12 runs. Failing from luck drops to about 2 in 100, and a real delay still fails almost every time.
+> - **B:** keep it at 1 extra.
+>
+> **Rec: A.** Reply "5 A".
+
+Asked in the orchestrator's session, 2026-10-16 15:39:06Z, from the builder's ask on [#62](https://github.com/jparker2006/lexicon/issues/62#issuecomment-6218971637); the 1 in 4 and 2 in 100 figures are the builder's estimate from a Poisson model on the saved Dev-off rate (2 keys over 12 ms in 400), not a measurement. Jake, in that session, 2026-10-16 (recorded 15:48:17Z): "5A" ([record](https://github.com/jparker2006/lexicon/issues/62#issuecomment-6219204002)). Decided: across the 12 runs per side, the PR may have at most 4 more keys over 12 ms than main (one per 3 runs); the p95 limit and the run count are unchanged.
+
 **78. In Private mode, a Re-speak with no close match changes nothing.** Spec: Private mode "picks by sound alone". Built (#82): by sound alone, the span that sounds most alike is replaced only when its distance from what Jake said (0 the same, 1 nothing alike; mostly sound, partly spelling) is 0.5 or less; otherwise nothing changes and the pill says "no match", as when Jev says none.
 > Jake: decide what a Re-speak does in Private mode when nothing in your last Dictation sounds like the word you said again. I recommend it changes nothing and the pill says "no match", the same as when Jev says none. [...] Reply "yes" to take that.
 
