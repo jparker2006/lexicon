@@ -274,13 +274,16 @@ private static func eachNewSettingsWindowLogsItsOwnOpenTimeBody() async throws {
     performSettingsMenuAction(menu)
     try #require(settingsWindows().first).performClose(nil)
 
-    // The log store may lag the call that logged, so read until both lines are there.
-    var lines: [String] = []
-    for _ in 0..<50 where lines.count < 2 {
-        lines = try store.getEntries(at: start, matching: NSPredicate(format: "subsystem == 'Lexicon' AND category == 'Settings'"))
-            .compactMap { ($0 as? OSLogEntryLog)?.composedMessage }
-        if lines.count < 2 { await drainMainQueue() }
+    // Nothing signals that the log store has a line, so poll as TestSupport's `until`
+    // does until both are there; the test's time limit is the hang guard.
+    func settingsLines() -> [String] {
+        let entries = try? store.getEntries(at: start, matching: NSPredicate(format: "subsystem == 'Lexicon' AND category == 'Settings'"))
+        return (entries.map(Array.init) ?? []).compactMap { ($0 as? OSLogEntryLog)?.composedMessage }
     }
+    while settingsLines().count < 2 {
+        try await Task.sleep(for: .milliseconds(5))  // timing-ok: a poll interval; it decides nothing
+    }
+    let lines = settingsLines()
     #expect(lines.count == 2)
     #expect(lines.allSatisfy { $0.wholeMatch(of: /Settings window: usable grid drawn \d+ ms after open/) != nil })
 }

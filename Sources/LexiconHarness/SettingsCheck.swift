@@ -243,10 +243,14 @@ enum SettingsCheck {
             continuation.resume(throwing: HarnessError(failure))
         }
 
+        /// Fails the wait at the deadline itself, so a child that outlives SIGTERM
+        /// cannot hold the check; its exit, if it comes, is then ignored.
         func timeOut() {
             guard !completed else { return }
+            completed = true
             timedOut = true
             if process.isRunning { process.terminate() }
+            continuation.resume(throwing: HarnessError(failure))
         }
     }
 
