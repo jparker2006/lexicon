@@ -18,6 +18,8 @@ public enum ModelState: Sendable, Hashable {
     case missing
     /// 0...1 of the download.
     case downloading(Double)
+    /// Downloaded; CoreML prepares it for this Mac (about 25 s) until it loads.
+    case preparing
     case installed
     /// Private mode is on, so nothing may be downloaded (#5).
     case privateMode
@@ -69,8 +71,19 @@ public struct SetupFacts: Sendable, Hashable {
     /// The permission step the menu bar icon's warning dot opens, or nil for no
     /// dot. Only a missing or revoked permission (or fn off) shows it: a missing
     /// model is setup's job, not a warning.
-    public var warning: SetupStep? {
-        [SetupStep.microphone, .accessibility].first { !isDone($0) }
+    public var warning: SetupStep? { warnings.first }
+
+    /// Every missing permission step, in order.
+    public var warnings: [SetupStep] {
+        [SetupStep.microphone, .accessibility].filter { !isDone($0) }
+    }
+
+    /// The menu bar menu's setup lines: each missing permission, or else
+    /// "Set Up Lexicon…" while the model is not installed.
+    public var menuSteps: [SetupStep] {
+        let warnings = warnings
+        if !warnings.isEmpty { return warnings }
+        return isDone(.model) ? [] : [.model]
     }
 
     /// Whether the window opens by itself at launch. First run, or the relaunch
@@ -151,6 +164,7 @@ public enum SetupCopy {
             case .missing: row("Speech model", "Transcribes on this Mac. A one-time download, \(modelSize).", "Download")
             case .downloading(let fraction):
                 row("Speech model", "Downloading, \(Int((fraction * 100).rounded()))%.", progress: fraction)
+            case .preparing: row("Speech model", "Preparing the model.")
             case .privateMode: row("Speech model", "Private mode is on, so nothing downloads. Turn it off and the download starts.")
             case .failed: row("Speech model", "The download stopped. Check your connection, then try again.", "Try Again")
             }

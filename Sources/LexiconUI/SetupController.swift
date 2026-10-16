@@ -4,6 +4,17 @@ import os
 public import LexiconDomain
 public import LexiconCore
 
+/// The setup window, as `Setup` drives it.
+@MainActor
+protocol SetupWindowShowing: AnyObject {
+    /// A Dictation was just typed into the window's try box.
+    var dictationLandedHere: Bool { get }
+    func render(_ facts: SetupFacts)
+    func focus(_ step: SetupStep?)
+}
+
+extension SetupWindowController: SetupWindowShowing {}
+
 /// First-run setup, the warning dot and start at login (#57). Reads the two
 /// permissions, the model and the globe key into `SetupFacts`, shows the setup
 /// window when it should open (first run, or the relaunch after the
@@ -21,23 +32,36 @@ public final class Setup: NSObject {
         public var fnOn: Bool
         public var globeKeyOK: @MainActor () -> Bool
         public var modelInstalled: @MainActor () -> Bool
-        /// Downloads and compiles the model under `access`, reporting 0...1.
-        public var installModel: @Sendable (CloudAccess, @escaping @Sendable (Double) -> Void) async throws -> Void
+        /// Downloads and compiles the model under `access`, reporting how it goes.
+        public var installModel: @Sendable (CloudAccess, @escaping @Sendable (ModelInstallProgress) -> Void) async throws -> Void
         /// After the install: load it now, so the first fn press doesn't wait.
         public var modelInstalledNow: @Sendable () async -> Void
         /// Microphone granted while running: prepare the mic, so fn-down only starts it.
         public var microphoneGranted: @MainActor () -> Void
+        /// Accessibility trust (`AXIsProcessTrusted`). Read at launch and on every poll, off the main thread.
+        public var accessibilityTrusted: @Sendable () -> Bool
+        /// The Microphone answer. Read at launch and on every poll, off the main thread.
+        public var microphone: @Sendable () -> MicrophoneAccess
+        /// Quits this copy and opens a new one; throws when the new one could not be started.
+        public var relaunch: @MainActor () throws -> Void
 
         public init(fnOn: Bool, globeKeyOK: @escaping @MainActor () -> Bool, modelInstalled: @escaping @MainActor () -> Bool,
-                    installModel: @escaping @Sendable (CloudAccess, @escaping @Sendable (Double) -> Void) async throws -> Void,
+                    installModel: @escaping @Sendable (CloudAccess, @escaping @Sendable (ModelInstallProgress) -> Void)
+                        async throws -> Void,
                     modelInstalledNow: @escaping @Sendable () async -> Void,
-                    microphoneGranted: @escaping @MainActor () -> Void) {
+                    microphoneGranted: @escaping @MainActor () -> Void,
+                    accessibilityTrusted: @escaping @Sendable () -> Bool,
+                    microphone: @escaping @Sendable () -> MicrophoneAccess,
+                    relaunch: @escaping @MainActor () throws -> Void) {
             self.fnOn = fnOn
             self.globeKeyOK = globeKeyOK
             self.modelInstalled = modelInstalled
             self.installModel = installModel
             self.modelInstalledNow = modelInstalledNow
             self.microphoneGranted = microphoneGranted
+            self.accessibilityTrusted = accessibilityTrusted
+            self.microphone = microphone
+            self.relaunch = relaunch
         }
     }
 
@@ -53,7 +77,11 @@ public final class Setup: NSObject {
     let registersAtLogin: Bool
     let relaunchRule: RelaunchRule
     private(set) var facts: SetupFacts
-    private var window: SetupWindowController?
+    private var window: (any SetupWindowShowing)?
+    /// Builds the setup window. Tests put in one that never shows.
+    var makeWindow: @MainActor (SetupWindowActions, @escaping @MainActor () -> Void) -> any SetupWindowShowing = {
+        SetupWindowController(actions: $0, onClose: $1)
+    }
     private var timer: Timer?
     private var downloading: Task<Void, Never>?
     /// A poll's reads are in flight; the timer's next tick skips rather than piling up.
@@ -68,16 +96,16 @@ public final class Setup: NSObject {
         self.services = services
         self.relaunched = relaunched
         self.registersAtLogin = registersAtLogin
-        let trusted = AXIsProcessTrusted()
+        let trusted = services.accessibilityTrusted()
         relaunchRule = RelaunchRule(trustedAtLaunch: trusted, fnOn: services.fnOn)
-        facts = SetupFacts(microphone: Self.microphone, accessibility: trusted, fnOn: services.fnOn,
+        facts = SetupFacts(microphone: services.microphone(), accessibility: trusted, fnOn: services.fnOn,
                            trustedAtLaunch: trusted, model: services.modelInstalled() ? .installed : .missing,
                            globeKeyOK: services.globeKeyOK(), triedFn: false)
         super.init()
     }
 
     /// "granted", "denied" or "undetermined", for the launch log and the test hooks' status.
-    public static var microphoneName: String { name(microphone) }
+    public static var microphoneName: String { name(systemMicrophone()) }
 
     private static func name(_ access: MicrophoneAccess) -> String {
         switch access {
@@ -104,7 +132,7 @@ public final class Setup: NSObject {
     /// Opens the window at `step` (the dot's step, or wherever setup is).
     public func show(_ step: SetupStep? = nil) {
         if window == nil {
-            window = SetupWindowController(actions: actions(), onClose: { [weak self] in
+            window = makeWindow(actions(), { [weak self] in
                 self?.window = nil
                 self?.schedulePoll()
             })
@@ -123,7 +151,7 @@ public final class Setup: NSObject {
     /// a system action (read each time the menu opens).
     public func menuItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = []
-        if let step = facts.warning ?? (facts.isDone(.model) ? nil : SetupStep.model) {
+        for step in facts.menuSteps {
             let item = NSMenuItem(title: SetupCopy.warningMenuTitle(step), action: #selector(openFromMenu(_:)), keyEquivalent: "")
             item.target = self
             item.tag = step.rawValue
@@ -146,7 +174,8 @@ public final class Setup: NSObject {
 
     // MARK: - Reading the system
 
-    nonisolated private static var microphone: MicrophoneAccess {
+    /// The real Microphone answer, for `Services.microphone`.
+    nonisolated public static func systemMicrophone() -> MicrophoneAccess {
         switch AVAudioApplication.shared.recordPermission {
         case .granted: .granted
         case .denied: .denied
@@ -161,17 +190,18 @@ public final class Setup: NSObject {
         guard !polling else { return }
         polling = true
         // Setup lives as long as the app, so holding it here costs nothing.
-        Task.detached {
-            let microphone = Self.microphone, trusted = AXIsProcessTrusted()
-            await self.polled(microphone: microphone, accessibility: trusted)
-        }
+        Task { await refresh() }
     }
 
-    private func polled(microphone: MicrophoneAccess, accessibility: Bool) {
+    /// One poll: reads both permissions and acts on them (the dot, the
+    /// download, the relaunch).
+    func refresh() async {
+        let microphone = services.microphone, trusted = services.accessibilityTrusted
+        let read = await Task.detached { (microphone(), trusted()) }.value
         polling = false
         var next = facts
-        next.microphone = microphone
-        next.accessibility = accessibility
+        next.microphone = read.0
+        next.accessibility = read.1
         if window != nil { next.globeKeyOK = services.globeKeyOK() }
         // Private mode turned off since the download was refused: try again.
         if next.model == .privateMode, preferences.snapshot().privacy == .standard { next.model = .missing }
@@ -256,11 +286,16 @@ public final class Setup: NSObject {
         guard downloading == nil, facts.model != .installed else { return }
         setModel(.downloading(0))
         let install = services.installModel, installed = services.modelInstalledNow
-        // Whole percents only: FluidAudio reports far more often than the bar can show.
-        let report: @Sendable (Double) -> Void = { fraction in
-            // The nudge keeps 0.57 from reading as 56 (0.57 * 100 is 56.99999999999999).
-            let percent = (fraction * 100 + 1e-9).rounded(.down) / 100
-            Task { @MainActor in self.downloaded(percent) }
+        let report: @Sendable (ModelInstallProgress) -> Void = { step in
+            switch step {
+            case .downloading(let fraction):
+                // Whole percents only: FluidAudio reports far more often than the bar can show.
+                // The nudge keeps 0.57 from reading as 56 (0.57 * 100 is 56.99999999999999).
+                let percent = (fraction * 100 + 1e-9).rounded(.down) / 100
+                Task { @MainActor in self.downloaded(percent) }
+            case .preparing:
+                Task { @MainActor in self.preparing() }
+            }
         }
         // Setup lives as long as the app, so holding it here costs nothing.
         downloading = Task {
@@ -289,6 +324,12 @@ public final class Setup: NSObject {
         setModel(.downloading(percent))
     }
 
+    /// The files are down; only the compile is left. A late download report never takes it back.
+    private func preparing() {
+        guard case .downloading = facts.model else { return }
+        setModel(.preparing)
+    }
+
     private func setModel(_ model: ModelState) {
         var next = facts
         next.model = model
@@ -307,6 +348,17 @@ public final class Setup: NSObject {
     /// after 60 s, and `open` then just brings the old copy forward.
     private func relaunchApp(byJake: Bool) {
         guard relaunch.begin(byJake: byJake) else { return }
+        do {
+            try services.relaunch()
+        } catch {
+            // Restart stays offered (and works); the poll doesn't retry by itself.
+            relaunch.failed()
+            log.error("relaunch failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The real relaunch, for `Services.relaunch`.
+    public static func relaunchThisApp() throws {
         let arguments = CommandLine.arguments.dropFirst().filter { $0 != Self.relaunchArgument } + [Self.relaunchArgument]
         let waiter = Process()
         waiter.executableURL = URL(filePath: "/bin/sh")
@@ -315,15 +367,9 @@ public final class Setup: NSObject {
             while kill -0 "$pid" 2>/dev/null && [ $i -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
             exec /usr/bin/open "$app" --args "$@"
             """, "relaunch", String(getpid()), Bundle.main.bundlePath] + arguments
-        do {
-            try waiter.run()
-            log.notice("relaunching to turn on fn")
-            NSApp.terminate(nil)
-        } catch {
-            // Restart stays offered (and works); the poll doesn't retry by itself.
-            relaunch.failed()
-            log.error("relaunch failed: \(error.localizedDescription, privacy: .public)")
-        }
+        try waiter.run()
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "setup").notice("relaunching to turn on fn")
+        NSApp.terminate(nil)
     }
 
     // MARK: - Start at login
