@@ -5,8 +5,8 @@ import LexiconDomain
 import WordStore
 
 // The Lexicon page's Remove on one heard-as form (#342): that form's Rule goes,
-// and the entry keeps its Term and its other forms. An entry's only form asks
-// first, as Delete does, so nothing goes on the press. The controller is never
+// and the entry keeps its Term and its other forms. A form that is all its
+// entry holds asks first, as Delete does, so nothing goes on the press. The controller is never
 // shown; the form buttons are pressed with performClick, and the test waits on
 // the work the press starts.
 
