@@ -79,13 +79,17 @@ public func runEval(arguments: [String]) async -> Int32 {
         switch argument {
         case "--scripted-gold": scriptedGold = true
         case "--scripted", "--manifest", "--split", "--baseline", "--out", "--install-model", "--transcribe", "--lexicon",
-             "--import-lexicon", "--into", "--sample", "--pace":
+             "--import-lexicon", "--into", "--sample", "--pace", "--guard-scan":
             guard let value = rest.popFirst(), options[argument] == nil else { return usage() }
             options[argument] = value
         default:
             guard !argument.hasPrefix("--") else { return usage() }
             files.append(argument)
         }
+    }
+    if let manifest = options["--guard-scan"] {
+        guard options.count == 1, files.isEmpty, !scriptedGold, !manifest.hasPrefix("--") else { return usage() }
+        return guardScan(URL(filePath: manifest))
     }
     if let bundleID = options["--install-model"] {
         guard options.count == 1, files.isEmpty, !scriptedGold, bundleID.contains("."), !bundleID.hasPrefix("."), !bundleID.contains("/")
@@ -268,6 +272,7 @@ func usage() -> Int32 {
                lexicon-eval --transcribe <manifest.jsonl> --out <run.jsonl>
                lexicon-eval --install-model <bundle id>
                lexicon-eval --import-lexicon <file> --into <data folder>
+               lexicon-eval --guard-scan <manifest.jsonl>
 
         """.utf8))
     return 2

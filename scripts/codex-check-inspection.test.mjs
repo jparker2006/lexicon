@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NODE = process.execPath;
 const TEST_WATCHDOG_MS = 30_000;
+const DIAGNOSTIC_STREAM_LIMIT = 4096;
 
 function deferred() {
   let resolve;
@@ -20,15 +21,46 @@ function deferred() {
 function capture(child, expectedLine) {
   let stdout = '';
   let stderr = '';
+  let readinessObserved = false;
   const ready = deferred();
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
   child.stdout.on('data', chunk => {
     stdout += chunk;
-    if (expectedLine && stdout.includes(expectedLine)) ready.resolve();
+    if (expectedLine && !readinessObserved && stdout.includes(expectedLine)) {
+      readinessObserved = true;
+      ready.resolve();
+    }
   });
   child.stderr.on('data', chunk => { stderr += chunk; });
-  return { ready: ready.promise, output: () => `${stdout}${stderr}` };
+  return {
+    ready: ready.promise,
+    stdout: () => stdout,
+    stderr: () => stderr,
+    readinessObserved: () => readinessObserved,
+  };
+}
+
+function boundedStream(text) {
+  if (!text) return '(empty)';
+  if (text.length <= DIAGNOSTIC_STREAM_LIMIT) return text;
+  return `${text.slice(0, DIAGNOSTIC_STREAM_LIMIT)}\n[truncated; captured ${text.length} characters]`;
+}
+
+function inspectionDiagnostic({ outcome, readinessObserved, phasePIDExists, descendantPIDExists, stdout, stderr, result, successStampAbsent }) {
+  return [
+    `harness exit code=${outcome.code ?? 'null'} signal=${outcome.signal ?? 'null'}`,
+    `readiness observed=${readinessObserved}`,
+    `phase PID present=${phasePIDExists}`,
+    `descendant PID present=${descendantPIDExists}`,
+    `phase result status=${result?.status ?? 'unavailable'} timedOut=${result?.timedOut ?? 'unavailable'}`,
+    `phase result=${result === null ? 'unavailable' : JSON.stringify(result)}`,
+    `success stamp absent=${successStampAbsent}`,
+    'harness stdout captured as received:',
+    boundedStream(stdout),
+    'harness stderr captured as received:',
+    boundedStream(stderr),
+  ].join('\n');
 }
 
 function shellQuote(value) {
@@ -58,7 +90,7 @@ function killRecordedPID(file) {
   }
 }
 
-async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM, nativeShellLeader = false, filteredFork = false }) {
+async function failedInspectionCleanup(t, { detachedChild, ignoreSIGTERM, nativeShellLeader = false, filteredFork = false, prematureFailure = false }) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'codex-check-inspection-'));
   const fakeBin = path.join(dir, 'bin');
   const flag = path.join(dir, 'fail-ps');
@@ -172,7 +204,9 @@ descendant.on('message', message => {
 });
 setInterval(() => {}, 1000);
 `;
-  writeFileSync(phasePath, phaseSource);
+  writeFileSync(phasePath, prematureFailure
+    ? `process.stderr.write('synthetic-phase-error=fixture-entry-failed-before-pid\\n'); process.exit(23);`
+    : phaseSource);
 
   t.after(() => {
     killRecordedPID(phasePIDPath);
@@ -221,7 +255,7 @@ process.exitCode = result.status;
     env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}` },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const harnessCapture = capture(harness);
+  const harnessCapture = capture(harness, readyLine);
   const closed = new Promise(resolve => harness.once('close', (code, signal) => resolve({ code, signal })));
   t.after(async () => {
     if (harness.exitCode === null && harness.signalCode === null) {
@@ -231,7 +265,42 @@ process.exitCode = result.status;
   });
 
   const outcome = await closed;
-  const output = harnessCapture.output();
+  const stdout = harnessCapture.stdout();
+  const stderr = harnessCapture.stderr();
+  const readinessObserved = harnessCapture.readinessObserved();
+  const result = existsSync(resultPath) ? JSON.parse(readFileSync(resultPath, 'utf8')) : null;
+  const successStampAbsent = !existsSync(successStamp);
+  const phasePIDExists = existsSync(phasePIDPath);
+  const descendantPIDExists = existsSync(descendantPIDPath);
+  const diagnostic = inspectionDiagnostic({
+    outcome,
+    readinessObserved,
+    phasePIDExists,
+    descendantPIDExists,
+    stdout,
+    stderr,
+    result,
+    successStampAbsent,
+  });
+  if (!readinessObserved || !phasePIDExists || !descendantPIDExists) {
+    t.diagnostic(`fixture startup diagnostic:\n${diagnostic}`);
+    throw new Error(`premature fixture startup\n${diagnostic}`);
+  }
+
+  assert.deepEqual(outcome, { code: 1, signal: null }, 'inspection failure exits the harness unsuccessfully');
+  if (nativeShellLeader) {
+    assert.equal(existsSync(nativeLeaderExited), true, 'the detached native leader exited before phase readiness');
+    assert.equal(existsSync(nativeLeaderPIDPath), true, 'the detached native leader started');
+  }
+  assert.equal(existsSync(phaseStopped), true, 'the root phase receives cleanup');
+  assert.equal(existsSync(descendantStopped), true, 'the owned descendant receives cleanup');
+  assert.equal(successStampAbsent, true, 'a failed phase never records success');
+  assert.notEqual(result, null, `the harness returns a phase result after handling the inspection failure\n${diagnostic}`);
+  assert.equal(result.status, 1, 'the phase result is nonzero');
+  assert.equal(result.timedOut, true, 'the phase preserves its timeout outcome');
+  assert.match(`${stdout}${stderr}`, /codex-check: cleanup failed phase=inspection-failure: cannot inspect owned check descendants/,
+    'the harness reports the process inspection failure explicitly');
+
   const phasePID = Number(readFileSync(phasePIDPath, 'utf8'));
   const descendantPID = Number(readFileSync(descendantPIDPath, 'utf8'));
   // The process-table snapshot may fail, but the owned process group remains the safety boundary.
@@ -241,22 +310,6 @@ process.exitCode = result.status;
   ], { encoding: 'utf8' });
   t.diagnostic(`cleanup actor census before assertions:\n${census.stdout ?? ''}${census.stderr ?? ''}control alive=${isAlive(control.pid)}`);
 
-  assert.deepEqual(outcome, { code: 1, signal: null }, 'inspection failure exits the harness unsuccessfully');
-  assert.equal(existsSync(phasePIDPath), true, 'the phase started before inspection failed');
-  assert.equal(existsSync(descendantPIDPath), true, 'the descendant became ready before inspection failed');
-  if (nativeShellLeader) {
-    assert.equal(existsSync(nativeLeaderExited), true, 'the detached native leader exited before phase readiness');
-    assert.equal(existsSync(nativeLeaderPIDPath), true, 'the detached native leader started');
-  }
-  assert.equal(existsSync(phaseStopped), true, 'the root phase receives cleanup');
-  assert.equal(existsSync(descendantStopped), true, 'the owned descendant receives cleanup');
-  assert.equal(existsSync(successStamp), false, 'a failed phase never records success');
-  assert.equal(existsSync(resultPath), true, 'the harness returns a phase result after handling the inspection failure');
-  const result = JSON.parse(readFileSync(resultPath, 'utf8'));
-  assert.equal(result.status, 1, 'the phase result is nonzero');
-  assert.equal(result.timedOut, true, 'the phase preserves its timeout outcome');
-  assert.match(output, /codex-check: cleanup failed phase=inspection-failure: cannot inspect owned check descendants/,
-    'the harness reports the process inspection failure explicitly');
   assert.equal(isAlive(phasePID), false, 'the root phase is gone');
   assert.equal(isAlive(descendantPID), false, 'the descendant is gone');
   assert.equal(isAlive(control.pid), true, 'the unrelated control process remains alive');
@@ -271,3 +324,18 @@ for (const scenario of [
 ]) {
   test(scenario.name, { timeout: TEST_WATCHDOG_MS }, async t => failedInspectionCleanup(t, scenario));
 }
+
+test('premature fixture startup reports diagnostics', { timeout: TEST_WATCHDOG_MS }, async t => {
+  await assert.rejects(failedInspectionCleanup(t, { prematureFailure: true }), error => {
+    assert.match(error.message, /premature fixture startup/);
+    assert.match(error.message, /harness exit code=23 signal=null/);
+    assert.match(error.message, /readiness observed=false/);
+    assert.match(error.message, /phase PID present=false/);
+    assert.match(error.message, /phase result status=23 timedOut=false/);
+    assert.match(error.message, /success stamp absent=true/);
+    assert.match(error.message, /harness stdout captured as received:/);
+    assert.match(error.message, /harness stderr captured as received:/);
+    assert.match(error.message, /synthetic-phase-error=fixture-entry-failed-before-pid/);
+    return true;
+  });
+});

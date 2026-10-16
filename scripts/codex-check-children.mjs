@@ -37,7 +37,14 @@ if (ledger) {
     const restore = ['PWD', 'SHLVL'].flatMap(key => env[key] === undefined ? ['unset', ''] : ['set', String(env[key])]);
     return [launcher, ledger, prefix, control, ready, String(seconds), keeperScript, ...restore, ...target];
   };
-  const self = identity(process.pid);
+  let self;
+  try { self = identity(process.pid); }
+  catch (error) {
+    // A transient inspection timeout can precede fixture entry. Retry once
+    // with the same probe budget; never construct ownership without identity.
+    if (error.code !== 'ETIMEDOUT') throw error;
+    self = identity(process.pid);
+  }
   if (self.group === process.pid && !entries().some(entry => entry.kind === 'group' && entry.group === self.group)) {
     const control = pipes();
     const keeper = originalSpawn('/bin/sh', [keeperScript, String(self.group), String(seconds), control],

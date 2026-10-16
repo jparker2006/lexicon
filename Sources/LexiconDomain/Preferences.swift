@@ -106,6 +106,14 @@ public enum CloudUse: Sendable, Hashable {
     /// A Test set eval sending audio to this model. Denied unless the model's
     /// zero retention is confirmed; daily Dictation never takes this path.
     case eval(CloudModel)
+
+    /// An eval may read only the credential for the speech provider being scored.
+    func allowsCredential(_ id: CredentialID) -> Bool {
+        switch self {
+        case .eval(let model): id == .speech(model)
+        case .app, .modelInstall: true
+        }
+    }
 }
 
 extension Preferences {
@@ -123,8 +131,8 @@ extension Preferences {
             return model.retention == .confirmed ? nil : .retentionUnconfirmed
         case .app(let app):
             guard !alwaysPrivateApps.isEmpty else { return nil }
-            guard let id = app.bundleID else { return .alwaysPrivateApp }
-            return alwaysPrivateApps.contains(id) ? .alwaysPrivateApp : nil
+            guard let id = app.bundleID?.lowercased() else { return .alwaysPrivateApp }
+            return alwaysPrivateApps.contains { $0.lowercased() == id } ? .alwaysPrivateApp : nil
         }
     }
 }
@@ -168,7 +176,10 @@ public final class CloudAccess: Sendable {
     /// by a Test set eval of a cloud model.
     public static func granted(by preferences: Preferences, for use: CloudUse,
                                keys: @escaping @Sendable (CredentialID) -> String?) -> CloudAccess? {
-        preferences.cloudDenied(for: use) == nil ? CloudAccess(lookup: keys) : nil
+        guard preferences.cloudDenied(for: use) == nil else { return nil }
+        return CloudAccess { id in
+            use.allowsCredential(id) ? keys(id) : nil
+        }
     }
 
     /// Key for a call that carries no Dictation text: the speech audio stream, a
