@@ -82,7 +82,7 @@ enum SettingsCheck {
         var pid: pid_t { application.processIdentifier }
     }
 
-    private struct GitResult {
+    private struct CommandResult {
         let status: Int32
         let output: String
     }
@@ -211,16 +211,18 @@ enum SettingsCheck {
     }
 
     @MainActor
-    private final class GitCommand {
+    private final class BoundedCommand {
         private let process: Process
         private let output: Pipe
-        private let continuation: CheckedContinuation<GitResult, any Error>
+        private let continuation: CheckedContinuation<CommandResult, any Error>
+        private let failure: String
         private var timedOut = false
         private var completed = false
 
-        init(process: Process, output: Pipe, continuation: CheckedContinuation<GitResult, any Error>) {
+        init(process: Process, output: Pipe, failure: String, continuation: CheckedContinuation<CommandResult, any Error>) {
             self.process = process
             self.output = output
+            self.failure = failure
             self.continuation = continuation
         }
 
@@ -229,16 +231,16 @@ enum SettingsCheck {
             completed = true
             let data = output.fileHandleForReading.readDataToEndOfFile()
             guard !timedOut, let value = String(data: data, encoding: .utf8) else {
-                continuation.resume(throwing: HarnessError("cannot verify the source head with git"))
+                continuation.resume(throwing: HarnessError(failure))
                 return
             }
-            continuation.resume(returning: GitResult(status: status, output: value.trimmingCharacters(in: .whitespacesAndNewlines)))
+            continuation.resume(returning: CommandResult(status: status, output: value.trimmingCharacters(in: .whitespacesAndNewlines)))
         }
 
         func failToStart() {
             guard !completed else { return }
             completed = true
-            continuation.resume(throwing: HarnessError("cannot verify the source head with git"))
+            continuation.resume(throwing: HarnessError(failure))
         }
 
         func timeOut() {
@@ -248,16 +250,22 @@ enum SettingsCheck {
         }
     }
 
-    private static func gitResult(_ arguments: [String]) async throws -> GitResult {
+    private static func gitResult(_ arguments: [String]) async throws -> CommandResult {
+        try await boundedRun("/usr/bin/git", arguments, within: .seconds(5), failure: "cannot verify the source head with git")
+    }
+
+    /// Runs a tool and stops it at the deadline, so a stuck child fails the check instead of hanging it.
+    private static func boundedRun(_ tool: String, _ arguments: [String], within limit: Duration,
+                                   failure: String) async throws -> CommandResult {
         let process = Process()
         let output = Pipe()
-        process.executableURL = URL(filePath: "/usr/bin/git")
+        process.executableURL = URL(filePath: tool)
         process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<GitResult, any Error>) in
-            let command = GitCommand(process: process, output: output, continuation: continuation)
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CommandResult, any Error>) in
+            let command = BoundedCommand(process: process, output: output, failure: failure, continuation: continuation)
             process.terminationHandler = { [command] terminated in
                 let status = terminated.terminationStatus
                 Task { @MainActor in command.finish(status: status) }
@@ -269,7 +277,7 @@ enum SettingsCheck {
                 return
             }
             Task { @MainActor in
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: limit)
                 command.timeOut()
             }
         }
@@ -601,10 +609,11 @@ enum SettingsCheck {
         let predicate = "subsystem == \"Lexicon\" && category == \"\(surface.logCategory)\" && processID == \(pid)"
         return try await HistoryCheck.poll("\(count) \(surface.receiptName) open times in the app's log",
                                            every: .milliseconds(500), within: .seconds(15)) { () -> [Int]? in
-            let (status, text) = try await runChild("/usr/bin/log", ["show", "--start", formatter.string(from: since),
-                                                                      "--style", "compact", "--predicate", predicate])
-            guard status == 0 else { throw HarnessError("log show exited \(status)") }
-            let times = text.split(separator: "\n").compactMap { line in
+            let result = try await boundedRun("/usr/bin/log", ["show", "--start", formatter.string(from: since),
+                                                                "--style", "compact", "--predicate", predicate],
+                                              within: .seconds(10), failure: "log show did not finish within 10 s")
+            guard result.status == 0 else { throw HarnessError("log show exited \(result.status)") }
+            let times = result.output.split(separator: "\n").compactMap { line in
                 line.firstMatch(of: surface.drawnLine).flatMap { Int($0.1) }
             }
             guard times.count <= count else {
