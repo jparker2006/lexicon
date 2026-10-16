@@ -68,15 +68,16 @@ private func removeForm(_ heard: String, from spelling: String, in controller: L
         #expect(cell.formLabels.map(\.stringValue) == ["heard as: ✨ super base"])
     }
 
-    @Test func removingTheLastFormOfAnEntryMadeOnlyOfRulesRemovesTheEntry() async throws {
+    // Removing an entry's only record removes the entry, so it asks first, as Delete does.
+    @Test func removingTheLastHeardAsFormAsksBeforeTheEntryGoes() async throws {
         let store = try Lexicon(paths: .temporary())
         try await store.add(Rule(heard: "codecs", written: "Codex"))
         let controller = await openedController(store)
 
         try await removeForm("codecs", from: "Codex", in: controller)
 
-        #expect(await store.rules.isEmpty)
-        #expect(controller.shown.isEmpty)
+        #expect(await store.rules == [Rule(heard: "codecs", written: "Codex")], "Nothing is removed before a confirmation")
+        #expect(controller.window?.attachedSheet != nil, "A confirmation names Codex before the entry goes")
     }
 
     @Test func aPlainSpellingHasNoFormButtonsOrFormLabels() async throws {
