@@ -89,6 +89,11 @@ private final class KeysWindowController: NSWindowController, NSWindowDelegate {
         let grid = NSGridView(views: Self.makeViews(controller: self, rows: &rows))
         grid.rowSpacing = 10
         grid.columnSpacing = 10
+        // A plain NSGridView is ignored by accessibility, which would leave its
+        // identifier unreachable and its rows loose in the window.
+        grid.setAccessibilityElement(true)
+        grid.setAccessibilityRole(.group)
+        grid.setAccessibilityLabel("Keys")
         grid.setAccessibilityIdentifier(AccessibilityID.settingsGrid)
 
         let content = NSView()

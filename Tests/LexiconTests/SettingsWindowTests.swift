@@ -69,12 +69,15 @@ private func view(withID identifier: String, in window: NSWindow) -> NSView? {
 
 /// Walks the accessibility tree as an assistive app reads it, not the view tree:
 /// a view that is not an accessibility element is skipped and its children promoted.
+/// In process a control is listed by its cell, which carries the control's identifier
+/// out of process.
 @MainActor
 private func accessibilityElement(withID identifier: String, under root: Any) -> NSAccessibilityProtocol? {
     guard let root = root as? NSAccessibilityProtocol else { return nil }
     for child in root.accessibilityChildren() ?? [] {
         guard let element = child as? NSAccessibilityProtocol else { continue }
-        if element.accessibilityIdentifier() == identifier { return element }
+        let elementID = (element as? NSCell)?.controlView?.accessibilityIdentifier() ?? element.accessibilityIdentifier()
+        if elementID == identifier { return element }
         if let match = accessibilityElement(withID: identifier, under: element) { return match }
     }
     return nil
