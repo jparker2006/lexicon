@@ -17,7 +17,8 @@ private struct WindowWeakRefs {
 }
 
 /// Builds, shows and closes one window over `paths`. Every strong reference dies when the pool
-/// drains, so the test sees only what outlives the close.
+/// drains, so the test sees only what outlives the close. No run loop turn is needed: what
+/// AppKit finishes later is the window itself, which holds neither.
 @MainActor
 private func openAndCloseWindow(_ paths: AppPaths) -> WindowWeakRefs {
     return autoreleasepool {
@@ -35,22 +36,10 @@ private func openAndCloseWindow(_ paths: AppPaths) -> WindowWeakRefs {
     }
 }
 
-/// A few turns of the main run loop, each in its own pool, so work the close queued runs now.
-/// They never wait (`before: Date()` returns at once), so the test has no clock in it.
-@MainActor
-private func drainRunLoop() {
-    for _ in 0..<5 {
-        autoreleasepool {
-            _ = RunLoop.main.run(mode: .default, before: Date())  // timing-ok: before now, so it runs what is queued and never waits
-        }
-    }
-}
-
 /// Once the close finishes, the controller and its reader are freed: nothing else holds them.
 @MainActor @Test func aClosedHistoryWindowFreesItsControllerAndItsReader() async throws {
     let (paths, _) = try await year()
     let closed = openAndCloseWindow(paths)
-    drainRunLoop()
     #expect(closed.controller == nil)
     #expect(closed.reader == nil)
 }
@@ -60,9 +49,7 @@ private func drainRunLoop() {
 @MainActor @Test func aSecondOpenAndCloseFreesItsControllerAndReaderToo() async throws {
     let (paths, _) = try await year()
     let first = openAndCloseWindow(paths)
-    drainRunLoop()
     let second = openAndCloseWindow(paths)
-    drainRunLoop()
     #expect(first.controller == nil)
     #expect(first.reader == nil)
     #expect(second.controller == nil)
