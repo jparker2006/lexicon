@@ -41,7 +41,7 @@ private func openAndCloseWindow(_ paths: AppPaths) -> WindowWeakRefs {
 private func drainRunLoop() {
     for _ in 0..<5 {
         autoreleasepool {
-            _ = RunLoop.main.run(mode: .default, before: Date())
+            _ = RunLoop.main.run(mode: .default, before: Date())  // timing-ok: before now, so it runs what is queued and never waits
         }
     }
 }
