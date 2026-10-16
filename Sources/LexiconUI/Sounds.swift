@@ -3,6 +3,7 @@ import CoreAudio
 import Darwin
 import Foundation
 import LexiconDomain
+import os
 import Synchronization
 
 /// Soft synthesized blips: short sine notes with a quiet octave on top, so the
@@ -101,6 +102,9 @@ extension Sounds {
         /// the engine stops. The size is per process (another process reads its own 512
         /// while one holds 256), so each Lexicon copy saves and restores only its own.
         private var saved: (device: AudioObjectID, frames: UInt32)?
+        /// Each change and its read-back, as this process sees the buffer: another
+        /// process can't, so the Live check of the restore reads these lines.
+        private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "sounds")
 
         init(voice: SynthVoice, output: any SoundOutput) {
             self.voice = voice
@@ -117,7 +121,11 @@ extension Sounds {
                     if let saved, saved.device != device { restore() }
                     if saved == nil, let frames = output.bufferFrames(of: device) { saved = (device, frames) }
                     // Only a size that can be put back is changed: a device whose read failed keeps its own.
-                    if saved?.device == device { output.setBufferFrames(Sounds.bufferFrames, of: device) }
+                    if let saved, saved.device == device {
+                        output.setBufferFrames(Sounds.bufferFrames, of: device)
+                        let now = output.bufferFrames(of: device).map(String.init) ?? "unreadable"
+                        log.notice("output buffer \(now, privacy: .public) frames while sounding (device's own \(saved.frames, privacy: .public))")
+                    }
                 }
                 do {
                     try output.start()
@@ -139,6 +147,8 @@ extension Sounds {
         private func restore() {
             guard let saved else { return }
             output.setBufferFrames(saved.frames, of: saved.device)
+            let now = output.bufferFrames(of: saved.device).map(String.init) ?? "unreadable"
+            log.notice("output buffer back to \(now, privacy: .public) frames (device's own \(saved.frames, privacy: .public))")
             self.saved = nil
         }
     }
