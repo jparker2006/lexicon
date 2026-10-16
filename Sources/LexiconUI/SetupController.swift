@@ -286,17 +286,7 @@ public final class Setup: NSObject {
         guard downloading == nil, facts.model != .installed else { return }
         setModel(.downloading(0))
         let install = services.installModel, installed = services.modelInstalledNow
-        let report: @Sendable (ModelInstallProgress) -> Void = { step in
-            switch step {
-            case .downloading(let fraction):
-                // Whole percents only: FluidAudio reports far more often than the bar can show.
-                // The nudge keeps 0.57 from reading as 56 (0.57 * 100 is 56.99999999999999).
-                let percent = (fraction * 100 + 1e-9).rounded(.down) / 100
-                Task { @MainActor in self.downloaded(percent) }
-            case .preparing:
-                Task { @MainActor in self.preparing() }
-            }
-        }
+        let report: @Sendable (ModelInstallProgress) -> Void = { step in Task { @MainActor in self.modelProgress(step) } }
         // Setup lives as long as the app, so holding it here costs nothing.
         downloading = Task {
             let model: ModelState
@@ -319,16 +309,21 @@ public final class Setup: NSObject {
         }
     }
 
-    private func downloaded(_ percent: Double) {
-        guard case .downloading(let shown) = facts.model, percent > shown else { return }
-        setModel(.downloading(percent))
-    }
-
-    /// The files are down; only the compile is left. Preparing holds until installed: a late
-    /// download report, or FluidAudio downloading again after a failed first load, never takes it back.
-    private func preparing() {
-        guard case .downloading = facts.model else { return }
-        setModel(.preparing)
+    /// One install report, on the main actor. Preparing holds until installed: a late
+    /// download report, or FluidAudio downloading again after a failed first load, never
+    /// takes it back, so the row never depends on the order the reports arrive in.
+    func modelProgress(_ step: ModelInstallProgress) {
+        switch (step, facts.model) {
+        case (.downloading(let fraction), .downloading(let shown)):
+            // Whole percents only: FluidAudio reports far more often than the bar can show.
+            // The nudge keeps 0.57 from reading as 56 (0.57 * 100 is 56.99999999999999).
+            let percent = (fraction * 100 + 1e-9).rounded(.down) / 100
+            if percent > shown { setModel(.downloading(percent)) }
+        case (.preparing, .downloading):
+            setModel(.preparing)
+        default:
+            return
+        }
     }
 
     private func setModel(_ model: ModelState) {
