@@ -100,6 +100,19 @@ private func removeForm(_ heard: String, from spelling: String, in controller: L
         #expect(await store.rules == [Rule(heard: "kodex", written: "Codex")], "Codex's last form goes only after a confirmation")
     }
 
+    // The plain spelling stays, so the entry does too: no confirmation.
+    @Test func theOneFormBesideAPlainSpellingGoesWithoutAsking() async throws {
+        let store = try Lexicon(paths: .temporary())
+        try await store.add(Term(text: "Codex"))
+        try await store.add(Rule(heard: "codecs", written: "Codex"))
+        let controller = await openedController(store)
+
+        try await removeForm("codecs", from: "Codex", in: controller)
+
+        #expect(await store.rules.isEmpty)
+        #expect(controller.shown.map { LexiconText.title(for: $0) } == ["Codex"])
+    }
+
     @Test func aPlainSpellingHasNoFormButtonsOrFormLabels() async throws {
         let store = try Lexicon(paths: .temporary())
         try await store.add(Term(text: "gstack"))
