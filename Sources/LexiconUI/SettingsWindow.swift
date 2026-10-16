@@ -30,6 +30,9 @@ public final class SettingsWindowPresenter: NSObject {
     }
 
     @objc public func show() {
+        // From the open request, so activating the app counts too.
+        let clock = ContinuousClock()
+        let opened = clock.now
         KeyEquivalents.install()
         NSApp.activate()
         if let controller {
@@ -37,16 +40,14 @@ public final class SettingsWindowPresenter: NSObject {
             return
         }
 
-        let clock = ContinuousClock()
-        let opened = clock.now
         let controller = KeysWindowController(credentials: credentials) { [weak self] in
             self?.controller = nil
         }
         self.controller = controller
         controller.showWindow(nil)
         controller.window?.displayIfNeeded()
-        // The budget is menu action to a usable grid, 100 ms or less; this is the in-process
-        // part, read the way History's open is. Availability is asked for after it.
+        // The 100 ms budget is timed inside Lexicon, open request to the grid drawn, the way
+        // History's open is (DECISIONS item 104). Availability is asked for after it.
         let ms = (clock.now - opened) / .milliseconds(1)
         log.notice("Settings window: usable grid drawn \(Int(ms.rounded()), privacy: .public) ms after open")
         controller.requestAvailability()

@@ -274,8 +274,13 @@ private static func eachNewSettingsWindowLogsItsOwnOpenTimeBody() async throws {
     performSettingsMenuAction(menu)
     try #require(settingsWindows().first).performClose(nil)
 
-    let lines = try store.getEntries(at: start, matching: NSPredicate(format: "subsystem == 'Lexicon' AND category == 'Settings'"))
-        .compactMap { ($0 as? OSLogEntryLog)?.composedMessage }
+    // The log store may lag the call that logged, so read until both lines are there.
+    var lines: [String] = []
+    for _ in 0..<50 where lines.count < 2 {
+        lines = try store.getEntries(at: start, matching: NSPredicate(format: "subsystem == 'Lexicon' AND category == 'Settings'"))
+            .compactMap { ($0 as? OSLogEntryLog)?.composedMessage }
+        if lines.count < 2 { await drainMainQueue() }
+    }
     #expect(lines.count == 2)
     #expect(lines.allSatisfy { $0.wholeMatch(of: /Settings window: usable grid drawn \d+ ms after open/) != nil })
 }
