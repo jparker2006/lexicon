@@ -1,5 +1,11 @@
 import Foundation
 
+extension String {
+    /// Nothing but whitespace, by `Character.isWhitespace` (Unicode's, not just ASCII's):
+    /// text that would paste as nothing. The one rule for blank text.
+    public var isBlank: Bool { !contains(where: { !$0.isWhitespace }) }
+}
+
 /// A word or name the Lexicon always writes one exact way: "gstack", "ELI5",
 /// "CLAUDE.md". Variants that differ only in case, spaces, hyphens or
 /// spelled-out numbers fold to it in code (`RuleSet`).

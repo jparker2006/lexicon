@@ -40,6 +40,11 @@ public struct IndicatorFollower: Sendable {
         case .finished(let id, let status):
             guard id == current, !isRecording else { return nil }
             return finish(status)
+        case .pasted(_, let newerOnItsWay):
+            // Jake answered "Not typed" himself: the check, at once, not the prompt for 4.5 s more.
+            if isRecording { return nil }
+            state = newerOnItsWay ? .error("Pasted the one before. The newest is on its way") : .landed
+            return nil
         case .notice(let notice):
             return show(notice)
         }

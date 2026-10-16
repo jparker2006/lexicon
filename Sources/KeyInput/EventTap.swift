@@ -18,10 +18,10 @@ import LexiconDomain
 /// key-down / mouse-down, (4) feeds fn and every other key-down to `FnGesture`
 /// and yields its commands, (5) takes or gives back Esc when that changed.
 ///
-/// `@unchecked Sendable` is safe because `gesture`, `deadline` and `tookEscape`
-/// are touched by one thread only: the tap thread (the callback, the timer and
-/// `perform`'s blocks all run on its run loop), or a test's thread for a tap
-/// never started. `tap` and `takeEscape` are set in `init` or in `start()`
+/// `@unchecked Sendable` is safe because `gesture`, `deadline`, `presses` and
+/// `tookEscape` are touched by one thread only: the tap thread (the callback, the
+/// timer and `perform`'s blocks all run on its run loop), or a test's thread for a
+/// tap never started. `tap` and `takeEscape` are set in `init` or in `start()`
 /// before the thread starts; `runLoop` is set on the new thread before it
 /// signals the semaphore that `start()` waits on, so it is set before
 /// `start()` returns.
@@ -35,6 +35,9 @@ final class EventTapThread: @unchecked Sendable {
     private let ownPID = Int64(getpid())
     /// Asked on fn-down. Tests pass their own: the real one is system-wide state.
     private let secureInput: @Sendable () -> Bool
+    /// Lexicon's own hotkeys (⌃⌘V): their presses are paired in `presses`.
+    private let hotkeys: [Hotkey]
+    private var presses = HotkeyPresses()
     /// Whether fn is down right now, asked after the tap was off with a press in
     /// progress. System-wide state; tests pass their own. Reading it needs listen
     /// access, which the tap is created only with.
@@ -51,13 +54,14 @@ final class EventTapThread: @unchecked Sendable {
          fnHeld: @escaping @Sendable () -> Bool = {
              CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn)
          },
-         takeEscape: @escaping @Sendable (Bool) -> Void = { _ in }) {
+         takeEscape: @escaping @Sendable (Bool) -> Void = { _ in }, hotkeys: [Hotkey] = []) {
         self.gesture = gesture
         self.input = input
         self.continuation = continuation
         self.secureInput = secureInput
         self.fnHeld = fnHeld
         self.takeEscape = takeEscape
+        self.hotkeys = hotkeys
     }
 
     /// Creates the tap (session level, listen-only, mask: flagsChanged, keyDown
@@ -122,6 +126,23 @@ final class EventTapThread: @unchecked Sendable {
         onTapThread { self.feed(input) }
     }
 
+    /// A Lexicon hotkey's press (⌃⌘V), yielded on the tap thread so it queues behind
+    /// every fn command already sent: `commands` keeps one producer. The press is Jake
+    /// typing, counted before its command unless the tap's copy already counted it
+    /// (`hotkeys`): a Dictation still on its way is held, and the paste this press
+    /// asks for marks after the press, so its own key-down never holds it.
+    /// A tap never started (tests) runs it at once, on the caller's thread.
+    func send(_ command: KeyCommand, pressedAt: HostTime = .now()) {
+        onTapThread { [self] in
+            let first = presses.isFirstReport(.hotkey, at: pressedAt)
+            if first { input.tick() }
+            // This line and the tap copy's give both clocks' times for one press: Live checks reads the gap.
+            log.notice("hotkey report: hotkey at \(pressedAt.nanoseconds, privacy: .public) ns, first \(first, privacy: .public)")
+            continuation.yield(command)
+            log.notice("key command: \(String(describing: command), privacy: .public)")
+        }
+    }
+
     func onTapThread(_ work: @escaping @Sendable () -> Void) {
         guard let runLoop else { return work() }
         CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue, work)
@@ -129,15 +150,16 @@ final class EventTapThread: @unchecked Sendable {
     }
 
     /// Tap thread only (the callback); tests call it on a tap never started.
-    func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+    /// `now`: when the callback runs; tests pass their own, so no test reads the clock.
+    func handle(_ type: CGEventType, _ event: CGEvent, now: HostTime = .now()) -> Unmanaged<CGEvent>? {
         let pass = Unmanaged.passUnretained(event)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             reenable(because: type == .tapDisabledByTimeout ? "timeout" : "user input")
             return pass
         }
         guard event.getIntegerValueField(.eventSourceUnixProcessID) != ownPID else { return pass }
-        if Self.isTypingOrClicking(type), !KeyInput.isFnItself(event) { input.tick() }
-        guard let key = KeyInput(event, secureInput: secureInput, now: .now()) else { return pass }
+        if Self.isTypingOrClicking(type), !KeyInput.isFnItself(event) { countTyping(event, now: now) }
+        guard let key = KeyInput(event, secureInput: secureInput, now: now) else { return pass }
         #if DEBUG
         let pressing = gesture.isRecording && !gesture.takesEscape  // a press or a tap not yet confirmed
         #endif
@@ -155,6 +177,18 @@ final class EventTapThread: @unchecked Sendable {
         default: break
         }
         return pass
+    }
+
+    /// One tick per keystroke; a hotkey press the hotkey's `send` already counted is not another.
+    /// A held hotkey's repeats come only here (Carbon reports a press once): they are typing,
+    /// as any held key's are, and never a report to pair.
+    private func countTyping(_ event: CGEvent, now: HostTime) {
+        guard hotkeys.contains(where: { $0.matches(event) }),
+              event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return input.tick() }
+        let at = HostTime(pressStamp: event.timestamp, now: now)
+        let first = presses.isFirstReport(.tapCopy, at: at)
+        if first { input.tick() }
+        log.notice("hotkey report: tap copy at \(at.nanoseconds, privacy: .public) ns, first \(first, privacy: .public)")
     }
 
     /// What counts as Jake typing or clicking for `InputClock`: key-downs and
@@ -270,7 +304,62 @@ extension KeyInput {
     }
 }
 
+/// One hotkey press reaches the tap thread twice, as the tap's copy of its key-down
+/// and as the hotkey's report, in either order, or once (the hotkey never registered,
+/// or the tap never saw the key). It is one keystroke, so only its first report
+/// counts. Both carry the key-down's own time, and a press's two reports are the
+/// same moment, so reports pair only within `pairWindow`: a report whose partner
+/// was lost never swallows a later press's.
+struct HotkeyPresses {
+    enum Report { case tapCopy, hotkey }
+    static let pairWindow: Duration = .milliseconds(250)
+    /// The last few first reports still waiting for their partner, oldest first. A partner
+    /// can arrive late (a busy tap), so they go by count, never by how old they are.
+    private var unpaired: [(report: Report, at: HostTime)] = []
+    /// Far more presses than can be waiting at once: a report is dropped before its partner
+    /// only if the tap stalls through nine ⌃⌘V presses, and then one extra tick only holds
+    /// that paste for ⌃⌘V, never types anything.
+    private static let kept = 8
+
+    /// True for a press's first report (count it), false for its second, which pairs
+    /// with the nearest unpaired report of the other kind within `pairWindow` of its own
+    /// press time: two quick presses keep their own.
+    mutating func isFirstReport(_ report: Report, at: HostTime) -> Bool {
+        let partner = unpaired.indices
+            .filter { unpaired[$0].report != report && Self.gap(unpaired[$0].at, at) <= Self.pairWindow }
+            .min { Self.gap(unpaired[$0].at, at) < Self.gap(unpaired[$1].at, at) }
+        if let partner {
+            unpaired.remove(at: partner)
+            return false
+        }
+        unpaired.append((report, at))
+        if unpaired.count > Self.kept { unpaired.removeFirst() }
+        return true
+    }
+
+    private static func gap(_ a: HostTime, _ b: HostTime) -> Duration { max(a, b).duration(since: min(a, b)) }
+}
+
+extension Hotkey {
+    /// This key-down, with exactly these modifiers among Command, Option, Control and Shift.
+    func matches(_ event: CGEvent) -> Bool {
+        guard event.type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == Int64(keyCode) else {
+            return false
+        }
+        let flags: [(Modifiers, CGEventFlags)] = [(.command, .maskCommand), (.option, .maskAlternate),
+                                                  (.control, .maskControl), (.shift, .maskShift)]
+        return flags.allSatisfy { modifiers.contains($0.0) == event.flags.contains($0.1) }
+    }
+}
+
 extension HostTime {
+    /// A key-down's own time for pairing a hotkey press's reports: its stamp however late
+    /// the tap handles it, as the hotkey's report keeps Carbon's (`init(carbonEventTime:now:)`).
+    /// Only an unset or future stamp reads as `now`.
+    init(pressStamp stamp: CGEventTimestamp, now: HostTime) {
+        self = stamp > 0 && stamp <= now.nanoseconds ? HostTime(nanoseconds: stamp) : now
+    }
+
     /// A CGEvent's timestamp is nanoseconds on the HostTime clock. An event posted
     /// without a time (stamp 0), or one that reads as not yet happened, is taken as
     /// `now`. An old stamp is kept: when the tap thread stalls, both edges of a long

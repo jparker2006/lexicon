@@ -91,3 +91,31 @@ func blankTextIsNeverPasted(_ text: String) async {
     }
     #expect(await lane.pasted.isEmpty)
 }
+
+/// Records the calls once a paste has a prepared target.
+private actor RecordingLane: PasteLane {
+    private(set) var calls: [String] = []
+    func idle() { calls.append("idle") }
+    func paste(_ text: String, as kind: PasteKind) -> PasteAttempt {
+        calls.append("paste")
+        return .sent(ClipboardKeeper.PasteID(value: calls.count))
+    }
+}
+
+@Test func aPreparedPasteLastWaitsForEarlierPastesBeforeItsCheckAndCmdV() async {
+    let lane = RecordingLane()
+    let field = FocusSnapshot(pid: 7, fieldFingerprint: "notes#1")
+    _ = await PasteOrder.run("pasted", as: .pasteLast, lane: lane) {
+        (InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false, sinceCapture: .zero), field)
+    }
+    #expect(await lane.calls == ["idle", "paste"])
+}
+
+@Test func aDictationNeverWaitsForKeys() async {
+    let lane = RecordingLane()
+    let field = FocusSnapshot(pid: 7, fieldFingerprint: "notes#1")
+    _ = await PasteOrder.run("dictated", as: .dictation, lane: lane) {
+        (InsertGuard.decide(target: field, focusNow: field, inputSinceMark: false, sinceCapture: .zero), field)
+    }
+    #expect(await lane.calls == ["idle", "paste"])
+}

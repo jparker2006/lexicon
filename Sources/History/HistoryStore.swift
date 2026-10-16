@@ -51,6 +51,22 @@ public enum DictationEvent: Sendable {
     case deleted(DictationID)
 }
 
+/// What ⌃⌘V pastes.
+public struct NewestText: Sendable, Hashable {
+    public let id: DictationID
+    /// Final text (cleaned plus Fixes), never blank.
+    public let text: String
+    /// A Dictation newer than this one is still being made (recording,
+    /// transcribing, waiting, or mid-paste), so this is the one before the newest.
+    public let newerOnItsWay: Bool
+
+    public init(id: DictationID, text: String, newerOnItsWay: Bool) {
+        self.id = id
+        self.text = text
+        self.newerOnItsWay = newerOnItsWay
+    }
+}
+
 /// Sole owner of `history.sqlite` and of the audio files' lifecycle (path,
 /// finalize after a crash, retention, delete). AudioCapture writes a file's
 /// bytes only while its LiveCapture is open.
@@ -172,8 +188,41 @@ public final class HistoryStore: @unchecked Sendable {
         return await Task.detached { try? CAFFile.read(url) }.value
     }
 
-    /// Paste-last: newest Dictation whose status has text, and its final text.
-    public func newestText() async -> (DictationID, String)? { fatalError("not implemented") }
+    /// Paste-last: the newest Dictation Jake can paste, by fn-down (`started_at`).
+    ///
+    /// Counts: purpose `.type` (a Re-speak's text fixes another Dictation, never
+    /// pastes), any origin, a status that has text and is settled (inserted, not
+    /// inserted, recovered; never `ready`, which is mid-paste), and a final text
+    /// that is not blank. `newerOnItsWay`: a newer `.type` row is not settled
+    /// (recording, transcribing, waiting, ready); a newer failed row is skipped
+    /// silently, as nothing is coming from it. nil: nothing to paste yet.
+    ///
+    /// Both status lists are generated from `DictationStatus`, and both reads run
+    /// in one `read`, after every event recorded before it, so they agree.
+    public func newestText() async -> NewestText? {
+        let settled = HistorySchema.sqlList({ $0.hasText && $0.isTerminal }, is: true)
+        let unsettled = HistorySchema.sqlList(\.isTerminal, is: false)
+        let type = SQLValue.text(DictationPurpose.type.column)
+        return try? await read { db in
+            // Blank is Swift's rule (`isBlank`), not SQLite's trim, so the pick agrees with the
+            // paste path. A blank row is rare (a Fix that empties one), so the next is read only then.
+            var skipped: Int64 = 0
+            while let row = try db.query("""
+                SELECT id, final_text, started_at FROM dictation
+                WHERE status IN (\(settled)) AND purpose = ? AND final_text IS NOT NULL
+                ORDER BY started_at DESC, rowid DESC LIMIT 1 OFFSET ?
+                """, [type, .int(skipped)]).first {
+                skipped += 1
+                guard let id = row.text(0).flatMap(DictationID.init(column:)), let text = row.text(1),
+                      let startedAt = row.int(2), !text.isBlank else { continue }
+                let newer = try db.query("""
+                    SELECT EXISTS (SELECT 1 FROM dictation WHERE status IN (\(unsettled)) AND purpose = ? AND started_at > ?)
+                    """, [type, .int(startedAt)]).first?.int(0) == 1
+                return NewestText(id: id, text: text, newerOnItsWay: newer)
+            }
+            return nil
+        }
+    }
 
     public func dictation(_ id: DictationID) async -> DictationRecord? {
         try? await read { db in

@@ -39,7 +39,7 @@ extension Conductor {
             // it to nothing: that is silence too. Typed, the empty Cmd-V would replace Jake's selection.
             // A Retry of a settled row leaves it as it was, engine runs included, as Retry does when
             // the engine hears silence.
-            let blank = !cleaned.versions.cleaned.contains(where: { !$0.isWhitespace })
+            let blank = cleaned.versions.cleaned.isBlank
             if blank, run.isRetry { return .nothing(id) }
             for record in heard.attempts { history.record(.attempted(id, record)) }
             if blank { return failed(id, .silence) }

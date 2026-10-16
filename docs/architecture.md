@@ -70,7 +70,7 @@ Each SwiftPM target is one module, and its dependency list is its "may import" l
 |---|---|---|
 | `LexiconDomain` | Shared values only (plus `RuleSet` matching, which WordStore compiles and Cleanup runs): `DictationID`, `DictationStatus` (with `canMove`, `isInFlight`, `needsAudio`), `TextVersions`, `SpeechSegment`, `InsertionReceipt`, `Term`/`Rule`/`RuleSet`, `Preferences`, `CloudAccess`, `AppPaths` (root only), `AccessibilityID` (identifiers the harness finds the UI by) | Foundation |
 | `SQLiteKit` | One connection to system SQLite, WAL, migrations | SQLite3 |
-| `KeyInput` | Event tap thread, `FnGesture`, hotkeys, `InputClock` (single writer) | Domain |
+| `KeyInput` | Event tap thread, `FnGesture`, hotkeys (⌃⌘V registered while the app runs), `InputClock` (single writer) | Domain |
 | `AudioCapture` | Engine, sink node, ring, converter, CAF writer, `F_FULLFSYNC` every 1 s and at stop, device rebuild, adaptive tail | Domain |
 | `Transcription` | One adapter file per cloud provider (Muse from M2), sockets, keywords, finalize, local race, residency, reachability. No reconnect after a cloud failure: local is already racing, and with no local model the Dictation waits and is transcribed again when the network returns. `CloudLink` (adapter, socket, network path) is the one seam tests replace, with a scripted fake provider | Domain |
 | `LocalParakeet` | The FluidAudio adapter (Parakeet Unified; Ultra or v3 as the multilingual pick), model install and compile. Long audio is decoded in FluidAudio's 15 s windows, each as soon as it is captured, then merged on the 2 s overlaps. The per-window decode and the merge are FluidAudio's, copied (Apache 2.0) because it keeps them internal, so each window reaches the merge raw and the words match its one-shot path; `UnifiedAsrManager` only downloads the model. No word boosting; Rules in code instead. The only FluidAudio importer | Domain, Transcription, the FluidAudio package |
@@ -103,12 +103,13 @@ No test target depends on an executable target: every test target links into one
 
 ### Invariants the compiler enforces
 
-- Recovered and retried text is never typed: `TextDestination.Target` has no public initializer, and only a live fn-up or a test file run produces one.
+- Recovered and retried text is never typed on its own: `TextDestination.Target` has no public initializer, and only a live fn-up, Jake's ⌃⌘V press (which pastes the newest Dictation with text, recovered ones included) or a test file run produces one.
 - Every cloud key comes through `CloudAccess`: speech, Cleanup's LLM, Jev and model downloads all take one. Its only constructor returns nil in Private mode, for an always-private app, or for a Test set eval of a speech model whose zero retention isn't confirmed (`CloudModel.retention`, an exhaustive switch), and Cleanup withholds it when "AI cleanup" is off. The socket and HTTP calls themselves are plain `URLSession` (`CloudLink`, `JevClient`, `CleanupModel`), so "no network call without a `CloudAccess`" is a review rule, not a compiler one.
 - Every Jev call has a local fallback: `decide(_:access:budget:fallback:)` has no other form.
 - A capture is stopped, and an attempt finished, at most once: both are `~Copyable` with `consuming` methods.
 - One list each, compiler-checked: providers, statuses (index predicates and retention derive from the enum), key commands, inbox messages, History events.
 - The late-text rule runs on every insert: `InsertGuard.decide` is a pure function with no grace window.
+- A ⌃⌘V paste waits up to 1 s for its keys to be released before capturing its target and input mark. Holding V into autorepeat cannot invalidate its own paste, and the key wait does not consume the 5 s fieldless window. The late-text check still runs after any earlier unread paste.
 - Text is never typed twice: a row left in `ready` after a crash becomes `notInserted` (reason `interrupted`) at launch; paste-last still reaches it.
 
 ### One push-to-talk Dictation

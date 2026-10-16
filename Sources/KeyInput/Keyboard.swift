@@ -79,9 +79,9 @@ public enum KeyboardError: Error, Sendable {
 ///
 /// Hides: the listen-only session-level CGEventTap on its own thread (#6), the
 /// gesture state machine and its timer (the hold, the double tap and the cap),
-/// passing every key on except Esc while recording (a registered hotkey takes
-/// it), re-enabling the tap after the system disables it, ignoring events
-/// Lexicon itself posted (its own Cmd-V), and stamping `InputClock`.
+/// passing every key on except Esc while recording and ⌃⌘V while the app runs
+/// (registered hotkeys take them), re-enabling the tap after the system disables
+/// it, ignoring events Lexicon itself posted (its own Cmd-V), and stamping `InputClock`.
 ///
 /// Gesture state has exactly one owner: the recognizer on the tap thread. Other
 /// code asks it to change state (`systemWillSleep()`); nothing else writes it.
@@ -92,6 +92,10 @@ public final class Keyboard: Sendable {
     let feed: @Sendable (KeyInput) -> Void
     /// The tap behind `feed`; nil for a test's scripted keyboard.
     let tap: EventTapThread?
+    /// ⌃⌘V, registered for as long as the app runs (decision 59): taken from every
+    /// app with no event tap, so no key waits on Lexicon. Held here only to keep it
+    /// alive; nil for a test's keyboard, so a test run never takes ⌃⌘V from the Mac.
+    let pasteLastKey: RegisteredHotkey?
 
     /// Creates the tap thread and starts listening. Throws if Accessibility is missing.
     public static func start(_ config: KeyboardConfig, input: InputClock) throws(KeyboardError) -> Keyboard {
@@ -100,22 +104,33 @@ public final class Keyboard: Sendable {
 
     static func start(_ config: KeyboardConfig, input: InputClock, listenAccess: Bool) throws(KeyboardError) -> Keyboard {
         let (commands, continuation) = AsyncStream<KeyCommand>.makeStream()
-        let tap = EventTapThread(gesture: FnGesture(config), input: input,
-                                 continuation: continuation)
+        let tap = Self.tap(config, input: input, continuation: continuation)
         try tap.start(listenAccess: listenAccess)
-        return Keyboard(tap: tap, commands: commands)
+        // The tap may see this key-down too; only the hotkey says paste, so one press pastes once.
+        let pasteLast = RegisteredHotkey(config.pasteLast) { at in tap.send(.pasteLast, pressedAt: at) }
+        pasteLast.setRegistered(true)
+        return Keyboard(tap: tap, commands: commands, pasteLastKey: pasteLast)
     }
 
-    init(tap: EventTapThread, commands: AsyncStream<KeyCommand>) {
+    /// The tap as `start` makes it, not yet started: tests drive it inline.
+    static func tap(_ config: KeyboardConfig, input: InputClock,
+                    continuation: AsyncStream<KeyCommand>.Continuation) -> EventTapThread {
+        EventTapThread(gesture: FnGesture(config), input: input, continuation: continuation,
+                       hotkeys: [config.pasteLast])
+    }
+
+    init(tap: EventTapThread, commands: AsyncStream<KeyCommand>, pasteLastKey: RegisteredHotkey? = nil) {
         self.commands = commands
         feed = { tap.perform($0) }
         self.tap = tap
+        self.pasteLastKey = pasteLastKey
     }
 
     init(commands: AsyncStream<KeyCommand>, feed: @escaping @Sendable (KeyInput) -> Void) {
         self.commands = commands
         self.feed = feed
         tap = nil
+        pasteLastKey = nil
     }
 
     /// Lid close or sleep is a normal stop (#4). It goes through the recognizer,

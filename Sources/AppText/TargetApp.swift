@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import os
 public import LexiconDomain
 public import KeyInput
 
@@ -111,14 +112,26 @@ public actor TargetApp: TextDestination {
         AppContext(bundleID: app?.bundleIdentifier, appName: app?.localizedName, windowTitle: nil, workingDirectory: nil)
     }
 
+    private static let log = Logger(subsystem: "Lexicon", category: "paste")
+
+    public func prepareForPasteLast() async {
+        await Paster.shared.keysReleased()
+    }
+
     public func target() async -> Target? {
-        // Both name the moment the target is taken (fn-up, or the ⌃⌘V press): the mark
+        // Both name the moment the target is taken (fn-up, or after ⌃⌘V releases): the mark
         // for typing since, the time for the fieldless window.
         let mark = input.mark(), capturedAt = ContinuousClock.now
-        guard let focus = Focus.now() else { return nil }
+        guard let focus = Focus.now() else {
+            Self.log.notice("no target: the focus could not be read")
+            return nil
+        }
         // A password field never gets a Dictation, in any mode, and a link or button
         // takes none. An app that exposes no focused element at all gets the paste.
-        if let traits = focus.traits, FieldTraits.accepts(traits) != .text { return nil }
+        if let traits = focus.traits, case let accepts = FieldTraits.accepts(traits), accepts != .text {
+            Self.log.notice("no target: the focused element takes \(String(describing: accepts), privacy: .public), role \(traits.role ?? "none", privacy: .public)")
+            return nil
+        }
         let bundleID = NSRunningApplication(processIdentifier: focus.pid)?.bundleIdentifier
         let fingerprint = focus.durableFingerprint(bundleID: bundleID)
         await Paster.shared.prefetch()  // Jake's clipboard, read now, off the text-ready-to-Cmd-V path
