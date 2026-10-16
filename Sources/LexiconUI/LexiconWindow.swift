@@ -61,7 +61,7 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
     var shown: [DictionaryEntry] = []
     /// Reads are async: only the newest one may set the list.
     var reads = 0
-    /// The newest form removal, kept so a test can wait for it.
+    /// The newest form removal: the next one waits for it, and so does a test.
     var pending: Task<Void, Never>?
     private let log = Logger(subsystem: "Lexicon", category: "Lexicon page")
 
@@ -206,15 +206,21 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
 
     /// Removes one heard-as form at once: adding it back is one line, unlike a whole
     /// entry. A form that is its entry's only record would take the entry with it,
-    /// so that one asks as Delete does.
+    /// so that one asks as Delete does. Each removal waits for the one before and
+    /// decides on a fresh read: the list as drawn lags a quick second click.
     @objc func removeFormClicked(_ sender: FormButton) {
         guard window?.attachedSheet == nil, let rule = sender.rule else { return }
-        let row = shown.firstIndex { $0.records.contains(.rule(rule)) }
-        if let row, shown[row].records.count == 1 {
-            remove(row: row)
-            return
-        }
+        let previous = pending
         pending = Task {
+            await previous?.value
+            let fresh = LexiconText.sorted(await lexicon.entries)
+            guard let entry = fresh.first(where: { $0.records.contains(.rule(rule)) }) else { return }
+            if entry.records.count == 1 {
+                await reload()
+                if let row = shown.firstIndex(where: { $0.records.contains(.rule(rule)) }) { remove(row: row) }
+                return
+            }
+            let row = shown.firstIndex { $0.records.contains(.rule(rule)) }
             do {
                 try await lexicon.remove(rule)
             } catch {
