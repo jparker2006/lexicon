@@ -97,9 +97,9 @@ extension Sounds {
         let voice: SynthVoice
         private var generation = 0
         var active = false
-        /// The device's own buffer size, from before this engine set 256. The HAL may
-        /// apply a buffer size device-wide, so it goes back when the engine stops and
-        /// other apps never run at Lexicon's.
+        /// The device's own buffer size, from before this engine set 256, put back when
+        /// the engine stops. The size is per process (another process reads its own 512
+        /// while one holds 256), so each Lexicon copy saves and restores only its own.
         private var saved: (device: AudioObjectID, frames: UInt32)?
 
         init(voice: SynthVoice, output: any SoundOutput) {
@@ -116,7 +116,8 @@ extension Sounds {
                 if let device = output.device {
                     if let saved, saved.device != device { restore() }
                     if saved == nil, let frames = output.bufferFrames(of: device) { saved = (device, frames) }
-                    output.setBufferFrames(Sounds.bufferFrames, of: device)
+                    // Only a size that can be put back is changed: a device whose read failed keeps its own.
+                    if saved?.device == device { output.setBufferFrames(Sounds.bufferFrames, of: device) }
                 }
                 do {
                     try output.start()
