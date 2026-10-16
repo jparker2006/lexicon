@@ -4,7 +4,8 @@ import LexiconDomain
 import os
 
 /// Opens the Keys form from the menu bar. Its window and rows exist only while
-/// the form is open; each opening begins with blank secure fields.
+/// the form is open, apart from the one warm-up build after launch, dropped at
+/// once; each opening begins with blank secure fields.
 @MainActor
 public final class SettingsWindowPresenter: NSObject {
     private let credentials: CredentialCommand
@@ -53,9 +54,9 @@ public final class SettingsWindowPresenter: NSObject {
         controller.requestAvailability()
     }
 
-    /// Builds the form once, unshown, and drops it, as History's warm-up does: a
-    /// process's first form pays AppKit's one-time setup (the grid, the secure
-    /// fields), which made the first open the slowest. It asks for no credential.
+    /// Builds the form once, unshown, and drops it, as History's warm-up does (DECISIONS
+    /// item 105): a process's first form pays AppKit's one-time setup (the grid, the
+    /// secure fields), which made the first open the slowest. It asks for no credential.
     /// Returns the controller it built (nil while Settings is open) for the caller to drop.
     @discardableResult
     public func warmUp() -> NSWindowController? {
