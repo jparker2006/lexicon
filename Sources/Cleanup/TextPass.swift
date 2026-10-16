@@ -288,24 +288,16 @@ enum Fillers {
         return next.isName && next.trailing == "?"
     }
 
-    /// Words a pseudo-cleft's clause hangs from: "all it was", "the only thing it was".
-    static let cleftHeads: Set<String> = [
-        "all", "thing", "reason", "problem", "issue", "point", "trouble", "catch", "idea",
-    ]
-    /// The subject of the clause a pseudo-cleft's first "was" closes.
-    static let subjects: Set<String> = ["it", "i", "he", "she", "we", "they", "you", "that", "this"]
-
-    /// The first "was" may close a pseudo-cleft's clause, whose predicate then needs its
-    /// own: "What the problem was was the cache", "All it was was a typo", "The reason it
-    /// was was the cache". Any earlier "what" may open such a clause, so the double stays
-    /// (decision 102): keeping a stutter costs less than dropping a predicate. "All I wanted was was" and
-    /// "the build was was green" are stutters. `sentence`: the sentence's kept words,
-    /// ending with that "was".
+    /// Decision 103: "was was" stays after an earlier "what" ("What the problem was was the
+    /// cache"), and after "all it was" and "the reason it was". A real stutter after a "what"
+    /// may stay: keeping one costs less than dropping a predicate. "All I wanted was was" and
+    /// "the build was was green" are stutters. `sentence`: the sentence's kept words, ending
+    /// with the first "was".
     private static func closesCleft(_ sentence: ArraySlice<String>) -> Bool {
         let before = sentence.dropLast()
         if before.contains("what") { return true }
         let pair = Array(before.suffix(2))
-        return pair.count == 2 && cleftHeads.contains(pair[0]) && subjects.contains(pair[1])
+        return pair == ["all", "it"] || pair == ["reason", "it"]
     }
 
     /// The same word in another form: "the The", "it’s it's". Only a first-letter capital

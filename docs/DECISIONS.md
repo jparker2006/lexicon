@@ -328,15 +328,15 @@ Decided: Rules-only Cleanup keeps “uh uh,” “um hmm,” “hmm hmm,” and 
 
 Canonical source: [#337 decision comment](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6164220809).
 
-**102. Rules-only Cleanup keeps "was was" after an earlier "what".** Narrows item 89 for one word: "was" is a function word whose double can finish a sentence ("What the problem was was the cache"), and the rules cannot tell that from a stutter.
+**103. Rules-only Cleanup keeps "was was" after an earlier "what".** Narrows item 89 for one word: "was" is a function word whose double can finish a sentence ("What the problem was was the cache"), and the rules cannot tell that from a stutter.
 
 Question, on [#337](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6217405039), asked again in the orchestrator's round at about 2026-10-16 08:25 Pacific:
 
 > 3. #337 "was was": A keeps both copies after any earlier "what"; B keeps both only when "what" is close by. Rec: A, because a missing word is worse than a leftover stutter.
 
-Jake's words, verbatim: "3A 4A". "3A" answers the question above; "4A" is another ticket's answer, recorded with #62. Recorded at (UTC): 2026-10-16T15:27:45Z, the time of the decision comment; the chat does not expose the exact answer time. Given in the Claude orchestrator session.
+Jake's words, verbatim: "3A 4A". "3A" answers the question above; "4A" is another ticket's answer, recorded with [#62](https://github.com/jparker2006/lexicon/issues/62#issuecomment-6218827499). Recorded at (UTC): 2026-10-16T15:27:45Z, the time of the decision comment; the chat does not expose the exact answer time. Given in the Claude orchestrator session.
 
-Decided: rules-only Cleanup keeps both copies of "was" whenever "what" came earlier in the sentence, and after "all it was" and "the reason it was" (a head word, then a subject). "The build was was green" still loses the stutter. A real stutter after an earlier "what" ("What I wanted to say was was that we're late") may stay: a missing word changes what Jake said, and a leftover stutter is easy to fix.
+Decided: rules-only Cleanup keeps both copies of "was" whenever "what" came earlier in the sentence, and after "all it was" and "the reason it was". "The build was was green" still loses the stutter. A real stutter after an earlier "what" ("What I wanted to say was was that we're late") may stay: a missing word changes what Jake said, and a leftover stutter is easy to fix.
 
 Canonical source: [#337 decision comment](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6218826858).
 

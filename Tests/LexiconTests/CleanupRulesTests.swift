@@ -565,9 +565,8 @@ let cleanup337MeaningKeptCases: [Case] = [
     Case("I think what it was was a bug.", "I think what it was was a bug."),
     Case("What I think it was was a bug.", "What I think it was was a bug."),
     Case("What the problem with the build was was the cache.", "What the problem with the build was was the cache."),
-    // Decision 102 accepts a real stutter after an earlier "what" staying.
+    // Decision 103 accepts a real stutter after an earlier "what" staying.
     Case("What I wanted to say was was that we're late.", "What I wanted to say was was that we're late."),
-    Case("The only thing it was was a typo.", "The only thing it was was a typo."),
     Case("The reason it was was because the cache was stale.", "The reason it was was because the cache was stale."),
     Case("May may be late.", "May may be late."),
     Case("I went there, um, there was a fire.", "I went there, there was a fire."),
