@@ -40,6 +40,8 @@ public final class LexiconWindowPresenter: NSObject {
 
 /// One row per exact spelling, with its heard-as forms and their learned marks.
 /// Each row has a delete button; Delete confirms removal of the whole entry.
+/// Each form has its own remove button, so one wrongly learned form can go
+/// without the rest.
 ///
 /// The list is a copy, read again after every change and whenever the window
 /// comes forward, so it never drifts from the store.
@@ -59,6 +61,8 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
     var shown: [DictionaryEntry] = []
     /// Reads are async: only the newest one may set the list.
     var reads = 0
+    /// The newest form removal, kept so a test can wait for it.
+    var pending: Task<Void, Never>?
     private let log = Logger(subsystem: "Lexicon", category: "Lexicon page")
 
     init(lexicon: Lexicon, onClose: @escaping @MainActor () -> Void) {
@@ -200,6 +204,21 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
         }
     }
 
+    /// Removes one heard-as form at once: adding it back is one line, unlike a whole entry.
+    @objc func removeFormClicked(_ sender: FormButton) {
+        guard window?.attachedSheet == nil, let rule = sender.rule else { return }
+        let row = shown.firstIndex { $0.records.contains(.rule(rule)) }
+        pending = Task {
+            do {
+                try await lexicon.remove(rule)
+            } catch {
+                log.error("remove form failed: \(String(describing: error), privacy: .private)")
+                NSSound.beep()
+            }
+            await reload(selectingRow: row)
+        }
+    }
+
     // MARK: Add new
 
     /// One field that takes a spelling or a heard-as line in the import format.
@@ -308,7 +327,7 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard shown.indices.contains(row) else { return nil }
         let cell = tableView.makeView(withIdentifier: EntryCell.identifier, owner: nil) as? EntryCell
-            ?? EntryCell(target: self, delete: #selector(deleteClicked(_:)))
+            ?? EntryCell(target: self, delete: #selector(deleteClicked(_:)), removeForm: #selector(removeFormClicked(_:)))
         cell.show(shown[row])
         return cell
     }
@@ -352,16 +371,33 @@ final class LexiconTable: NSTableView {
     }
 }
 
-/// One dictionary entry, with its delete button at the end.
+/// A heard-as form's remove button, carrying the form it removes.
+final class FormButton: NSButton {
+    var rule: Rule?
+}
+
+/// One dictionary entry: its spelling, then a line per heard-as form with that
+/// form's remove button, and the entry's delete button at the end.
 final class EntryCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("entry")
     let label = NSTextField(wrappingLabelWithString: "")
     let delete = NSButton()
+    let lines = NSStackView()
+    private(set) var formLabels: [NSTextField] = []
+    private(set) var formButtons: [FormButton] = []
+    private weak var target: AnyObject?
+    private let removeForm: Selector
 
-    init(target: AnyObject, delete action: Selector) {
+    init(target: AnyObject, delete action: Selector, removeForm: Selector) {
+        self.target = target
+        self.removeForm = removeForm
         super.init(frame: .zero)
         identifier = Self.identifier
         label.maximumNumberOfLines = 0
+        lines.orientation = .vertical
+        lines.alignment = .leading
+        lines.spacing = 2
+        lines.addArrangedSubview(label)
         delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete")
         delete.isBordered = false
         delete.contentTintColor = .secondaryLabelColor
@@ -369,16 +405,17 @@ final class EntryCell: NSTableCellView {
         delete.target = target
         delete.action = action
         delete.setAccessibilityIdentifier(AccessibilityID.lexiconDelete)
-        for view in [label, delete] {
+        for view in [lines, delete] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        lines.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
-            delete.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
+            lines.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            lines.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            lines.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            delete.leadingAnchor.constraint(greaterThanOrEqualTo: lines.trailingAnchor, constant: 8),
             delete.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             delete.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -386,9 +423,35 @@ final class EntryCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("not implemented") }
 
+    /// A reused cell drops the last entry's form lines before drawing this one's.
     func show(_ entry: DictionaryEntry) {
         let title = LexiconText.title(for: entry)
-        label.stringValue = title
+        label.stringValue = entry.spelling
+        setAccessibilityLabel(title)
         delete.setAccessibilityLabel("Delete \(title)")
+        for view in lines.arrangedSubviews where view !== label { view.removeFromSuperview() }
+        formLabels = []
+        formButtons = []
+        for rule in entry.forms {
+            let text = NSTextField(wrappingLabelWithString: LexiconText.formLine(rule))
+            text.maximumNumberOfLines = 0
+            text.textColor = .secondaryLabelColor
+            text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let button = FormButton()
+            button.rule = rule
+            button.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Remove")
+            button.isBordered = false
+            button.contentTintColor = .secondaryLabelColor
+            button.toolTip = "Remove this heard-as form"
+            button.target = target
+            button.action = removeForm
+            button.setAccessibilityIdentifier(AccessibilityID.lexiconRemoveForm)
+            button.setAccessibilityLabel("Remove heard-as form \(rule.heard) from \(entry.spelling)")
+            let line = NSStackView(views: [text, button])
+            line.spacing = 4
+            lines.addArrangedSubview(line)
+            formLabels.append(text)
+            formButtons.append(button)
+        }
     }
 }

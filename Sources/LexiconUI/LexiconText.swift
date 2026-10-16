@@ -25,6 +25,11 @@ enum LexiconText {
         return entry.spelling + (forms.isEmpty ? "" : " (heard as: \(forms.joined(separator: ", ")))")
     }
 
+    /// One heard-as form's line under its spelling.
+    static func formLine(_ rule: Rule) -> String {
+        "heard as: " + (rule.source == .learned ? "✨ " : "") + rule.heard
+    }
+
     /// What the Add field holds: exactly one line of the import format, or nil.
     /// A heard-as line typed with "→" reads as one typed with "->".
     static func entry(typed text: String) -> LexiconEntry? {
