@@ -518,6 +518,8 @@ let cleanup337Decision89FunctionStutterCases: [Case] = [
     Case("All the tests passed and the build was was green.", "All the tests passed and the build was green."),
     Case("All I did was was restart the build.", "All I did was restart the build."),
     Case("All I wanted was was a clean build.", "All I wanted was a clean build."),
+    Case("Fix the issue it was was causing.", "Fix the issue it was causing."),
+    Case("Explain the point I was was making.", "Explain the point I was making."),
 ]
 
 @Test(arguments: cleanup337Decision89FunctionStutterCases)
