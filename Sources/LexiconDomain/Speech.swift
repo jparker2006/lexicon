@@ -46,6 +46,13 @@ public enum LocalModel: String, Sendable, Codable, CaseIterable {
     }
 }
 
+/// A local model install, as it goes: the files downloading (0...1 of the whole
+/// install), then the model being prepared for this Mac until it loads.
+public enum ModelInstallProgress: Sendable, Hashable {
+    case downloading(Double)
+    case preparing
+}
+
 /// Any model that can produce text for a Dictation. Stored as `id` in SQLite.
 public enum SpeechModel: Hashable, Sendable {
     case cloud(CloudModel)
