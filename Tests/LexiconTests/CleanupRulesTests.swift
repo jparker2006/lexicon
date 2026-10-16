@@ -539,6 +539,28 @@ func cleanup337Decision89ContentNumberProtectedAndMeantDoublesStay(_ c: Case) {
     #expect(TextPass.run(c.raw, rules: .empty) == c.gold)
 }
 
+// A name, acronym or keyword spelled like the function word after it is not a stutter;
+// a clause-ending "at" keeps its comma; any pseudo-cleft keeps its predicate "was".
+let cleanup337MeaningKeptCases: [Case] = [
+    Case("Tell IT it is down.", "Tell IT it is down."),
+    Case("I think May may be late.", "I think May may be late."),
+    Case("Use AND and OR in the query.", "Use AND and OR in the query."),
+    Case("Ask WHO who pays.", "Ask WHO who pays."),
+    Case("Use IN in the where clause.", "Use IN in the where clause."),
+    Case("Take him to the OR or the ER.", "Take him to the OR or the ER."),
+    Case("Sort BY by date.", "Sort BY by date."),
+    Case("Tell US us too.", "Tell US us too."),
+    Case("Where are we at, um, Jake?", "Where are we at, Jake?"),
+    Case("What are you looking at, uh, Sam?", "What are you looking at, Sam?"),
+    Case("What the problem was was the cache.", "What the problem was was the cache."),
+    Case("All it was was a typo.", "All it was was a typo."),
+]
+
+@Test(arguments: cleanup337MeaningKeptCases)
+func cleanup337KeepsNamesClauseEndsAndPseudoClefts(_ c: Case) {
+    #expect(TextPass.run(c.raw, rules: .empty) == c.gold)
+}
+
 let ambiguousSoundCases: [Case] = [
     Case("uh uh", "uh uh"),
     Case("Uh uh, no.", "Uh uh, no."),
