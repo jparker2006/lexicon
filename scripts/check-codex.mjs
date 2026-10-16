@@ -5,7 +5,8 @@
 //
 //   node scripts/check-codex.mjs
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +16,17 @@ const read = (rel) => readFileSync(at(rel), 'utf8');
 
 const checks = [];
 const test = (name, fn) => checks.push({ name, fn });
+
+test('every repo skill is reachable as the same file under .agents/skills', () => {
+  for (const name of readdirSync(at('.claude/skills'))) {
+    if (!existsSync(at('.claude/skills', name, 'SKILL.md'))) continue;
+    assert.equal(realpathSync(at('.agents/skills', name, 'SKILL.md')), realpathSync(at('.claude/skills', name, 'SKILL.md')));
+  }
+});
+
+test('generated helper prompts match their source and have model/effort choices', () => {
+  execFileSync(process.execPath, [at('scripts/codex-agents.mjs'), '--check'], { stdio: 'pipe' });
+});
 
 test('docs/agents/codex.md exists and AGENTS.md and workflow.md link to it', () => {
   assert.ok(existsSync(at('docs/agents/codex.md')), 'docs/agents/codex.md is missing');

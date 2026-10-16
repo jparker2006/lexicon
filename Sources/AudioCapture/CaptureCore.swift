@@ -15,7 +15,8 @@ import LexiconDomain
 /// error, the capture carries on in RAM.
 ///
 /// `@unchecked Sendable`: every `var` is touched only on `queue` (all entry
-/// points dispatch onto it), except `tailLength` (see there); the `let`s are
+/// points dispatch onto it), except `tailLength` (see there), and `writer` and
+/// `fileCreate`, which `init` sets on the caller before anything is queued; the `let`s are
 /// immutable or thread-safe themselves.
 final class CaptureCore: @unchecked Sendable {
     let feed: AudioFeed
@@ -53,6 +54,8 @@ final class CaptureCore: @unchecked Sendable {
     /// Audio kept after fn-up. Set by `finish` on the writer queue; read only
     /// after `stop` returned, which orders it after the write.
     private(set) var tailLength: Duration?
+    /// How long `init` took to make the file on fn-down's path, for the log line.
+    private var fileCreate: Duration = .zero
     #if DEBUG
     /// Every frame read as zero (the `mic zeros` test hook). Set before `begin`.
     var silenced = false
@@ -76,11 +79,20 @@ final class CaptureCore: @unchecked Sendable {
         self.problems = problems
         signals = CaptureSignals(first: OneShot(), end: OneShot(), problems: problemStream)
         samples.reserveCapacity(PCM16k.sampleRate * 30)
+        // The file is made here, on the caller, so it exists when `Recorder.start`
+        // returns: the shared writer queue may still be closing the last Dictation,
+        // and a kill before its turn would leave no trace (recovery adopts a file
+        // with no row). One file open, no sync, and a free-space read that is one
+        // syscall on a disk with room (`FreeSpace`); the ring holds the first audio meanwhile.
+        let clock = ContinuousClock()
+        let began = clock.now
+        if hasRoom() { writer = try? CAFWriter(creating: file, calls: policy.files) }
+        fileCreate = began.duration(to: clock.now)
     }
 
-    /// Creates the file and the drain timer on the writer queue, and starts the
-    /// producer meanwhile: the file never stands in front of the first audio
-    /// (the ring holds it), and is queued before anything the producer reports.
+    /// Arms the drain timer on the writer queue and starts the producer. A file
+    /// `init` could not create (under 1 GB free, a failed or refused create) makes
+    /// the capture RAM-only from the start, reported before anything the producer does.
     func begin() {
         defer {
             let (first, end) = (signals.first, signals.end)
@@ -88,15 +100,7 @@ final class CaptureCore: @unchecked Sendable {
                                       switched: { [weak self] in self?.switchSegment(to: $0) }))
         }
         queue.async { [self] in
-            if hasRoom() {
-                do {
-                    writer = try CAFWriter(creating: fileURL, calls: policy.files)
-                } catch {
-                    diskTrouble()
-                }
-            } else {
-                diskTrouble()
-            }
+            if writer == nil { diskTrouble() }
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now() + policy.drainEvery.dispatch, repeating: policy.drainEvery.dispatch,
                            leeway: .milliseconds(5))
@@ -207,7 +211,8 @@ final class CaptureCore: @unchecked Sendable {
             captured \(summary.duration.ms, privacy: .public) ms, start gap \(summary.startGap?.ms ?? -1, privacy: .public) ms, \
             tail \(self.tailLength?.ms ?? -1, privacy: .public) ms, \(summary.gaps.count, privacy: .public) device changes, \
             \(summary.storage.rawValue, privacy: .public), \(summary.lost.ms, privacy: .public) ms lost, \
-            sound \(String(describing: self.sound), privacy: .public)
+            sound \(String(describing: self.sound), privacy: .public), \
+            file made in \(self.fileCreate.microseconds, privacy: .public) us
             """)
     }
 
@@ -299,9 +304,7 @@ final class CaptureCore: @unchecked Sendable {
         while !FileManager.default.fileExists(atPath: folder.path), folder.pathComponents.count > 1 {
             folder.deleteLastPathComponent()
         }
-        let free = try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            .volumeAvailableCapacityForImportantUsage
-        return (free ?? .max) >= policy.minimumFreeBytes
+        return FreeSpace.hasRoom(at: folder, minimum: policy.minimumFreeBytes)
     }
 
     /// Under 1 GB free or a write failed: continue in RAM only (#4). What is
@@ -333,6 +336,11 @@ final class CaptureCore: @unchecked Sendable {
 }
 
 private extension Duration {
+    var microseconds: Int64 {
+        let (seconds, attoseconds) = components
+        return seconds * 1_000_000 + attoseconds / 1_000_000_000_000
+    }
+
     var dispatch: DispatchTimeInterval {
         let (seconds, attoseconds) = components
         return .nanoseconds(Int(seconds) * 1_000_000_000 + Int(attoseconds / 1_000_000_000))

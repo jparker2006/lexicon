@@ -127,6 +127,15 @@ const BLAST = {
   },
   required: ['safetyFact', 'proofCommand', 'proofResult', 'findings'],
 }
+const CLOSED_BLAST = {
+  type: 'object',
+  properties: {
+    proofId: { type: 'string', enum: ['headless-public-wav', 'capture-file-before-return', 'capture-warmup-cleanup'] },
+    factId: { type: 'string', enum: ['scripted-wav-text-and-history', 'file-created-before-start-returns', 'warmup-leaves-no-file'] },
+    findings: { type: 'array', items: FINDING },
+  },
+  required: ['proofId', 'factId', 'findings'],
+}
 
 // The snapshot and the diffs come from one node script, so the paths, shas and file
 // lists are computed, not typed by a model.
@@ -137,6 +146,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 const a = ${JSON.stringify(input)}
+const mainSha = a.mainSha || 'origin/main'
 const sh = (cmd, args) => run(cmd, args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 const git = (...args) => sh('git', args)
 const have = s => { try { git('cat-file', '-e', s + '^{commit}'); return true } catch { return false } }
@@ -188,7 +198,7 @@ const delta = (from, to) => {
   const commits = lines(git('rev-list', '--first-parent', '--no-merges', '--reverse', from + '..' + to))
   const files = new Set(commits.flatMap(c => lines(git('diff-tree', '--no-commit-id', '--name-only', '--no-renames', '-r', c))))
   const merges = lines(git('rev-list', '--first-parent', '--merges', from + '..' + to))
-  const touched = new Set([...files, ...changed(git('merge-base', 'origin/main', from), from)])
+  const touched = new Set([...files, ...changed(git('merge-base', mainSha, from), from)])
   for (const m of merges) {
     for (const f of lines(git('diff-tree', '--cc', '--no-commit-id', '--name-only', '-r', m))) files.add(f)
     for (const f of changed(m + '^1', m)) if (touched.has(f)) files.add(f)
@@ -199,7 +209,7 @@ let main = null, later = null, note = null
 if (a.reviewed) {
   later = delta(git('rev-parse', a.reviewed), sha)
 } else {
-  let base = a.base ? git('rev-parse', a.base) : git('merge-base', 'origin/main', sha)
+  let base = a.base ? git('rev-parse', a.base) : git('merge-base', mainSha, sha)
   if (base === sha) base = git('rev-parse', sha + '^')
   main = pass(base, sha, changed(base, sha), [])
   head = head ? git('rev-parse', head) : sha
@@ -225,7 +235,7 @@ PREP`
 phase('Snapshot')
 const prepPrompt = `Run this one Bash command exactly as written, from the repository root, and put its complete stdout, unchanged, in \`out\`. Run nothing else and edit nothing. If it fails, put "ERROR: " and the error text in \`out\`.
 
-${prepCommand({ issue: a.issue, sha: a.sha, base: a.base, pr: a.pr, head: a.head, reviewed: a.reviewed })}`
+${prepCommand({ issue: a.issue, sha: a.sha, base: a.base, pr: a.pr, head: a.head, reviewed: a.reviewed, mainSha: a.mainSha })}`
 const prep = await hire('prep', 'haiku', 'xhigh', prepPrompt, { label: 'snapshot', phase: 'Snapshot', schema: OUT })
 // The helper sometimes hands the JSON back escaped once more, as a string's contents.
 const parsed = text => {
@@ -306,10 +316,13 @@ function critics() {
 }
 
 function where(pass) {
-  return `Read only the snapshot, never the live checkout: the code at ${pass.to.slice(0, 12)} is a copy at ${pass.snapshot}, and the change is the diff ${pass.diff} (${pass.from.slice(0, 12)}..${pass.to.slice(0, 12)}). For history, run git with these explicit shas.`
+  return `Read only the snapshot, never the live checkout: the code at ${pass.to.slice(0, 12)} is a copy at ${pass.snapshot}, and the change is the diff ${pass.diff} (${pass.from.slice(0, 12)}..${pass.to.slice(0, 12)}). Full reviewed pass SHA: ${pass.to}. For history, run git with these explicit shas.`
 }
 
 function criticPrompt(lens, pass, isDelta) {
+  const combining = info.mainSource
+    ? `Pinned source snapshots: ${JSON.stringify({ pr: { sha: pass.to, path: pass.snapshot }, main: info.mainSource })}\nCompare only these two immutable source snapshots and the parent's cached GitHub metadata. Never read source from the live checkout or a moving branch name. Name the merge order.\n`
+    : 'Also compare against the newest origin/main and every open PR (gh pr list --state open --limit 1000 --json number,title; gh pr diff N --name-only): same files, same dependency lists, same status list. Name the merge order.\n'
   const standard = lens.rule
     ? `the "## ${lens.name}" section of ${info.rules}`
     : lens.name.startsWith('Acceptance criteria')
@@ -319,7 +332,7 @@ function criticPrompt(lens, pass, isDelta) {
 
 ${where(pass)}
 ${isDelta ? `This is a delta pass: these commits landed after ${pass.from.slice(0, 12)} was reviewed, so review only what they changed:\n${pass.commits.map(c => '- ' + c).join('\n')}\n` : ''}Files in your slice: ${lens.files.join(', ')}.
-${lens.name === 'Combining with main' ? 'Also compare against the newest origin/main and every open PR (gh pr list --state open --limit 1000 --json number,title; gh pr diff N --name-only): same files, same dependency lists, same status list. Name the merge order.\n' : ''}
+${lens.name === 'Combining with main' ? combining : ''}
 The standard is ${standard}. Settled decisions are never findings: the spec #36 and its first comment (its supersessions)${info.decisions ? `, and ${info.decisions}` : ''}.
 
 A finding must cite one of: a review.md rule, a spec or DECISIONS.md line, or an acceptance criterion of #${a.issue}, quoted verbatim in cite.quote. A possible problem you can't cite goes in notes (at most 5), never in findings; what you checked and found fine goes in checked, not notes. At most ${MAX_FINDINGS} findings, strongest first, each with a repo-relative path and a concrete failure scenario. A clean slice returns no findings and says what you checked.
@@ -345,8 +358,9 @@ function blastPrompt(pass) {
   return `Blast radius for issue #${a.issue}'s change, a high-tier change touching ${blast.join(', ')}.
 
 ${where(pass)}
+${info.proofCatalogue ? `Stay read-only. Return only a closed proofId and its matching factId from this catalogue, plus findings: ${JSON.stringify(info.proofCatalogue)}. The parent runs the fixed test at full SHA ${pass.to}. Never return or run a command, return a result, or claim cached CI proves a fact. These facts do not establish live capture, the first-audio budget, credentials or unrelated networking. Custom risks add lenses, never proofs.\n` : ''}
 
-Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths), and prove the one fact it is safe because of by running real code, not by reading it: a Swift test filter, or the headless pipeline on a WAV you synthesize. Use the pstack:blast-radius skill if you have it. Never drive the live app, never read ~/Library/Application Support/Lexicon/ or any key, and no network calls. Run no repo script that touches Jake's data (scripts/test-set.sh, scripts/eval-quick.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set), installs (scripts/install.sh, scripts/lib/install-app.sh, scripts/install-model.sh, scripts/install-pstack-sheet.sh), reaches the live app (scripts/dev-run.sh, scripts/harness.sh, scripts/live-lane.sh, scripts/bench.sh) or posts to GitHub (scripts/live-request.sh), and never open, launch or quit an app. Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
+Find what this change could break outside the diff (callers, other modules, recovery, the History status list, the network door, private data paths). ${info.proofCatalogue ? 'Choose only the narrow catalogue fact the parent can prove.' : 'Prove the one fact it is safe because of by running real code: a Swift test filter or the headless pipeline on a synthesized WAV. Use the pstack:blast-radius skill if you have it.'} Never drive the live app, never read ~/Library/Application Support/Lexicon/ or any key, and no network calls. Run no repo script that touches Jake's data (scripts/test-set.sh, scripts/eval-quick.sh, scripts/import-lexicon.sh, lexicon-eval on the Test set), installs (scripts/install.sh, scripts/lib/install-app.sh, scripts/install-model.sh, scripts/install-pstack-sheet.sh), reaches the live app (scripts/dev-run.sh, scripts/harness.sh, scripts/live-lane.sh, scripts/bench.sh) or posts to GitHub (scripts/live-request.sh), and never open, launch or quit an app. Anything it breaks is a finding that cites a review.md rule, quoted verbatim.`
 }
 
 const rows = []
@@ -394,10 +408,19 @@ async function review(pass, isDelta) {
   // gets one more try, and a second failure is INCOMPLETE, not a crash that loses the table.
   const radius = mode === 'reviewer' && high && blast.length
     ? (async () => {
-      const ask = label => hire('blast-radius', 'opus', 'high', blastPrompt(pass), { label, phase: pass.phase, schema: BLAST }).catch(() => null)
+      const ask = label => hire('blast-radius', 'opus', 'high', blastPrompt(pass), { label, phase: pass.phase, schema: info.proofCatalogue ? CLOSED_BLAST : BLAST }).catch(() => null)
       const b = (await ask('blast radius')) || (await ask('blast radius again'))
       if (!b) { incomplete.push('no reply from blast radius'); return null }
-      pass.blast = b
+      if (info.proofCatalogue) {
+        const proof = Object.hasOwn(info.proofCatalogue, b.proofId) ? info.proofCatalogue[b.proofId] : null
+        if (!proof || proof.factId !== b.factId) incomplete.push('blast radius: unsupported proof/fact pair')
+        else {
+          let receipt = null
+          try { receipt = await agent('', { label: 'proof', proofId: b.proofId, factId: b.factId, sha: pass.to }) } catch {}
+          if (!receipt || !receipt.complete || receipt.sha !== pass.to || receipt.measuredSha !== pass.to || receipt.proofId !== b.proofId || receipt.factId !== b.factId) incomplete.push('blast radius: parent proof failed or did not measure the pinned pass SHA')
+          else pass.blast = receipt
+        }
+      } else pass.blast = b
       return parallel(b.findings.map(f => () => verify(f, pass, 'blast radius (opus)')))
     })()
     : null
@@ -464,7 +487,9 @@ if (!covered) lines.push('', reviewedSha ? `Re-run this review with the same arg
 if (info.note) lines.push('', `Not reviewed: ${info.note}.`)
 if (stale.length) lines.push('', `review-map.json names sections review.md no longer has: ${stale.join(', ')}. Any review.md section the map doesn't name runs on every file.`)
 if (info.fromCheckout.length) lines.push('', `Read from this checkout, not the sha (the sha predates them): ${info.fromCheckout.join(', ')}.`)
-for (const p of passes) if (p.blast) lines.push('', `Blast radius (${p.label}): ${cell(p.blast.safetyFact)} Proof: \`${cell(p.blast.proofCommand)}\`: ${cell(p.blast.proofResult)}`)
+for (const p of passes) if (p.blast) lines.push('', info.proofCatalogue
+  ? `Blast radius (${p.label}): ${cell(p.blast.fact)}. Proof: \`${p.blast.proofId}/${p.blast.factId}\` at \`${p.blast.measuredSha}\`, \`${cell(p.blast.command)}\`, exit ${p.blast.exitStatus}: ${cell(p.blast.testResult)}`
+  : `Blast radius (${p.label}): ${cell(p.blast.safetyFact)} Proof: \`${cell(p.blast.proofCommand)}\`: ${cell(p.blast.proofResult)}`)
 if (notes.length) lines.push('', '<details><summary>Notes (no citation, not counted)</summary>', '', ...notes.map(n => `- ${cell(n)}`), '', '</details>')
 if (checked.length) lines.push('', '<details><summary>Checked and found fine</summary>', '', ...checked.map(n => `- ${cell(n)}`), '', '</details>')
 lines.push('', `Helpers: ${Object.entries(helpers).map(([k, n]) => `${n} ${k}`).join(', ')}.`)
@@ -476,4 +501,5 @@ return {
   confirmed: counted.map(r => ({ path: r.path, line: r.line, claim: r.claim, cite: r.cite, trigger: r.v.trigger, test: r.v.test })),
   rows: rows.map(r => ({ verdict: r.verdict, path: r.path, line: r.line, claim: r.claim, lens: r.lens, pass: r.pass, evidence: r.v ? r.v.evidence : '' })),
   snapshots: passes.map(p => p.snapshot),
+  proofs: passes.filter(p => p.blast && info.proofCatalogue).map(p => p.blast),
 }
