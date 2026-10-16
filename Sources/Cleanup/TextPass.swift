@@ -168,7 +168,8 @@ enum Fillers {
                     } else if last.trailing.contains(","), kept[kept.count - 1].hasSuffix(","),
                               glue.contains(keptWords[keptWords.count - 1]),
                               !keptHedge(kept, keptWords, sentenceKept),
-                              !addressesName(keptWords[keptWords.count - 1], i + drop < tokens.count ? tokens[i + drop] : nil) {
+                              !addressesName(keptWords[keptWords.count - 1],
+                                             i + drop < tokens.count ? tokens[i + drop] : nil) {
                         kept[kept.count - 1].removeLast()
                     }
                 } else {
@@ -288,7 +289,9 @@ enum Fillers {
     }
 
     /// Words a pseudo-cleft's clause hangs from: "all it was", "the only thing it was".
-    static let cleftHeads: Set<String> = ["all", "thing", "reason", "problem", "issue", "point", "trouble", "catch", "idea"]
+    static let cleftHeads: Set<String> = [
+        "all", "thing", "reason", "problem", "issue", "point", "trouble", "catch", "idea",
+    ]
     /// The subject of the clause a pseudo-cleft's first "was" closes.
     static let subjects: Set<String> = ["it", "i", "he", "she", "we", "they", "you", "that", "this"]
 
@@ -326,7 +329,8 @@ enum Fillers {
             let next = tokens[i + 1]
             let before = Token(Substring(kept[kept.count - 2]))
             if before.word == "in", before.trailing.isEmpty, !before.isQuoted,
-               sameSpelling(before, token), previous.word == "the", previous.trailing.isEmpty, sameSpelling(previous, next),
+               sameSpelling(before, token),
+               previous.word == "the", previous.trailing.isEmpty, sameSpelling(previous, next),
                next.word == "the", !next.isQuoted, !rules.isWritten(next.text), !rules.isWritten(before.text) {
                 return 2
             }
