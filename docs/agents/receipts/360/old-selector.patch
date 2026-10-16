@@ -1,0 +1,12 @@
+diff --git a/Sources/LexiconCore/Conductor+Run.swift b/Sources/LexiconCore/Conductor+Run.swift
+index 89bd058..3a02712 100644
+--- a/Sources/LexiconCore/Conductor+Run.swift
++++ b/Sources/LexiconCore/Conductor+Run.swift
+@@ -137,7 +137,6 @@ extension Conductor {
+     /// race between the two would turn a discarded tap into a typed Dictation.
+     func nextEnd(_ ends: AsyncStream<RunEnd>, input: AudioInput,
+                  fileEnded: @escaping @Sendable () async -> HostTime?) async -> RunEnd {
+-        if case .microphone = input { return await ends.first { _ in true } ?? .stop(at: .now()) }
+         return await withTaskGroup(of: RunEnd.self) { group in
+             // `ends` finishing with no element should not happen; stopping is the safe reading.
+             group.addTask { await ends.first { _ in true } ?? .stop(at: .now()) }

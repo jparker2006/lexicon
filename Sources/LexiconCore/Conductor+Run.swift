@@ -65,7 +65,7 @@ extension Conductor {
 
         // Wait for fn-up (or the hands-free stop press, Esc, a stray tap, sleep, the cap,
         // end of file). The cap is a normal stop from FnGesture.
-        switch await nextEnd(ends, signals: signals, input: start.input) {
+        switch await nextEnd(ends, input: start.input, fileEnded: { await signals.inputEnded() }) {
         case .discard:
             _ = await capture.stop(.immediately)
             attempt.cancel()
@@ -135,12 +135,13 @@ extension Conductor {
     /// A microphone waits for its key end alone: its input ends early only when a
     /// newer fn-down cut it off, after this press's end was already sent, and a
     /// race between the two would turn a discarded tap into a typed Dictation.
-    func nextEnd(_ ends: AsyncStream<RunEnd>, signals: CaptureSignals, input: AudioInput) async -> RunEnd {
+    func nextEnd(_ ends: AsyncStream<RunEnd>, input: AudioInput,
+                 fileEnded: @escaping @Sendable () async -> HostTime?) async -> RunEnd {
         if case .microphone = input { return await ends.first { _ in true } ?? .stop(at: .now()) }
         return await withTaskGroup(of: RunEnd.self) { group in
             // `ends` finishing with no element should not happen; stopping is the safe reading.
             group.addTask { await ends.first { _ in true } ?? .stop(at: .now()) }
-            group.addTask { .stop(at: await signals.inputEnded() ?? .now()) }
+            group.addTask { .stop(at: await fileEnded() ?? .now()) }
             defer { group.cancelAll() }
             return await group.next() ?? .stop(at: .now())
         }

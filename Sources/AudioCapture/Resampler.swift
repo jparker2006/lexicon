@@ -54,14 +54,17 @@ final class Resampler: @unchecked Sendable {
 
     /// Converts the `input` buffer's frames. `emit` gets whatever 16 kHz samples
     /// came out (the converter may hold a few back until the next block).
-    /// Returns the audio lost: the whole block when the converter fails on it,
-    /// since its output is undefined and the next drain overwrites `input`. What
-    /// the converter held from earlier blocks still comes out after.
+    /// An error before a successful call accepts this block loses the block.
+    /// An error on a later output-draining call keeps the accepted input in the
+    /// accounting: its emitted samples remain, and buffered output can follow.
     @discardableResult
     func convert(emit: (UnsafeBufferPointer<Int16>) -> Void) -> Duration {
         supplied = false
         let frames = Int(input.frameLength)
-        guard run(endOfStream: false, emit: emit) else { return Duration(frames: frames, rate: input.format.sampleRate) }
+        let result = run(endOfStream: false, emit: emit)
+        guard result.succeeded || result.acceptedInput else {
+            return Duration(frames: frames, rate: input.format.sampleRate)
+        }
         consumed += frames
         return .zero
     }
@@ -71,14 +74,17 @@ final class Resampler: @unchecked Sendable {
     @discardableResult
     func flush(emit: (UnsafeBufferPointer<Int16>) -> Void) -> Duration {
         supplied = true
-        guard run(endOfStream: true, emit: emit) else {
+        guard run(endOfStream: true, emit: emit).succeeded else {
             return Duration(frames: max(0, Int((Double(consumed) * ratio).rounded()) - emitted), rate: Double(PCM16k.sampleRate))
         }
         return .zero
     }
 
-    /// False when the converter answered `.error`; its output is not emitted.
-    private func run(endOfStream: Bool, emit: (UnsafeBufferPointer<Int16>) -> Void) -> Bool {
+    /// A failed call emits nothing. Earlier successful calls may already have
+    /// accepted this input and emitted samples before a continuation fails.
+    private func run(endOfStream: Bool, emit: (UnsafeBufferPointer<Int16>) -> Void)
+        -> (succeeded: Bool, acceptedInput: Bool) {
+        var acceptedInput = false
         while true {
             output.frameLength = 0
             let (status, error) = convertCall(converter, output) { _, inputStatus in
@@ -93,15 +99,16 @@ final class Resampler: @unchecked Sendable {
             if status == .error {
                 // The code only: the error's text stays out of the log (review.md, private data).
                 Self.log.error("converter failed\(endOfStream ? " at the end" : "", privacy: .public): \(error?.code ?? 0, privacy: .public)")
-                return false
+                return (false, acceptedInput)
             }
+            if supplied, !endOfStream { acceptedInput = true }
             let produced = Int(output.frameLength)
             if produced > 0 {
                 emitted += produced
                 emit(UnsafeBufferPointer(start: output.int16ChannelData![0], count: produced))
             }
             // .haveData means the output filled up and more may be waiting.
-            guard status == .haveData, produced > 0 else { return true }
+            guard status == .haveData, produced > 0 else { return (true, acceptedInput) }
         }
     }
 
