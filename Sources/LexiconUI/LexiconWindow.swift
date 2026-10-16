@@ -204,7 +204,7 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
         }
     }
 
-    /// Removes one heard-as form at once: adding it back is one line, unlike a whole
+    /// Removes one heard-as form without asking: adding it back is one line, unlike a whole
     /// entry. A form that is its entry's only record would take the entry with it,
     /// so that one asks as Delete does. Each removal waits for the one before and
     /// decides on a fresh read: the list as drawn lags a quick second click.
