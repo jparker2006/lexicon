@@ -329,8 +329,10 @@ enum Fillers {
         }
 
         let commaStutter = previous.trailing == "," && (word == "the" || (word == "i" && sentenceKept == 1))
-        // "the... the build": the trailing off goes with the dropped copy.
-        let marked = previous.trailing.isEmpty || previous.trailing == "..." || commaStutter
+        // "the... the build", "we're... we're": the trailing off goes with the dropped copy.
+        // Other words may start a new clause after it ("I'm going to... to be honest").
+        let trailingOff = previous.trailing == "..." && (word == "the" || word.contains("'"))
+        let marked = previous.trailing.isEmpty || trailingOff || commaStutter
         guard previous.word == word, marked, sameSpelling(previous, token) else { return 0 }
         // "Will will review it", "May may be late": a name, then the modal.
         if word == "will" || word == "may", previous.isName { return 0 }
