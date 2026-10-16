@@ -287,18 +287,22 @@ enum Fillers {
         return next.isName && next.trailing == "?"
     }
 
-    /// Nouns a pseudo-cleft opens with: "The only thing it was was a typo".
-    static let cleftHeads: Set<String> = ["thing", "reason", "problem", "issue", "point", "trouble", "catch", "idea"]
+    /// Words a pseudo-cleft's clause hangs from: "what it was", "all it was", "the only thing it was".
+    static let cleftHeads: Set<String> = [
+        "what", "all", "thing", "reason", "problem", "issue", "point", "trouble", "catch", "idea",
+    ]
     /// The subject of the clause a pseudo-cleft's first "was" closes.
     static let subjects: Set<String> = ["it", "i", "he", "she", "we", "they", "you", "that", "this"]
 
     /// The first "was" closes a pseudo-cleft's clause, so the predicate needs its own:
     /// "What the problem was was the cache", "All it was was a typo", "The reason it was
     /// was the cache". `sentence`: the sentence's kept words, ending with that "was".
+    /// "All I did was was restart" and "the build was was green" are stutters.
     private static func closesCleft(_ sentence: ArraySlice<String>) -> Bool {
-        if sentence.first == "what" || sentence.first == "all" { return true }
-        let before = Array(sentence.dropLast().suffix(2))
-        return before.count == 2 && cleftHeads.contains(before[0]) && subjects.contains(before[1])
+        let before = Array(sentence.dropLast().suffix(3))
+        if before.contains("what") { return true }
+        let pair = Array(before.suffix(2))
+        return pair.count == 2 && cleftHeads.contains(pair[0]) && subjects.contains(pair[1])
     }
 
     /// The same word in another form: "the The", "it’s it's". Only a first-letter capital
