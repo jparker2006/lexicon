@@ -72,6 +72,8 @@ public final class HistoryWindowPresenter: NSObject {
         let nothing = HistoryReader(paths: AppPaths(root: URL(filePath: "/var/empty", directoryHint: .isDirectory)))
         let warm = HistoryWindowController(reader: nothing, system: system, pasteboard: .general) {}
         warm.warmRow = RowCell.warm(in: warm.window?.contentView)
+        // The caller drops it at once; its pages too go back, before the idle footprint is read.
+        Self.returnFreedMemory()
         return warm
     }
 
@@ -593,13 +595,16 @@ final class RowCell: NSTableCellView {
         text.stringValue = row?.finalText ?? ""
         text.placeholderString = row?.finalText == nil ? "No text" : nil
         details.stringValue = row.map(HistoryText.details) ?? ""
-        buttons.set(.play, symbol: playing ? "stop.fill" : "play.fill", label: playing ? "Stop" : "Play",
-                    enabled: actions?.play ?? false)
-        let pinned = row?.pinned ?? false
+        showButtons(playing: playing, pinned: row?.pinned ?? false, play: actions?.play ?? false,
+                    pin: actions?.pin ?? false, more: row != nil)
+    }
+
+    private func showButtons(playing: Bool, pinned: Bool, play: Bool, pin: Bool, more: Bool) {
+        buttons.set(.play, symbol: playing ? "stop.fill" : "play.fill", label: playing ? "Stop" : "Play", enabled: play)
         buttons.set(.pin, symbol: pinned ? "flag.fill" : "flag",
                     label: pinned ? "Unpin from the Test set" : "Pin to the Test set (keeps its audio)",
-                    color: pinned ? .controlAccentColor : .secondaryLabelColor, enabled: actions?.pin ?? false)
-        buttons.set(.more, symbol: "ellipsis.circle", label: "More", enabled: row != nil)
+                    color: pinned ? .controlAccentColor : .secondaryLabelColor, enabled: pin)
+        buttons.set(.more, symbol: "ellipsis.circle", label: "More", enabled: more)
     }
 
     /// Builds one row in `view` and draws it offscreen, with a row's usual
@@ -611,9 +616,8 @@ final class RowCell: NSTableCellView {
         view?.addSubview(cell)
         cell.time.stringValue = Date().formatted(date: .omitted, time: .shortened)
         cell.text.stringValue = " "
-        cell.buttons.set(.play, symbol: "play.fill", label: "Play", enabled: true)
-        cell.buttons.set(.pin, symbol: "flag", label: "Pin", enabled: true)
-        cell.buttons.set(.more, symbol: "ellipsis.circle", label: "More", enabled: true)
+        // A row with audio, not playing and not pinned: what most rows at open show.
+        cell.showButtons(playing: false, pinned: false, play: true, pin: true, more: true)
         cell.layoutSubtreeIfNeeded()
         if let bitmap = cell.bitmapImageRepForCachingDisplay(in: cell.bounds) {
             cell.cacheDisplay(in: cell.bounds, to: bitmap)

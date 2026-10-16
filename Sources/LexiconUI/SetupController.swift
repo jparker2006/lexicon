@@ -38,9 +38,9 @@ public final class Setup: NSObject {
         public var modelInstalledNow: @Sendable () async -> Void
         /// Microphone granted while running: prepare the mic, so fn-down only starts it.
         public var microphoneGranted: @MainActor () -> Void
-        /// Accessibility trust (`AXIsProcessTrusted`). Read at launch and on every poll, off the main thread.
+        /// Accessibility trust (`AXIsProcessTrusted`). Read once at launch, then on every poll off the main thread.
         public var accessibilityTrusted: @Sendable () -> Bool
-        /// The Microphone answer. Read at launch and on every poll, off the main thread.
+        /// The Microphone answer. Read once at launch, then on every poll off the main thread.
         public var microphone: @Sendable () -> MicrophoneAccess
         /// Quits this copy and opens a new one; throws when the new one could not be started.
         public var relaunch: @MainActor () throws -> Void

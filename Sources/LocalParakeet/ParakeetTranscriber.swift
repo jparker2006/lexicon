@@ -142,10 +142,8 @@ public actor ParakeetTranscriber: LocalTranscriber {
     }
 
     private func loaded(_ failure: LoadFailure) async throws -> WindowDecoder {
-        // A model loaded since (fn-down's load finishing late) wins over the memo.
-        if let decoder { return decoder }
         if let error = failure.error.withLock({ $0 }) { throw error }
-        if loading == nil, let last = lastFailure, last.at >= failure.since {
+        if decoder == nil, loading == nil, let last = lastFailure, last.at >= failure.since {
             failure.error.withLock { $0 = last.error }
             throw last.error
         }
