@@ -192,7 +192,6 @@ let functionStutterCases: [Case] = [
     Case("I I I think it works.", "I think it works."),
     Case("We we should ship.", "We should ship."),
     Case("It is in in the cache.", "It is in the cache."),
-    Case("The build was was broken.", "The build was broken."),
 ]
 
 @Test(arguments: functionStutterCases)
@@ -512,7 +511,6 @@ let cleanup337Decision89FunctionStutterCases: [Case] = [
     Case("I I think so.", "I think so."),
     Case("Ship it to to five users.", "Ship it to five users."),
     Case("Meet me at at ten.", "Meet me at ten."),
-    Case("The build was was broken.", "The build was broken."),
 ]
 
 @Test(arguments: cleanup337Decision89FunctionStutterCases)
@@ -532,6 +530,8 @@ let cleanup337Decision89KeptDoubleCases: [Case] = [
     Case("The build is is ready.", "The build is is ready."),
     Case("I know that that is wrong.", "I know that that is wrong."),
     Case("What it had had was a bug.", "What it had had was a bug."),
+    // "was", like "is", can be meant twice ("What it was was a bug"), so the AI cleanup decides.
+    Case("The build was was broken.", "The build was was broken."),
 ]
 
 @Test(arguments: cleanup337Decision89KeptDoubleCases)
@@ -554,7 +554,27 @@ let cleanup337MeaningKeptCases: [Case] = [
     Case("What are you looking at, uh, Sam?", "What are you looking at, Sam?"),
     Case("What the problem was was the cache.", "What the problem was was the cache."),
     Case("All it was was a typo.", "All it was was a typo."),
+    Case("The only thing it was was a typo.", "The only thing it was was a typo."),
+    Case("The reason it was was because the cache was stale.", "The reason it was was because the cache was stale."),
+    Case("May may be late.", "May may be late."),
+    Case("I went there, um, there was a fire.", "I went there, there was a fire."),
+    Case("We went in, um, in the morning.", "We went in, in the morning."),
 ]
+
+// A capital that only starts a sentence, a clause-final "at" before a common word, and
+// either curly apostrophe are not reasons to keep a stutter or its comma.
+let cleanup337StutterFormCases: [Case] = [
+    Case("Fix the The build.", "Fix the build."),
+    Case("Note: The the build failed.", "Note: The build failed."),
+    Case("We‘re we‘re, honestly,", "We‘re, honestly,"),
+    Case("Let's meet at, um, three o'clock.", "Let's meet at three o'clock."),
+    Case("Look at, um, the build.", "Look at the build."),
+]
+
+@Test(arguments: cleanup337StutterFormCases)
+func cleanup337DropsStuttersAcrossCapitalAndApostropheForms(_ c: Case) {
+    #expect(TextPass.run(c.raw, rules: .empty) == c.gold)
+}
 
 @Test(arguments: cleanup337MeaningKeptCases)
 func cleanup337KeepsNamesClauseEndsAndPseudoClefts(_ c: Case) {
