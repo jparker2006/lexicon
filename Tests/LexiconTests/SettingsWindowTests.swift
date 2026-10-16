@@ -3,6 +3,7 @@ import Darwin
 import LexiconCore
 import LexiconDomain
 import LexiconUI
+import OSLog
 import Testing
 
 private struct CredentialRequest: Sendable {
@@ -34,6 +35,12 @@ private final class CredentialCommandProbe: @unchecked Sendable {
         }
         lock.unlock()
         ready.forEach { $0.continuation.resume(returning: request) }
+    }
+
+    var requestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests.count
     }
 
     func request(
@@ -242,6 +249,64 @@ private static func theKeysGridHoldsEveryRowInTheAccessibilityTreeBody() async t
         }
     }
     window.performClose(nil)
+}
+
+@Test(.timeLimit(.minutes(1))) func eachNewSettingsWindowLogsItsOwnOpenTime() async throws {
+    await #expect(processExitsWith: .exitCode(73)) {
+        await runNativeCheck { try await Self.eachNewSettingsWindowLogsItsOwnOpenTimeBody() }
+    }
+}
+
+// The opening bar is read from this line, as History's is from its own: two new
+// windows log two lines, and bringing an open window forward logs none.
+@MainActor
+private static func eachNewSettingsWindowLogsItsOwnOpenTimeBody() async throws {
+    NSApplication.shared.setActivationPolicy(.prohibited)
+    let presenter = SettingsWindowPresenter(credentials: { _, _ in })
+    let menu = NSMenu()
+    menu.addItem(presenter.menuItem())
+    let store = try OSLogStore(scope: .currentProcessIdentifier)
+    let start = store.position(date: Date())
+
+    performSettingsMenuAction(menu)
+    performSettingsMenuAction(menu)
+    try #require(settingsWindows().first).performClose(nil)
+    performSettingsMenuAction(menu)
+    try #require(settingsWindows().first).performClose(nil)
+
+    let lines = try store.getEntries(at: start, matching: NSPredicate(format: "subsystem == 'Lexicon' AND category == 'Settings'"))
+        .compactMap { ($0 as? OSLogEntryLog)?.composedMessage }
+    #expect(lines.count == 2)
+    #expect(lines.allSatisfy { $0.wholeMatch(of: /Settings window: usable grid drawn \d+ ms after open/) != nil })
+}
+
+@Test(.timeLimit(.minutes(1))) func warmingUpBuildsTheFormWithoutAskingForCredentials() async throws {
+    await #expect(processExitsWith: .exitCode(73)) {
+        await runNativeCheck { try await Self.warmingUpBuildsTheFormWithoutAskingForCredentialsBody() }
+    }
+}
+
+// The first window of a process pays AppKit's one-time setup; the warm-up pays it
+// after launch with no Keychain work and nothing on screen.
+@MainActor
+private static func warmingUpBuildsTheFormWithoutAskingForCredentialsBody() async throws {
+    NSApplication.shared.setActivationPolicy(.prohibited)
+    let probe = CredentialCommandProbe()
+    let presenter = SettingsWindowPresenter(credentials: { edit, reply in
+        probe.submit(edit, reply: reply)
+    })
+    let menu = NSMenu()
+    menu.addItem(presenter.menuItem())
+
+    #expect(presenter.warmUp() != nil)
+    await drainMainQueue()
+    #expect(settingsWindows().isEmpty)
+    #expect(probe.requestCount == 0)
+
+    performSettingsMenuAction(menu)
+    _ = await probe.request { if case .availability = $0 { true } else { false } }
+    #expect(presenter.warmUp() == nil)
+    try #require(settingsWindows().first).performClose(nil)
 }
 
 @Test(.timeLimit(.minutes(1))) func oneSettingsWindowIsReusedAndReopeningStartsWithBlankFields() async throws {
