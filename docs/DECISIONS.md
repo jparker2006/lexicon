@@ -334,7 +334,7 @@ Question, on [#337](https://github.com/jparker2006/lexicon/issues/337#issuecomme
 
 > 3. #337 "was was": A keeps both copies after any earlier "what"; B keeps both only when "what" is close by. Rec: A, because a missing word is worse than a leftover stutter.
 
-Jake's words, verbatim: "3A 4A". "3A" answers the question above; "4A" answers question 4 of the same round, the number of runs in #62's typing comparison, recorded on [#62](https://github.com/jparker2006/lexicon/issues/62#issuecomment-6218827499). Recorded at (UTC): 2026-10-16T15:27:45Z, the time of the decision comment; the chat does not expose the exact answer time. Given in the Claude orchestrator session.
+Jake's words, verbatim: "3A 4A". "3A" answers the question above; "4A" is another ticket's answer, recorded with #62. Recorded at (UTC): 2026-10-16T15:27:45Z, the time of the decision comment; the chat does not expose the exact answer time. Given in the Claude orchestrator session.
 
 Decided: rules-only Cleanup keeps both copies of "was" whenever "what" came earlier in the sentence, and after "all it was" and "the reason it was" (a head word, then a subject). "The build was was green" still loses the stutter. A real stutter after an earlier "what" ("What I wanted to say was was that we're late") may stay: a missing word changes what Jake said, and a leftover stutter is easy to fix.
 
