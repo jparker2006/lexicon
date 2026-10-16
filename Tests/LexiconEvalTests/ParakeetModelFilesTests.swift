@@ -308,19 +308,14 @@ private func fakeDownload(writingFor paths: AppPaths, recordingIn calls: Downloa
     }
 }
 
-// FluidAudio spends the first half of its fraction on the download and reports nothing
-// while it compiles, so the last file landing is the only sign that the install is
-// preparing. Counting the download to 1 at that point keeps the bar from stopping at 50%.
-@Test func theInstallSaysPreparingOnceTheLastFileLandsAndCountsTheDownloadToAHundred() {
-    // Every phase FluidAudio reports, routed the way the real install routes them.
+// FluidAudio spends the first half of its fraction on the download, so the bar counts
+// that half to 100%. Preparing never comes from a download report on this path.
+@Test func theDownloadCountsToAHundred() {
     let step = { (fraction: Double, phase: ParakeetTranscriber.InstallPhase) in
-        ParakeetTranscriber.installStep(fraction: fraction, phase: phase)
+        ParakeetTranscriber.downloadStep(fraction: fraction, phase: phase)
     }
     #expect(step(0, .listing) == .downloading(0))
-    #expect(step(0, .downloading(done: 0, total: 4)) == .downloading(0))
     #expect(step(0.25, .downloading(done: 2, total: 4)) == .downloading(0.5))
-    #expect(step(0.5, .downloading(done: 3, total: 4)) == .downloading(1.0))
-    #expect(step(0.5, .downloading(done: 4, total: 4)) == .preparing)
-    #expect(step(0.5, .downloading(done: 0, total: 0)) == .preparing)
+    #expect(step(0.5, .downloading(done: 4, total: 4)) == .downloading(1.0))
     #expect(step(0.75, .compiling) == .preparing)
 }

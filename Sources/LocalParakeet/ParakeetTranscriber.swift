@@ -209,23 +209,27 @@ public actor ParakeetTranscriber: LocalTranscriber {
     /// here does not warm another process: the app compiles on its own first load.
     public static func install(paths: AppPaths, access: CloudAccess,
                                progress: @escaping @Sendable (ModelInstallProgress) -> Void) async throws {
-        try await install(paths: paths, access: access, progress: progress) { models, progress in
-            let manager = UnifiedAsrManager(encoderPrecision: .int8)
-            try await manager.loadModels(to: models, progressHandler: { report in
-                progress(Self.installStep(fraction: report.fractionCompleted, phase: InstallPhase(report.phase)))
+        try await install(paths: paths, access: access, progress: progress, download: { models, progress in
+            // The files only. FluidAudio's own load would fetch and then compile with no
+            // report between, so the install could not say when preparing starts.
+            try await ModelHub.download(.parakeetUnified, to: models, variant: "offline", progressHandler: { report in
+                progress(Self.downloadStep(fraction: report.fractionCompleted, phase: InstallPhase(report.phase)))
             })
+        }, prepare: { models in
+            // Finds the set whole, so it only loads (and still purges and fetches a set that won't).
+            let manager = UnifiedAsrManager(encoderPrecision: .int8)
+            try await manager.loadModels(to: models)
             await manager.cleanup()
-        }
+        })
     }
 
-    /// FluidAudio's progress for this install, as setup shows it. Its repo load counts
-    /// the download as 0 to 0.5 of the whole and then compiles (about 25 s on a new
-    /// build) with no report on this path, so the last file landing is where preparing starts; a
-    /// set it finds whole already (0 of 0 files) goes straight to preparing.
-    static func installStep(fraction: Double, phase: InstallPhase) -> ModelInstallProgress {
+    /// FluidAudio's download progress, as setup shows it: a repo download counts as 0
+    /// to 0.5 of FluidAudio's fraction (the compile it leaves for the load is the rest),
+    /// so it is scaled to the download's own 0 to 1.
+    static func downloadStep(fraction: Double, phase: InstallPhase) -> ModelInstallProgress {
         switch phase {
         case .listing: .downloading(0)
-        case .downloading(let done, let total): done >= total ? .preparing : .downloading(min(1, fraction / 0.5))
+        case .downloading: .downloading(min(1, fraction / 0.5))
         case .compiling: .preparing
         }
     }
@@ -245,13 +249,16 @@ public actor ParakeetTranscriber: LocalTranscriber {
         }
     }
 
-    /// `download` fetches and prepares the model into the `models` folder it is
-    /// given; tests pass one that never touches the network.
+    /// `download` fetches the model's files into the `models` folder it is given, and
+    /// `prepare` loads them once (the CoreML compile); preparing is said between the two,
+    /// whatever the download last reported. Tests pass a `download` that never touches
+    /// the network, and leave out `prepare`.
     static func install(paths: AppPaths, access: CloudAccess,
                         progress: @escaping @Sendable (ModelInstallProgress) -> Void,
                         download: @escaping @Sendable (_ models: URL,
                                                        _ progress: @escaping @Sendable (ModelInstallProgress) -> Void)
-                            async throws -> Void) async throws {
+                            async throws -> Void,
+                        prepare: @escaping @Sendable (_ models: URL) async throws -> Void = { _ in }) async throws {
         // Whole already: nothing to fetch, and FluidAudio's repair never runs through a link into the daily folder.
         guard !isInstalled(paths: paths) else { return }
         let models = modelsFolder(paths)
@@ -261,6 +268,8 @@ public actor ParakeetTranscriber: LocalTranscriber {
                 try FileManager.default.removeItem(at: models)
             }
             try await download(models, progress)
+            progress(.preparing)
+            try await prepare(models)
         }
     }
 }
