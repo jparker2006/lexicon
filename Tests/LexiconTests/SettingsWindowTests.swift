@@ -67,10 +67,9 @@ private func view(withID identifier: String, in window: NSWindow) -> NSView? {
     return search(contentView)
 }
 
-/// Walks the accessibility tree as an assistive app reads it, not the view tree:
-/// a view that is not an accessibility element is skipped and its children promoted.
-/// In process a control is listed by its cell, which carries the control's identifier
-/// out of process.
+/// Walks the in-process accessibility tree, not the view tree. A view that is not an
+/// accessibility element does not appear in it. AppKit lists a control here by its
+/// cell, so a cell matches by its control's identifier.
 @MainActor
 private func accessibilityElement(withID identifier: String, under root: Any) -> NSAccessibilityProtocol? {
     guard let root = root as? NSAccessibilityProtocol else { return nil }
