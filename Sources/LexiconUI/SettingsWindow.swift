@@ -1,6 +1,7 @@
 public import AppKit
 public import LexiconCore
 import LexiconDomain
+import os
 
 /// Opens the Keys form from the menu bar. Its window and rows exist only while
 /// the form is open; each opening begins with blank secure fields.
@@ -8,6 +9,7 @@ import LexiconDomain
 public final class SettingsWindowPresenter: NSObject {
     private let credentials: CredentialCommand
     private var controller: KeysWindowController?
+    private let log = Logger(subsystem: "Lexicon", category: "Settings")
 
     #if DEBUG
     public var credentialFieldsAreEmpty: Bool {
@@ -35,12 +37,29 @@ public final class SettingsWindowPresenter: NSObject {
             return
         }
 
+        let clock = ContinuousClock()
+        let opened = clock.now
         let controller = KeysWindowController(credentials: credentials) { [weak self] in
             self?.controller = nil
         }
         self.controller = controller
         controller.showWindow(nil)
+        controller.window?.displayIfNeeded()
+        // The budget is menu action to a usable grid, 100 ms or less; this is the in-process
+        // part, read the way History's open is. Availability is asked for after it.
+        let ms = (clock.now - opened) / .milliseconds(1)
+        log.notice("Settings window: usable grid drawn \(Int(ms.rounded()), privacy: .public) ms after open")
         controller.requestAvailability()
+    }
+
+    /// Builds the form once, unshown, and drops it, as History's warm-up does: a
+    /// process's first form pays AppKit's one-time setup (the grid, the secure
+    /// fields), which made the first open the slowest. It asks for no credential.
+    /// Returns the controller it built (nil while Settings is open) for the caller to drop.
+    @discardableResult
+    public func warmUp() -> NSWindowController? {
+        guard controller == nil else { return nil }
+        return KeysWindowController(credentials: { _, _ in }) {}
     }
 }
 

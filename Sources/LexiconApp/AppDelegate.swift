@@ -100,5 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.startSetup(statusItem: statusItem, preferences: preferences, paths: paths, bundleID: bundleID)
         }
+        // Queued after setup, so it runs after the status item's launch mark and never holds the icon.
+        DispatchQueue.main.async { [weak self] in self?.settings?.warmUp() }
     }
 }

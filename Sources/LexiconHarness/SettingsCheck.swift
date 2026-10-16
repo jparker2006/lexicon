@@ -14,8 +14,9 @@ enum SettingsCheck {
         With no options, Settings drives the fixed .jev fixture through Dev's
         test hooks. After a separate relaunch, `inspect` checks the blank form
         without editing it.
-        Release mode attaches to the running Lexicon Dev and saves one
-        first-show sample followed by <n> repeated-show samples.
+        Release mode attaches to the running Lexicon Dev, opens the surface from
+        its menu, and saves the app's own open-to-drawn time for one first show
+        followed by <n> repeated shows, with the menu-to-window time beside it.
         """
 
     private static let fixtureKeyOne = "lexicon-373-fixture-first-5f8a"
@@ -51,6 +52,21 @@ enum SettingsCheck {
             switch self {
             case .settings: "Settings (Keys only)"
             case .history: "main History control"
+            }
+        }
+
+        /// The app's own line for each new window, timed from being asked to open to drawn.
+        var logCategory: String {
+            switch self {
+            case .settings: "Settings"
+            case .history: "History"
+            }
+        }
+
+        var drawnLine: Regex<(Substring, Substring)> {
+            switch self {
+            case .settings: /Settings window: usable grid drawn (\d+) ms after open/
+            case .history: /History window: first rows drawn (\d+) ms after open/
             }
         }
     }
@@ -108,24 +124,27 @@ enum SettingsCheck {
             throw HarnessError("close the existing \(options.surface.receiptName) window before measuring")
         }
 
-        var samples: [Int] = []
+        // A second before now: `log show` starts on whole seconds, and the app has
+        // shown no such window since this fresh launch.
+        let since = Date().addingTimeInterval(-1)
+        var menuToWindow: [Int] = []
         for _ in 0...options.runs {
             let menuItem = try await menuItem(for: options.surface, app: app.element)
             let clock = ContinuousClock()
             let start = clock.now
             try press(menuItem)
             _ = try await usableWindow(options.surface, app: app.element, every: .milliseconds(2))
-            let elapsed = ceilMilliseconds(clock.now - start)
-            samples.append(elapsed)
+            menuToWindow.append(ceilMilliseconds(clock.now - start))
             guard windowCount(options.surface, app: app.element) == 1 else {
                 throw HarnessError("expected one \(options.surface.receiptName) window after its menu action")
             }
             try await closeWindow(options.surface, app: app)
         }
+        let samples = try await drawnTimes(options.surface, pid: app.pid, since: since, count: menuToWindow.count)
 
-        try writeReceipt(options: options, app: app, samples: samples)
+        try writeReceipt(options: options, app: app, samples: samples, menuToWindow: menuToWindow)
         let first = samples[0]
-        ok("\(options.surface.receiptName): first show \(first) ms, \(options.runs) repeated shows, samples saved to \(options.out.path)")
+        ok("\(options.surface.receiptName): first show \(first) ms open to drawn (\(menuToWindow[0]) ms menu to window), \(options.runs) repeated shows, samples saved to \(options.out.path)")
         ok("reviewed head \(app.reviewedHead), source head \(app.sourceHead), build head \(app.buildHead), pid \(app.pid)")
     }
 
@@ -552,7 +571,7 @@ enum SettingsCheck {
     }
 
     private static func writeReceipt(options: (surface: Surface, head: String, out: URL, runs: Int),
-                                     app: ReleaseApp, samples: [Int]) throws {
+                                     app: ReleaseApp, samples: [Int], menuToWindow: [Int]) throws {
         let directory = options.out.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let name = options.surface.receiptName
@@ -565,12 +584,34 @@ enum SettingsCheck {
             "# build_head=\(app.buildHead)",
             "# bundle=\(app.bundlePath)",
             "# pid=\(app.pid)",
-            "# timing_boundary=menu_action_to_visible_usable_surface",
+            "# timing_boundary=asked_to_open_to_drawn_app_log",
             "# first_ms=\(samples[0])"
         ]
         lines += samples.dropFirst().enumerated().map { "# repeated_\($0.offset + 1)_ms=\($0.element)" }
+        lines += menuToWindow.enumerated().map { "# context_menu_to_window_\($0.offset)_ms=\($0.element)" }
         lines += samples.map(String.init)
         try (lines.joined(separator: "\n") + "\n").write(to: options.out, atomically: true, encoding: .utf8)
+    }
+
+    /// The app's own open-to-drawn times for this pid since `since`, one per show, in
+    /// order. The log store can lag the window, so it is read until all `count` are there.
+    private static func drawnTimes(_ surface: Surface, pid: pid_t, since: Date, count: Int) async throws -> [Int] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let predicate = "subsystem == \"Lexicon\" && category == \"\(surface.logCategory)\" && processID == \(pid)"
+        return try await HistoryCheck.poll("\(count) \(surface.receiptName) open times in the app's log",
+                                           every: .milliseconds(500), within: .seconds(15)) { () -> [Int]? in
+            let (status, text) = try await runChild("/usr/bin/log", ["show", "--start", formatter.string(from: since),
+                                                                      "--style", "compact", "--predicate", predicate])
+            guard status == 0 else { throw HarnessError("log show exited \(status)") }
+            let times = text.split(separator: "\n").compactMap { line in
+                line.firstMatch(of: surface.drawnLine).flatMap { Int($0.1) }
+            }
+            guard times.count <= count else {
+                throw HarnessError("the app logged \(times.count) \(surface.receiptName) opens for \(count) shows")
+            }
+            return times.count == count ? times : nil
+        }
     }
 
     private static func press(_ element: AXUIElement) throws {

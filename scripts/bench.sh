@@ -19,7 +19,8 @@
 #                 never Dev's own data. The harness's check scrolls to the oldest day.
 #   launch        process start to fn working, warm relaunch with `open`, p95 150 ms or less.
 #                 Excludes each install's first launch (macOS checks the new signature).
-#   settings-open Settings (Keys only), menu action to a usable grid, p95 100 ms or less.
+#   settings-open Settings (Keys only), asked to open to the grid drawn, read from the
+#                 app's own log line as history-open is, p95 100 ms or less.
 #                 Excludes nothing. B is a named main History control for context only.
 #
 # History/launch A and B are Lexicon Dev bundles from scripts/bundle.sh, each
@@ -75,7 +76,7 @@ budget() {
             ;;
         settings-open)
             TARGET=100
-            READING="Settings (Keys only), menu action to a usable grid, first and repeated shows"
+            READING="Settings (Keys only), asked to open to the grid drawn (the app's log), first and repeated shows"
             EXCLUDES="nothing"
             ;;
         *) die "unknown budget '$1': history-open, launch or settings-open" ;;
