@@ -48,14 +48,14 @@ public final class SettingsWindowPresenter: NSObject {
         controller.showWindow(nil)
         controller.window?.displayIfNeeded()
         // The 100 ms budget is timed inside Lexicon, open request to the grid drawn, the way
-        // History's open is (DECISIONS item 104). Availability is asked for after it.
+        // History's open is (DECISIONS item 105). Availability is asked for after it.
         let ms = (clock.now - opened) / .milliseconds(1)
         log.notice("Settings window: usable grid drawn \(Int(ms.rounded()), privacy: .public) ms after open")
         controller.requestAvailability()
     }
 
     /// Builds the form once, unshown, and drops it, as History's warm-up does (DECISIONS
-    /// item 105): a process's first form pays AppKit's one-time setup (the grid, the
+    /// item 106): a process's first form pays AppKit's one-time setup (the grid, the
     /// secure fields), which made the first open the slowest. It asks for no credential.
     /// Returns the controller it built (nil while Settings is open) for the caller to drop.
     @discardableResult
