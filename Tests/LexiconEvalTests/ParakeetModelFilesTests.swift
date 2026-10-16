@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import LexiconDomain
 @testable import LocalParakeet
@@ -285,6 +286,25 @@ private func fakeDownload(writingFor paths: AppPaths, recordingIn calls: Downloa
         #expect(await calls.started.map { $0.folder.path } == [ParakeetTranscriber.modelsFolder(paths).path])
         #expect(linkTarget(ParakeetTranscriber.modelsFolder(paths)) == nil)
         #expect(ParakeetTranscriber.isInstalled(paths: paths))
+    }
+}
+
+// FluidAudio reports no boundary for a file already on disk (a resumed install), so the
+// download's last report can be short of 100%. Preparing comes from the install itself,
+// once the download returns, not from any report.
+@Test func theInstallSaysPreparingOnceTheDownloadReturnsWhateverItLastReported() async throws {
+    try await withScratch { dir in
+        let paths = AppPaths(root: dir.appending(path: "dev", directoryHint: .isDirectory))
+        let calls = DownloadCalls()
+        let seen = Mutex<[ModelInstallProgress]>([])
+        let write = fakeDownload(writingFor: paths, recordingIn: calls)
+        try await ParakeetTranscriber.install(paths: paths, access: try openAccess(),
+                                              progress: { step in seen.withLock { $0.append(step) } },
+                                              download: { models, progress in
+                                                  progress(.downloading(0.75))  // file 4 of 4 was already there
+                                                  try await write(models, progress)
+                                              })
+        #expect(seen.withLock { $0 } == [.downloading(0.75), .preparing])
     }
 }
 
