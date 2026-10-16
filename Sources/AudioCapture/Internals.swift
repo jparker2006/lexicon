@@ -211,6 +211,39 @@ struct Tail: Sendable {
     }
 }
 
+/// Whether a folder's volume has room, asked on fn-down's path, so cheaply
+/// first: `statfs` is one syscall, while the "important usage" figure (which
+/// counts space macOS can purge) can take tens of ms on a first call (#311).
+/// Only a disk `statfs` puts under the floor, or a `statfs` that fails, pays
+/// for that read, so purgeable space still counts. Unknown counts as room: a
+/// failed write still falls back.
+enum FreeSpace {
+    struct Readers: Sendable {
+        /// The volume's free blocks and block size, as `statfs` reports them.
+        var blocks: @Sendable (URL) -> (available: UInt64, size: UInt32)? = { folder in
+            var info = statfs()
+            guard statfs(folder.path, &info) == 0 else { return nil }
+            return (info.f_bavail, info.f_bsize)
+        }
+        var thorough: @Sendable (URL) -> Int64? = { folder in
+            try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                .volumeAvailableCapacityForImportantUsage
+        }
+    }
+
+    static func hasRoom(at folder: URL, minimum: Int64, readers: Readers = Readers()) -> Bool {
+        if let blocks = readers.blocks(folder), bytes(blocks.available, blocks.size) >= minimum { return true }
+        return (readers.thorough(folder) ?? .max) >= minimum
+    }
+
+    /// Never traps: a volume that reports "unlimited" (UInt64.max blocks, from
+    /// some network and FUSE filesystems) reads as `.max`, which is room.
+    private static func bytes(_ available: UInt64, _ size: UInt32) -> Int64 {
+        let (product, overflow) = Int64(clamping: available).multipliedReportingOverflow(by: Int64(size))
+        return overflow ? .max : product
+    }
+}
+
 /// The writer's flush schedule (#4): write() every chunk, F_FULLFSYNC every 1 s
 /// (fsync fallback where unsupported), F_FULLFSYNC + close at stop.
 struct FlushPolicy: Sendable {
