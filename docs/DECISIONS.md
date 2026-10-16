@@ -340,6 +340,18 @@ Decided: rules-only Cleanup keeps both copies of "was" whenever "what" came earl
 
 Canonical source: [#337 decision comment](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6218826858).
 
+**104. After a trail-off, rules-only Cleanup drops a repeat only of "the" or a contraction.** Narrows item 89 after "...": a speaker who trails off often starts a new clause with the same small word, and the rules cannot tell that from a stutter.
+
+Question, on [#337](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6220416821), asked again in the orchestrator's round at about 2026-10-16 09:52 Pacific:
+
+> 7. #337: when you trail off with "..." and then repeat a small word. A. Drop the repeat only for "the" and contractions like "we're." ... B. Drop it for every small word. ... Rec: A.
+
+Jake's words, verbatim: "6 A is fine 7 rec is fine ill step away in a while not rn tho". "7 rec is fine" answers the question above; the rest answers other questions of the same round. Recorded at (UTC): 2026-10-16T16:59:58Z, the time of the decision comment; the chat does not expose the exact answer time. Given in the Claude orchestrator session.
+
+Decided: after "...", rules-only Cleanup drops a repeated word only when it is "the" or a contraction such as "we're": "Fix the... the build" becomes "Fix the build", "We're... we're fine" becomes "We're fine". Every other repeat after "..." stays as said, including "I'm going to... to be honest", "It was... was it the cache?" and a real stutter like "I... I think".
+
+Canonical source: [#337 decision comment](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6220546884).
+
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
 **75. A mic that gives no sound fails with "No sound from the microphone".** Neither the spec nor this file had the rule; #4 left `silentInput` ("exactly-zero samples in the first ~300 ms") declared and never raised, and #144 asked for it. Built: when every raw frame of a hold (before conversion to 16 kHz) is exactly zero, or no frame arrives at all, the Dictation is not transcribed. Its row is failed (`microphone: zeros` or `microphone: noFrames`) with its audio kept, and the pill shows "No sound from the microphone". Judged over the whole hold at fn-up, not its first 300 ms, so a device that starts with zeros and then delivers audio is still transcribed, and Jake learns of a dead mic only at fn-up (the pill shows no notice while recording). Esc, or sleep, on a silent hold fails the same way instead of transcribing, and a Retry from History of an all-zero clip does nothing. A file of zeros (eval, the dev hook) fails the same way. Stray taps and chord cancels stay silent. Item 41's start limit covers only an engine that never starts; one that starts and delivers nothing is this case. A mic that stops after delivering some audio is caught by neither: its Dictation transcribes what came.

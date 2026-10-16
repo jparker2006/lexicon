@@ -548,7 +548,8 @@ func cleanup337Decision89ContentNumberProtectedAndMeantDoublesStay(_ c: Case) {
 
 // A name, acronym or keyword spelled like the function word after it is not a stutter;
 // a clause-ending "at" keeps its comma before a person asked; a pseudo-cleft keeps its
-// predicate "was"; a word that ends one clause and starts the next after a filler stays.
+// predicate "was"; a word that ends one clause and starts the next after a filler or a
+// trail-off stays.
 let cleanup337MeaningKeptCases: [Case] = [
     Case("Tell IT it is down.", "Tell IT it is down."),
     Case("I think May may be late.", "I think May may be late."),
@@ -576,6 +577,8 @@ let cleanup337MeaningKeptCases: [Case] = [
     Case("It was... was it the cache?", "It was... was it the cache?"),
     Case("We could... could you check it?", "We could... could you check it?"),
     Case("I was in... in the end it worked.", "I was in... in the end it worked."),
+    // Decision 104 accepts a real stutter after "..." staying.
+    Case("I... I think we should go.", "I... I think we should go."),
 ]
 
 // A capital that only starts a sentence, a clause-final "at" before a common word, and
