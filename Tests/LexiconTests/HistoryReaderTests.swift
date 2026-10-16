@@ -9,14 +9,9 @@ import LexiconDomain
 // text in one transaction. A fixed clock and time zone, so day headers and
 // DST never depend on when or where the tests run.
 
-private let pacific: Calendar = {
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
-    return calendar
-}()
-
-/// The fake clock: Sunday 11 October 2026, 15:00 in Los Angeles.
-private let now = pacific.date(from: DateComponents(year: 2026, month: 10, day: 11, hour: 15))!
+/// The seeded year's calendar and clock (HistoryYear.swift), so these tests read the year they seed.
+private let pacific = yearCalendar
+private let now = yearNow
 
 private func at(_ month: Int, _ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
     pacific.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour, minute: minute))!
@@ -67,79 +62,9 @@ private func allRows(_ reader: HistoryReader, _ sections: [DaySection], page: In
 
 // MARK: - A year of synthetic History
 
-/// About three times Jake's rate (the spec's 441 Wispr clips in about two weeks is about 30 a day).
-private let perDay = 100
+// The seeded year (`year()`, `seedYear`) lives in HistoryYear.swift, shared with the window tests.
+/// Jake's own rate, for the search speed run: `perDay` is about three times it.
 private let jakesRate = 30
-private let yearDays = 365
-private let marker = "zanzibar"
-/// Every 97th Dictation says the marker word, in a known place.
-private let markerEvery = 97
-
-/// Deterministic synthetic text: no real Dictation, no randomness between runs.
-private struct Synthetic {
-    private var state: UInt64 = 0x2545_F491_4F6C_DD1D
-    private static let words = """
-        the auth callback should retry once then fall back to the local model and log the lag so we can see \
-        whether the cloud helps make sure history opens fast and search stays under twenty milliseconds please \
-        ship it after the tests pass and the reviewer merges keep the clipboard as it was
-        """.split(separator: " ").map(String.init)
-
-    mutating func next() -> UInt64 {
-        state ^= state << 13
-        state ^= state >> 7
-        state ^= state << 17
-        return state
-    }
-
-    mutating func sentence(_ index: Int) -> String {
-        let count = 8 + Int(next() % 90)
-        var words = (0..<count).map { _ in Self.words[Int(next() % UInt64(Self.words.count))] }
-        if index % markerEvery == 0 { words.insert(index % 2 == 0 ? marker : marker.uppercased(), at: words.count / 2) }
-        let text = words.joined(separator: " ")
-        return text.prefix(1).uppercased() + text.dropFirst() + "."
-    }
-}
-
-/// One seeded year for every test that only reads it.
-@MainActor private var seededYear: Task<(paths: AppPaths, total: Int), any Error>?
-
-@MainActor private func year() async throws -> (paths: AppPaths, total: Int) {
-    if seededYear == nil {
-        seededYear = Task {
-            let (store, paths) = try makeStore()
-            return (paths, try await seedYear(store))
-        }
-    }
-    return try await seededYear!.value
-}
-
-/// `perDay` Dictations on each of the last `yearDays` days, newest at `now`, spread over waking hours.
-private func seedYear(_ store: HistoryStore, perDay: Int = perDay) async throws -> Int {
-    var synthetic = Synthetic()
-    var rows: [(id: String, at: Int64, text: String)] = []
-    for day in 0..<yearDays {
-        let date = pacific.date(byAdding: .day, value: -day, to: pacific.startOfDay(for: now))!
-        for slot in 0..<perDay {
-            // 07:00 to 15:00, so today's rows are all before the fake clock.
-            let ms = date.unixMs + Int64(7 * 3_600_000) + Int64(slot) * (28_800_000 / Int64(perDay))
-            rows.append((DictationID().description, ms, synthetic.sentence(rows.count)))
-        }
-    }
-    let cleanup = try CleanupOutcome.rulesOnly(.off).column()
-    try await store.read { [rows] db in
-        try db.transaction { db in
-            for row in rows {
-                try db.execute("""
-                    INSERT INTO dictation (id, started_at, origin, purpose, status, model_text, cleaned_text, final_text,
-                                           cleanup, model, lag_ms, audio_storage)
-                    VALUES (?, ?, 'live', 'type', 'inserted', ?, ?, ?, ?, ?, 480, 'onDisk')
-                    """, [.text(row.id), .int(row.at), .text(row.text), .text(row.text), .text(row.text),
-                          .text(cleanup), .text(parakeet.id)])
-            }
-        }
-    }
-    return rows.count
-}
 
 // MARK: - Rows
 

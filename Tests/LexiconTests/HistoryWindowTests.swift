@@ -75,3 +75,34 @@ private func unshownController(_ paths: AppPaths) -> HistoryWindowController {
     controller.searched(controller.search)
     #expect(controller.empty.stringValue == "No Dictations yet")
 }
+
+// The warm-up builds one row so the first real open finds that row's symbol
+// images already in the cache. It builds the row with no screen and reads no
+// History to do it: the row count stays 0 even though History has a row.
+@MainActor
+@Test func theWarmUpBuildsOneRowWithItsSymbolsCachedAndReadsNoRows() async throws {
+    let paths = AppPaths.temporary()
+    let store = try HistoryStore(paths: paths)
+    let id = DictationID()
+    store.record(.began(id, origin: .live, purpose: .type, at: Date(), app: AppContext(
+        bundleID: "com.example.editor", appName: "Editor", windowTitle: nil, workingDirectory: nil)))
+    await store.flush()
+    #expect(unshownController(paths).rowCount > 0, "the History the window would read has a row")
+
+    let warm = HistoryWindowPresenter(paths: paths, system: nil).warmUp() as? HistoryWindowController
+    #expect(warm?.rowCount == 0)
+
+    let cell = try #require(warm?.warmRow)
+    // The symbol cache is keyed by appearance, so the check asks under the warm
+    // row's own appearance, which is the one its images were drawn under.
+    for symbol in ["play.fill", "flag", "ellipsis.circle"] {
+        #expect(RowButtons.isCached(symbol, .secondaryLabelColor, appearance: cell.effectiveAppearance.name))
+    }
+}
+
+// Only the warm-up builds a row without a screen. A normal open has no warm row
+// to keep, so the warm row must not be set on it.
+@MainActor
+@Test func aNormalOpenHasNoWarmRow() {
+    #expect(unshownController(AppPaths.temporary()).warmRow == nil)
+}

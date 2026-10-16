@@ -155,3 +155,64 @@ private func facts(microphone: MicrophoneAccess = .granted, accessibility: Bool 
     #expect(!pollAfterFailure)
     #expect(restartAfterFailure)
 }
+
+// The setup menu's lines (#339): each missing permission gets its own line, so
+// the menu names every thing to fix instead of only the dot's first one. The model
+// line appears only once the permissions are fine, so the menu never offers a
+// download before Jake can dictate with it.
+
+@Test func bothMissingPermissionsGetAMenuLineEachInOrder() {
+    // Denied and not yet asked both count as off.
+    for microphone in [MicrophoneAccess.denied, .undetermined] {
+        let mac = facts(microphone: microphone, accessibility: false)
+        #expect(mac.menuSteps == [.microphone, .accessibility])
+        // The dot still points at the first missing step; the menu lists both.
+        #expect(mac.warning == .microphone)
+    }
+    #expect(SetupCopy.warningMenuTitle(.microphone) == "Microphone is off: Set Up…")
+    #expect(SetupCopy.warningMenuTitle(.accessibility) == "fn is off: Set Up…")
+}
+
+@Test func oneMissingPermissionGetsOnlyItsOwnMenuLine() {
+    #expect(facts(microphone: .denied).menuSteps == [.microphone])
+    #expect(facts(microphone: .undetermined).menuSteps == [.microphone])
+    #expect(facts(accessibility: false).menuSteps == [.accessibility])
+    #expect(facts(fnOn: false).menuSteps == [.accessibility])
+    // A missing model waits behind a missing permission, so the menu names the permission only.
+    #expect(facts(microphone: .denied, model: .missing).menuSteps == [.microphone])
+}
+
+@Test func aMissingModelIsTheOnlyMenuLineOnceThePermissionsAreFine() {
+    #expect(facts(model: .missing).menuSteps == [.model])
+    #expect(SetupCopy.warningMenuTitle(.model) == "Set Up Lexicon…")
+}
+
+@Test func aFinishedSetupHasNoMenuLines() {
+    #expect(facts().menuSteps == [])
+}
+
+@Test func thePreparingModelRowSaysPreparingWithNoBarOrButton() {
+    // The download is over and CoreML is still preparing the model: not a download, not done.
+    let preparing = facts(model: .preparing)
+    let row = SetupCopy.row(.model, preparing)
+    #expect(row.detail == "Preparing the model.")
+    #expect(row.progress == nil)
+    #expect(row.button == nil)
+    #expect(!preparing.isDone(.model))
+    #expect(preparing.current == .model)
+}
+
+@Test func aDownloadShowsItsWholePercentAndAProgressBar() {
+    let row = SetupCopy.row(.model, facts(model: .downloading(0.42)))
+    #expect(row.detail == "Downloading, 42%.")
+    #expect(row.progress == 0.42)
+}
+
+@Test func onlyADownloadingModelSaysDownloading() {
+    // "Downloading" describes the file transfer alone; the Preparing step after it must not read as one.
+    let others: [ModelState] = [.missing, .preparing, .installed, .privateMode, .failed]
+    for state in others {
+        let detail = SetupCopy.row(.model, facts(model: state)).detail
+        #expect(!detail.hasPrefix("Downloading"))
+    }
+}
