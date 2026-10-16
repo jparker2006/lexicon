@@ -119,7 +119,7 @@ public actor ParakeetTranscriber: LocalTranscriber {
 
     /// One window, as its own job: a live Dictation waits behind at most one
     /// window of a background Retry, never the whole clip.
-    private func decode(_ samples: [Int16], at start: Int, priority: LocalPriority, failure: LoadFailure) async throws
+    func decode(_ samples: [Int16], at start: Int, priority: LocalPriority, failure: LoadFailure) async throws
         -> [SeamMerge.TokenWindow] {
         try await jobs.run(priority) {
             // Its Dictation was cancelled, or the cloud won, while it waited its turn.
@@ -131,7 +131,10 @@ public actor ParakeetTranscriber: LocalTranscriber {
     /// A load that failed, kept for the rest of one Dictation: a model folder that
     /// looks whole but won't load would otherwise start a fresh load (a CoreML
     /// compile) for every 15 s window while Jake talks. The next Dictation makes a
-    /// new session, so the next fn-down tries again.
+    /// new session, so the next fn-down tries again. It lives in the session's decode
+    /// closure, so it is freed with the Dictation; the actor would need a table of
+    /// sessions it is never told have ended. The lock is only for Sendable: every read
+    /// and write runs on this actor.
     final class LoadFailure: Sendable {
         /// When the Dictation began: a load that failed since (its fn-down load) counts as its own.
         let since = ContinuousClock.now
