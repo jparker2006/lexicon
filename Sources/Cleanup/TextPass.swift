@@ -95,7 +95,7 @@ enum Fillers {
     /// ("sorry sorry", "still still").
     static let meantDoubles: Set<String> = [
         "that", "had", "is", "do", "very", "too", "sorry", "scratch", "still", "already", "again", "also", "once",
-        "own", "her", "you", "was",
+        "own", "her", "you",
     ]
 
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".
@@ -180,12 +180,12 @@ enum Fillers {
                 continue
             }
 
-            let stutter = stutterCount(tokens, at: i, kept: kept, sentenceKept: sentenceKept, rules: rules)
+            let stutter = stutterCount(tokens, at: i, kept: kept, words: keptWords, sentenceKept: sentenceKept, rules: rules)
             if stutter > 0 {
                 let last = tokens[i + stutter - 1]
                 let previous = Token(Substring(kept[kept.count - 1]))
                 var text = kept[kept.count - 1]
-                if previous.trailing == "," { text.removeLast() }
+                if previous.trailing == "," || previous.trailing == "..." { text.removeLast(previous.trailing.count) }
                 if sentenceKept == 1, token.isCapitalized || previous.trailing == "," {
                     text = Token.capitalized(text)
                 }
@@ -279,10 +279,26 @@ enum Fillers {
         StructuralCheck.stop.contains(word) && !protected.contains(word) && !meantDoubles.contains(word)
     }
 
-    /// "Where are we at, um, Jake?": a clause-final "at" before a name, who is being asked.
-    /// Its comma stays when the filler goes; "Look at, um, the build" loses it.
+    /// "Where are we at, um, Jake?": a clause-final "at" before the person asked.
+    /// Its comma stays when the filler goes; "Look at, um, the build" and "Meet at, um,
+    /// Starbucks." lose it.
     private static func addressesName(_ keptWord: String, _ next: Token?) -> Bool {
-        keptWord == "at" && next?.isName == true
+        guard keptWord == "at", let next else { return false }
+        return next.isName && next.trailing == "?"
+    }
+
+    /// Nouns a pseudo-cleft opens with: "The only thing it was was a typo".
+    static let cleftHeads: Set<String> = ["thing", "reason", "problem", "issue", "point", "trouble", "catch", "idea"]
+    /// The subject of the clause a pseudo-cleft's first "was" closes.
+    static let subjects: Set<String> = ["it", "i", "he", "she", "we", "they", "you", "that", "this"]
+
+    /// The first "was" closes a pseudo-cleft's clause, so the predicate needs its own:
+    /// "What the problem was was the cache", "All it was was a typo", "The reason it was
+    /// was the cache". `sentence`: the sentence's kept words, ending with that "was".
+    private static func closesCleft(_ sentence: ArraySlice<String>) -> Bool {
+        if sentence.first == "what" || sentence.first == "all" { return true }
+        let before = Array(sentence.dropLast().suffix(2))
+        return before.count == 2 && cleftHeads.contains(before[0]) && subjects.contains(before[1])
     }
 
     /// The same word in another form: "the The", "it’s it's". Only a first-letter capital
@@ -293,7 +309,7 @@ enum Fillers {
 
     /// Match spelling forms without rewriting the retained word. Only "the" and
     /// an opening "I" match across a comma; other words may end a real clause.
-    private static func stutterCount(_ tokens: [Token], at i: Int, kept: [String],
+    private static func stutterCount(_ tokens: [Token], at i: Int, kept: [String], words: [String],
                                      sentenceKept: Int, rules: RuleSet) -> Int {
         guard sentenceKept > 0 else { return 0 }
         let token = tokens[i]
@@ -313,11 +329,12 @@ enum Fillers {
         }
 
         let commaStutter = previous.trailing == "," && (word == "the" || (word == "i" && sentenceKept == 1))
-        guard previous.word == word, previous.trailing.isEmpty || commaStutter, sameSpelling(previous, token) else {
-            return 0
-        }
+        // "the... the build": the trailing off goes with the dropped copy.
+        let marked = previous.trailing.isEmpty || previous.trailing == "..." || commaStutter
+        guard previous.word == word, marked, sameSpelling(previous, token) else { return 0 }
         // "Will will review it", "May may be late": a name, then the modal.
         if word == "will" || word == "may", previous.isName { return 0 }
+        if word == "was", closesCleft(words.suffix(sentenceKept)) { return 0 }
         return 1
     }
 
