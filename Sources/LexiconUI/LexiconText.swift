@@ -26,7 +26,7 @@ enum LexiconText {
     }
 
     /// What the Add field holds: exactly one line of the import format, or nil.
-    /// The page shows Rules with "→", so a Rule typed the way it is shown is one too.
+    /// A heard-as line typed with "→" reads as one typed with "->".
     static func entry(typed text: String) -> LexiconEntry? {
         let file = LexiconFile(parsing: text.replacingOccurrences(of: "→", with: "->"))
         return file.entries.count == 1 && file.unreadable == 0 ? file.entries.first : nil
