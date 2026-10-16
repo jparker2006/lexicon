@@ -67,6 +67,19 @@ private func view(withID identifier: String, in window: NSWindow) -> NSView? {
     return search(contentView)
 }
 
+/// Walks the accessibility tree as an assistive app reads it, not the view tree:
+/// a view that is not an accessibility element is skipped and its children promoted.
+@MainActor
+private func accessibilityElement(withID identifier: String, under root: Any) -> NSAccessibilityProtocol? {
+    guard let root = root as? NSAccessibilityProtocol else { return nil }
+    for child in root.accessibilityChildren() ?? [] {
+        guard let element = child as? NSAccessibilityProtocol else { continue }
+        if element.accessibilityIdentifier() == identifier { return element }
+        if let match = accessibilityElement(withID: identifier, under: element) { return match }
+    }
+    return nil
+}
+
 @MainActor
 private func settingsWindows() -> [NSWindow] {
     NSApp.windows.filter { $0.isVisible && view(withID: AccessibilityID.settingsGrid, in: $0) != nil }
@@ -198,6 +211,34 @@ private static func pendingCredentialCallbacksLeaveTheNativeGridUsableBody() asy
     #expect(emptySaveRemainsSave)
     #expect(!isRemove(emptySave.edit, for: id))
 
+    window.performClose(nil)
+}
+
+@Test(.timeLimit(.minutes(1))) func theKeysGridHoldsEveryRowInTheAccessibilityTree() async throws {
+    await #expect(processExitsWith: .exitCode(73)) {
+        await runNativeCheck { try await Self.theKeysGridHoldsEveryRowInTheAccessibilityTreeBody() }
+    }
+}
+
+// The Live checks harness finds the form through the accessibility tree, so the
+// grid has to be an element there with each row's controls beneath it.
+@MainActor
+private static func theKeysGridHoldsEveryRowInTheAccessibilityTreeBody() async throws {
+    NSApplication.shared.setActivationPolicy(.prohibited)
+    let presenter = SettingsWindowPresenter(credentials: { _, _ in })
+    let menu = NSMenu()
+    menu.addItem(presenter.menuItem())
+
+    performSettingsMenuAction(menu)
+    let window = try #require(settingsWindows().first)
+    let grid = try #require(accessibilityElement(withID: AccessibilityID.settingsGrid, under: window))
+    let ids: [CredentialID] = CloudModel.allCases.map { .speech($0) } + [.cleanup, .jev]
+    for id in ids {
+        for control in [AccessibilityID.settingsEntry(id), AccessibilityID.settingsStatus(id),
+                        AccessibilityID.settingsSave(id), AccessibilityID.settingsRemove(id)] {
+            #expect(accessibilityElement(withID: control, under: grid) != nil, "\(control)")
+        }
+    }
     window.performClose(nil)
 }
 
