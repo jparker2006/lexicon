@@ -1,7 +1,9 @@
 import AVFAudio
+import CoreAudio
 import Darwin
 import Foundation
 import LexiconDomain
+import os
 import Synchronization
 
 /// Soft synthesized blips: short sine notes with a quiet octave on top, so the
@@ -12,8 +14,9 @@ import Synchronization
 /// the Mac awake. The engine starts at fn-down (`warm`), at least 300 ms before
 /// the start sound, stays up while a Dictation is recording or finishing
 /// (`active`), and stops a few seconds after. A cue with the engine stopped
-/// starts it first, about 10 ms more. The IO buffer is 256 frames: at the
-/// default 512 a warm cue took up to 23 ms to reach the speaker, at 256 at most 12.
+/// starts it first, about 10 ms more. The IO buffer is 256 frames while the engine
+/// runs: at the default 512 a warm cue took up to 23 ms to reach the speaker, at 256
+/// at most 12. The device's own size goes back when the engine stops.
 final class Sounds: Sendable {
     static let volume: Float = 0.25
     /// Lower than the prototype's (start 660 to 990 Hz, error 330 to 233 Hz).
@@ -44,7 +47,7 @@ final class Sounds: Sendable {
     private let engine: Mutex<Engine?> = Mutex(nil)
 
     init() {
-        queue.async { [self] in engine.withLock { $0 = Engine(voice: voice) } }
+        queue.async { [self] in engine.withLock { $0 = Engine(voice: voice, output: DeviceOutput(voice: voice)) } }
     }
 
     /// fn went down: a start sound may follow.
@@ -76,16 +79,87 @@ final class Sounds: Sendable {
     }
 }
 
+/// What `Sounds.Engine` drives: the engine, and the IO buffer of the device it plays to.
+protocol SoundOutput: AnyObject {
+    var isRunning: Bool { get }
+    func start() throws
+    func stop()
+    var presentationLatency: Double { get }
+    /// The device the engine plays to now; nil when there is none.
+    var device: AudioObjectID? { get }
+    func bufferFrames(of device: AudioObjectID) -> UInt32?
+    func setBufferFrames(_ frames: UInt32, of device: AudioObjectID)
+}
+
 extension Sounds {
-    /// The engine and its source node. Lives inside `Sounds.engine`'s lock, used only on `Sounds.queue`.
+    /// Lives inside `Sounds.engine`'s lock, used only on `Sounds.queue`.
     final class Engine {
-        let engine = AVAudioEngine()
+        let output: any SoundOutput
         let voice: SynthVoice
         private var generation = 0
         var active = false
+        /// The device's own buffer size, from before this engine set 256, put back when
+        /// the engine stops. The size is per process (another process reads its own 512
+        /// while one holds 256), so each Lexicon copy saves and restores only its own.
+        private var saved: (device: AudioObjectID, frames: UInt32)?
+        /// Each change, logged with its read-back: the HAL answers per process, so only
+        /// Lexicon itself can see the size it set.
+        private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lexicon", category: "sounds")
+
+        init(voice: SynthVoice, output: any SoundOutput) {
+            self.voice = voice
+            self.output = output
+        }
+
+        /// Starts the engine if needed; returns the use's generation for `stopIfIdle`.
+        /// A new output device also stops the engine, so this is the restart after one too.
+        func use() -> Int {
+            generation += 1
+            if !output.isRunning {
+                // Per device, so set again on every start: the device may have changed.
+                if let device = output.device {
+                    if let saved, saved.device != device { restore() }
+                    if saved == nil, let frames = output.bufferFrames(of: device) { saved = (device, frames) }
+                    // Only a size that can be put back is changed: a device whose read failed keeps its own.
+                    if saved?.device == device { output.setBufferFrames(Sounds.bufferFrames, of: device) }
+                }
+                do {
+                    try output.start()
+                    voice.presentationLatency = output.presentationLatency
+                    // After the start, so the read-back never holds up a cold cue.
+                    if let saved, saved.device == output.device {
+                        let now = output.bufferFrames(of: saved.device).map(String.init) ?? "unreadable"
+                        log.notice("output buffer \(now, privacy: .public) frames while sounding (device's own \(saved.frames, privacy: .public))")
+                    }
+                } catch {
+                    // No sound is better than a crash, and a late one is worse than none: the next use tries again.
+                    voice.clear()
+                }
+            }
+            return generation
+        }
+
+        func stopIfIdle(since generation: Int) {
+            guard generation == self.generation, !active, !voice.isPlaying else { return }
+            output.stop()
+            restore()
+        }
+
+        private func restore() {
+            guard let saved else { return }
+            output.setBufferFrames(saved.frames, of: saved.device)
+            let now = output.bufferFrames(of: saved.device).map(String.init) ?? "unreadable"
+            log.notice("output buffer back to \(now, privacy: .public) frames (device's own \(saved.frames, privacy: .public))")
+            self.saved = nil
+        }
+    }
+
+    /// The real output: an AVAudioEngine with the voice's source node, and the
+    /// device's buffer read and set through the HAL.
+    final class DeviceOutput: SoundOutput {
+        let engine = AVAudioEngine()
 
         init(voice: SynthVoice) {
-            self.voice = voice
             engine.mainMixerNode.outputVolume = Sounds.volume
             let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate
             voice.sampleRate = rate > 0 ? rate : 48_000
@@ -97,32 +171,36 @@ extension Sounds {
             engine.prepare()
         }
 
-        /// Starts the engine if needed; returns the use's generation for `stopIfIdle`.
-        /// A new output device also stops the engine, so this is the restart after one too.
-        func use() -> Int {
-            generation += 1
-            if !engine.isRunning {
-                // Per device, so set again on every start: the device may have changed.
-                if let unit = engine.outputNode.audioUnit {
-                    var frames = Sounds.bufferFrames
-                    AudioUnitSetProperty(unit, kAudioDevicePropertyBufferFrameSize, kAudioUnitScope_Global, 0,
-                                         &frames, UInt32(MemoryLayout<UInt32>.size))
-                }
-                do {
-                    try engine.start()
-                    voice.presentationLatency = engine.outputNode.presentationLatency
-                } catch {
-                    // No sound is better than a crash, and a late one is worse than none: the next use tries again.
-                    voice.clear()
-                }
-            }
-            return generation
+        var isRunning: Bool { engine.isRunning }
+        func start() throws { try engine.start() }
+        func stop() { engine.stop() }
+        var presentationLatency: Double { engine.outputNode.presentationLatency }
+
+        var device: AudioObjectID? {
+            guard let unit = engine.outputNode.audioUnit else { return nil }
+            var device = AudioObjectID(kAudioObjectUnknown)
+            var size = UInt32(MemoryLayout<AudioObjectID>.size)
+            let status = AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                                              &device, &size)
+            return status == noErr && device != kAudioObjectUnknown ? device : nil
         }
 
-        func stopIfIdle(since generation: Int) {
-            guard generation == self.generation, !active, !voice.isPlaying else { return }
-            engine.stop()
+        func bufferFrames(of device: AudioObjectID) -> UInt32? {
+            var address = Self.bufferAddress
+            var frames: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            return AudioObjectGetPropertyData(device, &address, 0, nil, &size, &frames) == noErr ? frames : nil
         }
+
+        func setBufferFrames(_ frames: UInt32, of device: AudioObjectID) {
+            var address = Self.bufferAddress
+            var frames = frames
+            AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<UInt32>.size), &frames)
+        }
+
+        private static let bufferAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize, mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
     }
 }
 

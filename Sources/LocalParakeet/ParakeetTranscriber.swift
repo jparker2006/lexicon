@@ -5,6 +5,7 @@
 import FluidAudio
 import Foundation
 public import LexiconDomain
+import Synchronization
 public import Transcription
 
 /// Parakeet Unified 0.6B (English) on the Neural Engine via FluidAudio (#9),
@@ -26,17 +27,26 @@ public actor ParakeetTranscriber: LocalTranscriber {
     private var decoder: WindowDecoder?
     /// A load in flight, shared by every caller that needs the model meanwhile.
     private var loading: Task<WindowDecoder, any Error>?
+    /// The last load's failure and when it came, so a Dictation whose fn-down load
+    /// failed answers with that failure instead of loading again.
+    private var lastFailure: (error: any Error, at: ContinuousClock.Instant)?
     /// Joins windows into text. Read from the vocabulary on the first join and
     /// kept: a few KB, and a join never needs the model itself.
     private var words: SeamMerge?
     /// Every model call (one window, unload) runs here: one at a time, live first.
     private let jobs = LocalJobQueue()
+    private let loadDecoder: @Sendable (URL) async throws -> WindowDecoder
 
     /// Weights live in `<root>/models/` (this module names that folder). If they
     /// are missing, `load()` throws `LocalModelNotInstalled` and the Dictation
     /// waits for a model.
     public init(paths: AppPaths) {
-        folder = Self.folder(paths)
+        self.init(folder: Self.folder(paths), load: WindowDecoder.load(from:))
+    }
+
+    init(folder: URL, load: @escaping @Sendable (URL) async throws -> WindowDecoder) {
+        self.folder = folder
+        loadDecoder = load
     }
 
     static func folder(_ paths: AppPaths) -> URL {
@@ -99,19 +109,51 @@ public actor ParakeetTranscriber: LocalTranscriber {
 
     /// `terms` is ignored: no FluidAudio boosting (see the type's doc).
     public nonisolated func session(terms: [Term], priority: LocalPriority) -> any LocalSession {
-        WindowedSession(grid: WindowDecoder.grid,
-                        decode: { samples, start in try await self.decode(samples, at: start, priority: priority) },
-                        join: { windows in try await self.join(windows) })
+        let failure = LoadFailure()
+        return WindowedSession(grid: WindowDecoder.grid,
+                               decode: { samples, start in
+                                   try await self.decode(samples, at: start, priority: priority, failure: failure)
+                               },
+                               join: { windows in try await self.join(windows) })
     }
 
     /// One window, as its own job: a live Dictation waits behind at most one
     /// window of a background Retry, never the whole clip.
-    private func decode(_ samples: [Int16], at start: Int, priority: LocalPriority) async throws
+    func decode(_ samples: [Int16], at start: Int, priority: LocalPriority, failure: LoadFailure) async throws
         -> [SeamMerge.TokenWindow] {
         try await jobs.run(priority) {
             // Its Dictation was cancelled, or the cloud won, while it waited its turn.
             try Task.checkCancellation()
-            return try await self.loaded().decode(samples, at: start)
+            return try await self.loaded(failure).decode(samples, at: start)
+        }
+    }
+
+    /// A load that failed, kept for the rest of one Dictation: a model folder that
+    /// looks whole but won't load would otherwise start a fresh load (a CoreML
+    /// compile) for every 15 s window while Jake talks. The next Dictation makes a
+    /// new session, so the next fn-down tries again. It lives in the session's decode
+    /// closure, so it is freed with the Dictation; the actor would need a table of
+    /// sessions it is never told have ended. The lock is only for Sendable: every read
+    /// and write runs on this actor.
+    final class LoadFailure: Sendable {
+        /// When the Dictation began: a load that failed since (its fn-down load) counts as its own.
+        let since = ContinuousClock.now
+        let error = Mutex<(any Error)?>(nil)
+    }
+
+    private func loaded(_ failure: LoadFailure) async throws -> WindowDecoder {
+        if let error = failure.error.withLock({ $0 }) { throw error }
+        if decoder == nil, loading == nil, let last = lastFailure, last.at >= failure.since {
+            failure.error.withLock { $0 = last.error }
+            throw last.error
+        }
+        do {
+            return try await loaded()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            failure.error.withLock { $0 = error }
+            throw error
         }
     }
 
@@ -129,12 +171,19 @@ public actor ParakeetTranscriber: LocalTranscriber {
         if let loading { return try await loading.value }
         let folder = folder
         guard Self.isComplete(folder) else { throw LocalModelNotInstalled(model) }
-        let task = Task { try await WindowDecoder.load(from: folder) }
+        let load = loadDecoder
+        let task = Task { try await load(folder) }
         loading = task
         defer { loading = nil }
-        let decoder = try await task.value
-        self.decoder = decoder
-        return decoder
+        do {
+            let decoder = try await task.value
+            self.decoder = decoder
+            lastFailure = nil
+            return decoder
+        } catch {
+            lastFailure = (error, .now)
+            throw error
+        }
     }
 
     /// Lets go of the CoreML models; they are freed with the last reference.
@@ -159,7 +208,57 @@ public actor ParakeetTranscriber: LocalTranscriber {
     /// `~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache/`, so a compile
     /// here does not warm another process: the app compiles on its own first load.
     public static func install(paths: AppPaths, access: CloudAccess,
-                               progress: @escaping @Sendable (Double) -> Void) async throws {
+                               progress: @escaping @Sendable (ModelInstallProgress) -> Void) async throws {
+        try await install(paths: paths, access: access, progress: progress, download: { models, progress in
+            // The files only. FluidAudio's own load would fetch and then compile with no
+            // report between, so the install could not say when preparing starts.
+            try await ModelHub.download(.parakeetUnified, to: models, variant: "offline", progressHandler: { report in
+                progress(Self.downloadStep(fraction: report.fractionCompleted, phase: InstallPhase(report.phase)))
+            })
+        }, prepare: { models in
+            // Finds the set whole, so it only loads (and still purges and fetches a set that won't).
+            let manager = UnifiedAsrManager(encoderPrecision: .int8)
+            try await manager.loadModels(to: models)
+            await manager.cleanup()
+        })
+    }
+
+    /// FluidAudio's download progress, as setup shows it: a repo download counts as 0
+    /// to 0.5 of FluidAudio's fraction (the compile it leaves for the load is the rest),
+    /// so it is scaled to the download's own 0 to 1.
+    static func downloadStep(fraction: Double, phase: InstallPhase) -> ModelInstallProgress {
+        switch phase {
+        case .listing: .downloading(0)
+        case .downloading: .downloading(min(1, fraction / 0.5))
+        case .compiling: .preparing
+        }
+    }
+
+    /// FluidAudio's `DownloadPhase`, one for one, so the routing above is tested without FluidAudio.
+    enum InstallPhase: Sendable {
+        case listing
+        case downloading(done: Int, total: Int)
+        case compiling
+
+        init(_ phase: DownloadPhase) {
+            switch phase {
+            case .listing: self = .listing
+            case .downloading(let done, let total): self = .downloading(done: done, total: total)
+            case .compiling: self = .compiling
+            }
+        }
+    }
+
+    /// `download` fetches the model's files into the `models` folder it is given, and
+    /// `prepare` loads them once (the CoreML compile); preparing is said between the two,
+    /// whatever the download last reported. Tests pass a `download` that never touches
+    /// the network, and leave out `prepare`.
+    static func install(paths: AppPaths, access: CloudAccess,
+                        progress: @escaping @Sendable (ModelInstallProgress) -> Void,
+                        download: @escaping @Sendable (_ models: URL,
+                                                       _ progress: @escaping @Sendable (ModelInstallProgress) -> Void)
+                            async throws -> Void,
+                        prepare: @escaping @Sendable (_ models: URL) async throws -> Void = { _ in }) async throws {
         // Whole already: nothing to fetch, and FluidAudio's repair never runs through a link into the daily folder.
         guard !isInstalled(paths: paths) else { return }
         let models = modelsFolder(paths)
@@ -168,9 +267,9 @@ public actor ParakeetTranscriber: LocalTranscriber {
                 // Removes the link only, never what it points at.
                 try FileManager.default.removeItem(at: models)
             }
-            let manager = UnifiedAsrManager(encoderPrecision: .int8)
-            try await manager.loadModels(to: models, progressHandler: { progress($0.fractionCompleted) })
-            await manager.cleanup()
+            try await download(models, progress)
+            progress(.preparing)
+            try await prepare(models)
         }
     }
 }

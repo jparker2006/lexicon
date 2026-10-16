@@ -34,7 +34,8 @@ extension AppDelegate {
     }
 
     /// What setup needs from modules only the shell imports: the fn tap and the
-    /// globe key (KeyInput), the model (LocalParakeet), the mic (the system's recorder).
+    /// globe key (KeyInput), the model (LocalParakeet), the mic (the system's recorder),
+    /// and the system's own reads (Accessibility trust, the Microphone answer) and relaunch.
     static func setupServices(paths: AppPaths, system: LexiconSystem?) -> Setup.Services {
         Setup.Services(
             fnOn: system != nil && system?.fnOff == nil,
@@ -47,6 +48,9 @@ extension AppDelegate {
             microphoneGranted: {
                 guard let system else { return }
                 system.recorder.prepare(.microphone(deviceUID: system.preferences.snapshot().microphoneUID))
-            })
+            },
+            accessibilityTrusted: { AXIsProcessTrusted() },
+            microphone: { Setup.systemMicrophone() },
+            relaunch: { try Setup.relaunchThisApp() })
     }
 }

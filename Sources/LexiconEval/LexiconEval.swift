@@ -216,8 +216,12 @@ func installModel(for bundleID: String) async -> Int32 {
         return fail("Private mode is on in \(bundleID): turn it off to download the model")
     }
     do {
-        try await ParakeetTranscriber.install(paths: .forBundle(id: bundleID), access: access) { fraction in
-            FileHandle.standardError.write(Data("\rinstalling: \(Int(fraction * 100))%".utf8))
+        try await ParakeetTranscriber.install(paths: .forBundle(id: bundleID), access: access) { step in
+            let line = switch step {
+            case .downloading(let fraction): "\rinstalling: \(Int(fraction * 100))%"
+            case .preparing: "\rinstalling: preparing the model"
+            }
+            FileHandle.standardError.write(Data(line.utf8))
         }
         FileHandle.standardError.write(Data("\ninstalled\n".utf8))
         return 0

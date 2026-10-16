@@ -1,5 +1,6 @@
 public import AppKit
 import AVFAudio
+import Darwin
 import os
 public import LexiconDomain
 import History
@@ -44,6 +45,7 @@ public final class HistoryWindowPresenter: NSObject {
         let controller = HistoryWindowController(reader: HistoryReader(paths: paths), system: system,
                                                   pasteboard: .general) { [weak self] in
             self?.controller = nil
+            Self.returnFreedMemory()
         }
         controller.presenter = self
         self.controller = controller
@@ -62,11 +64,27 @@ public final class HistoryWindowPresenter: NSObject {
     ///
     /// Its reader looks in /var/empty, which macOS keeps empty and Lexicon cannot
     /// write, so the warm-up reads nothing from History: it has no rows on screen to load.
+    /// It still builds and draws one row, with no Dictation in it, so the first
+    /// open doesn't pay for the first row cell and its symbol images.
     @discardableResult
     public func warmUp() -> NSWindowController? {
         guard controller == nil else { return nil }
         let nothing = HistoryReader(paths: AppPaths(root: URL(filePath: "/var/empty", directoryHint: .isDirectory)))
-        return HistoryWindowController(reader: nothing, system: system, pasteboard: .general) {}
+        let warm = HistoryWindowController(reader: nothing, system: system, pasteboard: .general) {}
+        warm.warmRow = RowCell.warm(in: warm.window?.contentView)
+        // The caller drops it at once; its pages too go back, before the idle footprint is read.
+        Self.returnFreedMemory()
+        return warm
+    }
+
+    /// A closed window's memory is freed, but malloc keeps the freed pages and the
+    /// footprint counts them until memory runs short. Handed back once AppKit has
+    /// let go of the window (it finishes a close a few hundred ms later), so a
+    /// closed History costs nothing. Off the main thread: it walks every zone.
+    private static func returnFreedMemory() {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
+            _ = malloc_zone_pressure_relief(nil, 0)
+        }
     }
 
     /// Never typed: the new text replaces the old in History, and a failed Dictation becomes not inserted.
@@ -116,6 +134,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
     var playing: DictationID?
     /// Holds the Retries in progress. Set right after init.
     weak var presenter: HistoryWindowPresenter?
+    /// The warm-up's one row, drawn with no Dictation in it; nil for a real open.
+    var warmRow: RowCell?
     static let pageSize = 50
     /// Rows read at a time. Reading, and handing the table, a year of rows
     /// costs more than the whole open budget, so the window starts with the
@@ -143,6 +163,8 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         super.init(window: window)
         window.title = "History"
         window.isReleasedWhenClosed = false
+        // Lexicon never restores History, so macOS keeps no restoration state of it once it closes.
+        window.isRestorable = false
         window.minSize = NSSize(width: 380, height: 300)
         window.setAccessibilityIdentifier(AccessibilityID.historyWindow)
         window.delegate = self
@@ -573,13 +595,35 @@ final class RowCell: NSTableCellView {
         text.stringValue = row?.finalText ?? ""
         text.placeholderString = row?.finalText == nil ? "No text" : nil
         details.stringValue = row.map(HistoryText.details) ?? ""
-        buttons.set(.play, symbol: playing ? "stop.fill" : "play.fill", label: playing ? "Stop" : "Play",
-                    enabled: actions?.play ?? false)
-        let pinned = row?.pinned ?? false
+        showButtons(playing: playing, pinned: row?.pinned ?? false, play: actions?.play ?? false,
+                    pin: actions?.pin ?? false, more: row != nil)
+    }
+
+    private func showButtons(playing: Bool, pinned: Bool, play: Bool, pin: Bool, more: Bool) {
+        buttons.set(.play, symbol: playing ? "stop.fill" : "play.fill", label: playing ? "Stop" : "Play", enabled: play)
         buttons.set(.pin, symbol: pinned ? "flag.fill" : "flag",
                     label: pinned ? "Unpin from the Test set" : "Pin to the Test set (keeps its audio)",
-                    color: pinned ? .controlAccentColor : .secondaryLabelColor, enabled: actions?.pin ?? false)
-        buttons.set(.more, symbol: "ellipsis.circle", label: "More", enabled: row != nil)
+                    color: pinned ? .controlAccentColor : .secondaryLabelColor, enabled: pin)
+        buttons.set(.more, symbol: "ellipsis.circle", label: "More", enabled: more)
+    }
+
+    /// Builds one row in `view` and draws it offscreen, with a row's usual
+    /// buttons: AppKit's first row cell and the symbol images cost the first open
+    /// otherwise. Reads no History.
+    static func warm(in view: NSView?) -> RowCell {
+        let cell = RowCell()
+        cell.frame = NSRect(x: 0, y: 0, width: 600, height: 60)
+        view?.addSubview(cell)
+        cell.time.stringValue = Date().formatted(date: .omitted, time: .shortened)
+        cell.text.stringValue = " "
+        // A row with audio, not playing and not pinned: what most rows at open show.
+        cell.showButtons(playing: false, pinned: false, play: true, pin: true, more: true)
+        cell.layoutSubtreeIfNeeded()
+        if let bitmap = cell.bitmapImageRepForCachingDisplay(in: cell.bounds) {
+            cell.cacheDisplay(in: cell.bounds, to: bitmap)
+        }
+        cell.removeFromSuperview()
+        return cell
     }
 
     func flash(_ word: String) {
@@ -742,6 +786,10 @@ final class RowButtons: NSView, NSViewToolTipOwner {
         let symbol: String
         let color: NSColor
         let appearance: NSAppearance.Name
+    }
+
+    static func isCached(_ symbol: String, _ color: NSColor, appearance: NSAppearance.Name) -> Bool {
+        images[ImageKey(symbol: symbol, color: color, appearance: appearance)] != nil
     }
 
     private static func image(_ symbol: String, _ color: NSColor) -> NSImage? {
