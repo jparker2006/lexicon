@@ -37,7 +37,7 @@ private let cleaned = "the crash test passes now"  // nothing for rules-only Cle
                     return written >= 9_600
                 }
                 report("written \(written)")
-                kill(getpid(), SIGKILL)
+                killChild()
             }
         }
         _ = await conductor.dictate(file: URL(filePath: wav), pace: .realtime)
@@ -147,7 +147,7 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
             [root = root as String, wav = wav as String, killAfter = killAfter as Double] in
             DispatchQueue.global().asyncAfter(deadline: .now() + killAfter) {  // timing-ok: the kill's moment is the input; every moment must pass
                 report("killed \(HostTime.now().nanoseconds)")
-                kill(getpid(), SIGKILL)
+                killChild()
             }
             let conductor = try childConductor(root: root, destination: ReportingDestination())
             let events = await conductor.events()
@@ -338,6 +338,13 @@ func twoHundredDictationsWithRandomKillsLoseNone(lane: Int) async throws {
 
 // MARK: Helpers
 
+/// A successful signal request can return before the process dies. Keep the
+/// caller from recording more audio or returning an insertion receipt meanwhile.
+private func killChild() -> Never {
+    guard kill(getpid(), SIGKILL) == 0 else { _exit(EXIT_FAILURE) }
+    while true { _ = pause() }
+}
+
 /// What a relaunch builds: the real Conductor on `root`, a fake engine that hears `heard`.
 func childConductor(root: String, destination: ReportingDestination) throws -> Conductor<ReportingDestination> {
     let paths = AppPaths(root: URL(filePath: root))
@@ -377,7 +384,7 @@ final class ReportingDestination: TextDestination, @unchecked Sendable {
         if killMidPaste {
             await history?.flush()  // `.textReady` is on disk: the row says ready
             report("typed \(id)")
-            kill(getpid(), SIGKILL)
+            killChild()
         }
         report("typed \(id)")
         return .inserted(InsertionReceipt(appBundleID: nil, fieldFingerprint: nil, caretAfter: nil,

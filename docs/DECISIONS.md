@@ -320,6 +320,42 @@ Jake, in the orchestrator's session, about 2026-10-13 02:57Z (2026-10-12 19:57 P
 
 Jake, in the orchestrator's session, 2026-10-13 09:19:26Z: "yes, a m1, pause m4" ("a m1" answers this question; the other two answered other questions in the same round). Recorded on [#302](https://github.com/jparker2006/lexicon/issues/302#issuecomment-6142485406). Built (#302): a repeat goes only when the word is in `StructuralCheck.stop` and is neither protected ("not not") nor a meant double ("that that", "had had"). `StructuralCheck.stop` also lists cue words and adverbs the check may drop that are not function words ("sorry", "still", "already", "again", "also", "once", "own", "scratch"); their doubles stay too. Every other word said twice stays as spoken. That includes the soft fillers that are not function words: "okay okay", "like like" ("I like like her") and "basically basically" now stay, where they went before ("so so" and "well well" already stayed as meant doubles). So #75's acceptance line from item 82, "the guard refuses to drop any filler or word the rules keep", does not cover a doubled content word or soft filler the rules keep ("testing testing", "okay okay"); a doubled protected word ("not not") or number ("ten ten") stays under it. Option A as asked says "The guard lets the LLM decide on the rest from M3 on", so the AI cleanup may drop one copy, and the structural check already accepts that.
 
+**99. Rules-only Cleanup keeps the four ambiguous sound sequences.**
+
+Question, on [#337](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6164220809):
+
+> M3 Q2, from a real open Cleanup issue: should rules-only Cleanup keep “uh uh,” “um hmm,” “hmm hmm,” and “hm hm” when they might be an answer such as “no” or “yes”? I recommend keeping them, so a fixed rule cannot delete an answer. AI Cleanup can handle clearer filler cases later. Reply yes to take that.
+
+Jake's answer, verbatim from the selected option: “Keep these sounds (Recommended)” Recorded at (UTC): 2026-10-14T08:29:37Z. This is the recording time; the chat does not expose an exact answer timestamp.
+
+Decided: Rules-only Cleanup keeps “uh uh,” “um hmm,” “hmm hmm,” and “hm hm” as spoken, preserving possible acknowledgements or answers. In number-like text, `five uh uh oh seven` stays as spoken. This does not approve changing the AI Cleanup guard, adding Jev during ordinary Dictation, or changing Decision 89.
+
+Canonical source: [#337 decision comment](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6164220809).
+
+**103. Rules-only Cleanup keeps "was was" after an earlier "what".** Narrows item 89 for one word: "was" is a function word whose double can finish a sentence ("What the problem was was the cache"), and the rules cannot tell that from a stutter.
+
+Question, on [#337](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6217405039), asked again in the orchestrator's round at about 2026-10-16 08:25 Pacific:
+
+> 3. #337 "was was": A keeps both copies after any earlier "what"; B keeps both only when "what" is close by. Rec: A, because a missing word is worse than a leftover stutter.
+
+Jake's words, verbatim: "3A 4A". "3A" answers the question above; "4A" is another ticket's answer, recorded with [#62](https://github.com/jparker2006/lexicon/issues/62#issuecomment-6218827499). Recorded at (UTC): 2026-10-16T15:27:45Z, the time of the decision comment; the chat does not expose the exact answer time. Given in the Claude orchestrator session.
+
+Decided: rules-only Cleanup keeps both copies of "was" whenever "what" came earlier in the sentence, and after "all it was" and "the reason it was". "The build was was green" still loses the stutter. A real stutter after an earlier "what" ("What I wanted to say was was that we're late") may stay: a missing word changes what Jake said, and a leftover stutter is easy to fix.
+
+Canonical source: [#337 decision comment](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6218826858).
+
+**104. After a trail-off, rules-only Cleanup drops a repeat only of "the" or a contraction.** Narrows item 89 after "...": a speaker who trails off often starts a new clause with the same small word, and the rules cannot tell that from a stutter.
+
+Question, on [#337](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6220416821), asked again in the orchestrator's round at about 2026-10-16 09:52 Pacific:
+
+> 7. #337: when you trail off with "..." and then repeat a small word. A. Drop the repeat only for "the" and contractions like "we're." ... B. Drop it for every small word. ... Rec: A.
+
+Jake's words, verbatim: "6 A is fine 7 rec is fine ill step away in a while not rn tho". "7 rec is fine" answers the question above; the rest answers other questions of the same round. Recorded at (UTC): 2026-10-16T16:59:58Z, the time of the decision comment; the chat does not expose the exact answer time. Given in the Claude orchestrator session.
+
+Decided: after "...", rules-only Cleanup drops a repeated word only when it is "the" or a contraction such as "we're": "Fix the... the build" becomes "Fix the build", "We're... we're fine" becomes "We're fine". Every other repeat after "..." stays as said, including "I'm going to... to be honest", "It was... was it the cache?" and a real stutter like "I... I think".
+
+Canonical source: [#337 decision comment](https://github.com/jparker2006/lexicon/issues/337#issuecomment-6220546884).
+
 **60. The lag bar's power state.** Settled by grill Q9 (c): the state Jake normally dictates in, with the other reported beside it. Jake, 2026-10-12 04:25:38Z: "recs for all" (Q6 to Q10).
 
 **75. A mic that gives no sound fails with "No sound from the microphone".** Neither the spec nor this file had the rule; #4 left `silentInput` ("exactly-zero samples in the first ~300 ms") declared and never raised, and #144 asked for it. Built: when every raw frame of a hold (before conversion to 16 kHz) is exactly zero, or no frame arrives at all, the Dictation is not transcribed. Its row is failed (`microphone: zeros` or `microphone: noFrames`) with its audio kept, and the pill shows "No sound from the microphone". Judged over the whole hold at fn-up, not its first 300 ms, so a device that starts with zeros and then delivers audio is still transcribed, and Jake learns of a dead mic only at fn-up (the pill shows no notice while recording). Esc, or sleep, on a silent hold fails the same way instead of transcribing, and a Retry from History of an all-zero clip does nothing. A file of zeros (eval, the dev hook) fails the same way. Stray taps and chord cancels stay silent. Item 41's start limit covers only an engine that never starts; one that starts and delivers nothing is this case. A mic that stops after delivering some audio is caught by neither: its Dictation transcribes what came.

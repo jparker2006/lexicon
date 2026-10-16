@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import Cleanup
 import LexiconDomain
+@testable import LexiconCore
+import Transcription
 
 // The rules-only Cleanup (#42): what M0 to M2 type, and the fallback whenever
 // AI cleanup is late or rejected. Cases from docs/research/cleanup-pass.md
@@ -466,4 +468,222 @@ func runsUnderOneMillisecondOnAHundredWords() {
     }
     let median = times.sorted()[times.count / 2]
     #expect(median < .milliseconds(1), "median \(median)")
+}
+
+let functionWordCleanupGapCases: [Case] = [
+    Case("Fix the the.", "Fix the."),
+    Case("I want the the, big one.", "I want the, big one."),
+    Case("I, I think", "I think"),
+    Case("the, the build", "The build"),
+    Case("We're we're, honestly,", "We're, honestly,"),
+    Case("the The build.", "The build."),
+    Case("Meet at, um, at ten.", "Meet at ten."),
+    Case("it’s it's", "it’s"),
+    // Sentence-internal spelling variation exercises the text-identity mismatch.
+    Case("I think it’s it's failing.", "I think it’s failing."),
+    Case("I- I think", "I think"),
+    Case("We are in the in the cache.", "We are in the cache."),
+    Case("I gave her her keys.", "I gave her her keys."),
+    Case("I told you you were right.", "I told you you were right."),
+    Case("What it was was a bug.", "What it was was a bug."),
+    Case("Will will review it.", "Will will review it."),
+]
+
+@Test(arguments: functionWordCleanupGapCases)
+func functionWordCleanupRepairsTicketGaps(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+let functionWordGapBoundaryCases: [Case] = [
+    // The new phrase matcher must not bridge a sentence boundary.
+    Case("We were in the. In the cache.", "We were in the. In the cache."),
+    // Quoted spellings and inline code remain verbatim beside ordinary function words.
+    Case("It's \"it's\" fine.", "It's \"it's\" fine."),
+    Case("Use it in the `in the` cache.", "Use it in the `in the` cache."),
+]
+
+@Test(arguments: functionWordGapBoundaryCases)
+func functionWordCleanupLeavesQuotedCodeAndCrossSentenceTextAlone(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+let cleanup337Decision89FunctionStutterCases: [Case] = [
+    Case("Fix the the tests.", "Fix the tests."),
+    Case("I I think so.", "I think so."),
+    Case("Ship it to to five users.", "Ship it to five users."),
+    Case("Meet me at at ten.", "Meet me at ten."),
+    Case("The build was was broken.", "The build was broken."),
+    Case("It was was broken.", "It was broken."),
+    Case("The tests all passed and the build was was green.", "The tests all passed and the build was green."),
+    Case("All the tests passed and the build was was green.", "All the tests passed and the build was green."),
+    Case("All I did was was restart the build.", "All I did was restart the build."),
+    Case("All I wanted was was a clean build.", "All I wanted was a clean build."),
+    Case("Fix the issue it was was causing.", "Fix the issue it was causing."),
+    Case("Explain the point I was was making.", "Explain the point I was making."),
+]
+
+@Test(arguments: cleanup337Decision89FunctionStutterCases)
+func cleanup337Decision89FunctionStuttersDropOnlyTheRepeat(_ c: Case) {
+    #expect(TextPass.run(c.raw, rules: .empty) == c.gold)
+}
+
+// Content, spoken-number, protected, and meant doubles remain exactly as spoken.
+let cleanup337Decision89KeptDoubleCases: [Case] = [
+    Case("testing testing", "testing testing"),
+    Case("first first", "first first"),
+    Case("half half", "half half"),
+    Case("one one", "one one"),
+    Case("oh oh", "oh oh"),
+    Case("I should should ship.", "I should should ship."),
+    Case("I don't don't agree.", "I don't don't agree."),
+    Case("The build is is ready.", "The build is is ready."),
+    Case("I know that that is wrong.", "I know that that is wrong."),
+    Case("What it had had was a bug.", "What it had had was a bug."),
+]
+
+@Test(arguments: cleanup337Decision89KeptDoubleCases)
+func cleanup337Decision89ContentNumberProtectedAndMeantDoublesStay(_ c: Case) {
+    #expect(TextPass.run(c.raw, rules: .empty) == c.gold)
+}
+
+// A name, acronym or keyword spelled like the function word after it is not a stutter;
+// a clause-ending "at" keeps its comma before a person asked; a pseudo-cleft keeps its
+// predicate "was"; a word that ends one clause and starts the next after a filler or a
+// trail-off stays.
+let cleanup337MeaningKeptCases: [Case] = [
+    Case("Tell IT it is down.", "Tell IT it is down."),
+    Case("I think May may be late.", "I think May may be late."),
+    Case("Use AND and OR in the query.", "Use AND and OR in the query."),
+    Case("Ask WHO who pays.", "Ask WHO who pays."),
+    Case("Use IN in the where clause.", "Use IN in the where clause."),
+    Case("Take him to the OR or the ER.", "Take him to the OR or the ER."),
+    Case("Sort BY by date.", "Sort BY by date."),
+    Case("Tell US us too.", "Tell US us too."),
+    Case("Where are we at, um, Jake?", "Where are we at, Jake?"),
+    Case("What are you looking at, uh, Sam?", "What are you looking at, Sam?"),
+    Case("What the problem was was the cache.", "What the problem was was the cache."),
+    Case("All it was was a typo.", "All it was was a typo."),
+    Case("I think what it was was a bug.", "I think what it was was a bug."),
+    Case("What I think it was was a bug.", "What I think it was was a bug."),
+    Case("What the problem with the build was was the cache.", "What the problem with the build was was the cache."),
+    // Decision 103 accepts a real stutter after an earlier "what" staying.
+    Case("What I wanted to say was was that we're late.", "What I wanted to say was was that we're late."),
+    Case("The reason it was was because the cache was stale.", "The reason it was was because the cache was stale."),
+    Case("May may be late.", "May may be late."),
+    Case("I went there, um, there was a fire.", "I went there, there was a fire."),
+    Case("We went in, um, in the morning.", "We went in, in the morning."),
+    Case("I'm going to... to be honest, I don't know.", "I'm going to... to be honest, I don't know."),
+    Case("Put it on... on second thought, leave it.", "Put it on... on second thought, leave it."),
+    Case("It was... was it the cache?", "It was... was it the cache?"),
+    Case("We could... could you check it?", "We could... could you check it?"),
+    Case("I was in... in the end it worked.", "I was in... in the end it worked."),
+    // Decision 104 accepts a real stutter after "..." staying.
+    Case("I... I think we should go.", "I... I think we should go."),
+]
+
+// A capital that only starts a sentence, a clause-final "at" before a common word, and
+// either curly apostrophe are not reasons to keep a stutter or its comma.
+let cleanup337StutterFormCases: [Case] = [
+    Case("Fix the The build.", "Fix the build."),
+    Case("Note: The the build failed.", "Note: The build failed."),
+    Case("We‘re we‘re, honestly,", "We‘re, honestly,"),
+    Case("Let's meet at, um, three o'clock.", "Let's meet at three o'clock."),
+    Case("Look at, um, the build.", "Look at the build."),
+    Case("Let's meet at, um, Starbucks.", "Let's meet at Starbucks."),
+    Case("Fix the... the build.", "Fix the build."),
+    Case("We’re... we’re honestly fine.", "We’re honestly fine."),
+]
+
+@Test(arguments: cleanup337StutterFormCases)
+func cleanup337DropsStuttersAcrossCapitalAndApostropheForms(_ c: Case) {
+    #expect(TextPass.run(c.raw, rules: .empty) == c.gold)
+}
+
+@Test(arguments: cleanup337MeaningKeptCases)
+func cleanup337KeepsNamesClauseEndsAndPseudoClefts(_ c: Case) {
+    #expect(TextPass.run(c.raw, rules: .empty) == c.gold)
+}
+
+let ambiguousSoundCases: [Case] = [
+    Case("uh uh", "uh uh"),
+    Case("Uh uh, no.", "Uh uh, no."),
+    Case("um hmm", "um hmm"),
+    Case("Um hmm, that's right.", "Um hmm, that's right."),
+    Case("hmm hmm", "hmm hmm"),
+    Case("Hmm hmm, yes.", "Hmm hmm, yes."),
+    Case("hm hm", "hm hm"),
+    Case("Hm hm, no.", "Hm hm, no."),
+]
+
+@Test(arguments: ambiguousSoundCases)
+func ambiguousSoundAnswersStayAsSpoken(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+@Test func ambiguousSoundsInsideSpokenNumberStayAsDictated() {
+    #expect(clean("five uh uh oh seven") == "five uh uh oh seven")
+}
+
+let cleanup337SpokenEstimateCases: [Case] = [
+    Case("It costs, like, double-digit dollars.", "It costs, like, double-digit dollars."),
+    Case("It costs, like, triple-digit dollars.", "It costs, like, triple-digit dollars."),
+    Case("They saw, like, scores of birds.", "They saw, like, scores of birds."),
+    Case("We need, like, a gross of cable ties.", "We need, like, a gross of cable ties."),
+    Case("There were, like, zillions of requests.", "There were, like, zillions of requests."),
+]
+
+@Test(arguments: cleanup337SpokenEstimateCases)
+func cleanup337SpokenEstimatePhrasesKeepTheHedgeAndWords(_ c: Case) {
+    #expect(TextPass.run(c.raw, rules: .empty) == c.gold)
+}
+
+let fillerCapitalizationCases: [Case] = [
+    Case("Is it on? No. um, wait.", "Is it on? No. Wait."),
+    Case("No. um, wait.", "No. Wait."),
+    Case("It starts at 5 p.m. um, then we leave.", "It starts at 5 p.m. then we leave."),
+    // No. means number here. Removing the filler must leave the following word lowercase.
+    Case("Put it in bin No. um, one.", "Put it in bin No. one."),
+]
+
+@Test(arguments: fillerCapitalizationCases)
+func fillerRemovalRestoresSentenceCapitalWithoutPromotingAbbreviations(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+let cleanupProtectedTextCases: [Case] = [
+    Case("Fix the the config.json; preserve snake_case, /review, v2, and std:: names.",
+         "Fix the config.json; preserve snake_case, /review, v2, and std:: names."),
+    Case("Set the flag to \"uh\" and `the` literally, then fix the the key.",
+         "Set the flag to \"uh\" and `the` literally, then fix the key."),
+    Case("Keep **the** verbatim, then fix the the key.",
+         "Keep **the** verbatim, then fix the key."),
+    // Neither orientation may turn a quoted function word into an ordinary stutter.
+    Case("Use \"the\" the key.", "Use \"the\" the key."),
+    Case("Use the \"the\" key.", "Use the \"the\" key."),
+    Case("\"The\" the build.", "\"The\" the build."),
+]
+
+@Test(arguments: cleanupProtectedTextCases)
+func cleanupPreservesProtectedTextAroundOrdinaryStutters(_ c: Case) {
+    #expect(clean(c.raw) == c.gold)
+}
+
+@Test func sentenceCapitalizationRegressionRunsThroughHeadlessWav() async throws {
+    let transcript = "Is it on? No. um, wait."
+    let expected = "Is it on? No. Wait."
+    let wav = try writeWAV(syntheticSamples(count: 19_200), rate: 16_000, in: try scratchDirectory())
+    let engine = ScriptedTranscriber(text: transcript)
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown,
+                                         preferences: .defaults, local: engine, clock: TestClock())
+
+    let result = await system.conductor.dictate(file: wav, pace: .asFastAsPossible)
+
+    #expect(result.status == .inserted)
+    #expect(result.versions == TextVersions(model: transcript, cleaned: expected))
+    #expect(result.cleanup == .rulesOnly(.off))
+    #expect(await engine.heard.count == 1)
+}
+
+@Test func commaAfterCanPreservesTheNextClauseModal() {
+    #expect(TextPass.run("We can, can you send that?", rules: .empty) == "We can, can you send that?")
 }

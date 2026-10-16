@@ -68,13 +68,15 @@ enum Fillers {
         "to", "of", "for", "with", "from", "than", "as", "a", "an", "half", "few", "couple", "several", "some", "many",
         "most", "about", "around", "maybe", "under", "over", "almost", "nearly", "roughly", "twice", "thrice", "double",
         "triple", "doubled", "tripled", "quadrupled", "halved", "quarter", "quarters", "halves", "once", "teens",
-        "lots", "more", "less", "between", "upwards", "somewhere",
+        "lots", "more", "less", "between", "upwards", "somewhere", "double-digit", "triple-digit", "scores", "zillions",
     ]
 
     /// Two-word interjections made of filler sounds: answers and exclamations, never fillers.
-    /// Only without a comma between: "uh, huh?" is a filler and then "huh". "uh uh" and
-    /// "um hmm" are left out: written that way they are as likely two fillers as a word.
-    static let interjections: Set<String> = ["uh huh", "uh oh", "mm hmm", "mm hm", "ah ha", "ah hah"]
+    /// Only without a comma between: "uh, huh?" is a filler and then "huh".
+    /// Ambiguous answers stay, including inside a number-like phrase.
+    static let interjections: Set<String> = [
+        "uh huh", "uh oh", "mm hmm", "mm hm", "ah ha", "ah hah", "uh uh", "um hmm", "hmm hmm", "hm hm",
+    ]
 
     /// Hedges, negations and constraints. Never deleted, not even as a repeat
     /// ("it's not not working" means it works).
@@ -93,13 +95,13 @@ enum Fillers {
     /// ("sorry sorry", "still still").
     static let meantDoubles: Set<String> = [
         "that", "had", "is", "do", "very", "too", "sorry", "scratch", "still", "already", "again", "also", "once",
-        "own",
+        "own", "her", "you",
     ]
 
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".
     static let glue: Set<String> = [
         "and", "but", "or", "so", "to", "you", "it's", "is", "the", "a", "an", "of", "for", "that", "i", "we", "can",
-        "just", "if", "because", "like",
+        "just", "if", "because", "like", "at",
     ]
 
     /// Capitalized, but naming nobody.
@@ -124,7 +126,9 @@ enum Fillers {
         // The speech model capitalizes after a sentence end, so "etc. Um, ship it"
         // ends a sentence and "etc. um, then ship it" does not.
         for i in tokens.indices.dropLast() where tokens[i].isAbbreviation && !titles.contains(tokens[i].word) {
+            // At a sentence start, "No." is an answer; "bin No." is an abbreviation.
             tokens[i].endsSentence = tokens[i + 1].isCapitalized
+                || (tokens[i].word == "no" && (i == 0 || tokens[i - 1].endsSentence))
         }
         for k in tokens.indices where tokens[k].isHardFiller {
             tokens[k].isInNumber = soundInNumber(tokens, at: k)
@@ -155,15 +159,17 @@ enum Fillers {
             // A Term or a Rule's written side is never a filler: "OK" written by a Rule stays.
             let drop = rules.isWritten(token.text) ? 0 : dropCount(token, prior: i > 0 ? tokens[i - 1] : nil, next: next,
                                  after: i + 2 < tokens.count ? tokens[i + 2] : nil, hedge: hedge,
-                                 dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore,
-                                 previous: sentenceKept > 0 ? (kept.last!, keptWords.last!, sentenceKept == 1) : nil)
+                                 dictationStart: dictationStart && kept.isEmpty, afterOpener: droppedOpener, setOffBefore: setOffBefore)
             if drop > 0 {
                 let last = tokens[i + drop - 1]
                 if sentenceKept > 0 {
                     if last.endsSentence {
                         kept[kept.count - 1] = Token.merge(kept[kept.count - 1], last.trailing)
                     } else if last.trailing.contains(","), kept[kept.count - 1].hasSuffix(","),
-                              glue.contains(keptWords[keptWords.count - 1]), !keptHedge(kept, keptWords, sentenceKept) {
+                              glue.contains(keptWords[keptWords.count - 1]),
+                              !keptHedge(kept, keptWords, sentenceKept),
+                              !addressesName(keptWords[keptWords.count - 1],
+                                             i + drop < tokens.count ? tokens[i + drop] : nil) {
                         kept[kept.count - 1].removeLast()
                     }
                 } else {
@@ -172,6 +178,22 @@ enum Fillers {
                 if last.endsSentence { sentenceKept = 0; droppedOpener = false }
                 setOffBefore = setOffBefore || last.setsOffNext
                 i += drop
+                continue
+            }
+
+            let stutter = stutterCount(tokens, at: i, kept: kept, words: keptWords, sentenceKept: sentenceKept, rules: rules)
+            if stutter > 0 {
+                let last = tokens[i + stutter - 1]
+                let previous = Token(Substring(kept[kept.count - 1]))
+                var text = kept[kept.count - 1]
+                if previous.trailing == "," || previous.trailing == "..." { text.removeLast(previous.trailing.count) }
+                if sentenceKept == 1, token.isCapitalized || previous.trailing == "," {
+                    text = Token.capitalized(text)
+                }
+                kept[kept.count - 1] = Token.merge(text, last.trailing)
+                if last.endsSentence { sentenceKept = 0 }
+                setOffBefore = last.setsOffNext
+                i += stutter
                 continue
             }
 
@@ -253,16 +275,81 @@ enum Fillers {
         keptWords.last == "like" && (sentenceKept == 1 || kept[kept.count - 2].last.map { ",;:".contains($0) } == true)
     }
 
+    /// A word whose immediate repeat is a stutter (decision 89).
+    private static func canStutter(_ word: String) -> Bool {
+        StructuralCheck.stop.contains(word) && !protected.contains(word) && !meantDoubles.contains(word)
+    }
+
+    /// "Where are we at, um, Jake?": a clause-final "at" before the person asked.
+    /// Its comma stays when the filler goes; "Look at, um, the build" and "Meet at, um,
+    /// Starbucks." lose it.
+    private static func addressesName(_ keptWord: String, _ next: Token?) -> Bool {
+        guard keptWord == "at", let next else { return false }
+        return next.isName && next.trailing == "?"
+    }
+
+    /// Decision 103: "was was" stays after an earlier "what" ("What the problem was was the
+    /// cache"), and after "all it was" and "the reason it was". A real stutter after a "what"
+    /// may stay: keeping one costs less than dropping a predicate. "All I wanted was was" and
+    /// "the build was was green" are stutters. `sentence`: the sentence's kept words, ending
+    /// with the first "was".
+    private static func closesCleft(_ sentence: ArraySlice<String>) -> Bool {
+        let before = sentence.dropLast()
+        if before.contains("what") { return true }
+        let pair = Array(before.suffix(2))
+        return pair == ["all", "it"] || pair == ["reason", "it"]
+    }
+
+    /// The same word in another form: "the The", "it’s it's". Only a first-letter capital
+    /// may differ, never on an acronym: "Tell IT it is down" names something.
+    private static func sameSpelling(_ a: Token, _ b: Token) -> Bool {
+        a.spelling == b.spelling || (!a.isAcronym && !b.isAcronym && a.spelling.dropFirst() == b.spelling.dropFirst())
+    }
+
+    /// Match spelling forms without rewriting the retained word. Only "the" and
+    /// an opening "I" match across a comma; other words may end a real clause.
+    private static func stutterCount(_ tokens: [Token], at i: Int, kept: [String], words: [String],
+                                     sentenceKept: Int, rules: RuleSet) -> Int {
+        guard sentenceKept > 0 else { return 0 }
+        let token = tokens[i]
+        let word = token.word
+        guard canStutter(word), !token.isQuoted, !rules.isWritten(token.text) else { return 0 }
+        let previous = Token(Substring(kept[kept.count - 1]))
+        guard !previous.isQuoted, !rules.isWritten(previous.text) else { return 0 }
+
+        if sentenceKept >= 2, token.word == "in", token.trailing.isEmpty, i + 1 < tokens.count {
+            let next = tokens[i + 1]
+            let before = Token(Substring(kept[kept.count - 2]))
+            if before.word == "in", before.trailing.isEmpty, !before.isQuoted,
+               sameSpelling(before, token),
+               previous.word == "the", previous.trailing.isEmpty, sameSpelling(previous, next),
+               next.word == "the", !next.isQuoted, !rules.isWritten(next.text), !rules.isWritten(before.text) {
+                return 2
+            }
+        }
+
+        let commaStutter = previous.trailing == "," && (word == "the" || (word == "i" && sentenceKept == 1))
+        // "the... the build", "we're... we're": the trailing off goes with the dropped copy.
+        // Other words may start a new clause after it ("I'm going to... to be honest"); decision 104.
+        let trailingOff = previous.trailing == "..." && (word == "the" || word.contains("'"))
+        let marked = previous.trailing.isEmpty || trailingOff || commaStutter
+        guard previous.word == word, marked, sameSpelling(previous, token) else { return 0 }
+        // "Will will review it", "May may be late": a name, then the modal.
+        if word == "will" || word == "may", previous.isName { return 0 }
+        if word == "was", closesCleft(words.suffix(sentenceKept)) { return 0 }
+        return 1
+    }
+
     /// How many tokens from `token` on are fillers to delete: 0, 1 or 2.
     /// `prior`: the token just before, kept or not. `hedge`: a "like" before a number, a name or a Term.
-    /// `previous`: the last kept token in this sentence, its word, and whether it opened the sentence.
     /// `dictationStart`: nothing kept yet in the Dictation. `afterOpener`: a filler already went from this sentence's start.
     private static func dropCount(_ token: Token, prior: Token?, next: Token?, after: Token?, hedge: Bool,
                                   dictationStart: Bool, afterOpener: Bool,
-                                  setOffBefore: Bool, previous: (text: String, word: String, opensSentence: Bool)?)
+                                  setOffBefore: Bool)
         -> Int {
         let word = token.word
         if protected.contains(word) || token.isQuoted { return 0 }
+        if word == "i-", let next, next.word == "i", !next.isQuoted { return 1 }
         if token.isHardFiller {
             // A sound of "uh huh" or "mm hmm" is a word, unless it sits inside a number ("five uh oh seven").
             if let next, token.trailing.isEmpty, !token.isInNumber, interjections.contains(word + " " + next.word) {
@@ -295,11 +382,6 @@ enum Fillers {
             return 1
         }
 
-        if let previous, StructuralCheck.stop.contains(word), !meantDoubles.contains(word),
-           !previous.text.last!.isPunctuation, previous.word == word,
-           previous.text == token.text || previous.opensSentence {
-            return 1
-        }
         return 0
     }
 }
@@ -349,7 +431,7 @@ private struct Token {
         while let c = bare.first, c.isQuote { bare = bare.dropFirst() }
         while let c = bare.last, c.isQuote { bare = bare.dropLast() }
         var word = bare.lowercased()
-        if word.contains("’") { word = String(word.map { $0 == "’" ? "'" : $0 }) }
+        word = String(word.map(\.straightened))
         // "p.m.,": the period is the abbreviation's own, and the comma is what follows it.
         let ownPeriod = sentence == "." && comma && Fillers.abbreviations.contains(word)
         if ownPeriod { sentence = "" }
@@ -364,13 +446,21 @@ private struct Token {
     }
 
     var isPunctuationOnly: Bool { word.isEmpty && !trailing.isEmpty }
+    /// The word as written, case kept, marks dropped and apostrophes straightened: "it’s," is "it's".
+    var spelling: String {
+        var body = text
+        while let c = body.last, c.isMark { body = body.dropLast() }
+        return String(body.map(\.straightened))
+    }
+    /// "IT", "WHO", "OR": a name even at a sentence start. Not "I".
+    var isAcronym: Bool { text.filter(\.isLetter).count > 1 && !text.contains(where: \.isLowercase) }
     /// A comma or a sentence end after this token sets off the one after it.
     var setsOffNext: Bool { !trailing.isEmpty }
     /// "config.json", "snake_case", "/review", "v2": never recapitalized.
     var isCode: Bool { word.contains { $0 == "." || $0 == "/" || $0 == "_" || $0.isNumber } }
     /// "um", "Uh"; not "ER" or "UH", which are names.
     var isHardFiller: Bool {
-        Fillers.hard.contains(word) && !(text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase })
+        Fillers.hard.contains(word) && !isAcronym
     }
     /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written.
     var isNumber: Bool {
@@ -403,6 +493,8 @@ private struct Token {
 }
 
 private extension Character {
+    /// "we’re" and "we‘re" are "we're".
+    var straightened: Character { self == "’" || self == "‘" ? "'" : self }
     var isMark: Bool {
         switch self {
         case ",", ".", "!", "?", ";", ":": true
