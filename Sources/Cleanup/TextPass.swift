@@ -294,8 +294,8 @@ enum Fillers {
 
     /// The first "was" may close a pseudo-cleft's clause, whose predicate then needs its
     /// own: "What the problem was was the cache", "All it was was a typo", "The reason it
-    /// was was the cache". Any earlier "what" may open such a clause, so the double stays:
-    /// keeping a stutter costs less than dropping a predicate. "All I wanted was was" and
+    /// was was the cache". Any earlier "what" may open such a clause, so the double stays
+    /// (decision 102): keeping a stutter costs less than dropping a predicate. "All I wanted was was" and
     /// "the build was was green" are stutters. `sentence`: the sentence's kept words,
     /// ending with that "was".
     private static func closesCleft(_ sentence: ArraySlice<String>) -> Bool {
