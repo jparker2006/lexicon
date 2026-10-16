@@ -11,6 +11,7 @@ extension AppDelegate {
         self.history = history
         // The system's Lexicon, the one every Dictation reads, so the page's edits reach the next fn-down.
         lexiconPage = system.map { LexiconWindowPresenter(lexicon: $0.lexicon) }
+        settings = system.map { SettingsWindowPresenter(credentials: $0.credentials) }
         return history
     }
 

@@ -4,51 +4,84 @@ import LexiconCore
 import LexiconDomain
 
 // Fake keys only. The Keychain tests use a throwaway service per test, never a
-// Lexicon bundle ID, and delete their item when they finish.
+// Lexicon bundle ID, and remove their item when they finish.
 
 private func throwawayService() -> String { "dev.jparker.lexicon.tests.\(UUID().uuidString)" }
 
-@Test func aKeySetInTheKeychainIsReadBackAndDeleted() throws {
-    let service = throwawayService()
-    let secrets = Secrets(.keychain(service: service))
-    defer { try? secrets.set(nil, for: .jev) }
-
-    #expect(secrets.lookup(.jev) == nil)
-    try secrets.set("fake-jev-key", for: .jev)
-    #expect(secrets.lookup(.jev) == "fake-jev-key")
-    #expect(Secrets(.keychain(service: service)).lookup(.jev) == "fake-jev-key")
-
-    try secrets.set("fake-jev-key-2", for: .jev)
-    #expect(Secrets(.keychain(service: service)).lookup(.jev) == "fake-jev-key-2")
-
-    try secrets.set(nil, for: .jev)
-    #expect(secrets.lookup(.jev) == nil)
-    #expect(Secrets(.keychain(service: service)).lookup(.jev) == nil)
+private func outcome(from command: CredentialCommand, for edit: CredentialEdit) async -> CredentialOutcome {
+    await withCheckedContinuation { continuation in
+        command(edit) { continuation.resume(returning: $0) }
+    }
 }
 
-@Test func keysAreReadOnceAndKeptInMemory() throws {
+@Test func aKeySetInTheKeychainIsReadBackAndDeleted() async {
+    let service = throwawayService()
+    let secrets = Secrets(.keychain(service: service))
+    let command = secrets.credentials
+
+    let lookupStartedMissing = secrets.lookup(.jev) == nil
+    let saved = await outcome(from: command, for: .save(.jev, "fake-jev-key"))
+    let lookupSawSavedValue = secrets.lookup(.jev) == "fake-jev-key"
+    let freshOwnerSawSavedValue = Secrets(.keychain(service: service)).lookup(.jev) == "fake-jev-key"
+
+    let replaced = await outcome(from: command, for: .save(.jev, "fake-jev-key-2"))
+    let freshOwnerSawReplacement = Secrets(.keychain(service: service)).lookup(.jev) == "fake-jev-key-2"
+    let removed = await outcome(from: command, for: .remove(.jev))
+    let cachedLookupSawMissing = secrets.lookup(.jev) == nil
+    let freshOwnerSawMissing = Secrets(.keychain(service: service)).lookup(.jev) == nil
+
+    #expect(lookupStartedMissing)
+    #expect(saved == .saved)
+    #expect(lookupSawSavedValue)
+    #expect(freshOwnerSawSavedValue)
+    #expect(replaced == .saved)
+    #expect(freshOwnerSawReplacement)
+    #expect(removed == .removed)
+    #expect(cachedLookupSawMissing)
+    #expect(freshOwnerSawMissing)
+}
+
+@Test func keysAreReadOnceAndKeptInMemory() async {
     let service = throwawayService()
     let writer = Secrets(.keychain(service: service))
-    defer { try? writer.set(nil, for: .cleanup) }
-    try writer.set("fake-openrouter-key", for: .cleanup)
-
+    let writerCommand = writer.credentials
     let reader = Secrets(.keychain(service: service))
-    #expect(reader.lookup(.cleanup) == "fake-openrouter-key")
-    try writer.set(nil, for: .cleanup)
-    #expect(reader.lookup(.cleanup) == "fake-openrouter-key")
+    let readerCommand = reader.credentials
+
+    let saved = await outcome(from: writerCommand, for: .save(.cleanup, "fake-openrouter-key"))
+    let readerSawSavedValue = reader.lookup(.cleanup) == "fake-openrouter-key"
+    let removed = await outcome(from: writerCommand, for: .remove(.cleanup))
+    let readerKeptItsCachedValue = reader.lookup(.cleanup) == "fake-openrouter-key"
+    let readerCleanup = await outcome(from: readerCommand, for: .remove(.cleanup))
+
+    #expect(saved == .saved)
+    #expect(readerSawSavedValue)
+    #expect(removed == .removed)
+    #expect(readerKeptItsCachedValue)
+    #expect(readerCleanup == .removed)
 }
 
-@Test func eachCredentialIsItsOwnItem() throws {
+@Test func eachCredentialIsItsOwnItem() async {
     let service = throwawayService()
     let secrets = Secrets(.keychain(service: service))
-    defer {
-        for id in [CredentialID.speech(.museVoice), .cleanup, .jev] { try? secrets.set(nil, for: id) }
-    }
-    try secrets.set("fake-meta-key", for: .speech(.museVoice))
-    try secrets.set("fake-openrouter-key", for: .cleanup)
+    let command = secrets.credentials
+    let speechSave = await outcome(from: command, for: .save(.speech(.museVoice), "fake-meta-key"))
+    let cleanupSave = await outcome(from: command, for: .save(.cleanup, "fake-openrouter-key"))
 
     let fresh = Secrets(.keychain(service: service))
-    #expect(fresh.lookup(.speech(.museVoice)) == "fake-meta-key")
-    #expect(fresh.lookup(.cleanup) == "fake-openrouter-key")
-    #expect(fresh.lookup(.jev) == nil)
+    let speechItemWasSaved = fresh.lookup(.speech(.museVoice)) == "fake-meta-key"
+    let cleanupItemWasSaved = fresh.lookup(.cleanup) == "fake-openrouter-key"
+    let jevWasMissing = fresh.lookup(.jev) == nil
+    let removedSpeech = await outcome(from: command, for: .remove(.speech(.museVoice)))
+    let removedCleanup = await outcome(from: command, for: .remove(.cleanup))
+    let removedJev = await outcome(from: command, for: .remove(.jev))
+
+    #expect(speechSave == .saved)
+    #expect(cleanupSave == .saved)
+    #expect(speechItemWasSaved)
+    #expect(cleanupItemWasSaved)
+    #expect(jevWasMissing)
+    #expect(removedSpeech == .removed)
+    #expect(removedCleanup == .removed)
+    #expect(removedJev == .removed)
 }

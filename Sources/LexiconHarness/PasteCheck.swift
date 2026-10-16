@@ -53,6 +53,8 @@ func pasteCheck() async throws {
         guard insertion.outcome == "inserted" else { throw HarnessError("Lexicon did not insert: \(insertion.outcome)") }
     case .failed(let reason):
         throw HarnessError(reason)
+    case .settingsFixture:
+        throw HarnessError("unexpected Settings fixture reply to insert")
     case .status, .capture, .done, .soundPlayed, .dictated:
         throw HarnessError("unexpected reply to insert: \(reply)")
     }

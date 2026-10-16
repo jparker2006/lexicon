@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var history: HistoryWindowPresenter?
     /// Nil until the Lexicon has opened, just after launch; its menu line appears then.
     var lexiconPage: LexiconWindowPresenter?
+    var settings: SettingsWindowPresenter?
     var terminateOnSIGTERM: (any DispatchSourceSignal)?
     var sleepObserver: (any NSObjectProtocol)?
     /// The data root, chosen once in `startSystem`.
@@ -93,11 +94,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         terminateOnSIGTERM = Self.terminateOnSIGTERM()
         #if DEBUG
         testHooks = AppTestHooks.start(bundleID: bundleID, dataRoot: paths, indicator: indicator, system: system,
-                                       preferences: preferences, slowModel: slowModel)
+                                       preferences: preferences, slowModel: slowModel, settings: settings)
         #endif
 
         DispatchQueue.main.async { [weak self] in
             self?.startSetup(statusItem: statusItem, preferences: preferences, paths: paths, bundleID: bundleID)
         }
+        // Queued after setup, so it runs after the status item's launch mark and never holds the icon.
+        DispatchQueue.main.async { [weak self] in self?.settings?.warmUp() }
     }
 }

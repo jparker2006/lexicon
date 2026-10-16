@@ -15,6 +15,8 @@ func hook(_ arguments: [String]) async throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     switch try await DevApp.hooks.send(command, timeout: timeout) {
+    case .settingsFixture(let observation):
+        print(String(decoding: try encoder.encode(observation), as: UTF8.self))
     case .status(let status):
         print(String(decoding: try encoder.encode(status), as: UTF8.self))
     case .done:

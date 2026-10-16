@@ -19,6 +19,9 @@ public import LexiconDomain
 public enum TestHookCommand: Codable, Sendable, Equatable {
     /// Who is running, and its grants.
     case status
+    case settingsFixtureBegin
+    case settingsFixtureInspect
+    case settingsFixtureEnd
     /// Dictate this WAV through the live path, typing into the focused field.
     /// `resultDelay`: the local model answers this many seconds late.
     case dictate(wav: String, resultDelay: Double?)
@@ -48,6 +51,55 @@ public enum TestHookCommand: Codable, Sendable, Equatable {
     case privacy(PrivacyMode, alwaysPrivateApps: [String]?)
 }
 
+extension TestHookCommand {
+    private struct WireKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ string: String) { stringValue = string }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let outer = try decoder.container(keyedBy: WireKey.self)
+        guard outer.allKeys.count == 1, let key = outer.allKeys.first else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Expected one command"))
+        }
+        let arguments = try outer.nestedContainer(keyedBy: WireKey.self, forKey: key)
+        func value<T: Decodable>(_ type: T.Type, _ name: String) throws -> T {
+            try arguments.decode(type, forKey: WireKey(name))
+        }
+        func optional<T: Decodable>(_ type: T.Type, _ name: String) throws -> T? {
+            try arguments.decodeIfPresent(type, forKey: WireKey(name))
+        }
+        func noArguments() throws {
+            guard arguments.allKeys.isEmpty else {
+                throw DecodingError.dataCorrupted(.init(codingPath: arguments.codingPath, debugDescription: "Command takes no arguments"))
+            }
+        }
+        switch key.stringValue {
+        case "settingsFixtureBegin": try noArguments(); self = .settingsFixtureBegin
+        case "settingsFixtureInspect": try noArguments(); self = .settingsFixtureInspect
+        case "settingsFixtureEnd": try noArguments(); self = .settingsFixtureEnd
+        case "status": try noArguments(); self = .status
+        case "sleep": try noArguments(); self = .sleep
+        case "silenceMic": try noArguments(); self = .silenceMic
+        case "dropAudio": try noArguments(); self = .dropAudio
+        case "dictate": self = try .dictate(wav: value(String.self, "wav"), resultDelay: optional(Double.self, "resultDelay"))
+        case "keys": self = try .keys(value([TestHookKey].self, "_0"))
+        case "indicator": self = try .indicator(value(IndicatorState.self, "_0"))
+        case "sound": self = try .sound(value(SoundCue.self, "_0"))
+        case "capture":
+            self = try .capture(seconds: value(Double.self, "seconds"), preparedIdle: optional(Double.self, "preparedIdle"),
+                                deviceChange: value(Bool.self, "deviceChange"), deviceUID: optional(String.self, "deviceUID"))
+        case "insert": self = try .insert(text: value(String.self, "text"), delay: value(Double.self, "delay"))
+        case "privacy": self = try .privacy(value(PrivacyMode.self, "_0"), alwaysPrivateApps: optional([String].self, "alwaysPrivateApps"))
+        default:
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown command"))
+        }
+    }
+}
+
 /// A key `keys` presses, as the keyboard would send it.
 public enum TestHookKey: Codable, Sendable, Equatable {
     case fnDown(shift: Bool)
@@ -57,6 +109,7 @@ public enum TestHookKey: Codable, Sendable, Equatable {
 
 public enum TestHookReply: Codable, Sendable, Equatable {
     case status(TestHookStatus)
+    case settingsFixture(TestHookSettingsFixture)
     case done
     /// From the call to play until its first sample reaches the output device.
     case soundPlayed(latency: Duration)
@@ -65,6 +118,43 @@ public enum TestHookReply: Codable, Sendable, Equatable {
     case dictated(TestHookDictation)
     /// The app understood the command but could not do it; the text says why.
     case failed(String)
+}
+
+/// Closed observations of the synthetic Settings fixture. No stored data or item reference crosses the wire.
+public struct TestHookSettingsFixture: Codable, Sendable, Equatable {
+    public enum Phase: String, Codable, Sendable { case idle, reserved, refused, owned, removed, stranded }
+    public enum Outcome: String, Codable, Sendable { case ok, refused, unavailable }
+    public enum Cache: String, Codable, Sendable { case unknown, missing, available }
+    public enum OwnedItem: String, Codable, Sendable { case none, present, unavailable }
+    public let phase: Phase
+    public let outcome: Outcome
+    public let cache: Cache
+    public let item: OwnedItem
+    public let pid: Int32
+    public let fieldsAreEmpty: Bool
+
+    /// Local reporting only. The wire continues to carry closed state, not prose.
+    public var unavailableDescription: String? {
+        if phase == .refused {
+            return "Unavailable/unrun: refused; existing item preserved; lease retained."
+        }
+        if phase == .stranded {
+            return "Unavailable/unrun: stranded fixture; lease retained."
+        }
+        if outcome != .ok || item == .unavailable {
+            return "Unavailable/unrun: fixture observation unavailable."
+        }
+        return nil
+    }
+
+    public init(phase: Phase, outcome: Outcome, cache: Cache, item: OwnedItem, pid: Int32, fieldsAreEmpty: Bool) {
+        self.phase = phase
+        self.outcome = outcome
+        self.cache = cache
+        self.item = item
+        self.pid = pid
+        self.fieldsAreEmpty = fieldsAreEmpty
+    }
 }
 
 public struct TestHookStatus: Codable, Sendable, Equatable {
@@ -162,6 +252,10 @@ public struct TestHookChannel: Sendable {
     /// The launch argument that turns hooks on, for the dev bundle id only:
     /// `open "Lexicon Dev.app" --args --test-hooks`.
     public static let launchArgument = "--test-hooks"
+
+    public static func isEnabled(bundleID: String, arguments: [String]) -> Bool {
+        bundleID == AppPaths.devBundleID && arguments.contains(launchArgument)
+    }
     /// With `launchArgument`: keep the dev app's own data folder instead of a
     /// scratch one, for checks that need its real History or Lexicon.
     public static let devDataArgument = "--dev-data"

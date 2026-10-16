@@ -23,6 +23,7 @@ let usage = """
            lexicon-harness hook privacy on|off [--always-private <bundle id>[,<bundle id>...]]
            lexicon-harness pill [--shots <dir>]
            lexicon-harness history [search word]
+           lexicon-harness settings [inspect | --release --surface settings|history --head <SHA> --out <file> --runs <n>]
            lexicon-harness relaunch [--release] [--test-hooks [--dev-data] [--short-cap]]
            lexicon-harness wait-fn [--count <n>] [--timeout <seconds>]
            lexicon-harness fixture <text>
@@ -57,6 +58,8 @@ let usage = """
               a picture of the pill and the menu bar icon for each state
       history open the History window from the menu bar and time it, click to copy,
               search, close, and compare memory before and after
+      settings with no options, use the fixed .jev Dev fixture. Release mode attaches
+              to the running app and records a first show plus repeated show samples
       relaunch  quit Lexicon Dev as Quit does (a Dictation lands first), open it again
               and print its launch timings. --release: the installed copy must be a
               release build. --test-hooks: with hooks, data in a scratch folder unless
@@ -96,6 +99,7 @@ do {
     case "pill": try await pill(rest)
     case "paste-check": try await PostedInput.during { try await pasteCheck() }
     case "history": try await PostedInput.during { try await HistoryCheck.run(search: rest.first) }
+    case "settings": try await PostedInput.during { try await SettingsCheck.run(rest) }
     case "relaunch": try await relaunch(rest)
     case "wait-fn": try await waitFn(rest)
     case "fixture": try await fixture(rest)

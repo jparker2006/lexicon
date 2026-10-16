@@ -27,6 +27,9 @@ public final class LexiconSystem: Sendable {
     public let fnOff: KeyboardError?
     /// The fn tap; nil while fn is off. The test hooks press keys through it.
     public let keyboard: Keyboard?
+    /// Settings and the Conductor share this exact credential owner.
+    private let secrets: Secrets
+    public let credentials: CredentialCommand
     let speech: SpeechEngine
 
     /// Starts the fn tap first: fn must work within 150 ms of process start, and
@@ -58,18 +61,19 @@ public final class LexiconSystem: Sendable {
         let recorder = Recorder()
         let speech = SpeechEngine(local: local)
         let text = TargetApp(input: input)
+        let secrets = Secrets(.keychain(service: bundleID))
         let conductor = Conductor(
             recorder: recorder, speech: speech, cleanup: Cleanup(), lexicon: lexicon,
             history: history, destination: text, preferences: preferences,
-            secrets: Secrets(.keychain(service: bundleID)), keyboard: keyboard, fixes: nil, jev: nil)
+            secrets: secrets, keyboard: keyboard, fixes: nil, jev: nil)
         return LexiconSystem(paths: paths, conductor: conductor, history: history, preferences: preferences,
                              recorder: recorder, lexicon: lexicon, text: text, fnOff: fnOff, keyboard: keyboard,
-                             speech: speech)
+                             secrets: secrets, speech: speech)
     }
 
     init(paths: AppPaths, conductor: LiveConductor, history: HistoryStore, preferences: PreferencesStore,
          recorder: Recorder, lexicon: Lexicon, text: TargetApp, fnOff: KeyboardError?, keyboard: Keyboard?,
-         speech: SpeechEngine) {
+         secrets: Secrets, speech: SpeechEngine) {
         self.paths = paths
         self.conductor = conductor
         self.history = history
@@ -79,8 +83,20 @@ public final class LexiconSystem: Sendable {
         self.text = text
         self.fnOff = fnOff
         self.keyboard = keyboard
+        self.secrets = secrets
+        self.credentials = secrets.credentials
         self.speech = speech
     }
+
+    #if DEBUG
+    /// The app's closed test-hook bridge to its Dev-owned credential fixture.
+    public func settingsFixture(
+        _ action: SettingsFixtureAction,
+        completion: @escaping @Sendable (SettingsFixtureObservation) -> Void
+    ) {
+        secrets.settingsFixture(action, completion: completion)
+    }
+    #endif
 
     /// Everything that runs for the life of the app, all at once:
     /// 1. key commands -> `conductor.follow`, first, so fn works while the rest starts
