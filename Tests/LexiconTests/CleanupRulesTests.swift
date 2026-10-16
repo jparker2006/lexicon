@@ -192,6 +192,7 @@ let functionStutterCases: [Case] = [
     Case("I I I think it works.", "I think it works."),
     Case("We we should ship.", "We should ship."),
     Case("It is in in the cache.", "It is in the cache."),
+    Case("The build was was broken.", "The build was broken."),
 ]
 
 @Test(arguments: functionStutterCases)
@@ -511,6 +512,9 @@ let cleanup337Decision89FunctionStutterCases: [Case] = [
     Case("I I think so.", "I think so."),
     Case("Ship it to to five users.", "Ship it to five users."),
     Case("Meet me at at ten.", "Meet me at ten."),
+    Case("The build was was broken.", "The build was broken."),
+    Case("It was was broken.", "It was broken."),
+    Case("The tests all passed and the build was was green.", "The tests all passed and the build was green."),
 ]
 
 @Test(arguments: cleanup337Decision89FunctionStutterCases)
@@ -530,8 +534,6 @@ let cleanup337Decision89KeptDoubleCases: [Case] = [
     Case("The build is is ready.", "The build is is ready."),
     Case("I know that that is wrong.", "I know that that is wrong."),
     Case("What it had had was a bug.", "What it had had was a bug."),
-    // "was", like "is", can be meant twice ("What it was was a bug"), so the AI cleanup decides.
-    Case("The build was was broken.", "The build was was broken."),
 ]
 
 @Test(arguments: cleanup337Decision89KeptDoubleCases)
@@ -540,7 +542,8 @@ func cleanup337Decision89ContentNumberProtectedAndMeantDoublesStay(_ c: Case) {
 }
 
 // A name, acronym or keyword spelled like the function word after it is not a stutter;
-// a clause-ending "at" keeps its comma; any pseudo-cleft keeps its predicate "was".
+// a clause-ending "at" keeps its comma before a person asked; a pseudo-cleft keeps its
+// predicate "was"; a word that ends one clause and starts the next after a filler stays.
 let cleanup337MeaningKeptCases: [Case] = [
     Case("Tell IT it is down.", "Tell IT it is down."),
     Case("I think May may be late.", "I think May may be late."),
@@ -569,6 +572,9 @@ let cleanup337StutterFormCases: [Case] = [
     Case("We‘re we‘re, honestly,", "We‘re, honestly,"),
     Case("Let's meet at, um, three o'clock.", "Let's meet at three o'clock."),
     Case("Look at, um, the build.", "Look at the build."),
+    Case("Let's meet at, um, Starbucks.", "Let's meet at Starbucks."),
+    Case("Fix the... the build.", "Fix the build."),
+    Case("We’re... we’re honestly fine.", "We’re honestly fine."),
 ]
 
 @Test(arguments: cleanup337StutterFormCases)
