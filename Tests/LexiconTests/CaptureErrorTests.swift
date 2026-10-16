@@ -273,16 +273,18 @@ func aFailedFullSyncIsDiskTroubleAndTheTakeStaysInRAM() async throws {
 
     let recorder = Recorder(policy: policy)
     let capture = try await recorder.start(.file(wav, pace: .asFastAsPossible), writingTo: caf)
-    let problems = capture.signals.problems
+    var problems = capture.signals.problems.makeAsyncIterator()
     var firstSync = syncs.makeAsyncIterator()
     _ = await firstSync.next()
-    // The stop queues behind the tick that made the sync, so the failure is handled before the take is finished.
+    // Sync completes on its own queue; the notice confirms its result reached the writer.
+    let firstProblem = await problems.next()
     let ended = try #require(await capture.signals.inputEnded())
     let take = await capture.stop(.released(at: ended))
     await recorder.settle()
 
     var seen: [CaptureProblem] = []
-    for await problem in problems { seen.append(problem) }  // the stream finishes at stop
+    if let firstProblem { seen.append(firstProblem) }
+    while let problem = await problems.next() { seen.append(problem) }
 
     #expect(seen == [.diskTrouble])
     #expect(take.summary.storage == .ramOnly)
@@ -512,6 +514,36 @@ private func makeAAC(at url: URL, zeroedMiddle: Bool) throws {
     await recorder.settle()
 
     #expect(take.summary.lost == .zero)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aBrokenFileDictationFinishesAndTypesTheAudioItRead() async throws {
+    let source = try scratchDirectory().appending(path: "broken.m4a")
+    try makeAAC(at: source, zeroedMiddle: true)
+    let model = ScriptedTranscriber(text: "Ship it")
+    let system = try HeadlessSystem.make(paths: .temporary(), context: .unknown, preferences: .defaults,
+                                         local: model, clock: TestClock())
+    let events = await system.conductor.events()
+
+    let result = await system.conductor.dictate(file: source, pace: .asFastAsPossible)
+    await system.conductor.idle()
+
+    #expect(result.status == .inserted)
+    #expect(await system.conductor.destination.delivered[result.id] == "Ship it")
+    #expect(await system.conductor.destination.typedOrder == [result.id])
+    let heard = try #require(await model.heard.first)
+    #expect(!heard.samples.isEmpty)
+    #expect(heard.samples.count < fixtureFrames)
+    let row = try #require(await system.history.dictation(result.id))
+    #expect(row.status == .inserted)
+    #expect(row.origin == .file)
+    #expect(try CAFFile.read(system.history.audioURL(for: result.id)).samples == heard.samples)
+    var notices: [Notice] = []
+    for await event in events {
+        if case .notice(let notice) = event { notices.append(notice) }
+        if case .finished = event { break }
+    }
+    #expect(notices.contains(.audioLost))
 }
 
 @Test(.timeLimit(.minutes(1))) func stoppingEarlyReportsNoLostAudio() async throws {

@@ -123,6 +123,43 @@ final class OneShot<Value: Sendable>: Sendable {
     }
 }
 
+/// One periodic disk check and its stop cutoff. Packet writes share this lock
+/// with publication so a known failure cannot race another write to the file.
+final class DiskResult: Sendable {
+    private struct State: Sendable {
+        var outcome: Bool?
+        var finished = false
+    }
+
+    private let state = Mutex(State())
+
+    /// Publishes a result unless stop has already taken its snapshot.
+    func publish(_ outcome: Bool) -> Bool {
+        state.withLock { state in
+            guard !state.finished else { return false }
+            state.outcome = outcome
+            return true
+        }
+    }
+
+    /// Marks the stop cutoff and returns the latest result already published.
+    func finish() -> Bool? {
+        state.withLock { state in
+            state.finished = true
+            return state.outcome
+        }
+    }
+
+    /// Holds publication and stop at the same boundary as a packet write.
+    func write(_ body: () throws(CAFWriter.Failure) -> Void) throws(CAFWriter.Failure) -> Bool {
+        try state.withLock { state throws(CAFWriter.Failure) -> Bool in
+            guard state.outcome != false else { return false }
+            try body()
+            return true
+        }
+    }
+}
+
 /// Fans each chunk's level out to every `Recorder.levels` observer. Observers
 /// stay subscribed across captures until their stream goes away.
 final class LevelBroadcaster: Sendable {
@@ -208,6 +245,46 @@ struct Tail: Sendable {
 
     private static func samples(_ duration: Duration) -> Int {
         Int((duration / .seconds(1) * Double(PCM16k.sampleRate)).rounded())
+    }
+}
+
+/// Whether a folder's volume has room, asked on fn-down's path, so cheaply
+/// first: `statfs` is one syscall, while the "important usage" figure (which
+/// counts space macOS can purge) can take tens of ms on a first call (#311).
+/// Only a disk `statfs` puts under the floor, or a `statfs` that fails, pays
+/// for that read, so purgeable space still counts. Unknown counts as room: a
+/// failed write still falls back.
+enum FreeSpace {
+    struct Readers: Sendable {
+        /// The volume's free blocks and block size, as `statfs` reports them.
+        var blocks: @Sendable (URL) -> (available: UInt64, size: UInt32)? = { folder in
+            var info = statfs()
+            guard statfs(folder.path, &info) == 0 else { return nil }
+            return (info.f_bavail, info.f_bsize)
+        }
+        var thorough: @Sendable (URL) -> Int64? = { folder in
+            try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                .volumeAvailableCapacityForImportantUsage
+        }
+    }
+
+    static func hasRoom(at folder: URL, minimum: Int64, readers: Readers = Readers()) -> Bool {
+        (availableBytes(at: folder, minimum: minimum, readers: readers) ?? .max) >= minimum
+    }
+
+    static func availableBytes(at folder: URL, minimum: Int64, readers: Readers = Readers()) -> Int64? {
+        if let blocks = readers.blocks(folder) {
+            let free = bytes(blocks.available, blocks.size)
+            if free >= minimum { return free }
+        }
+        return readers.thorough(folder)
+    }
+
+    /// Never traps: a volume that reports "unlimited" (UInt64.max blocks, from
+    /// some network and FUSE filesystems) reads as `.max`, which is room.
+    private static func bytes(_ available: UInt64, _ size: UInt32) -> Int64 {
+        let (product, overflow) = Int64(clamping: available).multipliedReportingOverflow(by: Int64(size))
+        return overflow ? .max : product
     }
 }
 

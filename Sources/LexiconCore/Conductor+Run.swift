@@ -65,7 +65,7 @@ extension Conductor {
 
         // Wait for fn-up (or the hands-free stop press, Esc, a stray tap, sleep, the cap,
         // end of file). The cap is a normal stop from FnGesture.
-        switch await nextEnd(ends, signals: signals) {
+        switch await nextEnd(ends, input: start.input, fileEnded: { await signals.inputEnded() }) {
         case .discard:
             _ = await capture.stop(.immediately)
             attempt.cancel()
@@ -127,16 +127,21 @@ extension Conductor {
         if summary.storage == .ramOnly { emit(.notice(.diskTrouble)) }
     }
 
-    /// First of: a key/sleep end from `ends`, or end of input for a file source.
-    /// A microphone's `inputEnded()` returns only once the capture stops, and
-    /// cancelling it returns nil at once, so the losing side never holds this up.
-    /// Before either, nil means the input broke off (a file read failed): stop now,
-    /// since nothing else will end a file Dictation.
-    func nextEnd(_ ends: AsyncStream<RunEnd>, signals: CaptureSignals) async -> RunEnd {
-        await withTaskGroup(of: RunEnd.self) { group in
+    /// A key/sleep end from `ends`, or for a file source, whichever comes first
+    /// of that and the end of input (cancelling `inputEnded()` returns nil at once,
+    /// so the losing side never holds this up). For a file, nil means the input
+    /// broke off (a read failed): stop now, since nothing else will end it.
+    ///
+    /// A microphone waits for its key end alone: its input ends early only when a
+    /// newer fn-down cut it off, after this press's end was already sent, and a
+    /// race between the two would turn a discarded tap into a typed Dictation.
+    func nextEnd(_ ends: AsyncStream<RunEnd>, input: AudioInput,
+                 fileEnded: @escaping @Sendable () async -> HostTime?) async -> RunEnd {
+        if case .microphone = input { return await ends.first { _ in true } ?? .stop(at: .now()) }
+        return await withTaskGroup(of: RunEnd.self) { group in
             // `ends` finishing with no element should not happen; stopping is the safe reading.
             group.addTask { await ends.first { _ in true } ?? .stop(at: .now()) }
-            group.addTask { .stop(at: await signals.inputEnded() ?? .now()) }
+            group.addTask { .stop(at: await fileEnded() ?? .now()) }
             defer { group.cancelAll() }
             return await group.next() ?? .stop(at: .now())
         }

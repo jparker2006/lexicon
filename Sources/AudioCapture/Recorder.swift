@@ -41,19 +41,23 @@ public struct AudioLevel: Sendable { public let rms: Float }
 /// real-time thread, which only copies into `SPSCRing`), the writer queue that
 /// drains every 100 ms, AVAudioConverter (MinimumPhase, .max) to 16 kHz mono
 /// Int16, `AudioFileWritePackets` into a CAF whose data size stays -1 while open,
-/// F_FULLFSYNC every 1 s off the audio thread, device pinning, engine rebuild on
-/// a configuration change (same file keeps growing, gap logged), the disk-low
-/// and write-error fallback to RAM, and the adaptive tail.
+/// F_FULLFSYNC every 1 s on its own queue, device pinning, engine rebuild on a
+/// configuration change (same file keeps growing, gap logged), the disk-low and
+/// write-error fallback to RAM, and the adaptive tail.
 /// Never touches outputNode or mainMixerNode.
 ///
 /// Threads: the Core Audio IO thread (sink node), the microphone's engine
-/// queue, and one serial writer queue for every file and converter.
+/// queue, one serial writer queue for every converter and file write, and one
+/// serial sync queue for file flushes and descriptor closes.
 public final class Recorder: Sendable {
-    /// The one serial writer queue: drains, converts, writes, syncs, closes.
+    /// The one serial writer queue: drains, converts, writes, and closes AudioFiles.
     private let writerQueue = DispatchQueue(label: "lexicon.audio.writer", qos: .userInitiated)
+    /// Keeps slow flushes away from the queue that drains the mic ring.
+    private let syncQueue = DispatchQueue(label: "lexicon.audio.sync", qos: .utility)
     private let broadcaster = LevelBroadcaster()
     let microphone: Microphone
     let policy: FlushPolicy
+    private let warmedFiles = Atomic(false)
     #if DEBUG
     private let silenceNext = Atomic(false)
     private let dropNext = Atomic(false)
@@ -70,15 +74,21 @@ public final class Recorder: Sendable {
     }
 
     /// At launch, so the first `start` only has to start hardware. After every
-    /// stop the microphone prepares the next engine itself. A file has nothing to warm up.
+    /// stop the microphone prepares the next engine itself. A file input's engine
+    /// has nothing to warm up. The first `prepare` also makes and removes a
+    /// scratch CAF on the writer queue (`CAFWriter.warmUp`), since every
+    /// capture's file is made on fn-down's path.
     public func prepare(_ input: AudioInput) {
+        if !warmedFiles.exchange(true, ordering: .relaxed) { writerQueue.async { CAFWriter.warmUp() } }
         guard case .microphone(let uid) = input else { return }
         microphone.prepare(deviceUID: uid)
     }
 
-    /// fn-down at `keyDown`. Starts the engine, then (on the writer queue, not in
-    /// front of the hardware start) creates `file`. Returns as soon as capture is
-    /// running. The summary's start gap counts from `keyDown`.
+    /// fn-down at `keyDown`. Starts the engine, then creates `file` (after the
+    /// hardware start, never in front of it), so the file exists once this
+    /// returns, unless it could not be made (the capture is then RAM-only).
+    /// Returns as soon as capture is running. The summary's start gap counts
+    /// from `keyDown`.
     ///
     /// Ownership handoff: while the LiveCapture is open, this module is the only
     /// writer of `file`. After `stop`, the file belongs to History (#4).
@@ -100,8 +110,8 @@ public final class Recorder: Sendable {
             source = try FileSource(url: url, pace: pace)
             if pace == .asFastAsPossible { policy.drainEvery = .milliseconds(5) }
         }
-        guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue, startedAt: keyDown,
-                                     onLevel: broadcaster.send) else {
+        guard let core = CaptureCore(source: source, file: file, policy: policy, queue: writerQueue,
+                                     syncQueue: syncQueue, startedAt: keyDown, onLevel: broadcaster.send) else {
             source.stop()
             throw .engineFailed("no converter from \(source.firstSegment.rate) Hz to 16 kHz")
         }
@@ -113,10 +123,16 @@ public final class Recorder: Sendable {
         return LiveCapture(core: core)
     }
 
-    /// Returns once every stopped or dropped capture's file is synced and closed.
-    /// For quit, and for tests that read a file right after `stop`.
+    /// Waits for writer work and sync work, including final syncs enqueued by writer callbacks.
     public func settle() async {
-        await withCheckedContinuation { continuation in writerQueue.async { continuation.resume() } }
+        await waitForQueue(writerQueue)
+        await waitForQueue(syncQueue)
+        await waitForQueue(writerQueue)
+        await waitForQueue(syncQueue)
+    }
+
+    private func waitForQueue(_ queue: DispatchQueue) async {
+        await withCheckedContinuation { continuation in queue.async { continuation.resume() } }
     }
 
     /// Levels of whatever is recording, one per chunk, for the indicator. Each call
@@ -220,8 +236,9 @@ public struct LiveCapture: ~Copyable, Sendable {
     public var signals: CaptureSignals { core.signals }
 
     /// Returns once the last packet is written and `feed` has finished. The
-    /// F_FULLFSYNC and close (which writes the real size) run after, on the
-    /// writer queue, in parallel with transcription (`Recorder.settle` waits).
+    /// AudioFileClose (which writes the real size) runs after on the writer queue;
+    /// the final sync and descriptor close run on the sync queue, in parallel with
+    /// transcription (`Recorder.settle` waits).
     /// `.released` keeps capturing until the last word is in: 40 ms of quiet,
     /// at most 200 ms after fn-up. A file read to its end has no tail left.
     public consuming func stop(_ ending: Ending) async -> Take {

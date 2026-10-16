@@ -11,11 +11,12 @@ import LexiconDomain
 /// to the file, so anything a consumer sees survives an app crash. After
 /// `.diskTrouble` every chunk is yielded unwritten, the failed one included:
 /// RAM is the primary copy, and the problem was signalled first.
-/// F_FULLFSYNC every `fullSyncEvery`. Under 1 GB free, or on a write or sync
-/// error, the capture carries on in RAM.
+/// Free space and F_FULLFSYNC every `fullSyncEvery` on the sync queue. Under
+/// 1 GB free, or on a write or sync error, the writer switches to RAM.
 ///
 /// `@unchecked Sendable`: every `var` is touched only on `queue` (all entry
-/// points dispatch onto it), except `tailLength` (see there); the `let`s are
+/// points dispatch onto it), except `tailLength` (see there), and `writer` and
+/// `fileCreate`, which `init` sets on the caller before anything is queued; the `let`s are
 /// immutable or thread-safe themselves.
 final class CaptureCore: @unchecked Sendable {
     let feed: AudioFeed
@@ -25,6 +26,7 @@ final class CaptureCore: @unchecked Sendable {
     private let feedContinuation: AudioFeed.Continuation
     private let problems: AsyncStream<CaptureProblem>.Continuation
     private let queue: DispatchQueue
+    private let syncQueue: DispatchQueue
     private let policy: FlushPolicy
     private let fileURL: URL
     /// fn-down, for the start gap.
@@ -39,6 +41,7 @@ final class CaptureCore: @unchecked Sendable {
     private var samples: [Int16] = []
     private var chunkIndex = 0
     private var lastFullSync = DispatchTime.now()
+    private var syncResult: DiskResult?
     private var timer: (any DispatchSourceTimer)?
     private var tailTimer: (any DispatchSourceTimer)?
     private var tail = Tail()
@@ -53,6 +56,8 @@ final class CaptureCore: @unchecked Sendable {
     /// Audio kept after fn-up. Set by `finish` on the writer queue; read only
     /// after `stop` returned, which orders it after the write.
     private(set) var tailLength: Duration?
+    /// How long `init` took to make the file on fn-down's path, for the log line.
+    private var fileCreate: Duration = .zero
     #if DEBUG
     /// Every frame read as zero (the `mic zeros` test hook). Set before `begin`.
     var silenced = false
@@ -60,13 +65,15 @@ final class CaptureCore: @unchecked Sendable {
     var dropsFirstBlock = false
     #endif
 
-    init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, startedAt: HostTime,
+    init?(source: any CaptureSource, file: URL, policy: FlushPolicy, queue: DispatchQueue, syncQueue: DispatchQueue,
+          startedAt: HostTime,
           onLevel: @escaping @Sendable (AudioLevel) -> Void) {
         segment = source.firstSegment
         guard let resampler = Self.resampler(for: segment.rate, policy: policy) else { return nil }
         self.resampler = resampler
         self.source = source
         self.queue = queue
+        self.syncQueue = syncQueue
         self.policy = policy
         self.startedAt = startedAt
         self.onLevel = onLevel
@@ -76,27 +83,35 @@ final class CaptureCore: @unchecked Sendable {
         self.problems = problems
         signals = CaptureSignals(first: OneShot(), end: OneShot(), problems: problemStream)
         samples.reserveCapacity(PCM16k.sampleRate * 30)
+        // The file is made here, on the caller, so it exists when `Recorder.start`
+        // returns: the shared writer queue may still be closing the last Dictation,
+        // and a kill before its turn would leave no trace (recovery adopts a file
+        // with no row). One file open, no sync, and a free-space read that is one
+        // syscall on a disk with room (`FreeSpace`); the ring holds the first audio meanwhile.
+        let clock = ContinuousClock()
+        let began = clock.now
+        if hasRoom() { writer = try? CAFWriter(creating: file, calls: policy.files) }
+        fileCreate = began.duration(to: clock.now)
     }
 
-    /// Creates the file and the drain timer on the writer queue, and starts the
-    /// producer meanwhile: the file never stands in front of the first audio
-    /// (the ring holds it), and is queued before anything the producer reports.
+    /// Arms the drain timer on the writer queue and starts the producer. A file
+    /// `init` could not create (under 1 GB free, a failed or refused create) makes
+    /// the capture RAM-only from the start, reported before anything the producer does.
     func begin() {
         defer {
             let (first, end) = (signals.first, signals.end)
-            source.start(SourceEvents(firstAudio: { first.settle($0) }, ended: { end.settle($0) },
+            source.start(SourceEvents(firstAudio: { [weak self] at in
+                first.settle(at)
+                guard let self else { return }
+                self.queue.async { [self] in
+                    guard take == nil else { return }
+                    drain()
+                }
+            }, ended: { end.settle($0) },
                                       switched: { [weak self] in self?.switchSegment(to: $0) }))
         }
         queue.async { [self] in
-            if hasRoom() {
-                do {
-                    writer = try CAFWriter(creating: fileURL, calls: policy.files)
-                } catch {
-                    diskTrouble()
-                }
-            } else {
-                diskTrouble()
-            }
+            if writer == nil { diskTrouble() }
             let timer = DispatchSource.makeTimerSource(queue: queue)
             timer.schedule(deadline: .now() + policy.drainEvery.dispatch, repeating: policy.drainEvery.dispatch,
                            leeway: .milliseconds(5))
@@ -137,13 +152,33 @@ final class CaptureCore: @unchecked Sendable {
     private func tick() {
         guard take == nil else { return }
         drain()
-        if DispatchTime.now() >= lastFullSync + policy.fullSyncEvery.dispatch {
+        guard writer != nil, syncResult == nil,
+              DispatchTime.now() >= lastFullSync + policy.fullSyncEvery.dispatch else { return }
+        let result = DiskResult()
+        syncResult = result
+        let file = writer?.syncFile
+        syncQueue.async { [self] in
+            let succeeded: Bool
             do {
-                try writer?.fullSync()
+                if hasRoom() {
+                    try file?.fullSync()
+                    succeeded = true
+                } else {
+                    succeeded = false
+                }
             } catch {
-                diskTrouble()
+                succeeded = false
             }
-            lastFullSync = .now()
+            let accepted = result.publish(succeeded)
+            if !accepted, !succeeded {
+                Self.log.error("audio disk check failed after Dictation stopped")
+            }
+            queue.async { [self] in
+                if syncResult === result { syncResult = nil }
+                lastFullSync = .now()
+                guard accepted, take == nil, writer != nil else { return }
+                if !succeeded { diskTrouble() }
+            }
         }
     }
 
@@ -183,6 +218,9 @@ final class CaptureCore: @unchecked Sendable {
         source.stop()  // whatever it writes after this is never read
         drain()
         lostEarlier += resampler.flush(emit: emit)
+        // Snapshot only a result already published; an unfinished check logs a
+        // later failure without changing this Take or holding up its text.
+        if let syncResult, syncResult.finish() == false { diskTrouble() }
         feedContinuation.finish()
         problems.finish()
         signals.first.settle(nil)
@@ -207,7 +245,8 @@ final class CaptureCore: @unchecked Sendable {
             captured \(summary.duration.ms, privacy: .public) ms, start gap \(summary.startGap?.ms ?? -1, privacy: .public) ms, \
             tail \(self.tailLength?.ms ?? -1, privacy: .public) ms, \(summary.gaps.count, privacy: .public) device changes, \
             \(summary.storage.rawValue, privacy: .public), \(summary.lost.ms, privacy: .public) ms lost, \
-            sound \(String(describing: self.sound), privacy: .public)
+            sound \(String(describing: self.sound), privacy: .public), \
+            file made in \(self.fileCreate.microseconds, privacy: .public) us
             """)
     }
 
@@ -231,9 +270,25 @@ final class CaptureCore: @unchecked Sendable {
     private func closeFile() {
         guard let writer else { return }
         self.writer = nil
+        let file = writer.takeSyncFile()
+        let failure: CAFWriter.Failure?
         do {
             try writer.close()
+            failure = nil
         } catch {
+            failure = error
+        }
+        // Serialized after any periodic sync: no descriptor closes under it,
+        // and neither a final sync nor a repair's sync can hold up the drain.
+        syncQueue.async { [self] in
+            let syncFailure: CAFWriter.Failure?
+            do throws(CAFWriter.Failure) {
+                if let file { try file.close() }
+                syncFailure = nil
+            } catch {
+                syncFailure = error
+            }
+            guard let error = failure ?? syncFailure else { return }
             let header = switch try? CAFFile.finalize(fileURL) {
             case .wroteSize: "header repaired"
             case .wasWhole: "header already whole"
@@ -282,8 +337,13 @@ final class CaptureCore: @unchecked Sendable {
         onLevel(AudioLevel(rms: Self.rms(of: chunk)))
         samples.append(contentsOf: chunk)
         if let writer {
-            do {
-                try writer.write(chunk)
+            do throws(CAFWriter.Failure) {
+                if let syncResult {
+                    let wrote = try syncResult.write { () throws(CAFWriter.Failure) in try writer.write(chunk) }
+                    if !wrote { diskTrouble() }
+                } else {
+                    try writer.write(chunk)
+                }
             } catch {
                 diskTrouble()
             }
@@ -294,14 +354,13 @@ final class CaptureCore: @unchecked Sendable {
 
     /// Under 1 GB free (#4), asked of the nearest folder that exists (the audio
     /// folder may not yet). Unknown counts as room: a failed write still falls back.
+    /// Reads only immutable capture settings, so sync work can call it off the writer queue.
     private func hasRoom() -> Bool {
         var folder = fileURL.deletingLastPathComponent()
         while !FileManager.default.fileExists(atPath: folder.path), folder.pathComponents.count > 1 {
             folder.deleteLastPathComponent()
         }
-        let free = try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            .volumeAvailableCapacityForImportantUsage
-        return (free ?? .max) >= policy.minimumFreeBytes
+        return (policy.files.freeBytes(folder, policy.minimumFreeBytes) ?? .max) >= policy.minimumFreeBytes
     }
 
     /// Under 1 GB free or a write failed: continue in RAM only (#4). What is
@@ -333,6 +392,11 @@ final class CaptureCore: @unchecked Sendable {
 }
 
 private extension Duration {
+    var microseconds: Int64 {
+        let (seconds, attoseconds) = components
+        return seconds * 1_000_000 + attoseconds / 1_000_000_000_000
+    }
+
     var dispatch: DispatchTimeInterval {
         let (seconds, attoseconds) = components
         return .nanoseconds(Int(seconds) * 1_000_000_000 + Int(attoseconds / 1_000_000_000))

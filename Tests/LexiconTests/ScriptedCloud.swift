@@ -41,13 +41,14 @@ struct Reply: Sendable {
 /// A provider wire format for tests: text frames "partial:", "final:", "end",
 /// "error:"; audio as binary frames.
 struct FakeProvider: StreamingProvider {
+    let requiresAcknowledgment = false
     func connectRequest(key: String) -> URLRequest {
         var request = URLRequest(url: URL(string: "wss://fake-provider.invalid/asr")!)
         request.setValue(key, forHTTPHeaderField: "Authorization")
         return request
     }
 
-    func sessionStart(terms: [Term]) -> ProviderMessage? {
+    func sessionStart(key: String, terms: [Term]) -> ProviderMessage? {
         .text("start:" + terms.map(\.text).joined(separator: ","))
     }
 

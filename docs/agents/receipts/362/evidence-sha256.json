@@ -1,0 +1,19 @@
+{
+  "main-failed.log": "e46511e44ed792311fa0f8a52279424da79688f23912c0679132b0acc32b1f41",
+  "pr306-failed.log": "828a05230a0d8b769806971905415a0cf40e068e7ca0b9acc0275f9d0e100f94",
+  "baseline-45.log": "d31c32c1bfb9084a6bb36e5a0871ade778b10a1ccd77bbce91066758e76a37be",
+  "diagnostic-combined.jsonl": "78e7f9bfcb7c5e85c248d398dfae74b5a201cb9fd19dc43c78a608a1e046d9f0",
+  "git-operations.jsonl": "c22e23175f91946aa219f177ab4ebc127f10f8b8191cd72f0436468dd48dea61",
+  "instrumented-baseline.test.mjs": "9ce5bf1007bb25d22cdc27efe49610ad8118908878d24dc5b38265c5d6fda8ff",
+  "coverage-before.json": "64b28d912f246c0d5fff36155f468bb5b79273f44df1779a5ad0974f270a0895",
+  "red.log": "f20ade1cb7df122dc539a954efac38ee23d894b79f87924c788899c862b4fd62",
+  "red-wrapper.log": "f1944b004239693b8b1cb03837d06744062c1f42ade80cac53a849aef0bab3e7",
+  "green-runner.log": "62a3c370af7aae4ac1780c20f36b82a1a8607c285d3f6cf153ca8c807ccb220c",
+  "focused-green.log": "58ca9dbcf4d4edea8a213aafbb6c93b259907007e15f83c45c04adf51289b24b",
+  "driver-green.log": "cb58c438ed88f8300d63cbc0d959eca8918c05385226b1f428f561c3a8415c5a",
+  "repaired-45.log": "2fdc17ea4879441d60a377039cec5fd80717eac4820966064e49125e572a280b",
+  "lifecycle.log": "c5513571ec09ad9e9bc196e7404e6046c13be329b00f8cbe796fd859d8ede31f",
+  "red-detached.log": "5c4a5acf12b0859d2da035b2d4ce11f756933c16ea32e1e59049d2851433c2fc",
+  "runner-final-green.log": "08f3ed0061301c0e62c93bc6a4eb8fbc5df7ce8cbc4f9a51bcf72ef99058d82b",
+  "swarm.md": "9ec0d6416ec4fa47b987d2a06a71811bbaf19ed4730b072a7a3c55391a7c2ca1"
+}
