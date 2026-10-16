@@ -320,11 +320,15 @@ public final class Setup: NSObject {
     }
 
     private func downloaded(_ percent: Double) {
-        guard case .downloading(let shown) = facts.model, percent > shown else { return }
-        setModel(.downloading(percent))
+        switch facts.model {
+        case .downloading(let shown) where percent > shown: setModel(.downloading(percent))
+        // A first load that failed is purged and downloaded again: the row follows.
+        case .preparing: setModel(.downloading(percent))
+        default: return
+        }
     }
 
-    /// The files are down; only the compile is left. A late download report never takes it back.
+    /// The files are down; only the compile is left.
     private func preparing() {
         guard case .downloading = facts.model else { return }
         setModel(.preparing)

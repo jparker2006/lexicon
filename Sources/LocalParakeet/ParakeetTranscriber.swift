@@ -212,12 +212,7 @@ public actor ParakeetTranscriber: LocalTranscriber {
         try await install(paths: paths, access: access, progress: progress) { models, progress in
             let manager = UnifiedAsrManager(encoderPrecision: .int8)
             try await manager.loadModels(to: models, progressHandler: { report in
-                switch report.phase {
-                case .listing: progress(.downloading(0))
-                case .downloading(let done, let total):
-                    progress(Self.installStep(fraction: report.fractionCompleted, filesDone: done, of: total))
-                case .compiling: progress(.preparing)
-                }
+                progress(Self.installStep(fraction: report.fractionCompleted, phase: InstallPhase(report.phase)))
             })
             await manager.cleanup()
         }
@@ -225,10 +220,29 @@ public actor ParakeetTranscriber: LocalTranscriber {
 
     /// FluidAudio's progress for this install, as setup shows it. Its repo load counts
     /// the download as 0 to 0.5 of the whole and then compiles (about 25 s on a new
-    /// build) without a word, so the last file landing is where preparing starts; a
+    /// build) with no report on this path, so the last file landing is where preparing starts; a
     /// set it finds whole already (0 of 0 files) goes straight to preparing.
-    static func installStep(fraction: Double, filesDone: Int, of totalFiles: Int) -> ModelInstallProgress {
-        filesDone >= totalFiles ? .preparing : .downloading(min(1, fraction / 0.5))
+    static func installStep(fraction: Double, phase: InstallPhase) -> ModelInstallProgress {
+        switch phase {
+        case .listing: .downloading(0)
+        case .downloading(let done, let total): done >= total ? .preparing : .downloading(min(1, fraction / 0.5))
+        case .compiling: .preparing
+        }
+    }
+
+    /// FluidAudio's `DownloadPhase`, one for one, so the routing above is tested without FluidAudio.
+    enum InstallPhase: Sendable, Hashable {
+        case listing
+        case downloading(done: Int, total: Int)
+        case compiling
+
+        init(_ phase: DownloadPhase) {
+            switch phase {
+            case .listing: self = .listing
+            case .downloading(let done, let total): self = .downloading(done: done, total: total)
+            case .compiling: self = .compiling
+            }
+        }
     }
 
     /// `download` fetches and prepares the model into the `models` folder it is
