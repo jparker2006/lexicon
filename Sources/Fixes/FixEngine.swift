@@ -35,11 +35,12 @@ public enum RespeakOutcome: Sendable, Hashable {
 /// non-empty value, diff when focus leaves / field clears / next Dictation /
 /// 60 s), matching a Claude Code or Codex hook prompt to the Dictation it
 /// contains, the "I just fixed this" read, diffing, size filters, the Jev
-/// recognition-error check with a local fallback, and Re-speak replacement
-/// (`RespeakResolver` finds the span).
+/// recognition-error check with a local fallback, and finding the span a
+/// Re-speak replaces (`RespeakResolver`; the Conductor replaces it, holding the
+/// Re-speak's live target).
 ///
 /// Writes Fixes only through `HistoryStore.record(.fixRecorded)` and Rules only
-/// through `Lexicon.add`. Owns nothing durable itself; its only state is the
+/// through `Lexicon.add`; a Re-speak's Fix is the Conductor's, which made the replace. Owns nothing durable itself; its only state is the
 /// in-memory watch windows.
 public actor FixEngine {
     public init(history: HistoryStore, lexicon: Lexicon, text: TargetApp, jev: JevClient, prompter: any FixPrompter) {

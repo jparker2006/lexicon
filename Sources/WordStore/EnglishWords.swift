@@ -89,3 +89,14 @@ enum EnglishWords {
         bytes.reduce(fnvBasis) { ($0 ^ UInt64($1)) &* fnvPrime }
     }
 }
+
+/// One word at a time, for a Re-speak's first capital: each call scans the list.
+public enum PlainEnglish {
+    /// A plain English word that the list never writes with a capital: "dog",
+    /// but not "will" (the list also has "Will", a name) or "supabase".
+    public static func contains(_ word: String) -> Bool {
+        let lower = word.lowercased(), capital = lower.prefix(1).uppercased() + lower.dropFirst()
+        let found = EnglishWords.among([lower, capital])
+        return found.contains(lower) && !found.contains(capital)
+    }
+}

@@ -90,6 +90,11 @@ enum HistorySchema {
         );
         CREATE INDEX earlier_version_by_dictation ON earlier_version(dictation_id);
         """,
+        """
+        -- Where a Fix's words start in the final text before it (UTF-16): the
+        -- same words can appear twice, and a Fix belongs to one of them.
+        ALTER TABLE fix ADD COLUMN text_location INTEGER;
+        """,
     ]
 
     /// Indexes whose SQL is generated from Swift enums. Not migrations (a

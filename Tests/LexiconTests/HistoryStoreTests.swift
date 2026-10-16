@@ -95,7 +95,7 @@ private func origin(for status: DictationStatus) -> DictationOrigin { status == 
     #expect(row.app.bundleID == app.bundleID)
     #expect(row.audio == .onDisk)
     #expect(row.pinned == false)
-    #expect(await store.receipt(for: id) == receipt)
+    #expect(try await store.receipt(for: id) == receipt)
 }
 
 @Test(arguments: DictationStatus.allCases)
@@ -169,7 +169,7 @@ func deleteIsRefusedWhileInFlight(stored: DictationStatus) async throws {
         #expect(FileManager.default.fileExists(atPath: file))
     } else {
         #expect(await store.dictation(id) == nil)
-        #expect(await store.receipt(for: id) == nil)
+        #expect(try await store.receipt(for: id) == nil)
         #expect(!FileManager.default.fileExists(atPath: file))
     }
 }

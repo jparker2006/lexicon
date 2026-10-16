@@ -34,6 +34,15 @@ public protocol TextDestination: Sendable {
     /// ⌃⌘V: the same insert, except that Jake asked for it, so it still pastes
     /// when Lexicon can't save his clipboard (`TargetApp`, without the restore).
     func pasteLast(_ text: String, for id: DictationID, at target: Target) async -> Delivery
+
+    /// Re-speak: the target's field, read now. nil when it is gone or unreadable.
+    func read(at target: Target) async -> FieldText?
+
+    /// Re-speak: pastes `text` over `span` of the target's field through the
+    /// same paste-and-restore path and late-text guard as an insert, only while
+    /// the span still reads `expected`. Taking the Re-speak's own live `Target`
+    /// is what keeps a recovered or retried Re-speak from editing any app.
+    func replace(_ span: TextSpan, expected: String, with text: String, at target: Target) async -> ReplaceOutcome
 }
 
 extension TextDestination {
@@ -42,5 +51,12 @@ extension TextDestination {
 
     public func pasteLast(_ text: String, for id: DictationID, at target: Target) async -> Delivery {
         await insert(text, for: id, at: target)
+    }
+
+    /// A destination with no field to read has nothing to replace.
+    public func read(at target: Target) async -> FieldText? { nil }
+
+    public func replace(_ span: TextSpan, expected: String, with text: String, at target: Target) async -> ReplaceOutcome {
+        .refused(.noField)
     }
 }

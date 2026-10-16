@@ -182,13 +182,22 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// A Dictation's final text. Throws when History can't be read: that is not
+    /// "no such Dictation".
+    public func finalText(of id: DictationID) async throws -> String? {
+        try await read { db in
+            try db.query("SELECT final_text FROM dictation WHERE id = ?", [.text(id.description)]).first?.text(0)
+        }
+    }
+
     /// Recently inserted Dictations, newest first, for matching a hook prompt to its Dictation.
     public func recentInserted(within: Duration) async -> [DictationRecord] { fatalError("not implemented") }
 
     /// Where a Dictation's text last landed. The durable key Re-speak and Hand fix
     /// use once AppText's live references are gone (`TargetApp.reattach`).
-    public func receipt(for id: DictationID) async -> InsertionReceipt? {
-        try? await read { db in
+    /// Throws when History can't be read: that is not "never inserted".
+    public func receipt(for id: DictationID) async throws -> InsertionReceipt? {
+        try await read { db in
             try db.query("""
                 SELECT app_bundle_id, field_fingerprint, caret_after, context_before, context_after, inserted_at
                 FROM insertion WHERE dictation_id = ?
@@ -426,10 +435,11 @@ extension HistoryStore {
         case .fixRecorded(let fix):
             guard stored != nil else { return nil }
             try db.execute("""
-                INSERT OR IGNORE INTO fix (id, dictation_id, kind, source, text_before, text_after, verdict, at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO fix (id, dictation_id, kind, source, text_before, text_after, text_location, verdict, at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, [.text(fix.id.uuid.uuidString), key, .text(fix.kind.rawValue), .text(fix.source.rawValue),
-                      .text(fix.before), .text(fix.after), .text(fix.verdict.rawValue), .int(fix.at.unixMs)])
+                      .text(fix.before), .text(fix.after), fix.location.map { .int(Int64($0)) } ?? .null,
+                      .text(fix.verdict.rawValue), .int(fix.at.unixMs)])
             wroteChild = db.changes > 0
             if wroteChild { try Self.materializeFinalText(id, in: db) }
 
@@ -483,19 +493,30 @@ extension HistoryStore {
     }
 
     /// Final text = cleaned text with every Fix not rejected applied in the order
-    /// they were made. A Fix replaces the first occurrence of its `before`; a Fix
-    /// whose `before` is no longer there changes nothing. The only writer of `final_text`.
+    /// they were made. A Fix replaces the occurrence of its `before` nearest its
+    /// location (exactly there unless an earlier Fix was rejected since), or the
+    /// first one when it has no location; a Fix whose `before` is no longer there
+    /// changes nothing. The only writer of `final_text`.
     private static func materializeFinalText(_ id: DictationID, in db: Database) throws {
         let key = SQLValue.text(id.description)
         guard var text = try db.query("SELECT cleaned_text FROM dictation WHERE id = ?", [key]).first?.text(0) else { return }
         let fixes = try db.query("""
-            SELECT text_before, text_after FROM fix WHERE dictation_id = ? AND verdict != ? ORDER BY at, rowid
+            SELECT text_before, text_after, text_location FROM fix WHERE dictation_id = ? AND verdict != ? ORDER BY at, rowid
             """, [key, .text(FixVerdict.rejected.rawValue)])
         for fix in fixes {
-            guard let before = fix.text(0), !before.isEmpty, let range = text.range(of: before) else { continue }
+            guard let before = fix.text(0), !before.isEmpty,
+                  let range = occurrence(of: before, in: text, nearest: fix.int(2).map(Int.init)) else { continue }
             text.replaceSubrange(range, with: fix.text(1) ?? "")
         }
         try db.execute("UPDATE dictation SET final_text = ? WHERE id = ?", [.text(text), key])
+    }
+
+    /// The occurrence of `before` whose start is nearest `location` (UTF-16, as
+    /// AX counts); the first one when there is no location.
+    static func occurrence(of before: String, in text: String, nearest location: Int?) -> Range<String.Index>? {
+        guard let location else { return text.range(of: before) }
+        let offset = { (range: Range<String.Index>) in text.utf16.distance(from: text.startIndex, to: range.lowerBound) }
+        return text.ranges(of: before).min { abs(offset($0) - location) < abs(offset($1) - location) }
     }
 
     /// First half of a delete: commit the mark before the file goes (see `dropAudio`).

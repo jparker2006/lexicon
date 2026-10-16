@@ -38,16 +38,21 @@ public struct Fix: Sendable, Hashable, Codable {
     public var source: FixSource
     public var before: String
     public var after: String
+    /// Where `before` starts in the Dictation's final text as it stood just
+    /// before this Fix, in UTF-16 offsets: the same words can appear twice, and
+    /// a Fix belongs to one of them. nil: not known (the first one is meant).
+    public var location: Int?
     public var verdict: FixVerdict
     public var at: Date
     public init(id: FixID = FixID(), dictation: DictationID, kind: FixKind, source: FixSource,
-                before: String, after: String, verdict: FixVerdict, at: Date) {
+                before: String, after: String, location: Int? = nil, verdict: FixVerdict, at: Date) {
         self.id = id
         self.dictation = dictation
         self.kind = kind
         self.source = source
         self.before = before
         self.after = after
+        self.location = location
         self.verdict = verdict
         self.at = at
     }

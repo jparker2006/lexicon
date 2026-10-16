@@ -44,7 +44,8 @@ extension Conductor {
             for record in heard.attempts { history.record(.attempted(id, record)) }
             if blank { return failed(id, .silence) }
             // Queued for disk BEFORE it is typed. Fire-and-forget FIFO: still no wait on SQLite.
-            let typing = run.purpose == .type && run.target != nil
+            // Ready before anything is pasted: a Dictation's insert or a Re-speak's replace.
+            let typing = run.target != nil
             // A Retry keeps the text it replaces as an earlier version (#213).
             history.record(run.isRetry
                 ? .retried(id, cleaned.versions, cleanup: cleaned.outcome, model: heard.model, version: UUID())
@@ -52,10 +53,25 @@ extension Conductor {
 
             var delivery = Delivery.historyOnly
             var lag: Duration?
-            if typing, let target = run.target {
+            var respeak: RespeakStep?
+            if run.purpose == .type, let target = run.target {
                 await insertTurn(id)  // Dictations insert in the order they were spoken (#18)
                 delivery = await destination.insert(cleaned.versions.cleaned, for: id, at: target)  // text at the cursor
                 lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
+            } else if case .respeak = run.purpose, let target = run.target {
+                // Only a live target may change another app: a recovered or retried Re-speak has none (#4).
+                // In turn, so it fixes text an earlier Dictation is still pasting; the slow lookups come first.
+                let words = await respeakWords(cleaned.versions.cleaned)
+                await insertTurn(id)
+                respeak = await replaceSelection(cleaned.versions.cleaned, at: target, words: words)
+                // Its words landed in the field: the row reads inserted, with the lag to the fix.
+                switch respeak {
+                case .replaced(_, _, _, let receipt)?:
+                    delivery = .inserted(receipt)
+                    lag = run.releasedAt.map { HostTime.now().duration(since: $0) }
+                case .notLanded(let problem)?: delivery = .notInserted(NotInsertedReason(problem))
+                case .noSelection?, nil: delivery = .notInserted(.pasteFailed)  // #85 finds the span by sound
+                }
             }
             releaseInsertTurn(id)  // the next Dictation types now, not after the bookkeeping below
             run.hold?.end()  // the Dictation landed: App Nap may return
@@ -64,21 +80,34 @@ extension Conductor {
             switch delivery {
             case .inserted(let receipt):
                 history.record(.delivered(id, receipt, lag: lag))
-                await fixes?.didInsert(id, text: cleaned.versions.cleaned, app: run.context, receipt: receipt,
-                                       access: run.access)
+                // A Re-speak's words are a fix, not a Dictation to watch for Hand fixes.
+                if run.purpose == .type {
+                    await fixes?.didInsert(id, text: cleaned.versions.cleaned, app: run.context, receipt: receipt,
+                                           access: run.access)
+                }
             case .notInserted(let reason):
                 history.record(.notInserted(id, reason))
-                emit(.notice(.readyToPaste(id)))
+                // A Re-speak's words are a correction: no paste-last notice; its own notice says why.
+                if run.purpose == .type { emit(.notice(.readyToPaste(id))) }
             case .historyOnly:
                 // Esc'd or late live Dictation: say it's waiting in paste-last (#18 indicator state).
                 // Not for a Retry of one already settled: Jake is looking at it in History.
                 if run.origin == .live, run.purpose == .type, !run.isRetry {
                     emit(.notice(.readyToPaste(id)))
                 }
+                // A live Re-speak that didn't run: released with no target means nothing could
+                // take text at its fn-up; after a wait, its words came too late (a fix is never
+                // made late). Esc, a Retry and recovery say nothing here.
+                if run.origin == .live, case .respeak = run.purpose {
+                    if run.releasedAt != nil {
+                        emit(.notice(.fixNotLanded(.noField)))
+                    } else if run.previous == .waiting {
+                        emit(.notice(.fixNotLanded(.tooLate)))
+                    }
+                }
             }
-            // Only a live target may change another app: recovered or late text is never typed (#4).
-            if case .respeak(let fixing) = run.purpose, run.target != nil {
-                _ = await fixes?.respeak(cleaned.versions.cleaned, fixing: fixing, access: run.access)
+            if case .respeak(let fixing) = run.purpose, let respeak {
+                await settleRespeak(respeak, cleaned.versions.cleaned, fixing: fixing, run)
             }
             let status = DictationStatus.landed(delivery, origin: run.origin, previous: run.previous)
             // `lag` is the spec's number: fn-up to the target app reading the paste (scripts/lag-report.sh).

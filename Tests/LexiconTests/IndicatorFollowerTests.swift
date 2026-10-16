@@ -111,3 +111,32 @@ private func cues(_ events: [ConductorEvent]) -> [SoundCue] { follow(events).com
     #expect(states(events).last == .recording(.hold, minuteLeft: true))
     #expect(cues(events) == [.start, .warning])
 }
+
+// A Re-speak's "nothing was fixed" line comes before its `finished`, which must not wipe it (#83, PR #298 review).
+@Test func aFixNotLandedLineSurvivesItsFinished() {
+    let r = DictationID()
+    var follower = IndicatorFollower()
+    for event: ConductorEvent in [.started(r), .confirmed(r, .hold), .stopped(r),
+                                  .notice(.fixNotLanded(.textChanged)), .finished(r, .notInserted)] { _ = follower.apply(event) }
+    #expect(follower.state == .error("That text changed, so nothing was fixed"))
+}
+
+@Test func aFixThatLandedButWasNotSavedKeepsItsLine() {
+    let r = DictationID()
+    var follower = IndicatorFollower()
+    for event: ConductorEvent in [.started(r), .confirmed(r, .hold), .stopped(r),
+                                  .notice(.fixNotLanded(.historyUnreadable)), .finished(r, .inserted)] { _ = follower.apply(event) }
+    #expect(follower.state == .error("Fixed, but History couldn't be read to save it"))
+}
+
+@Test func theNextDictationClearsAFixLine() {
+    let (r, next) = (DictationID(), DictationID())
+    var follower = IndicatorFollower()
+    for event: ConductorEvent in [.started(r), .confirmed(r, .hold), .stopped(r),
+                                  .notice(.fixNotLanded(.textChanged)), .finished(r, .notInserted),
+                                  .started(next), .confirmed(next, .hold), .stopped(next), .finished(next, .inserted)] {
+        _ = follower.apply(event)
+    }
+    #expect(follower.state == .landed)
+}
+

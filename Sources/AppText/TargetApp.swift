@@ -78,6 +78,8 @@ public actor TargetApp: TextDestination {
         let fingerprint: String?
         /// Where the paste will start: the caret, or the selection it replaces.
         let pasteStart: Int?
+        /// Where Jake had text selected, for a Re-speak's precise path. nil when nothing was.
+        let selection: TextSpan?
     }
 
     public func context() -> AppContext {
@@ -122,9 +124,12 @@ public actor TargetApp: TextDestination {
         let bundleID = NSRunningApplication(processIdentifier: focus.pid)?.bundleIdentifier
         let fingerprint = focus.durableFingerprint(bundleID: bundleID)
         await Paster.shared.prefetch()  // Jake's clipboard, read now, off the text-ready-to-Cmd-V path
+        let range = focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute) }
+        // Its text is read with the field at Re-speak time (`read(at:)`), which retries.
+        let selection = range.flatMap { $0.length > 0 ? TextSpan(location: $0.location, length: $0.length) : nil }
         return Target(focus: focus.snapshot(durable: fingerprint), bundleID: bundleID, mark: mark,
                       capturedAt: capturedAt, field: focus.field.map(FieldRef.init), fingerprint: fingerprint,
-                      pasteStart: focus.field.flatMap { AX.range($0, kAXSelectedTextRangeAttribute)?.location })
+                      pasteStart: range?.location, selection: selection)
     }
 
     /// Quit, after the last Dictation landed: waits, at most 2 s per paste, until Jake's
@@ -143,17 +148,7 @@ public actor TargetApp: TextDestination {
     }
 
     private func paste(_ text: String, as kind: PasteKind, at target: Target) async -> Delivery {
-        let order = await PasteOrder.run(text, as: kind, lane: Paster.shared) {
-            let now = Focus.now()
-            // The same element as at fn-up keeps fn-up's snapshot; anything else differs from it.
-            let focusNow = now.map { now in
-                now.pid == target.focus.pid && Self.same(now.field, target.field?.element) ? target.focus
-                    : now.snapshot(durable: nil)
-            }
-            return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
-                                       inputSinceMark: input.hasInput(since: target.mark),
-                                       sinceCapture: ContinuousClock.now - target.capturedAt), now)
-        }
+        let order = await PasteOrder.run(text, as: kind, lane: Paster.shared) { check(target) }
         let paste: ClipboardKeeper.PasteID, now: Focus?
         switch order {
         case .held(let reason): return .notInserted(reason)
@@ -168,10 +163,23 @@ public actor TargetApp: TextDestination {
         return .inserted(now.receipt(inserted: text, bundleID: target.bundleID, fingerprint: target.fingerprint))
     }
 
+    /// The late-text guard for a paste at `target` now, and the focus it saw.
+    func check(_ target: Target) -> (InsertDecision, Focus?) {
+        let now = Focus.now()
+        // The same element as at fn-up keeps fn-up's snapshot; anything else differs from it.
+        let focusNow = now.map { now in
+            now.pid == target.focus.pid && Self.same(now.field, target.field?.element) ? target.focus
+                : now.snapshot(durable: nil)
+        }
+        return (InsertGuard.decide(target: target.focus, focusNow: focusNow,
+                                   inputSinceMark: input.hasInput(since: target.mark),
+                                   sinceCapture: ContinuousClock.now - target.capturedAt), now)
+    }
+
     /// Electron apps update the field a frame or more after they read the
     /// pasteboard, so a caret read at once is from before the paste. Waits, up
     /// to 100 ms, for the caret to reach the end of the new text.
-    private func caretPassed(_ end: Int?, in field: AXUIElement?) async {
+    func caretPassed(_ end: Int?, in field: AXUIElement?) async {
         guard let end, let field else { return }
         let deadline = ContinuousClock.now + .milliseconds(100)
         while let caret = AX.range(field, kAXSelectedTextRangeAttribute)?.location, caret < end,
@@ -195,9 +203,6 @@ public actor TargetApp: TextDestination {
 
     // MARK: Finding text again (Fixes)
 
-    /// The field a recent Dictation landed in, read now. nil if gone or unreadable.
-    public func read(_ id: DictationID) -> FieldText? { fatalError("not implemented") }
-
     /// Value and focus changes of that field for `window` (Hand fix watch: #13).
     /// Ends early when focus leaves or the field clears; yields the last
     /// non-empty value seen before that.
@@ -205,31 +210,6 @@ public actor TargetApp: TextDestination {
         fatalError("not implemented")
     }
 
-    /// Replaces a span of a recent Dictation's text (Re-speak fix).
-    /// Picks the strategy for the target app; refuses (false) when it cannot be
-    /// done safely (Claude Code collapsed paste, Ghostty after typing).
-    public func replace(_ span: TextSpan, in id: DictationID, with text: String) async -> Bool {
-        fatalError("not implemented")
-    }
-
     /// "I just fixed this": the focused field (or its selection) right now.
     public func readFocused() -> FieldText? { fatalError("not implemented") }
-}
-
-/// Text read from another app's field. Offsets are UTF-16, like AX.
-public struct FieldText: Sendable, Hashable {
-    public let text: String
-    public let selection: TextSpan?
-    /// Where the Dictation's text sits now, if it can still be located.
-    public let dictationSpan: TextSpan?
-    public let app: AppContext
-}
-
-public struct TextSpan: Sendable, Hashable {
-    public let location: Int
-    public let length: Int
-    public init(location: Int, length: Int) {
-        self.location = location
-        self.length = length
-    }
 }

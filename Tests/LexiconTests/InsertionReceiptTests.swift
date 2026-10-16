@@ -48,7 +48,7 @@ private func dictate(into destination: Answering) async throws -> (DictationResu
 
     #expect(result.status == .inserted)
     #expect(await history.dictation(result.id)?.status == .inserted)
-    #expect(await history.receipt(for: result.id) == receipt)
+    #expect(try await history.receipt(for: result.id) == receipt)
 }
 
 @Test func aPasteNobodyReadLeavesNoReceiptAndWaitsForPasteLast() async throws {
@@ -58,5 +58,5 @@ private func dictate(into destination: Answering) async throws -> (DictationResu
     let row = try #require(await history.dictation(result.id))
     #expect(row.status == .notInserted)
     #expect(row.finalText != nil)  // still there for paste-last
-    #expect(await history.receipt(for: result.id) == nil)
+    #expect(try await history.receipt(for: result.id) == nil)
 }

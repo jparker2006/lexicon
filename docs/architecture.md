@@ -110,6 +110,7 @@ No test target depends on an executable target: every test target links into one
 - One list each, compiler-checked: providers, statuses (index predicates and retention derive from the enum), key commands, inbox messages, History events.
 - The late-text rule runs on every insert: `InsertGuard.decide` is a pure function with no grace window.
 - Text is never typed twice: a row left in `ready` after a crash becomes `notInserted` (reason `interrupted`) at launch; paste-last still reaches it.
+- A recovered or retried Re-speak never edits any app: `TextDestination.replace` takes the Re-speak's own `Target`, so the Conductor, which holds it, does the replace, under the same insert turn and late-text guard as an insert, and records the Fix row in History: it is the one writer of a Re-speak's Fix. `Fixes` finds the span (`RespeakResolver`; `FixEngine.respeak` becomes that lookup when #85 wires it) and saves each Re-speak fix to the Test set (#86). A Fix keeps where its words start (`Fix.location`), so the second of two identical words is the one changed in the final text.
 
 ### One push-to-talk Dictation
 

@@ -12,6 +12,8 @@ public struct IndicatorFollower: Sendable {
     public private(set) var state: IndicatorState = .hidden
     private var current: DictationID?
     private var stopSounded = false
+    /// A Re-speak's "nothing was fixed" line is showing: its `finished` comes after it and keeps it.
+    private var fixLine = false
 
     public init() {}
 
@@ -25,6 +27,7 @@ public struct IndicatorFollower: Sendable {
             if sounds {
                 current = id
                 stopSounded = false
+                fixLine = false
             }
             state = .recording(mode, minuteLeft: false)
             return sounds ? .start : nil
@@ -50,6 +53,7 @@ public struct IndicatorFollower: Sendable {
     }
 
     private mutating func finish(_ status: DictationStatus) -> SoundCue? {
+        if fixLine { return nil }
         switch status {
         case .inserted:
             state = .landed
@@ -94,6 +98,27 @@ public struct IndicatorFollower: Sendable {
         case .accessibilityNeeded: return fail("Allow Accessibility in the Lexicon menu")
         case .nothingToPaste: return fail("Nothing to paste yet")
         case .noFieldToPaste: return fail("Click a text field, then press \u{2303}\u{2318}V")
+        case .fixNotLanded(let problem):
+            fixLine = true
+            return fail(Self.line(for: problem))
+        }
+    }
+
+    /// One plain sentence per problem. Exhaustive, so a new one fails the build here.
+    static func line(for problem: FixProblem) -> String {
+        switch problem {
+        case .movedOn: "You moved on, so nothing was fixed"
+        case .textChanged: "That text changed, so nothing was fixed"
+        case .cannotSelect: "This app won't let Lexicon select text. Nothing was fixed"
+        case .terminal: "Can't fix text in a terminal or a collapsed paste yet"
+        case .noField: "No text field to fix"
+        case .clipboardDenied: "Lexicon can't use the clipboard here, so nothing was fixed"
+        case .pasteFailed: "The fix didn't paste"
+        case .unverified: "Check the fix: Lexicon couldn't see it land"
+        case .historyUnreadable: "Fixed, but History couldn't be read to save it"
+        case .nothingHeard: "Didn't catch a word, so nothing was fixed"
+        case .noSelection: "Select the words to fix, then try again"
+        case .tooLate: "The words came too late, so nothing was fixed"
         }
     }
 
