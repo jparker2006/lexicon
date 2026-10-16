@@ -95,13 +95,13 @@ enum Fillers {
     /// ("sorry sorry", "still still").
     static let meantDoubles: Set<String> = [
         "that", "had", "is", "do", "very", "too", "sorry", "scratch", "still", "already", "again", "also", "once",
-        "own", "her", "you",
+        "own", "her", "you", "was",
     ]
 
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".
     static let glue: Set<String> = [
         "and", "but", "or", "so", "to", "you", "it's", "is", "the", "a", "an", "of", "for", "that", "i", "we", "can",
-        "just", "if", "because", "like",
+        "just", "if", "because", "like", "at",
     ]
 
     /// Capitalized, but naming nobody.
@@ -166,9 +166,9 @@ enum Fillers {
                     if last.endsSentence {
                         kept[kept.count - 1] = Token.merge(kept[kept.count - 1], last.trailing)
                     } else if last.trailing.contains(","), kept[kept.count - 1].hasSuffix(","),
-                              glue.contains(keptWords[keptWords.count - 1])
-                                  || repeatsKept(tokens, at: i + drop, kept: kept[kept.count - 1]),
-                              !keptHedge(kept, keptWords, sentenceKept) {
+                              glue.contains(keptWords[keptWords.count - 1]),
+                              !keptHedge(kept, keptWords, sentenceKept),
+                              !addressesName(keptWords[keptWords.count - 1], i + drop < tokens.count ? tokens[i + drop] : nil) {
                         kept[kept.count - 1].removeLast()
                     }
                 } else {
@@ -180,7 +180,7 @@ enum Fillers {
                 continue
             }
 
-            let stutter = stutterCount(tokens, at: i, kept: kept, words: keptWords, sentenceKept: sentenceKept, rules: rules)
+            let stutter = stutterCount(tokens, at: i, kept: kept, sentenceKept: sentenceKept, rules: rules)
             if stutter > 0 {
                 let last = tokens[i + stutter - 1]
                 let previous = Token(Substring(kept[kept.count - 1]))
@@ -279,18 +279,21 @@ enum Fillers {
         StructuralCheck.stop.contains(word) && !protected.contains(word) && !meantDoubles.contains(word)
     }
 
-    /// The token at `i` repeats the last kept one: "Meet at, um, at ten" loses the comma
-    /// with the filler so the stutter can go, while "Where are we at, um, Jake?" keeps it.
-    private static func repeatsKept(_ tokens: [Token], at i: Int, kept: String) -> Bool {
-        guard i < tokens.count, canStutter(tokens[i].word), !tokens[i].isQuoted else { return false }
-        return tokens[i].spelling == Token(Substring(kept)).spelling
+    /// "Where are we at, um, Jake?": a clause-final "at" before a name, who is being asked.
+    /// Its comma stays when the filler goes; "Look at, um, the build" loses it.
+    private static func addressesName(_ keptWord: String, _ next: Token?) -> Bool {
+        keptWord == "at" && next?.isName == true
+    }
+
+    /// The same word in another form: "the The", "it’s it's". Only a first-letter capital
+    /// may differ, never on an acronym: "Tell IT it is down" names something.
+    private static func sameSpelling(_ a: Token, _ b: Token) -> Bool {
+        a.spelling == b.spelling || (!a.isAcronym && !b.isAcronym && a.spelling.dropFirst() == b.spelling.dropFirst())
     }
 
     /// Match spelling forms without rewriting the retained word. Only "the" and
     /// an opening "I" match across a comma; other words may end a real clause.
-    /// Case must match too, except on a sentence's first word, whose capital is the
-    /// sentence's: "Tell IT it is down" and "May may" are a name and a word.
-    private static func stutterCount(_ tokens: [Token], at i: Int, kept: [String], words: [String],
+    private static func stutterCount(_ tokens: [Token], at i: Int, kept: [String],
                                      sentenceKept: Int, rules: RuleSet) -> Int {
         guard sentenceKept > 0 else { return 0 }
         let token = tokens[i]
@@ -303,20 +306,18 @@ enum Fillers {
             let next = tokens[i + 1]
             let before = Token(Substring(kept[kept.count - 2]))
             if before.word == "in", before.trailing.isEmpty, !before.isQuoted,
-               before.spelling == token.spelling || (sentenceKept == 2 && !before.isAcronym),
-               previous.word == "the", previous.trailing.isEmpty, previous.spelling == next.spelling,
+               sameSpelling(before, token), previous.word == "the", previous.trailing.isEmpty, sameSpelling(previous, next),
                next.word == "the", !next.isQuoted, !rules.isWritten(next.text), !rules.isWritten(before.text) {
                 return 2
             }
         }
 
         let commaStutter = previous.trailing == "," && (word == "the" || (word == "i" && sentenceKept == 1))
-        guard previous.word == word, previous.trailing.isEmpty || commaStutter,
-              previous.spelling == token.spelling || (sentenceKept == 1 && !previous.isAcronym) else { return 0 }
-        if word == "will", previous.isName { return 0 }
-        // A pseudo-cleft's predicate needs its own "was" ("What the problem was was the
-        // cache", "All it was was a typo"); "the build was was broken" loses the stutter.
-        if word == "was", words.suffix(sentenceKept).contains(where: { $0 == "what" || $0 == "all" }) { return 0 }
+        guard previous.word == word, previous.trailing.isEmpty || commaStutter, sameSpelling(previous, token) else {
+            return 0
+        }
+        // "Will will review it", "May may be late": a name, then the modal.
+        if word == "will" || word == "may", previous.isName { return 0 }
         return 1
     }
 
@@ -411,7 +412,7 @@ private struct Token {
         while let c = bare.first, c.isQuote { bare = bare.dropFirst() }
         while let c = bare.last, c.isQuote { bare = bare.dropLast() }
         var word = bare.lowercased()
-        if word.contains("’") { word = String(word.map { $0 == "’" ? "'" : $0 }) }
+        word = String(word.map(\.straightened))
         // "p.m.,": the period is the abbreviation's own, and the comma is what follows it.
         let ownPeriod = sentence == "." && comma && Fillers.abbreviations.contains(word)
         if ownPeriod { sentence = "" }
@@ -430,7 +431,7 @@ private struct Token {
     var spelling: String {
         var body = text
         while let c = body.last, c.isMark { body = body.dropLast() }
-        return String(body.map { $0 == "’" ? "'" : $0 })
+        return String(body.map(\.straightened))
     }
     /// "IT", "WHO", "OR": a name even at a sentence start. Not "I".
     var isAcronym: Bool { text.filter(\.isLetter).count > 1 && !text.contains(where: \.isLowercase) }
@@ -473,6 +474,8 @@ private struct Token {
 }
 
 private extension Character {
+    /// "we’re" and "we‘re" are "we're".
+    var straightened: Character { self == "’" || self == "‘" ? "'" : self }
     var isMark: Bool {
         switch self {
         case ",", ".", "!", "?", ";", ":": true
