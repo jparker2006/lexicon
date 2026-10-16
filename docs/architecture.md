@@ -132,7 +132,8 @@ No test target depends on an executable target: every test target links into one
 | Where | Runs |
 |---|---|
 | Core Audio IO thread | Sink block: memcpy into the SPSC ring, nothing else |
-| Audio writer queue | Drain, convert to 16 kHz, write CAF (created on the caller at fn-down, so it exists before the queue gets to it), `F_FULLFSYNC` each 1 s and at stop, yield chunks |
+| Audio writer queue | Drain at first audio and every 100 ms, convert to 16 kHz, write CAF (created on the caller at fn-down, so it exists before the queue gets to it), yield chunks, close AudioFile, apply sync and free-space results. Each write and stop's final snapshot use the same short result lock as publication. Known disk failures stop further writes; stop never waits for a pending check. A failure published after the snapshot is logged without changing the Take (DECISIONS item 100) |
+| Audio sync queue | Check free space and `F_FULLFSYNC` each 1 s with at most one outstanding sync per capture; final sync, descriptor close and closed-file header repair after any sync in flight. `Recorder.settle()` waits for both queues and their result callbacks |
 | Event tap thread (own run loop) | Tap callback in microseconds, `FnGesture`, `InputClock` |
 | AX thread (own run loop, custom executor) | `TargetApp`: Accessibility calls with timeouts, observers, Cmd-V |
 | Main actor | AppKit, the History window's read-only connection, pasteboard promise callbacks |
