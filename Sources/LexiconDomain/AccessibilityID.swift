@@ -18,6 +18,7 @@ public enum AccessibilityID {
     public static let lexiconImport = "lexicon.page.import"
     public static let lexiconAddField = "lexicon.page.addField"
     public static let lexiconDelete = "lexicon.page.delete"
+    public static let lexiconRemoveForm = "lexicon.page.removeForm"
     /// The menu bar icon's button.
     public static let statusItem = "lexicon.statusItem"
     /// The recording pill's panel.

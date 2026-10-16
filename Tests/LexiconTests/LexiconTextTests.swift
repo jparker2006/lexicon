@@ -4,73 +4,79 @@ import Testing
 import LexiconDomain
 import WordStore
 
-// The words the Lexicon page draws and what its Add field reads. The window
-// itself (add, search, delete, import) is checked in the live-app lane.
+// The dictionary rows the Lexicon page draws and what its Add field reads.
+// The window itself (add, search, delete, import) is checked in the live-app lane.
 
-@Test func aTermsTitleIsItsText() {
-    let zorblax = LexiconEntry.term(Term(text: "Zorblax"))
-    #expect(LexiconText.title(for: zorblax) == "Zorblax")
-}
-
-@Test func aRuleTitleShowsHeardThenWrittenWithAnArrow() {
-    let rule = LexiconEntry.rule(Rule(heard: "frob nicate", written: "Frobnicate"))
-    #expect(LexiconText.title(for: rule) == "frob nicate → Frobnicate")
-}
-
-@Test func aLearnedRuleTitleStartsWithASparkleAndAnAddedRuleTitleDoesNot() {
-    let learned = LexiconEntry.rule(Rule(heard: "frob nicate", written: "Frobnicate", source: .learned))
-    let added = LexiconEntry.rule(Rule(heard: "frob nicate", written: "Frobnicate", source: .added))
-    #expect(LexiconText.title(for: learned) == "✨ frob nicate → Frobnicate")
-    #expect(LexiconText.title(for: added) == "frob nicate → Frobnicate")
-}
-
-@Test func aBlankSearchMatchesEveryTermAndRule() {
-    let zorblax = LexiconEntry.term(Term(text: "Zorblax"))
-    let rule = LexiconEntry.rule(Rule(heard: "frob nicate", written: "Frobnicate"))
-    for query in ["", "   "] {
-        #expect(LexiconText.matches(zorblax, query))
-        #expect(LexiconText.matches(rule, query))
-    }
-}
-
-@Test func aSearchIgnoresCase() {
-    let zorblax = LexiconEntry.term(Term(text: "Zorblax"))
-    #expect(LexiconText.matches(zorblax, "zorb"))
-    #expect(LexiconText.matches(zorblax, "ZORB"))
-}
-
-@Test func aSearchIgnoresAccents() {
-    let cafe = LexiconEntry.term(Term(text: "Café"))
-    #expect(LexiconText.matches(cafe, "cafe"))
-}
-
-@Test func aRuleMatchesOnItsHeardSideAndOnItsWrittenSide() {
-    let rule = LexiconEntry.rule(Rule(heard: "frob nicate", written: "Frobnicate"))
-    #expect(LexiconText.matches(rule, "frob nicate"))
-    #expect(LexiconText.matches(rule, "frobnicate"))
-}
-
-@Test func aSearchThatMatchesNeitherSideFindsNothing() {
-    let zorblax = LexiconEntry.term(Term(text: "Zorblax"))
-    let rule = LexiconEntry.rule(Rule(heard: "frob nicate", written: "Frobnicate"))
-    #expect(!LexiconText.matches(zorblax, "quux"))
-    #expect(!LexiconText.matches(rule, "quux"))
-    #expect(!LexiconText.matches(zorblax, "Frobnicate"))
-}
-
-@Test func termsAndRulesSortTogetherByTheirFirstWordIgnoringCase() {
+@Test func aDictionaryEntryShowsItsWrittenSpellingAndAllHeardForms() {
     let entries: [LexiconEntry] = [
-        .term(Term(text: "Zorblax")),
-        .rule(Rule(heard: "frob nicate", written: "Frobnicate")),
-        .term(Term(text: "apple")),
-        .term(Term(text: "Banana")),
-        .rule(Rule(heard: "codecs", written: "Codex")),
+        .rule(Rule(heard: "super bass", written: "Supabase")),
+        .term(Term(text: "Supabase")),
+        .rule(Rule(heard: "super base", written: "Supabase")),
     ]
     let titles = LexiconText.sorted(entries).map { LexiconText.title(for: $0) }
-    #expect(titles == ["apple", "Banana", "codecs → Codex", "frob nicate → Frobnicate", "Zorblax"])
+    #expect(titles == ["Supabase (heard as: super base, super bass)"])
 }
 
-@Test func numbersInNamesSortAsNumbers() {
+@Test func aLearnedMarkStaysBesideItsOwnHeardForm() {
+    let entries: [LexiconEntry] = [
+        .rule(Rule(heard: "frop nicate", written: "Frobnicate")),
+        .rule(Rule(heard: "frob nicate", written: "Frobnicate", source: .learned)),
+    ]
+    let titles = LexiconText.sorted(entries).map { LexiconText.title(for: $0) }
+    #expect(titles == ["Frobnicate (heard as: ✨ frob nicate, frop nicate)"])
+}
+
+@Test func aTemporaryLexiconProjectsOneEntryAndKeepsBothRulesWorking() async throws {
+    let lexicon = try Lexicon(paths: .temporary())
+    try await lexicon.add(Term(text: "Supabase"))
+    try await lexicon.add(Rule(heard: "super base", written: "Supabase", source: .learned))
+    try await lexicon.add(Rule(heard: "super bass", written: "Supabase"))
+
+    let titles = LexiconText.sorted(await lexicon.entries).map { LexiconText.title(for: $0) }
+    #expect(await lexicon.entries.count == 3)
+    #expect(titles == ["Supabase (heard as: ✨ super base, super bass)"])
+
+    let rules = await lexicon.forDictation(in: .unknown).rules
+    #expect(rules.apply(to: "super base and super bass") == "Supabase and Supabase")
+}
+
+@Test func entriesGroupByExactWrittenValueWithoutCaseOrAccentMerging() {
+    let entries: [LexiconEntry] = [
+        .term(Term(text: "Codex")),
+        .rule(Rule(heard: "codecs", written: "Codex")),
+        .term(Term(text: "CODEX")),
+        .rule(Rule(heard: "code ex", written: "CODEX")),
+        .term(Term(text: "Cafe")),
+        .rule(Rule(heard: "coffee", written: "Cafe")),
+        .term(Term(text: "Café")),
+        .rule(Rule(heard: "ka fay", written: "Café")),
+    ]
+    let groups = LexiconText.sorted(entries)
+    let titles = groups.map { LexiconText.title(for: $0) }
+
+    #expect(groups.count == 4)
+    #expect(Set(titles) == Set([
+        "Codex (heard as: codecs)",
+        "CODEX (heard as: code ex)",
+        "Cafe (heard as: coffee)",
+        "Café (heard as: ka fay)",
+    ]))
+    #expect(groups.filter { LexiconText.matches($0, "codex") }.count == 2)
+    #expect(groups.filter { LexiconText.matches($0, "cafe") }.count == 2)
+}
+
+@Test func dictionaryEntriesSortByWrittenSpelling() {
+    let entries: [LexiconEntry] = [
+        .term(Term(text: "Zorblax")),
+        .rule(Rule(heard: "zulu", written: "Frobnicate")),
+        .term(Term(text: "apple")),
+        .term(Term(text: "Banana")),
+    ]
+    let titles = LexiconText.sorted(entries).map { LexiconText.title(for: $0) }
+    #expect(titles == ["apple", "Banana", "Frobnicate (heard as: zulu)", "Zorblax"])
+}
+
+@Test func numbersInWrittenSpellingsSortAsNumbers() {
     let entries: [LexiconEntry] = [
         .term(Term(text: "Item10")),
         .term(Term(text: "Item2")),
@@ -80,18 +86,35 @@ import WordStore
     #expect(titles == ["Item1", "Item2", "Item10"])
 }
 
+@Test func searchMatchesTheWrittenSpellingAndEveryHeardForm() {
+    let groups = LexiconText.sorted([
+        .rule(Rule(heard: "super base", written: "Supabase")),
+        .rule(Rule(heard: "cafe latte", written: "Café Latte")),
+    ])
+
+    #expect(groups.count == 2)
+    for query in ["", "   "] {
+        #expect(groups.filter { LexiconText.matches($0, query) }.count == groups.count)
+    }
+    #expect(groups.filter { LexiconText.matches($0, "SUPABASE") }.count == 1)
+    #expect(groups.filter { LexiconText.matches($0, "SUPER BASE") }.count == 1)
+    #expect(groups.filter { LexiconText.matches($0, "cafe latte") }.count == 1)
+    #expect(groups.filter { LexiconText.matches($0, "cafe") }.count == 1)
+    #expect(groups.filter { LexiconText.matches($0, "quux") }.isEmpty)
+}
+
 @Test func aMixedImportSaysWhatWasAddedAndWhatWasLeftAlone() {
     let summary = LexiconText.summary(of: ImportCounts(terms: 6, rules: 4, duplicates: 1, unreadable: 1))
-    #expect(summary.message == "Imported 6 Terms and 4 Rules")
-    #expect(summary.detail == "1 already in the Lexicon. 1 line not read: a Rule needs both sides, heard -> written.")
+    #expect(summary.message == "Imported 6 spellings and 4 heard-as forms")
+    #expect(summary.detail == "1 already in the Lexicon. 1 line not read: a heard-as form needs both sides, heard -> written.")
 }
 
 @Test func aSingleTermOrRuleIsSingularAndHasNoDetail() {
     let term = LexiconText.summary(of: ImportCounts(terms: 1))
-    #expect(term.message == "Imported 1 Term")
+    #expect(term.message == "Imported 1 spelling")
     #expect(term.detail == "")
     let rule = LexiconText.summary(of: ImportCounts(rules: 1))
-    #expect(rule.message == "Imported 1 Rule")
+    #expect(rule.message == "Imported 1 heard-as form")
     #expect(rule.detail == "")
 }
 
@@ -104,10 +127,20 @@ import WordStore
 @Test func unreadableLinesAreCountedInTheDetailAndOneLineIsSingular() {
     let one = LexiconText.summary(of: ImportCounts(unreadable: 1))
     #expect(one.message == "Nothing new to import")
-    #expect(one.detail == "1 line not read: a Rule needs both sides, heard -> written.")
+    #expect(one.detail == "1 line not read: a heard-as form needs both sides, heard -> written.")
     let two = LexiconText.summary(of: ImportCounts(unreadable: 2))
     #expect(two.message == "Nothing new to import")
-    #expect(two.detail == "2 lines not read: a Rule needs both sides, heard -> written.")
+    #expect(two.detail == "2 lines not read: a heard-as form needs both sides, heard -> written.")
+}
+
+@Test func importFailureExplainsSpellingsAndHeardAsForms() {
+    let failure = LexiconText.importFailure
+    #expect(failure.message == "Couldn't import that file")
+    #expect(failure.detail == "Import reads one spelling or heard-as form per line, heard -> written. Nothing was added.")
+
+    let copy = failure.message + " " + failure.detail
+    #expect(!copy.localizedCaseInsensitiveContains("term"))
+    #expect(!copy.localizedCaseInsensitiveContains("rule"))
 }
 
 @Test func theAddFieldTakesOneTermOrOneRuleTypedEitherWay() {
@@ -117,12 +150,4 @@ import WordStore
     for nothing in ["", "   ", "# a comment", "-> Frobnicate", "frob nicate ->"] {
         #expect(LexiconText.entry(typed: nothing) == nil, "\(nothing)")
     }
-}
-
-@Test func anEntryJustAddedFindsItsRowWhateverCaseAndSpacingTheStoreKept() {
-    let typed = LexiconEntry.rule(Rule(heard: "frob  nicate", written: "Frobnicate"))
-    #expect(LexiconText.isSame(.rule(Rule(heard: "Frob nicate", written: "FROBNICATE")), typed))
-    #expect(LexiconText.isSame(.term(Term(text: "zorblax")), .term(Term(text: "Zorblax"))))
-    #expect(!LexiconText.isSame(.term(Term(text: "frob nicate")), typed))
-    #expect(!LexiconText.isSame(.term(Term(text: "Zorblax")), .term(Term(text: "Vexmo"))))
 }
