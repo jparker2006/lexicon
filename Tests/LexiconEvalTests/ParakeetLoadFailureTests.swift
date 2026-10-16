@@ -4,7 +4,7 @@ import Testing
 @testable import LocalParakeet
 import LexiconDomain
 
-// A model that fails to load fails its Dictation once, not once per window (#339).
+// A model that fails to load fails its Dictation once, not once per window.
 // A clip's windows are decoded one by one, and a long Dictation's first windows are
 // decoded while Jake is still talking. Without a memo of the failure, one broken load
 // would be retried for every window before fn-up, each try a full read of the weights.
@@ -118,4 +118,32 @@ func fnDownsFailedLoadIsTheDictationsOneAttempt() async throws {
     let error = await errorThrown { try await session.finish(clip) }
     #expect(error as? LoadFailure == LoadFailure(attempt: 2))
     #expect(attempts.withLock { $0 } == 2)
+}
+
+// Criterion 2, window by window: each of the Dictation's three windows fails with the
+// first load's error, and only the first window loaded.
+@Test(.timeLimit(.minutes(1)))
+func everyWindowOfTheDictationFailsWithTheOneLoadsError() async throws {
+    let folder = try wholeModelFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let attempts = Mutex(0)
+    let transcriber = ParakeetTranscriber(folder: folder, load: { _ in
+        throw LoadFailure(attempt: attempts.withLock { count -> Int in
+            count += 1
+            return count
+        })
+    })
+    let grid = WindowDecoder.grid
+    let starts = grid.starts(total: grid.window + 2 * grid.stride)
+    #expect(starts.count == 3)
+    let dictation = ParakeetTranscriber.LoadFailure()
+    for start in starts {
+        let window = [Int16](repeating: 0, count: grid.window)
+        let error = await errorThrown {
+            _ = try await transcriber.decode(window, at: start, priority: .live, failure: dictation)
+            return ""
+        }
+        #expect(error as? LoadFailure == LoadFailure(attempt: 1), "window at \(start)")
+    }
+    #expect(attempts.withLock { $0 } == 1)
 }

@@ -5,7 +5,7 @@ import LexiconCore
 import LexiconDomain
 @testable import LexiconUI
 
-// First-run setup's Accessibility relaunch and model download (#339), through fake
+// First-run setup's Accessibility relaunch and model download, through fake
 // `Setup.Services`: no permission is asked, no login item is touched, no network
 // is used. `start()` is never called, so the poll timer never runs; each test
 // makes its own polls with `refresh()`.
@@ -92,15 +92,6 @@ private func withSetup(_ machine: Machine, fnOn: Bool, install: @escaping Instal
     await body(setup)
 }
 
-/// Gives queued main-actor work turns before a check that something did NOT happen.
-/// A negative check can only do this: a download hops off the main actor before it
-/// asks for the model, so a few turns may not show one. The positive checks wait on
-/// the state they need, not on turns.
-@MainActor
-private func yieldTurns() async {
-    for _ in 0..<100 { await Task.yield() }
-}
-
 /// Polls until `condition` holds, and returns whether it did. Model progress arrives
 /// on a background task and hops here, and nothing signals the test when the facts
 /// change. The bound is a hang guard only: 10 s is far longer than any hop takes, so
@@ -164,14 +155,15 @@ func theModelDownloadStartsOnlyOnceBothPermissionsAreGranted() async {
         setup.show()
         #expect(!window.renders.isEmpty, "show() draws the setup window")
 
+        // A due download starts inside the poll (the row goes to downloading at once), so
+        // the model still missing right after it means none started.
         await setup.refresh()
-        await yieldTurns()
-        #expect(machine.installs == 0, "no download while Microphone and Accessibility are both missing")
+        #expect(setup.facts.model == .missing, "no download while Microphone and Accessibility are both missing")
 
         machine.write { $0.microphone = .granted }
         await setup.refresh()
-        await yieldTurns()
-        #expect(machine.installs == 0, "Microphone alone doesn't start it: Accessibility is still missing")
+        #expect(setup.facts.model == .missing, "Microphone alone doesn't start it: Accessibility is still missing")
+        #expect(machine.installs == 0)
         #expect(machine.microphoneGrants == 1, "the Microphone grant is handled once")
 
         machine.write { $0.trusted = true }
@@ -181,10 +173,11 @@ func theModelDownloadStartsOnlyOnceBothPermissionsAreGranted() async {
 
         // A poll while it runs starts no second one.
         await setup.refresh()
-        await yieldTurns()
+        finish.open()
+        let installed = await waitUntil { setup.facts.model == .installed }
+        #expect(installed)
         #expect(machine.installs == 1, "exactly one download")
         #expect(machine.microphoneGrants == 1)
-        finish.open()
     }
 }
 
@@ -222,5 +215,20 @@ func theModelShowsPreparingBetweenTheDownloadAndTheInstall() async {
         let installed = await waitUntil { setup.facts.model == .installed }
         #expect(installed, "the model is installed once preparing finishes")
         #expect(machine.installs == 1, "the download ran once")
+    }
+}
+
+// Criterion 5, through the menu itself: with both permissions missing, the menu bar
+// menu has a line for each, in order, before the start at login line.
+@MainActor
+@Test func theMenuNamesEveryMissingPermission() async {
+    let machine = Machine()  // Microphone undetermined, Accessibility not trusted
+    await withSetup(machine, fnOn: false, install: finishingInstall(machine)) { setup in
+        let titles = setup.menuItems().map(\.title)
+        #expect(Array(titles.prefix(2)) == ["Microphone is off: Set Up…", "fn is off: Set Up…"])
+        machine.write { $0.microphone = .granted }
+        await setup.refresh()
+        #expect(setup.menuItems().map(\.title).first == "fn is off: Set Up…")
+        #expect(!setup.menuItems().map(\.title).contains("Microphone is off: Set Up…"))
     }
 }

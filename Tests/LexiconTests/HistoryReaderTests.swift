@@ -63,8 +63,8 @@ private func allRows(_ reader: HistoryReader, _ sections: [DaySection], page: In
 // MARK: - A year of synthetic History
 
 // The seeded year (`year()`, `seedYear`) lives in HistoryYear.swift, shared with the window tests.
-/// Jake's own rate, for the search speed run: `perDay` is about three times it.
-private let jakesRate = 30
+/// An everyday rate for the search speed run, well under `perDay`.
+private let everydayRate = 30
 
 // MARK: - Rows
 
@@ -381,10 +381,10 @@ private func searchTimes(_ paths: AppPaths) -> [Duration] {
     }
 }
 
-/// The target is about 20 ms at Jake's own rate; the heavy year is reported, not held to it.
+/// The target is about 20 ms at an everyday rate; the heavy year is reported, not held to it.
 @MainActor @Test(.enabled(if: timingRun)) func speedSearchWithinTarget() async throws {
     let (store, paths) = try makeStore()
-    let total = try await seedYear(store, perDay: jakesRate)
+    let total = try await seedYear(store, perDay: everydayRate)
     let samples = searchTimes(paths)
     let heavy = searchTimes(try await year().paths)
     print("History search over \(total) Dictations: p50 \(percentile(samples, 0.5)), p95 \(percentile(samples, 0.95))")

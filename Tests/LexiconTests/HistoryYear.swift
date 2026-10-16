@@ -21,7 +21,7 @@ let yearCalendar: Calendar = {
 /// The fake clock: Sunday 11 October 2026, 15:00 in Los Angeles.
 let yearNow = yearCalendar.date(from: DateComponents(year: 2026, month: 10, day: 11, hour: 15))!
 
-/// About three times Jake's rate (the spec's 441 Wispr clips in about two weeks is about 30 a day).
+/// A heavy year, well above an everyday rate, so the reads are tested at their worst.
 let perDay = 100
 let yearDays = 365
 let marker = "zanzibar"

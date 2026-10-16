@@ -156,7 +156,7 @@ private func facts(microphone: MicrophoneAccess = .granted, accessibility: Bool 
     #expect(restartAfterFailure)
 }
 
-// The setup menu's lines (#339): each missing permission gets its own line, so
+// The setup menu's lines: each missing permission gets its own line, so
 // the menu names every thing to fix instead of only the dot's first one. The model
 // line appears only once the permissions are fine, so the menu never offers a
 // download before Jake can dictate with it.

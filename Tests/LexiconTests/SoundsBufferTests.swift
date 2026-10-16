@@ -111,3 +111,16 @@ private let otherStock: UInt32 = 1024
     #expect(output.bufferFrames(of: 2) == otherStock)
     #expect(output.bufferFrames(of: 1) == stock)
 }
+
+// A device whose buffer size can't be read is left alone: with nothing saved, a 256
+// set on start could never be put back.
+@Test func aDeviceWhoseBufferCannotBeReadIsNeverChanged() {
+    let output = FakeOutput(device: 7, buffers: [:])  // the read fails: no value for device 7
+    let voice = SynthVoice()
+    let engine = Sounds.Engine(voice: voice, output: output)
+    let generation = engine.use()
+    #expect(output.isRunning, "the cue still plays, at the device's own buffer")
+    #expect(output.bufferFrames(of: 7) == nil, "nothing set on a device it could not read")
+    engine.stopIfIdle(since: generation)
+    #expect(output.bufferFrames(of: 7) == nil)
+}
