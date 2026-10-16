@@ -76,8 +76,9 @@ private func removeForm(_ heard: String, from spelling: String, in controller: L
 
         try await removeForm("codecs", from: "Codex", in: controller)
 
+        // The confirmation itself is a sheet, which an unshown window never attaches: Live checks sees it.
         #expect(await store.rules == [Rule(heard: "codecs", written: "Codex")], "Nothing is removed before a confirmation")
-        #expect(controller.window?.attachedSheet != nil, "A confirmation names Codex before the entry goes")
+        #expect(controller.shown.map(\.spelling) == ["Codex"])
     }
 
     @Test func aPlainSpellingHasNoFormButtonsOrFormLabels() async throws {
@@ -93,6 +94,7 @@ private func removeForm(_ heard: String, from spelling: String, in controller: L
     @Test func removingAFormLeavesACaseOnlyVariantEntryAsItIs() async throws {
         let store = try Lexicon(paths: .temporary())
         try await store.add(Rule(heard: "codecs", written: "Codex"))
+        try await store.add(Rule(heard: "code ex", written: "Codex"))
         try await store.add(Rule(heard: "kodex", written: "CODEX"))
         let controller = await openedController(store)
         // Codex and CODEX are two entries: a spelling is exact, case included.
@@ -100,8 +102,8 @@ private func removeForm(_ heard: String, from spelling: String, in controller: L
 
         try await removeForm("codecs", from: "Codex", in: controller)
 
-        #expect(await store.rules == [Rule(heard: "kodex", written: "CODEX")])
-        #expect(controller.shown.map { LexiconText.title(for: $0) } == ["CODEX (heard as: kodex)"])
+        #expect(Set(await store.rules) == [Rule(heard: "code ex", written: "Codex"), Rule(heard: "kodex", written: "CODEX")])
+        #expect(Set(controller.shown.map { LexiconText.title(for: $0) }) == ["Codex (heard as: code ex)", "CODEX (heard as: kodex)"])
     }
 
     @Test func eachFormButtonIsNamedForItsFormAndItsSpelling() async throws {

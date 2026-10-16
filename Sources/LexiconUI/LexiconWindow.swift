@@ -204,10 +204,16 @@ final class LexiconWindowController: NSWindowController, NSTableViewDataSource, 
         }
     }
 
-    /// Removes one heard-as form at once: adding it back is one line, unlike a whole entry.
+    /// Removes one heard-as form at once: adding it back is one line, unlike a whole
+    /// entry. A form that is its entry's only record would take the entry with it,
+    /// so that one asks as Delete does.
     @objc func removeFormClicked(_ sender: FormButton) {
         guard window?.attachedSheet == nil, let rule = sender.rule else { return }
         let row = shown.firstIndex { $0.records.contains(.rule(rule)) }
+        if let row, shown[row].records.count == 1 {
+            remove(row: row)
+            return
+        }
         pending = Task {
             do {
                 try await lexicon.remove(rule)
