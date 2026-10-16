@@ -292,9 +292,15 @@ private func fakeDownload(writingFor paths: AppPaths, recordingIn calls: Downloa
 // while it compiles, so the last file landing is the only sign that the install is
 // preparing. Counting the download to 1 at that point keeps the bar from stopping at 50%.
 @Test func theInstallSaysPreparingOnceTheLastFileLandsAndCountsTheDownloadToAHundred() {
-    #expect(ParakeetTranscriber.installStep(fraction: 0, filesDone: 0, of: 4) == .downloading(0))
-    #expect(ParakeetTranscriber.installStep(fraction: 0.25, filesDone: 2, of: 4) == .downloading(0.5))
-    #expect(ParakeetTranscriber.installStep(fraction: 0.5, filesDone: 3, of: 4) == .downloading(1.0))
-    #expect(ParakeetTranscriber.installStep(fraction: 0.5, filesDone: 4, of: 4) == .preparing)
-    #expect(ParakeetTranscriber.installStep(fraction: 0.5, filesDone: 0, of: 0) == .preparing)
+    // Every phase FluidAudio reports, routed the way the real install routes them.
+    let step = { (fraction: Double, phase: ParakeetTranscriber.InstallPhase) in
+        ParakeetTranscriber.installStep(fraction: fraction, phase: phase)
+    }
+    #expect(step(0, .listing) == .downloading(0))
+    #expect(step(0, .downloading(done: 0, total: 4)) == .downloading(0))
+    #expect(step(0.25, .downloading(done: 2, total: 4)) == .downloading(0.5))
+    #expect(step(0.5, .downloading(done: 3, total: 4)) == .downloading(1.0))
+    #expect(step(0.5, .downloading(done: 4, total: 4)) == .preparing)
+    #expect(step(0.5, .downloading(done: 0, total: 0)) == .preparing)
+    #expect(step(0.75, .compiling) == .preparing)
 }

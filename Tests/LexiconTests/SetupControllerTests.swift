@@ -232,3 +232,33 @@ func theModelShowsPreparingBetweenTheDownloadAndTheInstall() async {
         #expect(!setup.menuItems().map(\.title).contains("Microphone is off: Set Up…"))
     }
 }
+
+// A model that fails its first load is purged and downloaded again (FluidAudio's
+// recovery), so a download report after preparing shows the download again.
+@MainActor
+@Test(.timeLimit(.minutes(1)))
+func aDownloadAfterPreparingShowsTheDownloadAgain() async {
+    let machine = Machine()
+    machine.write { $0.trusted = true; $0.microphone = .granted }
+    let sawPreparing = Gate()
+    let release = Gate()
+    let install: Install = { _, progress in
+        progress(.downloading(0.5))
+        progress(.preparing)
+        await sawPreparing.wait()
+        progress(.downloading(0.2))  // the first load failed: the files come down again
+        await release.wait()
+        machine.write { $0.modelInstalled = true }
+    }
+    await withSetup(machine, fnOn: true, install: install) { setup in
+        setup.makeWindow = { _, _ in FakeWindow() }
+        setup.show()
+        let preparing = await waitUntil { setup.facts.model == .preparing }
+        #expect(preparing)
+        sawPreparing.open()
+        let again = await waitUntil { setup.facts.model == .downloading(0.2) }
+        #expect(again, "the row says Downloading while the files come down again")
+        release.open()
+        _ = await waitUntil { setup.facts.model == .installed }
+    }
+}
