@@ -213,24 +213,20 @@ enum SettingsCheck {
     @MainActor
     private final class BoundedCommand {
         private let process: Process
-        private let output: Pipe
         private let continuation: CheckedContinuation<CommandResult, any Error>
         private let failure: String
-        private var timedOut = false
         private var completed = false
 
-        init(process: Process, output: Pipe, failure: String, continuation: CheckedContinuation<CommandResult, any Error>) {
+        init(process: Process, failure: String, continuation: CheckedContinuation<CommandResult, any Error>) {
             self.process = process
-            self.output = output
             self.failure = failure
             self.continuation = continuation
         }
 
-        func finish(status: Int32) {
+        func finish(status: Int32, data: Data) {
             guard !completed else { return }
             completed = true
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            guard !timedOut, let value = String(data: data, encoding: .utf8) else {
+            guard let value = String(data: data, encoding: .utf8) else {
                 continuation.resume(throwing: HarnessError(failure))
                 return
             }
@@ -248,7 +244,6 @@ enum SettingsCheck {
         func timeOut() {
             guard !completed else { return }
             completed = true
-            timedOut = true
             if process.isRunning { process.terminate() }
             continuation.resume(throwing: HarnessError(failure))
         }
@@ -269,10 +264,13 @@ enum SettingsCheck {
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CommandResult, any Error>) in
-            let command = BoundedCommand(process: process, output: output, failure: failure, continuation: continuation)
+            let command = BoundedCommand(process: process, failure: failure, continuation: continuation)
             process.terminationHandler = { [command] terminated in
                 let status = terminated.terminationStatus
-                Task { @MainActor in command.finish(status: status) }
+                // Read here, off the main actor: a grandchild still holding the pipe
+                // blocks only this thread, and the deadline below still fires.
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                Task { @MainActor in command.finish(status: status, data: data) }
             }
             do {
                 try process.run()
