@@ -515,6 +515,8 @@ let cleanup337Decision89FunctionStutterCases: [Case] = [
     Case("The build was was broken.", "The build was broken."),
     Case("It was was broken.", "It was broken."),
     Case("The tests all passed and the build was was green.", "The tests all passed and the build was green."),
+    Case("All the tests passed and the build was was green.", "All the tests passed and the build was green."),
+    Case("All I did was was restart the build.", "All I did was restart the build."),
 ]
 
 @Test(arguments: cleanup337Decision89FunctionStutterCases)
@@ -557,6 +559,7 @@ let cleanup337MeaningKeptCases: [Case] = [
     Case("What are you looking at, uh, Sam?", "What are you looking at, Sam?"),
     Case("What the problem was was the cache.", "What the problem was was the cache."),
     Case("All it was was a typo.", "All it was was a typo."),
+    Case("I think what it was was a bug.", "I think what it was was a bug."),
     Case("The only thing it was was a typo.", "The only thing it was was a typo."),
     Case("The reason it was was because the cache was stale.", "The reason it was was because the cache was stale."),
     Case("May may be late.", "May may be late."),
