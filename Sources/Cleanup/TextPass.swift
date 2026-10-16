@@ -101,7 +101,7 @@ enum Fillers {
     /// Words that cannot end a clause: "and, um, open" becomes "and open", not "and, open".
     static let glue: Set<String> = [
         "and", "but", "or", "so", "to", "you", "it's", "is", "the", "a", "an", "of", "for", "that", "i", "we", "can",
-        "just", "if", "because", "like", "at",
+        "just", "if", "because", "like",
     ]
 
     /// Capitalized, but naming nobody.
@@ -166,7 +166,9 @@ enum Fillers {
                     if last.endsSentence {
                         kept[kept.count - 1] = Token.merge(kept[kept.count - 1], last.trailing)
                     } else if last.trailing.contains(","), kept[kept.count - 1].hasSuffix(","),
-                              glue.contains(keptWords[keptWords.count - 1]), !keptHedge(kept, keptWords, sentenceKept) {
+                              glue.contains(keptWords[keptWords.count - 1])
+                                  || repeatsKept(tokens, at: i + drop, kept: kept[kept.count - 1]),
+                              !keptHedge(kept, keptWords, sentenceKept) {
                         kept[kept.count - 1].removeLast()
                     }
                 } else {
@@ -272,15 +274,28 @@ enum Fillers {
         keptWords.last == "like" && (sentenceKept == 1 || kept[kept.count - 2].last.map { ",;:".contains($0) } == true)
     }
 
+    /// A word whose immediate repeat is a stutter (decision 89).
+    private static func canStutter(_ word: String) -> Bool {
+        StructuralCheck.stop.contains(word) && !protected.contains(word) && !meantDoubles.contains(word)
+    }
+
+    /// The token at `i` repeats the last kept one: "Meet at, um, at ten" loses the comma
+    /// with the filler so the stutter can go, while "Where are we at, um, Jake?" keeps it.
+    private static func repeatsKept(_ tokens: [Token], at i: Int, kept: String) -> Bool {
+        guard i < tokens.count, canStutter(tokens[i].word), !tokens[i].isQuoted else { return false }
+        return tokens[i].spelling == Token(Substring(kept)).spelling
+    }
+
     /// Match spelling forms without rewriting the retained word. Only "the" and
     /// an opening "I" match across a comma; other words may end a real clause.
+    /// Case must match too, except on a sentence's first word, whose capital is the
+    /// sentence's: "Tell IT it is down" and "May may" are a name and a word.
     private static func stutterCount(_ tokens: [Token], at i: Int, kept: [String], words: [String],
                                      sentenceKept: Int, rules: RuleSet) -> Int {
         guard sentenceKept > 0 else { return 0 }
         let token = tokens[i]
         let word = token.word
-        guard StructuralCheck.stop.contains(word), !protected.contains(word), !meantDoubles.contains(word),
-              !token.isQuoted, !rules.isWritten(token.text) else { return 0 }
+        guard canStutter(word), !token.isQuoted, !rules.isWritten(token.text) else { return 0 }
         let previous = Token(Substring(kept[kept.count - 1]))
         guard !previous.isQuoted, !rules.isWritten(previous.text) else { return 0 }
 
@@ -288,18 +303,20 @@ enum Fillers {
             let next = tokens[i + 1]
             let before = Token(Substring(kept[kept.count - 2]))
             if before.word == "in", before.trailing.isEmpty, !before.isQuoted,
-               previous.word == "the", previous.trailing.isEmpty,
+               before.spelling == token.spelling || (sentenceKept == 2 && !before.isAcronym),
+               previous.word == "the", previous.trailing.isEmpty, previous.spelling == next.spelling,
                next.word == "the", !next.isQuoted, !rules.isWritten(next.text), !rules.isWritten(before.text) {
                 return 2
             }
         }
 
         let commaStutter = previous.trailing == "," && (word == "the" || (word == "i" && sentenceKept == 1))
-        guard previous.word == word, previous.trailing.isEmpty || commaStutter else { return 0 }
+        guard previous.word == word, previous.trailing.isEmpty || commaStutter,
+              previous.spelling == token.spelling || (sentenceKept == 1 && !previous.isAcronym) else { return 0 }
         if word == "will", previous.isName { return 0 }
-        // The predicate after "what it was" needs its own "was"; an ordinary
-        // "the build was was broken" still loses the stutter.
-        if word == "was", sentenceKept >= 3, words.suffix(3).elementsEqual(["what", "it", "was"]) { return 0 }
+        // A pseudo-cleft's predicate needs its own "was" ("What the problem was was the
+        // cache", "All it was was a typo"); "the build was was broken" loses the stutter.
+        if word == "was", words.suffix(sentenceKept).contains(where: { $0 == "what" || $0 == "all" }) { return 0 }
         return 1
     }
 
@@ -409,13 +426,21 @@ private struct Token {
     }
 
     var isPunctuationOnly: Bool { word.isEmpty && !trailing.isEmpty }
+    /// The word as written, case kept, marks dropped and apostrophes straightened: "it’s," is "it's".
+    var spelling: String {
+        var body = text
+        while let c = body.last, c.isMark { body = body.dropLast() }
+        return String(body.map { $0 == "’" ? "'" : $0 })
+    }
+    /// "IT", "WHO", "OR": a name even at a sentence start. Not "I".
+    var isAcronym: Bool { text.filter(\.isLetter).count > 1 && !text.contains(where: \.isLowercase) }
     /// A comma or a sentence end after this token sets off the one after it.
     var setsOffNext: Bool { !trailing.isEmpty }
     /// "config.json", "snake_case", "/review", "v2": never recapitalized.
     var isCode: Bool { word.contains { $0 == "." || $0 == "/" || $0 == "_" || $0.isNumber } }
     /// "um", "Uh"; not "ER" or "UH", which are names.
     var isHardFiller: Bool {
-        Fillers.hard.contains(word) && !(text.filter(\.isLetter).count > 1 && text.allSatisfy { !$0.isLowercase })
+        Fillers.hard.contains(word) && !isAcronym
     }
     /// "5", "twenty", "twenty-six", "thirty-something": a number as said or written.
     var isNumber: Bool {
