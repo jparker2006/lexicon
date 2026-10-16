@@ -571,6 +571,11 @@ let cleanup337MeaningKeptCases: [Case] = [
     Case("May may be late.", "May may be late."),
     Case("I went there, um, there was a fire.", "I went there, there was a fire."),
     Case("We went in, um, in the morning.", "We went in, in the morning."),
+    Case("I'm going to... to be honest, I don't know.", "I'm going to... to be honest, I don't know."),
+    Case("Put it on... on second thought, leave it.", "Put it on... on second thought, leave it."),
+    Case("It was... was it the cache?", "It was... was it the cache?"),
+    Case("We could... could you check it?", "We could... could you check it?"),
+    Case("I was in... in the end it worked.", "I was in... in the end it worked."),
 ]
 
 // A capital that only starts a sentence, a clause-final "at" before a common word, and
